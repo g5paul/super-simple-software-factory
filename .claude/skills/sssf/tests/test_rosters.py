@@ -88,3 +88,10 @@ def test_install_ignores_the_built_visualizer(repo):
     # `git add -A`, so the build must be ignored or it lands in a commit.
     script("install.py")
     assert ".claude/skills/sssf/apps/visualizer/dist/" in Path(".gitignore").read_text().splitlines()
+
+
+def test_install_says_to_exclude_sssf_from_the_projects_tools(repo):
+    # Repo-wide linters and package builds pick up the stamped code. The
+    # project owns those configs, so the installer only says what to do.
+    out = script("install.py").stdout
+    assert "exclude adws/ and .claude/" in out

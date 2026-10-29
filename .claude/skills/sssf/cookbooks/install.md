@@ -74,7 +74,21 @@ A repo installed before `stamp.json` existed has no record. Its first update rep
 3. **The model resolves** — the config's default `gemini-3.6-flash` must be a registered id in `~/.pi/agent/models.json`. Check with `pi --list-models` or read the file directly; see `references/config.md` for model resolution.
 4. **Gitignore** — `install.py` appends `adws/adw_data/sessions/`, `adws/adw_data/sssf.db*`, and `.env` for you; confirm they landed. All three are runtime or secrets and must never be committed.
 5. **Git repo** — ADWs that end in a commit phase call `git_helper.commit_all`, which raises if the cwd is not a git repository. Run `git init` and make a first commit before using `adw_plan_build.py`, `adw_plan_build_test.py`, or `adw_simple_sdlc.py`. `adw_document.py` needs one too: it measures the change with `git diff` against a base ref (`main` by default, `--base` to override).
-6. **Smoke test** — `just demo` runs two cheap read-only workflows back to back, or run the smallest ADW directly:
+6. **Keep SSSF out of the project's own tools.** The install adds about 150 files of Python, TypeScript, and Vue under `adws/` and `.claude/`, and they don't follow your project's rules. A linter, formatter, or type checker that runs on the whole repo then fails on SSSF's code, not yours. In yt-summarizer, CI's `ruff check .` and `ruff format --check .` failed with 434 errors and 64 files, all in those two folders. A package build can also take them in: its first `uv build` put 148 SSSF files into the sdist. `quality.py` names your paths, so the chain passes, and CI fails later. Exclude both folders where your tools read the whole repo:
+
+   | Tool | Where |
+   |---|---|
+   | ruff | `pyproject.toml`: `[tool.ruff]` `extend-exclude = ["adws", ".claude"]` |
+   | eslint (flat config) | `eslint.config.js`: `{ ignores: ["adws/**", ".claude/**"] }` |
+   | prettier, biome | `.prettierignore`, or `files.ignore` in `biome.json` |
+   | tsc | `tsconfig.json`: `"exclude": ["adws", ".claude"]` |
+   | hatchling sdist | `pyproject.toml`: `[tool.hatch.build.targets.sdist]` `exclude = ["/adws", "/.claude"]` |
+   | setuptools sdist | `MANIFEST.in`: `prune adws` and `prune .claude` |
+   | npm package | the `files` field in `package.json`, or `.npmignore` |
+
+   `install.py` does not edit these files: they belong to the project. A wheel limited to your package is already clean. The sdist still carries a few small SSSF files at the top level (`justfile`, `.env.sample`, `specs/`, `app_docs/`). They are harmless, and you can exclude them the same way.
+
+7. **Smoke test** — `just demo` runs two cheap read-only workflows back to back, or run the smallest ADW directly:
 
 ```bash
 just demo                                                    # both, end to end

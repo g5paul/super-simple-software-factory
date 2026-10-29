@@ -273,6 +273,8 @@ def main() -> int:
     print("  2. just demo             # two cheap read-only runs, end to end")
     print("  3. just sessions         # what just happened")
     print("  4. just obs              # the trace UI, needs bun")
+    print("  5. exclude adws/ and .claude/ from repo-wide lint, format, typecheck,")
+    print("     and package builds (see cookbooks/install.md, post-install checklist)")
     print("\n  no just? the raw form of step 2 is:")
     print("     uv run adws/adw_prompt.py \"say hello\" --agent scout")
     return code

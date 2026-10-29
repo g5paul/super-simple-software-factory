@@ -52,7 +52,8 @@ from pathlib import Path
 
 from adw_modules import account, agents, budget, changes, gates, git_helper, quality, session, tickets
 from adw_modules.data_types import (AgentCall, AxisReviewOutput, BuildOutput, ChangeCapture,
-                                    DocumentOutput, GenericOutput, PhaseParams, ScoutOutput)
+                                    DocumentOutput, EventRecord, GenericOutput, PhaseParams,
+                                    ScoutOutput)
 
 REQUIRED_AGENTS = ["scout", "ticket_builder", "standards_reviewer", "spec_reviewer", "documenter"]
 MAX_FIX_LOOPS = 3
@@ -118,6 +119,13 @@ def build_feature(run, folder: str) -> int:
         history = git_helper.feature_commits(feature.slug)
         base = git_helper.rev(f"{history[0][0]}^") if history else git_helper.rev("HEAD")
         finished = any(step == "documented" for _, step in history)
+        # For the dashboard, which groups this run's phases by ticket. Not a
+        # console line: the log line below already says what will be built.
+        run.tracer.event(EventRecord(
+            adw_id=run.adw_id, phase_id=ph.phase.phase_id, type="log", name="tickets",
+            payload={"feature": feature.slug, "folder": folder,
+                     "tickets": [{"number": t.number, "title": t.title, "path": t.path,
+                                  "done": t.done} for t in feature.tickets]}))
         ph.log(feature=feature.slug, tickets=len(feature.tickets),
                to_build=" ".join(t.number for t in feature.todo) or "none",
                base=git_helper.short_sha(base),

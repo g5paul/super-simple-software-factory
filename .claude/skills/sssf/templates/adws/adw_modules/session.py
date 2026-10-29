@@ -12,7 +12,7 @@ import signal
 import sys
 from pathlib import Path
 
-from .data_types import SSSFConfig
+from .data_types import EventRecord, SSSFConfig
 from .runner import Run
 from .tracer import Tracer
 from .utils import engineer_name, new_id
@@ -45,6 +45,11 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
     # hangs in its first agent call is still killable by adw_id.
     tracer.process_start(adw_id, "adw", "", os.getpid(),
                          " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]))
+    # The caps this run is held to, so the dashboard can draw spend against
+    # them. A joined run records them again; the latest row wins.
+    tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="run_caps",
+                             payload={"max_run_cost": cfg.defaults.max_run_cost,
+                                      "rate_limit_stop": cfg.defaults.rate_limit_stop}))
     _finalize_when_killed(run)
     run.console.session_started(adw_id, run.engineer)
     return run

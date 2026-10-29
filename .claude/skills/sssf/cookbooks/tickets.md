@@ -38,7 +38,7 @@ After the last ticket, two reviewers read the whole feature's diff, each blind t
 
 ## 4. When it stops
 
-Every stop leaves finished tickets committed and the unfinished one in the tree. The message says why it stopped, what the feature has cost across every run, and how to look at, keep, or drop what's uncommitted. Nothing is discarded for you.
+Every stop leaves finished tickets committed and the unfinished one in the tree. The dashboard's session page shows the stop reason above the run, a row per ticket, and spend against the run cap; click a ticket to open its phases. The message says why it stopped, what the feature has cost across every run, and how to look at, keep, or drop what's uncommitted. Nothing is discarded for you.
 
 | Why | What to do |
 |---|---|

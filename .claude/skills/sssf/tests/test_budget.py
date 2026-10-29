@@ -191,3 +191,8 @@ def test_none_turns_the_run_cap_off(factory):
     run = factory([result(0.1)], max_run_cost=None)
     run.add_usage(0, 100.0)
     assert build(run).status == "success"
+
+
+def test_a_run_records_its_caps_so_the_dashboard_can_draw_them(factory):
+    run = factory([result(0.1)], max_run_cost=3.0)
+    assert events(run, "run_caps")[-1] == {"max_run_cost": 3.0, "rate_limit_stop": 0.8}

@@ -33,6 +33,9 @@ export async function fetchSession(adwId: string): Promise<SessionDetail> {
   const detail = (await getJson(`${base()}/sessions/${encodeURIComponent(adwId)}`)) as SessionDetail
   return {
     session: detail.session,
+    caps: detail.caps ?? null,
+    stop: detail.stop ?? null,
+    tickets: detail.tickets ?? null,
     usage: detail.usage ?? { read: 0, written: 0 },
     phases: detail.phases ?? [],
     agents: detail.agents ?? [],

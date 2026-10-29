@@ -227,3 +227,14 @@ def test_the_estimate_learns_from_past_runs(repo):
     assert tickets.spent_on(db, FOLDER) == pytest.approx(0.1 * 7)
     assert tickets.estimate(db, 0) == "no tickets left to build"
     assert tickets.estimate(db, 2).startswith("about $0.60: 2 ticket(s) at $0.10 each from 3 past")
+
+
+def test_the_run_records_its_tickets_for_the_dashboard(repo):
+    import sqlite3
+    run()
+    with sqlite3.connect("adws/adw_data/sssf.db") as conn:
+        payload = json.loads(conn.execute(
+            "SELECT payload_json FROM events WHERE name = 'tickets'").fetchone()[0])
+    assert payload["feature"] == "summaries"
+    assert [(t["number"], t["title"], t["done"]) for t in payload["tickets"]] == [
+        ("01", "A", False), ("03", "C", False), ("02", "B", False)]

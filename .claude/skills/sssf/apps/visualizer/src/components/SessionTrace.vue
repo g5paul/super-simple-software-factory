@@ -9,7 +9,10 @@ import type {
   Phase,
   PhaseKind,
   Session,
+  RunCaps,
   SessionUsage,
+  StopReason,
+  TicketRun,
 } from '../lib/types'
 import { Bot, SquareTerminal, UserRound } from 'lucide-vue-next'
 import { fetchEnvelopes, fetchEvents, fetchGates, fetchSession } from '../lib/api'
@@ -20,6 +23,7 @@ import { navigate, phaseCrumb } from '../lib/router'
 import StatusChip from './StatusChip.vue'
 import StatChip from './StatChip.vue'
 import PhaseDetail from './PhaseDetail.vue'
+import RunSummary from './RunSummary.vue'
 
 const props = defineProps<{ adwId: string; phaseId: string | null }>()
 
@@ -27,6 +31,9 @@ const session = ref<Session | null>(null)
 const phases = ref<Phase[]>([])
 const agents = ref<AgentSession[]>([])
 const usage = ref<SessionUsage>({ read: 0, written: 0 })
+const caps = ref<RunCaps | null>(null)
+const stop = ref<StopReason | null>(null)
+const tickets = ref<TicketRun | null>(null)
 const events = ref<EventRow[]>([])
 const envelopes = ref<Envelope[]>([])
 const gates = ref<GateResult[]>([])
@@ -49,6 +56,9 @@ async function tick() {
     phases.value = detail.phases.toSorted((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
     agents.value = detail.agents
     usage.value = detail.usage
+    caps.value = detail.caps
+    stop.value = detail.stop
+    tickets.value = detail.tickets
 
     const fresh: EventRow[] = []
     let page
@@ -442,6 +452,15 @@ function selectPhase(p: Phase) {
         <StatChip kind="written" :value="usage.written" />
       </span>
     </div>
+
+    <RunSummary
+      v-if="session"
+      :cost="session.total_cost"
+      :caps="caps"
+      :stop="stop"
+      :tickets="tickets"
+      @select="(id) => navigate(adwId, id)"
+    />
 
     <div v-if="phases.length" class="waterfall">
       <div class="row axis-row">

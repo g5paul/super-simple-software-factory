@@ -14,6 +14,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { caps, stopReason, ticketRun, type RunEvent } from "./runview.ts";
 import type {
   AgentSession,
   AgentStartPayload,
@@ -327,12 +328,29 @@ export class SssfDb {
     const session = this.session(adwId);
     if (!session) return null;
 
+    const phases = this.phases(adwId);
+    const events = this.runEvents(adwId);
     return {
       session,
+      caps: caps(events),
+      stop: stopReason(events, phases, session.status),
+      tickets: ticketRun(events, phases),
       usage: this.usage(adwId),
-      phases: this.phases(adwId),
+      phases,
       agents: this.agentSessions(adwId),
     };
+  }
+
+  /** The few events runview reads: caps, stops, the ticket list, and agent costs. */
+  private runEvents(adwId: string): RunEvent[] {
+    return this.db
+      .query<RunEvent, [string]>(
+        `SELECT type, name, phase_id, payload_json FROM events
+          WHERE adw_id = ? AND (type IN ('agent_end', 'error')
+                                OR name IN ('run_caps', 'tickets'))
+          ORDER BY rowid`,
+      )
+      .all(adwId);
   }
 
   /**

@@ -242,8 +242,54 @@ export interface SessionUsage {
   written: number;
 }
 
+/** The caps a run recorded at its start. null means that cap is off. */
+export interface RunCaps {
+  max_run_cost: number | null;
+  rate_limit_stop: number | null;
+}
+
+/** Why a failed run stopped, from its own stop event or its first failed phase. */
+export interface StopReason {
+  kind: "call_budget_stop" | "budget_stop" | "rate_limit_stop" | "not_accepted" | "phase_failed";
+  /** The full message the run printed, git advice included. */
+  message: string;
+  /** The phase it stopped in, to jump to. */
+  phase_id: string | null;
+}
+
+/**
+ * done_before: done when this run started, so it built nothing.
+ * stopped: had phases, but the run ended before its commit without a failure.
+ */
+export type TicketStatus = "done_before" | "queued" | "running" | "done" | "fail" | "stopped";
+
+export interface TicketRow {
+  number: string;
+  title: string;
+  status: TicketStatus;
+  /** Fix passes after a failed verify. */
+  retries: number;
+  /** What this run's agents spent on the ticket. */
+  cost: number;
+  /** The ticket's first phase in this run, to jump to. */
+  phase_id: string | null;
+}
+
+/** An adw_tickets run, its phases grouped by ticket in build order. */
+export interface TicketRun {
+  feature: string;
+  folder: string;
+  tickets: TicketRow[];
+}
+
 export interface SessionDetail {
   session: Session;
+  /** null for a run from before caps were recorded. */
+  caps: RunCaps | null;
+  /** null unless the run failed. */
+  stop: StopReason | null;
+  /** null unless this is an adw_tickets run. */
+  tickets: TicketRun | null;
   /** Derived from agent_end payloads, so historical runs have it too. */
   usage: SessionUsage;
   /** Ordered by seq. */

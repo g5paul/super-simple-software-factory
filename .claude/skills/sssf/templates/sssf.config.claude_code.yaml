@@ -1,0 +1,118 @@
+# sssf.config.yaml — the factory's agent roster, Claude Code edition.
+# Stamped by `install.py --coding-agent claude_code`. Every agent runs on the
+# `claude` CLI under your subscription login: no API key, and .env does not
+# need one. Same prompts, purposes, and write boundaries as the Pi roster;
+# only the harness and the models differ. See references/config.md.
+defaults:
+  coding_agent: claude_code
+  model: anthropic/claude-sonnet-5-5   # anthropic/* only; the provider prefix is stripped for claude
+  thinking: medium                     # maps to --effort: off|minimal -> low, else the same name
+  harness_engineering: []              # pi extensions; claude_code cannot load them, keep empty
+  # Pi names map to Claude Code tools: read->Read, bash->Bash, edit->Edit,
+  # write->Write, grep->Grep, find->Glob, ls->Glob. Claude Code names
+  # (e.g. WebFetch) pass through as written.
+  tools:
+    - read
+    - bash
+    - edit
+    - write
+    - grep
+    - find
+  # Off-limits to every agent that does not name them in its own `writes`.
+  # Enforced in adw_modules/permissions.py after each call, the same as on Pi:
+  # --permission-mode bypassPermissions lets claude act, and this check decides
+  # whether what it did stands.
+  protected_files:
+    - adws/adw_modules/
+    - adws/adw_sssf_config/
+    - adws/adw_*.py
+  data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
+
+observability:
+  db: adws/adw_data/sssf.db
+  poll_ms: 500
+
+agents:
+  - name: planner
+    model: anthropic/claude-opus-5-5   # the plan sets the ceiling for everything after it
+    thinking: high
+    color: "#a78bfa"
+    purpose: Turn a request into a plan the builder can implement without asking questions.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/planner/system.md
+      user: adws/adw_data/prompt_engineering/planner/user.md
+    writes:
+      - specs/
+    tools:                             # recon + write for the spec; no edit
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: builder
+    color: "#22d3ee"
+    purpose: Implement the plan exactly; report every changed file in the envelope.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/builder/system.md
+      user: adws/adw_data/prompt_engineering/builder/user.md
+    # No `writes` key: unrestricted, and the only agent that is. It still cannot
+    # touch defaults.protected_files.
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - edit
+      - write
+
+  - name: scout
+    model: anthropic/claude-haiku-5-5  # search and report; speed over depth
+    color: "#fbbf24"
+    purpose: Find and report where things live; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/scout/system.md
+      user: adws/adw_data/prompt_engineering/scout/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: reviewer
+    model: anthropic/claude-opus-5-5   # a different model from the builder, so it does not share its blind spots
+    thinking: high
+    color: "#fb7185"
+    purpose: Confirm that what was built is what was asked for; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/reviewer/system.md
+      user: adws/adw_data/prompt_engineering/reviewer/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: documenter
+    model: anthropic/claude-haiku-5-5
+    color: "#e879f9"
+    purpose: Write up the change that was just made, from the diff; document only.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/documenter/system.md
+      user: adws/adw_data/prompt_engineering/documenter/user.md
+    writes:
+      - app_docs/
+      - docs/
+      - "**/*.md"
+      - "*.md"
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+      - edit

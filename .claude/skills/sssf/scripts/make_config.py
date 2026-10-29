@@ -5,7 +5,7 @@
 """make_config — generate adws/adw_sssf_config/sssf.config.yaml with great defaults.
 
 Usage:
-    uv run <skill>/scripts/make_config.py [--force]
+    uv run <skill>/scripts/make_config.py [--force] [--coding-agent pi|claude_code]
 """
 
 import argparse
@@ -13,12 +13,17 @@ import shutil
 import sys
 from pathlib import Path
 
-TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "sssf.config.yaml"
+TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+ROSTERS = {
+    "pi": TEMPLATES / "sssf.config.yaml",
+    "claude_code": TEMPLATES / "sssf.config.claude_code.yaml",
+}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--coding-agent", choices=sorted(ROSTERS), default="pi")
     args = parser.parse_args()
 
     dest = Path.cwd() / "adws" / "adw_sssf_config" / "sssf.config.yaml"
@@ -26,7 +31,7 @@ def main() -> int:
         print(f"{dest} already exists — use --force to overwrite")
         return 1
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(TEMPLATE, dest)
+    shutil.copy2(ROSTERS[args.coding_agent], dest)
     print(f"wrote {dest}")
     return 0
 

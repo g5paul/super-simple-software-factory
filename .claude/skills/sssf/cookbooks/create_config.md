@@ -10,6 +10,8 @@ uv run .claude/skills/sssf/scripts/make_config.py
 
 Writes `adws/adw_sssf_config/sssf.config.yaml` — creating the directory if needed — with the starter agents (planner, builder, scout, reviewer, documenter) wired to the prompt files `/sssf install` stamped into `adws/adw_data/prompt_engineering/`. That path is the default every ADW and the justfile look for; `--config` overrides it. `make_config.py` refuses to overwrite an existing config unless you pass `--force`, so retuning an existing roster is a hand edit — see `update_config.md`.
 
+`--coding-agent claude_code` writes the Claude Code roster instead: planner and reviewer on Opus with high thinking, builder on Sonnet, scout and documenter on Haiku. See `references/config.md`, section "Claude Code".
+
 ## The rule
 
 **One agent, one prompt, one purpose.** An entry defines who an agent *is*: its coding agent, model, thinking level, and exactly one system prompt plus one user prompt. How it gets *used* — the output type, a per-call user prompt override — lives at the ADW call site, never here.

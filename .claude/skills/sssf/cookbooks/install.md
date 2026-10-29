@@ -10,6 +10,8 @@ uv run .claude/skills/sssf/scripts/install.py
 
 Run from the **target repo root** — the cwd is where everything lands. If the skill lives in your user scope, the path is `~/.claude/skills/sssf/scripts/install.py`.
 
+To run every agent on Claude Code instead of Pi, add `--coding-agent claude_code`. The installer then stamps `templates/sssf.config.claude_code.yaml` as the roster. It has the same prompts, purposes, and `writes` boundaries as the Pi roster, with Anthropic models and no pi extensions. It uses your `claude` subscription login, so `.env` needs no API key. Check the login with `claude auth status`.
+
 ## What gets stamped
 
 `install.py` copies `templates/` into the cwd:

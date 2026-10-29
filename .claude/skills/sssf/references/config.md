@@ -203,6 +203,8 @@ Rule: **every entry in `harness_engineering` that registers a tool must have tha
 
 ## Claude Code (`coding_agent: claude_code`)
 
+`install.py --coding-agent claude_code` (or `make_config.py --coding-agent claude_code`) stamps a ready roster from `templates/sssf.config.claude_code.yaml`. It keeps the Pi roster's prompts, purposes, and `writes`, and changes only the harness, the models, and the tool lists.
+
 `adw_modules/agent_cc.py` runs the agent as `claude -p --output-format stream-json`. It has the same contract as `agent_pi.run()`, so prompts, envelopes, gates, `writes` enforcement, and the trace all work unchanged. Set it roster-wide in `defaults.coding_agent` or per agent. Pi and Claude Code agents can share one roster.
 
 How the roster maps onto `claude`:

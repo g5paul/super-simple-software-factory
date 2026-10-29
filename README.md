@@ -68,6 +68,8 @@ cp -r /path/to/super-simple-software-factory/.claude/skills/sssf .claude/skills/
 # 2. stamp the factory (run from the target repo ROOT, the cwd is where everything lands)
 uv run .claude/skills/sssf/scripts/install.py
 cp .env.sample .env                              # then set OPENROUTER_API_KEY
+# or, for Claude Code on your subscription (no API key):
+#   uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code
 pi --version                                     # confirm pi is on PATH, or set PI_PATH in .env
 git init && git commit --allow-empty -m init     # chains that end in a commit phase need a repo
 

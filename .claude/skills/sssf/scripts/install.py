@@ -5,7 +5,7 @@
 """/install — stamp the SSSF factory from the skill into the cwd. Idempotent.
 
 Usage:
-    uv run <skill>/scripts/install.py [--force]
+    uv run <skill>/scripts/install.py [--force] [--coding-agent pi|claude_code]
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
 (4 starter agents), adws/adw_sssf_config/sssf.config.yaml, .env.sample,
@@ -19,6 +19,13 @@ import sys
 from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+
+# One starter roster per harness. Pi stays the default; claude_code stamps a
+# roster that runs on the `claude` CLI and the subscription login.
+ROSTERS = {
+    "pi": TEMPLATES / "sssf.config.yaml",
+    "claude_code": TEMPLATES / "sssf.config.claude_code.yaml",
+}
 
 GITIGNORE_ENTRIES = [
     "adws/adw_data/sessions/",
@@ -64,6 +71,8 @@ def ensure_gitignore(root: Path, stamped: list) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
+    parser.add_argument("--coding-agent", choices=sorted(ROSTERS), default="pi",
+                        help="which starter roster to stamp (default: pi)")
     args = parser.parse_args()
 
     root = Path.cwd()
@@ -74,7 +83,7 @@ def main() -> int:
           root / "adws" / "adw_data" / "prompt_engineering", args.force, stamped, skipped)
     stamp(TEMPLATES / "harness_engineering",
           root / "adws" / "adw_data" / "harness_engineering", args.force, stamped, skipped)
-    stamp(TEMPLATES / "sssf.config.yaml",
+    stamp(ROSTERS[args.coding_agent],
           root / "adws" / "adw_sssf_config" / "sssf.config.yaml",
           args.force, stamped, skipped)
     stamp(TEMPLATES / "env.sample", root / ".env.sample", args.force, stamped, skipped)
@@ -91,7 +100,10 @@ def main() -> int:
     if skipped:
         print(f"  skipped (already exist, use --force to overwrite): {len(skipped)}")
     print("\nnext steps:")
-    print("  1. cp .env.sample .env   # then set the key(s) your roster needs")
+    if args.coding_agent == "claude_code":
+        print("  1. claude auth status    # must be logged in; no API key needed")
+    else:
+        print("  1. cp .env.sample .env   # then set the key(s) your roster needs")
     print("  2. just demo             # two cheap read-only runs, end to end")
     print("  3. just sessions         # what just happened")
     print("  4. just obs              # the trace UI, needs bun")

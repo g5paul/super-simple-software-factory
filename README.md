@@ -58,7 +58,12 @@ Copy `.claude/skills/sssf/` into the target repo and type `/sssf install` inside
 
 ### Manual Install
 
-**Prereqs:** [`uv`](https://docs.astral.sh/uv/), [`pi`](https://github.com/mariozechner/pi-coding-agent), `sqlite3`, and an API key for whichever providers your roster names (see below). [`bun`](https://bun.sh) only if you want the visualizer.
+**Prereqs:** [`uv`](https://docs.astral.sh/uv/), `sqlite3`, and one of two ways to run agents:
+
+- a Claude subscription, with [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and logged in (`claude auth status`). No API key. See [Run on your Claude subscription](#run-on-your-claude-subscription).
+- [`pi`](https://github.com/mariozechner/pi-coding-agent) and an API key for each provider your roster names. See [Which API keys you actually need](#which-api-keys-you-actually-need).
+
+[`bun`](https://bun.sh) only if you want the visualizer.
 
 ```bash
 # 1. get the skill into the target repo
@@ -66,11 +71,13 @@ mkdir -p .claude/skills
 cp -r /path/to/super-simple-software-factory/.claude/skills/sssf .claude/skills/
 
 # 2. stamp the factory (run from the target repo ROOT, the cwd is where everything lands)
-uv run .claude/skills/sssf/scripts/install.py
-cp .env.sample .env                              # then set OPENROUTER_API_KEY
-# or, for Claude Code on your subscription (no API key):
-#   uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code
-pi --version                                     # confirm pi is on PATH, or set PI_PATH in .env
+#    on your Claude subscription, no API key:
+uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code
+cp .env.sample .env                              # leave the API keys out
+#    or on pi with API keys:
+#      uv run .claude/skills/sssf/scripts/install.py
+#      cp .env.sample .env                       # then set OPENROUTER_API_KEY
+#      pi --version                              # confirm pi is on PATH, or set PI_PATH in .env
 git init && git commit --allow-empty -m init     # chains that end in a commit phase need a repo
 
 # 3. smoke test: two cheap read-only runs, end to end
@@ -87,9 +94,32 @@ Re-running `install.py` is safe. It skips every file that already exists and rep
 
 To bring SSSF into a new project, start a Claude session in that repo and point it at `cookbooks/onboard.md`. It checks whether SSSF fits, installs it, sets `quality.py` to the commands CI runs, writes `docs/sssf.md`, and makes a first small run.
 
-Green on the smoke test means the whole path works: config validated, session minted, Pi ran, envelope parsed, events landed in `adws/adw_data/sssf.db`. Fix it there before composing anything larger, because every multi-agent chain rides this exact path.
+Green on the smoke test means the whole path works: config validated, session minted, the agent ran, envelope parsed, events landed in `adws/adw_data/sssf.db`. Fix it there before composing anything larger, because every multi-agent chain rides this exact path.
+
+### Run on your Claude subscription
+
+`--coding-agent claude_code` runs every agent through Claude Code on the account you're logged into. There's nothing to put in `.env`, and no bill per token.
+
+- **No keys to leak or pay for.** `.env` is loaded into every ADW, so SSSF removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from each agent's environment. If Claude still reports an API key as its auth source, the run stops before the model is called. A stray key can't quietly turn a subscription run into an API bill. Set `SSSF_CLAUDE_AUTH=api_key` if you do want the API.
+- **A flat price.** The subscription covers the runs. What limits you is the account's 5-hour and 7-day usage windows, not money.
+- **You can see the windows.** The account panel in `just obs-all` shows how full each window is, when it resets, and which projects and models filled it.
+- **A run stops before the account runs out.** Before each agent starts, SSSF checks the windows and stops the run cleanly at `defaults.rate_limit_stop` (80% by default), with the reset time. That beats a run that dies halfway through a phase.
+- **The agents stay isolated.** Each call runs with `--safe-mode`, so an agent never loads your own `CLAUDE.md`, skills, hooks, or MCP servers. It sees its prompt and the repo.
+
+**What the dollar figures mean here.** Every cost SSSF shows, in the console, the trace, and the dashboard, is what the tokens would cost on the API. On a subscription you aren't charged it. The caps still matter: `max_run_cost` and each agent's `max_call_cost` limit how much of your usage window one run, or one runaway call, can take.
+
+**The trade-offs.**
+
+- SSSF runs draw on the same usage windows as your interactive Claude sessions. A long unattended run can leave less for you, and a busy day at the keyboard can stop a run.
+- Only Claude models. A roster that mixes providers needs Pi and API keys.
+- Interactive sessions don't report the windows, so the reading SSSF checks is as fresh as its last agent call. `/usage` in any Claude Code session gives the current figure.
+
+See `references/config.md` for the details.
 
 ### Which API keys you actually need
+
+This section is for Pi. On a Claude subscription you need none.
+
 
 That depends on your roster, not on this repo. Every `model:` in `sssf.config.yaml` is written `provider/model-id`, and the provider half decides the key. Which key pi reads for a given provider comes from `~/.pi/agent/models.json`.
 

@@ -47,6 +47,9 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Implement the plan exactly")) as ph:
         previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
                                      gates=[gates.artifacts_exist]))
+    # The first build describes the whole change. A fix or a revision reports
+    # only its own repair, so its message must never name the code commit.
+    built = previous
 
     test = None
     for i in range(1, MAX_FIX_LOOPS + 1):
@@ -70,7 +73,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     if test is not None and test.passed:
         with run.phase(PhaseParams(name="commit", kind="code", owner="git",
                                    description="Land the code only after the suite came back green")) as ph:
-            message = previous.commit_message or f"sssf({run.adw_id}): {previous.summary}"
+            message = built.commit_message or f"sssf({run.adw_id}): {built.summary}"
             ph.log(sha=git_helper.commit_all(message), message=message)
 
     return run.finish(accepted=test is not None and test.passed,

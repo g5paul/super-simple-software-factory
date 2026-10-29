@@ -92,6 +92,9 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Implement the plan exactly")) as ph:
         build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
                                   gates=[gates.diff_matches_claims]))
+    # The first build describes the whole change. A fix or a revision reports
+    # only its own repair, so its message must never name the code commit.
+    built = build
 
     test = None
     for i in range(1, MAX_FIX_LOOPS + 1):
@@ -145,7 +148,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     if verified:
         with run.phase(PhaseParams(name="commit_build", kind="code", owner="git",
                                    description="Land the code only now: green suite, approved review")) as ph:
-            commit(ph, build)
+            commit(ph, built)
 
         with run.phase(PhaseParams(name="changes", kind="code", owner="git",
                                    description="Diff the whole run against its pinned baseline, for the documenter")) as ph:

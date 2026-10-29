@@ -5,7 +5,7 @@ and a failing Bash call), turn 2 resumes it. A fake `claude` replays them and
 logs the argv and env it was handed, so no test touches the network.
 
 Run from the skill root:
-    uv run --with pytest --with pydantic --with pyyaml --with python-dotenv pytest tests
+    uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests
 """
 
 from __future__ import annotations

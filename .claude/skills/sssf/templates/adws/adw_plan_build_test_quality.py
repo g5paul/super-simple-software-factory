@@ -44,6 +44,9 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Implement the plan exactly")) as ph:
         previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
                                      gates=[gates.diff_matches_claims]))
+    # The first build describes the whole change. A fix or a revision reports
+    # only its own repair, so its message must never name the code commit.
+    built = previous
 
     def record(ph, result) -> None:
         passed = sum(1 for check in result.checks if check.passed)
@@ -82,7 +85,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     if verified:
         with run.phase(PhaseParams(name="commit", kind="code", owner="git",
                                    description="Commit the tested and quality-verified working tree")) as ph:
-            message = previous.commit_message or f"sssf({run.adw_id}): {previous.summary}"
+            message = built.commit_message or f"sssf({run.adw_id}): {built.summary}"
             ph.log(sha=git_helper.commit_all(message), message=message)
 
     return run.finish(accepted=verified,

@@ -68,7 +68,8 @@ const agentConfig = computed(() => {
 interface UsageRow {
   label: string
   tokens: number
-  cost: number
+  /** null: the coding agent reported only a total, so this share is unknown. */
+  cost: number | null
   /** Total gets a rule above it; reasoning is indented under output. */
   kind?: 'total' | 'nested'
   title?: string
@@ -99,9 +100,14 @@ const phaseUsage = computed<{ rows: UsageRow[]; partial: boolean } | null>(() =>
       rows: [{ label: 'total', tokens: end.tokens ?? 0, cost: payload.cost ?? 0, kind: 'total' }],
     }
   }
+  // Claude Code reports one total cost and no breakdown. Its components arrive
+  // as zero; showing $0 would claim those tokens were free.
+  const unsplit =
+    u.total_cost > 0 && !u.input_cost && !u.output_cost && !u.cache_read_cost && !u.cache_write_cost
+  const part = (cost: number) => (unsplit ? null : cost)
   const rows: UsageRow[] = [
-    { label: 'input', tokens: u.input_tokens, cost: u.input_cost },
-    { label: 'output', tokens: u.output_tokens, cost: u.output_cost },
+    { label: 'input', tokens: u.input_tokens, cost: part(u.input_cost) },
+    { label: 'output', tokens: u.output_tokens, cost: part(u.output_cost) },
   ]
   if (u.reasoning_tokens) {
     // Thinking bills at the output rate, so its share of the output cost is
@@ -110,14 +116,14 @@ const phaseUsage = computed<{ rows: UsageRow[]; partial: boolean } | null>(() =>
     rows.push({
       label: 'thinking',
       tokens: u.reasoning_tokens,
-      cost: share,
+      cost: part(share),
       kind: 'nested',
       title: 'Thinking tokens — part of output above, billed at the output rate. Not added to the total.',
     })
   }
   rows.push(
-    { label: 'cache read', tokens: u.cache_read_tokens, cost: u.cache_read_cost },
-    { label: 'cache write', tokens: u.cache_write_tokens, cost: u.cache_write_cost },
+    { label: 'cache read', tokens: u.cache_read_tokens, cost: part(u.cache_read_cost) },
+    { label: 'cache write', tokens: u.cache_write_tokens, cost: part(u.cache_write_cost) },
     { label: 'total', tokens: u.total_tokens, cost: u.total_cost, kind: 'total' },
   )
   return { rows, partial: false }
@@ -126,7 +132,8 @@ const phaseUsage = computed<{ rows: UsageRow[]; partial: boolean } | null>(() =>
 const NUM = new Intl.NumberFormat('en-US')
 
 /** Per-component costs run to fractions of a cent; four places keeps them real. */
-function money(n: number): string {
+function money(n: number | null): string {
+  if (n === null) return '—'
   if (!n) return '$0'
   return n < 0.0001 ? '<$0.0001' : `$${n.toFixed(4)}`
 }

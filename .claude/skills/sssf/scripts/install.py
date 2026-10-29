@@ -30,6 +30,9 @@ GITIGNORE_ENTRIES = [
     # first repo that was ever installed into from scratch.
     "__pycache__/",
     "*.pyc",
+    # `just obs` runs `bun install` inside the skill. The same `git add -A`
+    # would then commit the visualizer's packages with the next phase.
+    ".claude/skills/sssf/apps/visualizer/node_modules/",
 ]
 
 

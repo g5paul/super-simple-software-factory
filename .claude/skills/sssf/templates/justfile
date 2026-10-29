@@ -81,9 +81,16 @@ procs ADW_ID:
 
 # ── observability UI ────────────────────────────────────────────────────────
 
-# Needs bun. The db path is passed explicitly because the server runs from the
-# app dir and would otherwise look for a trace db sitting next to itself.
+# Needs bun. `obs` builds the UI, then serves UI and API from ONE process on
+# the first free port from 4600 up, so several repos can each run their own at
+# once. Set SSSF_OBS_PORT in .env to pin a port instead. The db path is passed
+# explicitly because the server runs from the app dir and would otherwise look
+# for a trace db sitting next to itself. Ctrl+C stops it.
 
-# boot the trace UI, http://localhost:4601 (api on :4600)
+# boot the trace UI; prints its address
 obs:
-    cd .claude/skills/sssf/apps/visualizer && bun install && (SSSF_DB={{justfile_directory()}}/{{db}} bun run server/index.ts &) && bunx vite
+    cd .claude/skills/sssf/apps/visualizer && bun install --silent && bunx vite build --logLevel warn && SSSF_DB={{justfile_directory()}}/{{db}} bun run server/index.ts
+
+# only for working on the visualizer itself: Vite dev server, fixed ports 4601 (ui) + 4600 (api)
+obs-dev:
+    cd .claude/skills/sssf/apps/visualizer && bun install && (SSSF_DB={{justfile_directory()}}/{{db}} SSSF_OBS_PORT=4600 bun run server/index.ts &) && bunx vite

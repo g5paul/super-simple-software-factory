@@ -50,6 +50,8 @@ GITIGNORE_ENTRIES = [
     # `just obs` runs `bun install` inside the skill. The same `git add -A`
     # would then commit the visualizer's packages with the next phase.
     ".claude/skills/sssf/apps/visualizer/node_modules/",
+    # `just obs` also builds the UI into dist/ there, for the same reason.
+    ".claude/skills/sssf/apps/visualizer/dist/",
 ]
 
 

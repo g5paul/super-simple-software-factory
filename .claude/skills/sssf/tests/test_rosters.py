@@ -81,3 +81,10 @@ def test_rosters_agree_on_prompts_and_write_boundaries():
         assert agent["prompt_engineering"] == twin["prompt_engineering"], agent["name"]
         assert agent.get("writes") == twin.get("writes"), agent["name"]
         assert agent["purpose"] == twin["purpose"], agent["name"]
+
+
+def test_install_ignores_the_built_visualizer(repo):
+    # `just obs` builds the UI into the skill's copy. Commit phases run
+    # `git add -A`, so the build must be ignored or it lands in a commit.
+    script("install.py")
+    assert ".claude/skills/sssf/apps/visualizer/dist/" in Path(".gitignore").read_text().splitlines()

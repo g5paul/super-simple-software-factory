@@ -8,14 +8,19 @@
  *
  *   bun run server/index.ts
  *   bun run server/index.ts --db /path/to/repo/adws/adw_data/sssf.db
- *   SSSF_DB=/path/to/sssf.db PORT=4600 bun run server/index.ts
+ *   SSSF_DB=/path/to/sssf.db SSSF_OBS_PORT=4610 bun run server/index.ts
  */
 import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
 import type { AgentPrompts, ApiError, HealthResponse } from "../shared/types.ts";
 
-const PORT = Number(process.env.PORT ?? 4600);
+// SSSF_OBS_PORT (or PORT) pins the port, and a pinned port that is taken is
+// an error. Unpinned, the server takes the first free port from 4600 up, so
+// several repos can each run `just obs` at the same time.
+const PINNED_PORT = process.env.SSSF_OBS_PORT ?? process.env.PORT;
+const FIRST_PORT = 4600;
+const PORT_TRIES = 50;
 const DIST_DIR = resolve(import.meta.dir, "..", "dist");
 
 const dbPath = resolveDbPath();
@@ -85,7 +90,7 @@ async function serveStatic(req: Request): Promise<Response> {
 
   if (!existsSync(DIST_DIR)) {
     return new Response(
-      `SSSF visualizer API is running on :${PORT}.\n\n` +
+      `SSSF visualizer API is running.\n\n` +
         `No ./dist build found. Run "bun run dev" for the Vite dev server ` +
         `(it proxies /api here), or "bun run build" to serve the UI from this process.\n`,
       { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } },
@@ -110,8 +115,33 @@ async function serveStatic(req: Request): Promise<Response> {
   return notFound("not found");
 }
 
-const server = Bun.serve({
-  port: PORT,
+function inUse(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === "EADDRINUSE";
+}
+
+function listen(start: (port: number) => ReturnType<typeof Bun.serve>) {
+  if (PINNED_PORT) {
+    try {
+      return start(Number(PINNED_PORT));
+    } catch (err) {
+      if (!inUse(err)) throw err;
+      console.error(`[sssf] port ${PINNED_PORT} is in use. Change SSSF_OBS_PORT, or unset it to take the first free port.`);
+      process.exit(1);
+    }
+  }
+  for (let port = FIRST_PORT; port < FIRST_PORT + PORT_TRIES; port++) {
+    try {
+      return start(port);
+    } catch (err) {
+      if (!inUse(err)) throw err;
+    }
+  }
+  console.error(`[sssf] ports ${FIRST_PORT}-${FIRST_PORT + PORT_TRIES - 1} are all in use. Set SSSF_OBS_PORT.`);
+  process.exit(1);
+}
+
+const server = listen((port) => Bun.serve({
+  port,
   routes: {
     "/api/health": safely(
       () =>
@@ -196,7 +226,7 @@ const server = Bun.serve({
     if (pathname.startsWith("/api/")) return notFound(`no route ${pathname}`);
     return serveStatic(req);
   },
-});
+}));
 
 console.log(`[sssf] visualizer api  http://localhost:${server.port}`);
 console.log(`[sssf] db              ${db.path}  [journal_mode=${db.journalMode}]`);

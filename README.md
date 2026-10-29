@@ -270,12 +270,13 @@ That one cursor query is the entire transport. Live view and full history are th
 
 Files stay the raw record (`raw_output.jsonl`, `envelope.json`, `agent_map.json`). The db is the queryable mirror. Losing it loses nothing you cannot rebuild.
 
-The skill ships a read-only UI for this db at `.claude/skills/sssf/apps/visualizer/`: Vue and Vite served by Bun on port 4600, with sessions, a trace waterfall, and per-phase tool-call detail.
+The skill ships a read-only UI for this db at `.claude/skills/sssf/apps/visualizer/`: Vue and Vite served by Bun, with sessions, a trace waterfall, and per-phase tool-call detail.
+
+`just obs` builds the UI and serves it, with the API, from one process. It takes the first free port from 4600 up and prints the address, so several repos can each run their own at once. Set `SSSF_OBS_PORT` in `.env` to pin a port. The raw form:
 
 ```bash
-cd .claude/skills/sssf/apps/visualizer && bun install
-SSSF_DB=/abs/path/to/your-repo/adws/adw_data/sssf.db bun run server/index.ts &
-bunx vite
+cd .claude/skills/sssf/apps/visualizer && bun install && bunx vite build
+SSSF_DB=/abs/path/to/your-repo/adws/adw_data/sssf.db bun run server/index.ts
 ```
 
 It resolves its target through `--db`, then `SSSF_DB`, then `<cwd>/adws/adw_data/sssf.db`, so one instance can point at any stamped repo. Pass the db explicitly, because the server runs from the app dir.

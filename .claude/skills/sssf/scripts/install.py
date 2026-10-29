@@ -143,7 +143,9 @@ def register(root: Path) -> None:
     try:
         data = json.loads(path.read_text()) if path.is_file() else {}
         projects = data.setdefault("projects", {})
-        if any(entry.get("root") == str(root) for entry in projects.values()):
+        listed = [n for n, entry in projects.items() if entry.get("root") == str(root)]
+        if listed:
+            print(f"  dashboard: listed as {listed[0]} in {path}")
             return
         name, n = root.name, 1
         if name in projects:
@@ -154,6 +156,7 @@ def register(root: Path) -> None:
         projects[name] = {"root": str(root), "db": DB}
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        print(f"  dashboard: registered as {name} in {path}")
     except (OSError, ValueError) as err:
         # The dashboard is a convenience; an install must not fail over it.
         print(f"  could not record this repo in {path}: {err}")

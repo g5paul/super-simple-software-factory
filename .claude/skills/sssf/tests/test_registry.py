@@ -72,3 +72,9 @@ def test_a_registry_that_cannot_be_written_does_not_fail_the_install(tmp_path, m
     monkeypatch.setenv("SSSF_REGISTRY", str(blocker / "projects.json"))
     out = install(repo(tmp_path, "shop")).stdout
     assert "could not record" in out
+
+
+def test_install_and_update_say_where_the_repo_is_listed(tmp_path, private_registry):
+    root = repo(tmp_path, "shop")
+    assert f"registered as shop in {private_registry}" in install(root).stdout
+    assert f"listed as shop in {private_registry}" in install(root, "--update").stdout

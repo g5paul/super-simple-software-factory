@@ -1,0 +1,151 @@
+"""`install.py --update` brings a stamped repo up to the skill's current version
+without losing what the repo customized.
+
+The installer records the hash of every file it stamps in
+adws/adw_sssf_config/stamp.json. An update replaces a file only while it still
+matches that record, so a file the repo changed (the roster, quality.py, a
+prompt) is kept and listed. Repos stamped before the record existed get one
+exception: SSSF's own code (adw_modules/ except quality.py, and the starter
+adw_*.py) is replaced, because a repo is not meant to edit it.
+
+Run from the skill root:
+    uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+SKILL = Path(__file__).resolve().parent.parent
+TEMPLATES = SKILL / "templates"
+STAMP = Path("adws/adw_sssf_config/stamp.json")
+
+AGENTS = Path("adws/adw_modules/agents.py")
+QUALITY = Path("adws/adw_modules/quality.py")
+CONFIG = Path("adws/adw_sssf_config/sssf.config.yaml")
+REVIEWER = Path("adws/adw_data/prompt_engineering/reviewer/user.md")
+
+
+def install(*args: str) -> subprocess.CompletedProcess:
+    result = subprocess.run([sys.executable, str(SKILL / "scripts" / "install.py"), *args],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result
+
+
+def sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def stamp() -> dict:
+    return json.loads(STAMP.read_text())
+
+
+def pretend_an_older_skill_stamped(path: Path) -> None:
+    """Make `path` look like an untouched copy of an OLDER template."""
+    path.write_text(path.read_text() + "\n# older template\n")
+    record = stamp()
+    record["files"][str(path)]["sha256"] = sha(path)
+    STAMP.write_text(json.dumps(record))
+
+
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    install("--coding-agent", "claude_code")
+    return tmp_path
+
+
+def test_install_records_every_stamped_file(repo):
+    files = stamp()["files"]
+    assert files[str(AGENTS)]["sha256"] == sha(AGENTS)
+    assert files[str(CONFIG)]["source"] == "sssf.config.claude_code.yaml"
+    assert str(STAMP) not in files
+
+
+def test_update_replaces_an_untouched_file(repo):
+    pretend_an_older_skill_stamped(REVIEWER)
+    out = install("--update").stdout
+    assert REVIEWER.read_text() == (TEMPLATES / "prompt_engineering/reviewer/user.md").read_text()
+    assert f"~ {REVIEWER}" in out
+
+
+def test_update_keeps_a_file_the_repo_changed(repo):
+    QUALITY.write_text(QUALITY.read_text().replace('_placeholder("test")', '["make", "test"]'))
+    CONFIG.write_text(CONFIG.read_text() + "\n# tuned\n")
+    out = install("--update").stdout
+    assert '["make", "test"]' in QUALITY.read_text()
+    assert CONFIG.read_text().endswith("# tuned\n")
+    assert f"! {QUALITY}" in out and f"! {CONFIG}" in out
+
+
+def test_update_adds_a_missing_file(repo):
+    AGENTS.unlink()
+    out = install("--update").stdout
+    assert AGENTS.read_text() == (TEMPLATES / "adws/adw_modules/agents.py").read_text()
+    assert f"+ {AGENTS}" in out
+
+
+def test_second_update_changes_nothing(repo):
+    install("--update")
+    out = install("--update").stdout
+    assert "updated: 0" in out and "added: 0" in out
+
+
+def test_update_records_the_new_hashes(repo):
+    pretend_an_older_skill_stamped(REVIEWER)
+    install("--update")
+    assert stamp()["files"][str(REVIEWER)]["sha256"] == sha(REVIEWER)
+
+
+def test_take_replaces_a_kept_file(repo):
+    REVIEWER.write_text("my own reviewer prompt\n")
+    install("--update", "--take", str(REVIEWER))
+    assert REVIEWER.read_text() == (TEMPLATES / "prompt_engineering/reviewer/user.md").read_text()
+
+
+# ── repos stamped before stamp.json existed ──────────────────────────────────
+
+@pytest.fixture
+def old_repo(repo):
+    """An install from before the record: older module and prompt, no stamp.json."""
+    STAMP.unlink()
+    AGENTS.write_text(AGENTS.read_text() + "\n# older template\n")
+    REVIEWER.write_text(REVIEWER.read_text() + "\n# older template\n")
+    QUALITY.write_text(QUALITY.read_text().replace('_placeholder("test")', '["make", "test"]'))
+    return repo
+
+
+def test_old_repo_gets_sssf_code_replaced(old_repo):
+    install("--update")
+    assert AGENTS.read_text() == (TEMPLATES / "adws/adw_modules/agents.py").read_text()
+
+
+def test_old_repo_keeps_quality_and_prompts(old_repo):
+    out = install("--update").stdout
+    assert '["make", "test"]' in QUALITY.read_text()
+    assert REVIEWER.read_text().endswith("# older template\n")
+    assert f"! {REVIEWER}" in out and f"! {QUALITY}" in out
+
+
+def test_old_repo_gets_a_record(old_repo):
+    install("--update")
+    files = stamp()["files"]
+    assert files[str(AGENTS)]["sha256"] == sha(AGENTS)
+    # A kept file has no trusted base yet, so it stays unrecorded and is
+    # listed again next time instead of being replaced silently.
+    assert str(REVIEWER) not in files
+
+
+def test_update_refuses_without_an_install(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = subprocess.run([sys.executable, str(SKILL / "scripts" / "install.py"), "--update"],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert "install" in result.stderr

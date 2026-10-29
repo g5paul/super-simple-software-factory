@@ -33,7 +33,33 @@ The two `*_engineering` dirs mirror the two config keys of the same name: `promp
 
 ## Idempotency
 
-Re-running is safe. `install.py` skips **every** file that already exists — your config, your prompts, and previously stamped code alike — and reports what it skipped, so a second run doubles as a drift check. To refresh stamped code (`adw_modules/`, the starter `adw_*.py`) to the skill's current version, run with `--force` — but know that `--force` overwrites ALL existing stamped files, including `sssf.config.yaml` and `prompt_engineering/`, so commit or back up user-owned edits first.
+Re-running is safe. `install.py` skips **every** file that already exists — your config, your prompts, and previously stamped code alike — and reports what it skipped, so a second run doubles as a drift check. `--force` overwrites ALL existing stamped files, including `sssf.config.yaml`, `quality.py`, and `prompt_engineering/`. To bring a repo up to a newer skill, use `--update` instead (next section).
+
+## Update an installed repo
+
+When the skill changes, update each repo that uses it in two steps. Commit first, so the diff shows exactly what the update changed.
+
+```bash
+# 1. refresh the repo's copy of the skill from its source
+rsync -a --delete --exclude apps/visualizer/node_modules \
+  /path/to/super-simple-software-factory/.claude/skills/sssf/ .claude/skills/sssf/
+
+# 2. update the stamped files
+uv run .claude/skills/sssf/scripts/install.py --update
+```
+
+`install.py` records a hash of every file it stamps in `adws/adw_sssf_config/stamp.json`. Commit that file with the install. `--update` uses it to decide:
+
+| The file in the repo | `--update` |
+|---|---|
+| is missing | adds it (`+`) |
+| already matches the skill | leaves it (`up to date`) |
+| still matches its recorded hash, so the repo never changed it | replaces it (`~`) |
+| differs from its recorded hash, so the repo changed it | keeps it and lists it (`!`), with a `diff` command to compare |
+
+So a tuned roster, the real commands in `quality.py`, and edited prompts survive an update. To take the skill's version of a kept file anyway, add `--take <path>` (repeatable).
+
+A repo installed before `stamp.json` existed has no record. Its first update replaces SSSF's own code (`adws/adw_modules/` except `quality.py`, and the starter `adw_*.py`), because a repo is not meant to edit it. It keeps every other file that differs, prompts included, because it cannot tell an edit from an older template. Check each listed file with the printed `diff` command and `--take` the ones you never changed. After that first update, the record exists and later updates need no checks.
 
 ## Post-install checklist
 

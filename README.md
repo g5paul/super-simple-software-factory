@@ -82,7 +82,7 @@ just obs                   # the trace UI, needs bun
 uv run adws/adw_prompt.py "reply with a one-line summary of this repo" --agent scout
 ```
 
-Re-running `install.py` is safe. It skips every file that already exists and reports what it skipped, so a second run doubles as a drift check. `--force` refreshes stamped code to the skill's current version, but it overwrites **all** stamped files including your `sssf.config.yaml` and your prompts, so commit first.
+Re-running `install.py` is safe. It skips every file that already exists and reports what it skipped, so a second run doubles as a drift check. To bring a repo up to a newer skill, refresh its copy of the skill and run `install.py --update`. It replaces only the files the repo never changed and lists the rest. `--force` overwrites **all** stamped files including your `sssf.config.yaml`, `quality.py`, and your prompts, so commit first. See `cookbooks/install.md`.
 
 Green on the smoke test means the whole path works: config validated, session minted, Pi ran, envelope parsed, events landed in `adws/adw_data/sssf.db`. Fix it there before composing anything larger, because every multi-agent chain rides this exact path.
 
@@ -363,7 +363,7 @@ Honest edges, because knowing them is cheaper than discovering them.
 | Gates pass, output is bad | Gates check what a predicate can check, not plan quality or code taste | Run the `reviewer`, or read it yourself |
 | An agent edits something it should not | Detected and rolled back after the call, and the phase fails | Expected. Widen that agent's `writes` if the change was legitimate |
 | Commit phase has nothing to commit | `commit_all` raises if the cwd is not a git repo or nothing changed | `git init` with one commit first. A no-op build fails the phase rather than committing nothing |
-| `install.py --force` | Overwrites **all** stamped files, config and prompts included | Commit before you force |
+| `install.py --force` | Overwrites **all** stamped files, config and prompts included | Use `--update` to refresh a repo. Commit before you force |
 
 Also missing on purpose, so you know what to add: this runs on your current branch. For real work you want a branch per run, a sandbox around the agent, and a merge step at the end.
 

@@ -15,7 +15,7 @@ SSSF agents run with `--safe-mode`, so they never load skills. Everything they n
 
 ## 1. Set up the tracker, once per repo
 
-Run `/setup-matt-pocock-skills` and choose **Local markdown**. The skills then write to `.scratch/<feature>/`. If the repo's `.gitignore` covers `.scratch/`, take that rule out: `adw_tickets` commits each ticket's done status, so the folder must be tracked.
+Run `/setup-matt-pocock-skills` and choose **Local markdown**. The skills then write to `.scratch/<feature>/`. If the repo's `.gitignore` covers `.scratch/`, take that rule out: `adw_tickets` commits each ticket's `Status: resolved`, so the folder must be tracked.
 
 ## 2. Decide what to build (interactive)
 
@@ -32,9 +32,9 @@ just tickets .scratch/<feature>/
 
 The read step runs before any agent and prints the ticket order, what the feature has cost so far, and an estimate from past ticket runs. It stops the run on `main`, on a dirty tree, on an untracked folder, on a spec with no seams, on a blocker that isn't a ticket, and on a cycle.
 
-Then one Haiku scout explores for the whole feature. Each ticket gets a fresh builder session with the spec, its ticket, the scout's notes, and the commits so far. A ticket lands as its own commit, `NN: title`, once every `quality.py` check passes, and that commit marks it done.
+Then one Haiku scout explores for the whole feature. Each ticket gets a fresh builder session with the spec, its ticket, the scout's notes, and the commits so far. A ticket lands as its own commit, `NN: title`, once every `quality.py` check passes, and that commit sets its `Status:` to `resolved`, the tracker's word for a finished ticket.
 
-After the last ticket, two reviewers read the whole feature's diff, each blind to the other. One asks whether it follows the repo's standards, and the other whether it does what the spec asked. If either finds something blocking, one builder session fixes it, the checks run again, and the fix gets its own commit. The documenter writes it up, and that last commit marks the feature finished.
+After the last ticket, two reviewers read the whole feature's diff, each blind to the other. One asks whether it follows the repo's standards, and the other whether it does what the spec asked. If either finds something blocking, one builder session fixes it, the checks run again, and the fix gets its own commit. A finding that would mean changing a protected file, such as the spec, a ticket, the glossary, or an ADR, never reaches the builder. The run prints it for you instead. The documenter writes it up, and that last commit marks the feature finished.
 
 ## 4. When it stops
 

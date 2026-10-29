@@ -53,7 +53,7 @@ It runs on the current branch, and refuses `main` and a dirty tree.
 3. **Per ticket, in order.**
    - `ticket_builder` (Sonnet) starts a fresh session with pointers to the spec, the ticket, the scout's notes, and the commits so far. Its system prompt carries the `tdd` discipline, at the spec's seams only.
    - Verify runs every `quality.py` block. Failures go back to the same session, a bounded number of times.
-   - The commit is "NN: title", in the builder's words. Code sets `Status: done` in the ticket file in the same commit.
+   - The commit is "NN: title", in the builder's words. Code sets `Status: resolved` in the ticket file in the same commit.
    - A ticket that still fails stops the run. Its work stays uncommitted, and the message prints how to look at it, keep it, or drop it.
 4. **Review the feature.** `standards_reviewer` and `spec_reviewer` (both Opus) read the feature's whole diff, one after the other, each blind to the other's findings. Then one fresh `ticket_builder` session fixes what they found, verify runs again, and the fix gets its own commit.
 5. **Document.** Same as today: the shared documenter writes the write-up, then a commit.
@@ -122,7 +122,7 @@ Settled in the grilling session, in order.
 9. **One roster file.** `ticket_builder`, `standards_reviewer`, and `spec_reviewer` are new agents in `sssf.config.yaml`, with their own prompt folders. The documenter is shared, and the existing prompts stay as they are.
 10. **A failed ticket stops the run.** Tickets before it stay committed. Its work stays uncommitted in the tree, and the run says which ticket failed and why.
 11. **A rerun resumes from git.** Tickets with an "NN:" commit for this feature on the branch are skipped. A rerun refuses to start on a dirty tree.
-12. **Code marks a ticket done.** The ticket's own commit sets `Status: done` in its file. Nothing else in the ticket changes, and the checkboxes stay as written.
+12. **Code marks a ticket done.** The ticket's own commit sets `Status: resolved` in its file (`done` until decision 37). Nothing else in the ticket changes, and the checkboxes stay as written.
 13. **The spec carries the seams.** `to-spec` agrees the test seams with the engineer and records them under "Testing Decisions". The read step requires that section to be non-empty. Tickets follow Matt's template unchanged. (Revised by 29: the first version asked for a seams section in every ticket, which `to-tickets` doesn't write.)
 14. **One fix pass after review.** The fix is followed by the checks. If they fail after the retries, the run stops, with the tickets still committed.
 15. **The feature folder is the only input.** A missing `spec.md` or `issues/` fails the read step.
@@ -157,3 +157,7 @@ Settled in the grilling session, in order.
     - The stop reason comes from the run's own stop event when there is one (`call_budget_stop`, `budget_stop`, `rate_limit_stop`, `not_accepted`), and otherwise from the first failed phase. It shows the full message, git advice included.
     - A ticket row's cost is what this run's agents spent on it. A ticket finished by an earlier run shows as "done earlier" at $0, so the feature's total across runs stays in the read step's log, not the table.
     - Checked against the sandbox: b7ff8391's tickets show done at $0.084 and $0.061, matching the trace, and the capped scout run 5ccc3f20 shows its `call_budget_stop` message.
+37. **What the first real run settled** (yt-summarizer d30adda3, usage-summary, six tickets). All six tickets were built and committed, three with one fix pass each, for $2.76 of the $5 cap. The run then stopped in review_fix, for three reasons in SSSF:
+    - Code wrote `Status: done`, but Matt Pocock's local tracker calls a finished ticket `resolved`, so the standards reviewer blocked on all six ticket files. Code now writes `resolved`, and still reads `done` as finished so older runs resume.
+    - The fixer tried to change those protected files, and the permission check rolled them back and failed the whole fix pass. Both reviewers and the fixer are now told which paths are protected. A blocking finding located in a protected file never reaches the fixer; it is printed for the engineer.
+    - A permission breach ended in a traceback after the stop message. It now exits 1 like any other stop.

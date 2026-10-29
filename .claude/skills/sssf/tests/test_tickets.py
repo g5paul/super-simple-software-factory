@@ -94,8 +94,11 @@ def test_numbers_inside_words_are_not_edges(feature):
     assert load(feature).tickets[1].blocked_by == ["01"]
 
 
-def test_done_tickets_are_skipped(feature):
-    feature("01-a", "A", status="done")
+# `resolved` is what Matt Pocock's local tracker calls a finished ticket.
+# `done` is what adw_tickets wrote before, so tickets it finished still count.
+@pytest.mark.parametrize("status", ["resolved", "done"])
+def test_done_tickets_are_skipped(feature, status):
+    feature("01-a", "A", status=status)
     feature("02-b", "B", blocked_by="01")
     loaded = load(feature)
     assert [t.number for t in loaded.todo] == ["02"]
@@ -148,8 +151,8 @@ def test_mark_done_changes_only_the_status_line(feature):
     before = path.read_text()
     tickets.mark_done(load(feature).tickets[0])
     after = path.read_text()
-    assert "**Status:** done" in after
-    assert after.replace("**Status:** done", "**Status:** ready-for-agent") == before
+    assert "**Status:** resolved" in after
+    assert after.replace("**Status:** resolved", "**Status:** ready-for-agent") == before
     assert load(feature).tickets[0].done
 
 
@@ -157,4 +160,4 @@ def test_mark_done_adds_a_status_line_when_there_is_none(feature):
     path = feature("01-a", "A")
     path.write_text(path.read_text().replace("**Status:** ready-for-agent\n", ""))
     tickets.mark_done(load(feature).tickets[0])
-    assert path.read_text().splitlines()[:3] == ["# 01: A", "", "**Status:** done"]
+    assert path.read_text().splitlines()[:3] == ["# 01: A", "", "**Status:** resolved"]

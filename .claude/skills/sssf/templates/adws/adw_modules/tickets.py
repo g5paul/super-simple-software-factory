@@ -10,6 +10,8 @@ A ticket file starts `# NN: Title` and carries `**Blocked by:** 01, 03` (or
 adw_tickets: plain code that rejects a bad folder before any agent spends
 money, orders the tickets so blockers come first, and reports which are done.
 `mark_done` is the only write, and only code calls it, in the ticket's commit.
+It writes `resolved`, the word Matt Pocock's local tracker uses for a finished
+ticket. `done`, which adw_tickets wrote before, still reads as finished.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ TICKET_FILE = re.compile(r"^(\d{2,3})-.+\.md$")
 TITLE = re.compile(r"^#\s*\d{2,3}\s*:\s*(.+?)\s*$", re.M)
 BLOCKED_BY = re.compile(r"^\**Blocked by:?\**:?\s*(.*)$", re.M | re.I)
 STATUS = re.compile(r"^(\**Status:?\**:?[ \t]*)(.*)$", re.M | re.I)
+FINISHED = {"resolved", "done"}       # done: what adw_tickets wrote before resolved
 # A bare number, not part of a word or a version: "01", "3", but not "OAuth2" or "v1.5".
 NUMBER = re.compile(r"(?<![\w.])(\d{1,3})(?![\w.])")
 
@@ -54,14 +57,14 @@ def load(folder: str | Path) -> Feature:
 
 
 def mark_done(ticket: Ticket) -> None:
-    """Set the ticket's Status line to done, changing nothing else in the file."""
+    """Set the ticket's Status line to resolved, changing nothing else in the file."""
     path = Path(ticket.path)
     text = path.read_text()
     if STATUS.search(text):
-        text = STATUS.sub(lambda m: m.group(1) + "done", text, count=1)
+        text = STATUS.sub(lambda m: m.group(1) + "resolved", text, count=1)
     else:
         lines = text.splitlines(keepends=True)
-        lines[1:1] = ["\n", "**Status:** done\n"]
+        lines[1:1] = ["\n", "**Status:** resolved\n"]
         text = "".join(lines)
     path.write_text(text)
 
@@ -87,7 +90,7 @@ def _ticket(path: Path) -> Ticket:
     return Ticket(number=number, slug=path.stem, path=str(path),
                   title=title.group(1) if title else path.stem,
                   blocked_by=list(dict.fromkeys(edges)),
-                  done=bool(status) and status.group(2).strip().strip("*").lower() == "done")
+                  done=bool(status) and status.group(2).strip().strip("*").lower() in FINISHED)
 
 
 def _order(found: list[Ticket]) -> list[Ticket]:

@@ -53,6 +53,7 @@ class Agent:
     def __init__(self):
         self.calls: list[tuple[str, str, str]] = []      # (agent, session_id, user prompt)
         self.blocking = False                             # the spec reviewer blocks once
+        self.where = "src/t01.py:1"                       # where its finding points
 
     def run(self, req, on_event=None, on_spawn=None, on_exit=None) -> AgentResult:
         name = req.system_prompt.strip()
@@ -76,7 +77,7 @@ class Agent:
     def _review(self, prompt, blocking):
         path = Path(field(prompt, "handoff")) / f"{field(prompt, 'phase')}.md"
         path.write_text("review\n")
-        findings = [{"where": "src/t01.py:1", "problem": "wrong", "source": "spec line",
+        findings = [{"where": self.where, "problem": "wrong", "source": "spec line",
                      "blocking": True}] if blocking else []
         return {"status": "success", "summary": "reviewed", "findings": findings,
                 "artifacts": [str(path)]}
@@ -238,3 +239,28 @@ def test_the_run_records_its_tickets_for_the_dashboard(repo):
     assert payload["feature"] == "summaries"
     assert [(t["number"], t["title"], t["done"]) for t in payload["tickets"]] == [
         ("01", "A", False), ("03", "C", False), ("02", "B", False)]
+
+
+def test_the_fixer_is_told_what_it_may_not_touch(repo):
+    repo.blocking = True
+    run()
+    fix_prompt = repo.of("ticket_builder")[-1][2]
+    assert "Never change these protected paths: .scratch/" in fix_prompt
+
+
+def test_a_blocking_finding_in_a_protected_file_goes_to_the_engineer(repo, capsys):
+    repo.blocking = True
+    repo.where = f"{FOLDER}/issues/01-a.md:3"
+    assert run() == 0
+    assert len(repo.of("ticket_builder")) == 3             # no fix pass
+    out = capsys.readouterr().out
+    assert "for the engineer" in out and "01-a.md:3" in out
+
+
+def test_a_permission_breach_stops_cleanly(repo, monkeypatch, capsys):
+    from adw_modules.permissions import PermissionBreach
+    def breach(run, folder):
+        raise PermissionBreach("ticket_builder is barred from ['.scratch/']")
+    monkeypatch.setattr(adw_tickets, "build_feature", breach)
+    assert run() == 1
+    assert "stopped: ticket_builder is barred" in capsys.readouterr().out

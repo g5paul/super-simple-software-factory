@@ -50,7 +50,8 @@ import os
 import sys
 from pathlib import Path
 
-from adw_modules import account, agents, budget, changes, gates, git_helper, quality, session, tickets
+from adw_modules import (account, agents, budget, changes, gates, git_helper, permissions, quality,
+                         session, tickets)
 from adw_modules.data_types import (AgentCall, AxisReviewOutput, BuildOutput, ChangeCapture,
                                     DocumentOutput, EventRecord, GenericOutput, PhaseParams,
                                     ScoutOutput)
@@ -73,8 +74,8 @@ def main(folder: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         return build_feature(run, folder)
     except Exception as error:
         stopped(run, folder, error)
-        if isinstance(error, (budget.BudgetStop, account.RateLimitStop)):
-            return 1                       # a cap, not a crash: the message says it all
+        if isinstance(error, (budget.BudgetStop, account.RateLimitStop, permissions.PermissionBreach)):
+            return 1                       # a stop, not a crash: the message says it all
         raise
 
 
@@ -163,23 +164,39 @@ def build_feature(run, folder: str) -> int:
 
     diff = f"git diff {git_helper.short_sha(base)}..HEAD"
     commits = git_helper.log_oneline(base)
+    protected = ", ".join(run.cfg.defaults.protected_files)
+    hands_off = (f"Protected paths, which no agent may change: {protected}. A finding that needs "
+                 f"one of them changed is for the engineer, so it is never blocking.")
     with run.phase(PhaseParams(name="review_standards", kind="agent", owner="standards_reviewer",
                                description="Does the feature follow this repo's standards?")) as ph:
         standards = ph.call(AgentCall(output_type=AxisReviewOutput,
-                                      prompt=f"Diff: {diff}\nCommits:\n{commits}",
+                                      prompt=f"Diff: {diff}\nCommits:\n{commits}\n{hands_off}",
                                       gates=[gates.artifacts_exist, gates.files_non_empty]))
     with run.phase(PhaseParams(name="review_spec", kind="agent", owner="spec_reviewer",
                                description="Does the feature do what its spec and tickets ask?")) as ph:
         spec = ph.call(AgentCall(output_type=AxisReviewOutput,
                                  prompt=(f"Spec: {feature.spec}\nTickets:\n"
                                          + "\n".join(t.path for t in feature.tickets)
-                                         + f"\nDiff: {diff}\nCommits:\n{commits}"),
+                                         + f"\nDiff: {diff}\nCommits:\n{commits}\n{hands_off}"),
                                  gates=[gates.artifacts_exist, gates.files_non_empty]))
 
-    blocking = standards.blocking + spec.blocking
+    # A reviewer can still block on a file the fixer may not touch. Such a
+    # finding would only trip the permission check and lose the whole fix pass,
+    # so it goes to the engineer instead.
+    builder = agents.resolve(run.cfg, "ticket_builder")
+    blocking, for_engineer = [], []
+    for f in standards.blocking + spec.blocking:
+        path = f.where.split(":")[0].strip()
+        fixable = not path or permissions.permitted(path, builder, run.cfg)
+        (blocking if fixable else for_engineer).append(f)
+    if for_engineer:
+        run.console.advise("blocking findings for the engineer, in files no agent may change:\n"
+                           + "\n".join(f"- {f.where}: {f.problem}" for f in for_engineer))
     if blocking:
         prompt = (f"Fix the blocking review findings for the feature in {folder}. "
-                  f"Spec: {feature.spec}. The reviews are in previous_envelope.artifacts.")
+                  f"Spec: {feature.spec}. The reviews are in previous_envelope.artifacts. "
+                  f"Never change these protected paths: {protected}. A finding that needs one "
+                  f"of them changed is for the engineer: skip it, and say so in notes_for_next_agent.")
         findings = GenericOutput(
             status="success", summary=f"{len(blocking)} blocking finding(s)",
             artifacts=standards.artifacts + spec.artifacts,

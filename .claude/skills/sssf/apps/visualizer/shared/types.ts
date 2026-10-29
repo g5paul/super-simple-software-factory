@@ -301,6 +301,23 @@ export interface HealthResponse {
   sessions: number;
 }
 
+/** One row on the projects page. available=false: the repo has no runs yet. */
+export interface ProjectSummary {
+  name: string;
+  root: string;
+  db: string;
+  available: boolean;
+  sessions: number;
+  running: number;
+  last_started_at: string | null;
+}
+
+/** GET /api/projects: all=true for `just obs-all`, false for one repo's `just obs`. */
+export interface ProjectsResponse {
+  all: boolean;
+  projects: ProjectSummary[];
+}
+
 export interface ApiError {
   error: string;
 }

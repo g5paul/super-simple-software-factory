@@ -1,19 +1,28 @@
 /**
- * SSSF visualizer server — JSON API over a target repo's sssf.db, plus the
+ * SSSF visualizer server — JSON API over one or more repos' sssf.db, plus the
  * built UI when ./dist exists. Reads are read-only; the single write is
- * POST /api/sessions/:adw_id/archive, which sets one review flag on a row.
+ * POST /api/projects/:project/sessions/:adw_id/archive, which sets one review
+ * flag on a row.
  *
  * There is no ingest endpoint and no websocket. The data path is
  * agents → sqlite → web ui, and the UI gets there by polling.
  *
- *   bun run server/index.ts
+ *   bun run server/index.ts                    # one repo: the db below
  *   bun run server/index.ts --db /path/to/repo/adws/adw_data/sssf.db
  *   SSSF_DB=/path/to/sssf.db SSSF_OBS_PORT=4610 bun run server/index.ts
+ *   bun run server/index.ts --all              # every repo in the registry
  */
 import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
-import type { AgentPrompts, ApiError, HealthResponse } from "../shared/types.ts";
+import { Projects, projectForDb, registryPath } from "./projects.ts";
+import type {
+  AgentPrompts,
+  ApiError,
+  HealthResponse,
+  ProjectsResponse,
+  SessionSummary,
+} from "../shared/types.ts";
 
 // SSSF_OBS_PORT (or PORT) pins the port, and a pinned port that is taken is
 // an error. Unpinned, the server takes the first free port from 4600 up, so
@@ -23,13 +32,22 @@ const FIRST_PORT = 4600;
 const PORT_TRIES = 50;
 const DIST_DIR = resolve(import.meta.dir, "..", "dist");
 
-const dbPath = resolveDbPath();
-let db: SssfDb;
-try {
-  db = new SssfDb(dbPath);
-} catch (error) {
-  console.error(`[sssf] ${(error as Error).message}`);
-  process.exit(1);
+const ALL = Bun.argv.includes("--all");
+
+// One repo: its db must exist, so a wrong path fails at startup with the
+// reason. All repos: a repo with no runs yet is listed, not an error.
+let projects: Projects;
+if (ALL) {
+  projects = new Projects(null);
+} else {
+  const only = projectForDb(resolveDbPath());
+  try {
+    new SssfDb(only.dbPath).close();
+  } catch (error) {
+    console.error(`[sssf] ${(error as Error).message}`);
+    process.exit(1);
+  }
+  projects = new Projects(only);
 }
 
 function json(data: unknown, status = 200): Response {
@@ -75,6 +93,24 @@ function param(req: Request, key: string): string {
   return decodeURIComponent(
     (req as Request & { params: Record<string, string> }).params[key] ?? "",
   );
+}
+
+/**
+ * Route a request to its project's db. `empty` answers for a project that
+ * has no runs yet; without it, that is a 404.
+ */
+function withDb(
+  handler: (db: SssfDb, req: Request) => Response | Promise<Response>,
+  empty?: () => Response,
+): (req: Request) => Promise<Response> {
+  return safely((req) => {
+    const name = param(req, "project");
+    const project = projects.find(name);
+    if (!project) return notFound(`no project ${name}`);
+    const db = projects.db(project);
+    if (!db) return empty ? empty() : notFound(`no runs yet in ${name}`);
+    return handler(db, req);
+  });
 }
 
 function intQuery(req: Request, key: string, fallback: number): number {
@@ -143,27 +179,50 @@ function listen(start: (port: number) => ReturnType<typeof Bun.serve>) {
 const server = listen((port) => Bun.serve({
   port,
   routes: {
-    "/api/health": safely(
-      () =>
-        json({
-          ok: true,
-          db: db.path,
-          journal_mode: db.journalMode,
-          sessions: db.sessionCount(),
-        } satisfies HealthResponse),
+    "/api/health": safely(() => json({ ok: true, all: projects.all })),
+
+    "/api/projects": safely(() =>
+      json({
+        all: projects.all,
+        projects: projects.list().map((p) => {
+          const db = projects.db(p);
+          const counts = db?.overview();
+          return {
+            name: p.name,
+            root: p.root,
+            db: p.dbPath,
+            available: db !== null,
+            sessions: counts?.sessions ?? 0,
+            running: counts?.running ?? 0,
+            last_started_at: counts?.last_started_at ?? null,
+          };
+        }),
+      } satisfies ProjectsResponse),
     ),
 
-    "/api/sessions": safely((req) => json(db.sessions(intQuery(req, "limit", 200)))),
+    "/api/projects/:project/health": withDb((db) =>
+      json({
+        ok: true,
+        db: db.path,
+        journal_mode: db.journalMode,
+        sessions: db.sessionCount(),
+      } satisfies HealthResponse),
+    ),
 
-    "/api/sessions/:adw_id": safely((req) => {
+    "/api/projects/:project/sessions": withDb(
+      (db, req) => json(db.sessions(intQuery(req, "limit", 200))),
+      () => json([] satisfies SessionSummary[]),
+    ),
+
+    "/api/projects/:project/sessions/:adw_id": withDb((db, req) => {
       const detail = db.sessionDetail(param(req, "adw_id"));
       return detail ? json(detail) : notFound(`no session ${param(req, "adw_id")}`);
     }),
 
     // The one write. Archiving is review triage — it belongs to the reader, not
     // to the run — so it never touches anything a tracer wrote.
-    "/api/sessions/:adw_id/archive": {
-      POST: safely(async (req) => {
+    "/api/projects/:project/sessions/:adw_id/archive": {
+      POST: withDb(async (db, req) => {
         const adwId = param(req, "adw_id");
         if (!isSafeSegment(adwId)) {
           return json({ error: "invalid adw_id" } satisfies ApiError, 400);
@@ -176,7 +235,7 @@ const server = listen((port) => Bun.serve({
       }),
     },
 
-    "/api/sessions/:adw_id/events": safely((req) =>
+    "/api/projects/:project/sessions/:adw_id/events": withDb((db, req) =>
       json(
         db.events(
           param(req, "adw_id"),
@@ -186,15 +245,17 @@ const server = listen((port) => Bun.serve({
       ),
     ),
 
-    "/api/sessions/:adw_id/envelopes": safely((req) =>
+    "/api/projects/:project/sessions/:adw_id/envelopes": withDb((db, req) =>
       json(db.envelopes(param(req, "adw_id"))),
     ),
 
-    "/api/sessions/:adw_id/gates": safely((req) => json(db.gates(param(req, "adw_id")))),
+    "/api/projects/:project/sessions/:adw_id/gates": withDb((db, req) =>
+      json(db.gates(param(req, "adw_id"))),
+    ),
 
     // The exact prompts an agent was sent, read from the session dir. Files are
     // the raw record; the db has no copy of them.
-    "/api/sessions/:adw_id/agents/:agent/prompts": safely(async (req) => {
+    "/api/projects/:project/sessions/:adw_id/agents/:agent/prompts": withDb(async (db, req) => {
       const adwId = param(req, "adw_id");
       const agent = param(req, "agent");
       if (!isSafeSegment(adwId) || !isSafeSegment(agent)) {
@@ -229,7 +290,16 @@ const server = listen((port) => Bun.serve({
 }));
 
 console.log(`[sssf] visualizer api  http://localhost:${server.port}`);
-console.log(`[sssf] db              ${db.path}  [journal_mode=${db.journalMode}]`);
+if (ALL) {
+  const listed = projects.list();
+  console.log(`[sssf] registry        ${registryPath()}  [${listed.length} projects]`);
+  for (const p of listed) console.log(`[sssf]   ${p.name.padEnd(20)} ${p.root}`);
+  if (!listed.length) console.log(`[sssf] no projects yet: install.py and --update add each repo`);
+} else {
+  const [only] = projects.list();
+  console.log(`[sssf] project         ${only.name}`);
+  console.log(`[sssf] db              ${only.dbPath}`);
+}
 console.log(
   existsSync(DIST_DIR)
     ? `[sssf] serving ui from  ${DIST_DIR}`
@@ -237,6 +307,6 @@ console.log(
 );
 
 process.on("SIGINT", () => {
-  db.close();
+  projects.close();
   process.exit(0);
 });

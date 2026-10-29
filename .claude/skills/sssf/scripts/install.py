@@ -19,11 +19,16 @@ still matches its record is replaced, a file the repo changed is kept and
 listed, a missing file is added. --take PATH replaces a kept file anyway;
 --keep PATH records that you reviewed it, so it stays quiet until the
 skill's version of it changes again.
+
+Install and --update also record the repo in the user's project registry
+(~/.config/sssf/projects.json, or $SSSF_REGISTRY), which `just obs-all`
+reads to show every repo in one dashboard.
 """
 
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -56,6 +61,7 @@ GITIGNORE_ENTRIES = [
 
 
 STAMP = Path("adws/adw_sssf_config/stamp.json")
+DB = "adws/adw_data/sssf.db"
 
 
 def targets(root: Path, roster: Path) -> list[tuple[Path, Path]]:
@@ -123,6 +129,36 @@ def ensure_gitignore(root: Path, stamped: list) -> None:
         stamped.append(f"{gitignore} (+{len(missing)} entries)")
 
 
+def registry_path() -> Path:
+    if os.environ.get("SSSF_REGISTRY"):
+        return Path(os.environ["SSSF_REGISTRY"])
+    config = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    return Path(config) / "sssf" / "projects.json"
+
+
+def register(root: Path) -> None:
+    """Record the repo for `just obs-all`. A repo keeps its name once it has one;
+    a second repo with the same folder name gets its parent folder's name too."""
+    path = registry_path()
+    try:
+        data = json.loads(path.read_text()) if path.is_file() else {}
+        projects = data.setdefault("projects", {})
+        if any(entry.get("root") == str(root) for entry in projects.values()):
+            return
+        name, n = root.name, 1
+        if name in projects:
+            name = f"{root.parent.name}-{root.name}"
+        while name in projects:
+            n += 1
+            name = f"{root.parent.name}-{root.name}-{n}"
+        projects[name] = {"root": str(root), "db": DB}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    except (OSError, ValueError) as err:
+        # The dashboard is a convenience; an install must not fail over it.
+        print(f"  could not record this repo in {path}: {err}")
+
+
 def install(root: Path, roster: Path, force: bool) -> int:
     record = load_stamp(root)
     stamped, skipped = [], []
@@ -141,6 +177,7 @@ def install(root: Path, roster: Path, force: bool) -> int:
     ensure_gitignore(root, stamped)
 
     print(f"sssf installed into {root}")
+    register(root)
     print(f"  stamped: {len(stamped)} file(s)")
     for s in stamped:
         print(f"    + {s}")
@@ -212,6 +249,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     gone = sorted(rel for rel, entry in files.items() if entry["source"] not in sources)
 
     print(f"sssf updated in {root}")
+    register(root)
     print(f"  updated: {len(updated)}")
     for rel in updated:
         print(f"    ~ {rel}")
@@ -258,7 +296,7 @@ def main() -> int:
     if (args.take or args.keep) and not args.update:
         parser.error("--take and --keep need --update")
 
-    root = Path.cwd()
+    root = Path.cwd().resolve()
     if args.update:
         return update(root, ROSTERS[args.coding_agent],
                       {Path(p).as_posix() for p in args.take},
@@ -273,6 +311,7 @@ def main() -> int:
     print("  2. just demo             # two cheap read-only runs, end to end")
     print("  3. just sessions         # what just happened")
     print("  4. just obs              # the trace UI, needs bun")
+    print("     just obs-all          # every repo SSSF is installed in, one dashboard")
     print("  5. exclude adws/ and .claude/ from repo-wide lint, format, typecheck,")
     print("     and package builds (see cookbooks/install.md, post-install checklist)")
     print("\n  no just? the raw form of step 2 is:")

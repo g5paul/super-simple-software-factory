@@ -77,6 +77,7 @@ git init && git commit --allow-empty -m init     # chains that end in a commit p
 just demo
 just sessions              # what just happened
 just obs                   # the trace UI, needs bun
+just obs-all               # one dashboard for every repo SSSF is installed in
 
 # no just? every recipe is one line. the raw form of `just demo` is:
 uv run adws/adw_prompt.py "reply with a one-line summary of this repo" --agent scout
@@ -280,6 +281,10 @@ SSSF_DB=/abs/path/to/your-repo/adws/adw_data/sssf.db bun run server/index.ts
 ```
 
 It resolves its target through `--db`, then `SSSF_DB`, then `<cwd>/adws/adw_data/sssf.db`, so one instance can point at any stamped repo. Pass the db explicitly, because the server runs from the app dir.
+
+`just obs-all` serves every repo SSSF is installed in, from one process. `install.py` and `install.py --update` record each repo in `~/.config/sssf/projects.json` (or `$SSSF_REGISTRY`). The page opens on a list of projects, with running ones first, and each project opens its own sessions. The server reads the registry again on every listing, so a newly installed repo appears without a restart. To drop a repo, delete its entry from the file. The raw form is `bun run server/index.ts --all`.
+
+A repo on another machine is not in this registry. Run `just obs` there, and reach it through an SSH tunnel: `ssh -L 4600:localhost:4600 host`.
 
 ---
 

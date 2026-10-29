@@ -404,6 +404,23 @@ export class SssfDb {
       .all(adwId);
   }
 
+  /** Counts for the projects page: every run, the live ones, and the latest start. */
+  overview(): { sessions: number; running: number; last_started_at: string | null } {
+    const row = this.db
+      .query<{ sessions: number; running: number | null; last_started_at: string | null }, []>(
+        `SELECT COUNT(*) AS sessions,
+                SUM(status = 'running') AS running,
+                MAX(started_at) AS last_started_at
+           FROM sessions`,
+      )
+      .get();
+    return {
+      sessions: row?.sessions ?? 0,
+      running: row?.running ?? 0,
+      last_started_at: row?.last_started_at ?? null,
+    };
+  }
+
   sessionCount(): number {
     const row = this.db
       .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions")

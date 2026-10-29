@@ -1,9 +1,29 @@
 <script setup lang="ts">
-import { useRoute, hrefFor, phaseCrumb } from './lib/router'
+import { onMounted, ref } from 'vue'
+import { useRoute, hrefFor, phaseCrumb, projectHref } from './lib/router'
+import { fetchProjects } from './lib/api'
+import ProjectsList from './components/ProjectsList.vue'
 import SessionsList from './components/SessionsList.vue'
 import SessionTrace from './components/SessionTrace.vue'
 
 const route = useRoute()
+
+// `just obs` serves one repo, so the projects page is skipped and its crumb
+// hidden. `just obs-all` (all=true) opens on the projects page.
+const all = ref<boolean | null>(null)
+
+onMounted(async () => {
+  try {
+    const listing = await fetchProjects()
+    all.value = listing.all
+    const [only] = listing.projects
+    if (!listing.all && only && route.value.project !== only.name) {
+      window.location.replace(projectHref(only.name))
+    }
+  } catch {
+    all.value = true // the server is down; the projects page shows the error and retries
+  }
+})
 </script>
 
 <template>
@@ -18,8 +38,14 @@ const route = useRoute()
           <rect x="4" y="21" width="13" height="5" rx="2.5" fill="#5ad2dd" />
         </svg>
         <span class="brand">Super Simple Software Factory</span>
-        <span class="sep">›</span>
-        <a :href="hrefFor()" :class="{ current: !route.adwId }">sessions</a>
+        <template v-if="all">
+          <span class="sep">›</span>
+          <a :href="projectHref()" :class="{ current: !route.project }">projects</a>
+        </template>
+        <template v-if="route.project">
+          <span class="sep">›</span>
+          <a :href="hrefFor()" :class="{ current: !route.adwId }">{{ route.project }}</a>
+        </template>
         <template v-if="route.adwId">
           <span class="sep">›</span>
           <a :href="hrefFor(route.adwId)" :class="{ current: !route.phaseId }">{{
@@ -34,8 +60,14 @@ const route = useRoute()
       <span class="live-hint"><span class="live-dot" /> live</span>
     </header>
     <main>
-      <SessionsList v-if="!route.adwId" />
-      <SessionTrace v-else :key="route.adwId" :adw-id="route.adwId" :phase-id="route.phaseId" />
+      <ProjectsList v-if="!route.project && all" />
+      <SessionsList v-else-if="route.project && !route.adwId" :key="route.project" />
+      <SessionTrace
+        v-else-if="route.project && route.adwId"
+        :key="`${route.project}/${route.adwId}`"
+        :adw-id="route.adwId"
+        :phase-id="route.phaseId"
+      />
     </main>
   </div>
 </template>

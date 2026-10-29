@@ -1,7 +1,9 @@
 import { ref } from 'vue'
 
-// Hash routes: #/ → sessions · #/<adw_id> → waterfall · #/<adw_id>/<phase_id> → phase panel open
+// Hash routes: #/ → projects · #/<project> → sessions · #/<project>/<adw_id> → waterfall
+// · #/<project>/<adw_id>/<phase_id> → phase panel open
 export interface Route {
+  project: string | null
   adwId: string | null
   phaseId: string | null
 }
@@ -12,7 +14,7 @@ function parse(): Route {
     .split('/')
     .filter(Boolean)
     .map(decodeURIComponent)
-  return { adwId: parts[0] ?? null, phaseId: parts[1] ?? null }
+  return { project: parts[0] ?? null, adwId: parts[1] ?? null, phaseId: parts[2] ?? null }
 }
 
 const route = ref<Route>(parse())
@@ -29,9 +31,14 @@ export function useRoute() {
 // since the phase_id in the URL is not the display name.
 export const phaseCrumb = ref<string | null>(null)
 
+export function projectHref(project?: string | null): string {
+  return project ? `#/${encodeURIComponent(project)}` : '#/'
+}
+
+/** A link inside the current project. Views below the project page never name it. */
 export function hrefFor(adwId?: string | null, phaseId?: string | null): string {
-  let h = '#/'
-  if (adwId) h += encodeURIComponent(adwId)
+  let h = projectHref(route.value.project)
+  if (adwId) h += `/${encodeURIComponent(adwId)}`
   if (adwId && phaseId) h += `/${encodeURIComponent(phaseId)}`
   return h
 }

@@ -91,6 +91,11 @@ procs ADW_ID:
 obs:
     cd .claude/skills/sssf/apps/visualizer && bun install --silent && bunx vite build --logLevel warn && SSSF_DB={{justfile_directory()}}/{{db}} bun run server/index.ts
 
+# one dashboard for every repo SSSF is installed in (install.py and --update
+# record each one in ~/.config/sssf/projects.json); prints its address
+obs-all:
+    cd .claude/skills/sssf/apps/visualizer && bun install --silent && bunx vite build --logLevel warn && bun run server/index.ts --all
+
 # only for working on the visualizer itself: Vite dev server, fixed ports 4601 (ui) + 4600 (api)
 obs-dev:
     cd .claude/skills/sssf/apps/visualizer && bun install && (SSSF_DB={{justfile_directory()}}/{{db}} SSSF_OBS_PORT=4600 bun run server/index.ts &) && bunx vite

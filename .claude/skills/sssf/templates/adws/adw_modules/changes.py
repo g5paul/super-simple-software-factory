@@ -52,12 +52,13 @@ def resolve_base(ref: str) -> BaseRef:
 def capture(run, params: ChangeCapture) -> ChangeSet:
     """Diff the working tree against the resolved base and persist the evidence."""
     base = resolve_base(params.base)
-    files = git_helper.diff_files(base.commit)
-    untracked = git_helper.untracked_files() if params.include_untracked else []
-    insertions, deletions = git_helper.diff_counts(base.commit)
-    stat = git_helper.diff_stat(base.commit)
+    out = tuple(params.exclude)
+    files = git_helper.diff_files(base.commit, out)
+    untracked = git_helper.untracked_files(out) if params.include_untracked else []
+    insertions, deletions = git_helper.diff_counts(base.commit, out)
+    stat = git_helper.diff_stat(base.commit, out)
 
-    text = git_helper.diff_text(base.commit)
+    text = git_helper.diff_text(base.commit, out)
     lines = text.splitlines()
     truncated = len(lines) > params.max_diff_lines
     if truncated:
@@ -74,7 +75,9 @@ def capture(run, params: ChangeCapture) -> ChangeSet:
     diff_path.write_text(
         f"# changes since {base.label} @ {git_helper.short_sha(base.commit)}\n"
         f"# {base.reason}\n"
-        f"# +{insertions} -{deletions} across {len(files)} tracked file(s)\n\n"
+        f"# +{insertions} -{deletions} across {len(files)} tracked file(s)\n"
+        + (f"# leaving out SSSF's own files: {', '.join(out)}\n" if out else "")
+        + "\n"
         f"## stat\n{stat or '  (no tracked changes)'}\n\n"
         f"## untracked files\n{untracked_block}\n\n"
         f"## diff\n{text}\n")

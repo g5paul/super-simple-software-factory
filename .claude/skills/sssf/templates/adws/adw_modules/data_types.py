@@ -199,6 +199,8 @@ class ChangeCapture(BaseModel):
     base: str = "main"              # the ref the work is measured against
     max_diff_lines: int = 2000      # the diff artifact is truncated past this
     include_untracked: bool = True  # a brand-new file is part of the change
+    exclude: list[str] = Field(default_factory=lambda: ["adws/", ".claude/skills/sssf/"])
+                                    # SSSF's own files (git_helper.SSSF_PATHS): not the change
 
 
 class BaseRef(BaseModel):

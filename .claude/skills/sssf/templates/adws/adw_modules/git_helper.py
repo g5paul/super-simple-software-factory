@@ -6,6 +6,16 @@ import subprocess
 from pathlib import Path
 
 
+# What `just sssf-update` writes. It is SSSF's work, not the project's, so a
+# reviewer or documenter shown the project's change never sees it.
+SSSF_PATHS = ("adws/", ".claude/skills/sssf/")
+
+
+def _outside(exclude) -> list[str]:
+    """A pathspec that leaves out `exclude`, or nothing when it is empty."""
+    return ["--", ".", *(f":(exclude){p}" for p in exclude)] if exclude else []
+
+
 def _git(*args: str) -> str:
     result = subprocess.run(["git", *args], capture_output=True, text=True)
     if result.returncode != 0:
@@ -72,8 +82,7 @@ def feature_commits(feature: str) -> list[tuple[str, str]]:
 def log_oneline(base: str, exclude: tuple[str, ...] = ()) -> str:
     """The commits after `base`, one line each, oldest first. A commit that
     touches only `exclude` paths is left out."""
-    pathspec = ["--", ".", *(f":(exclude){p}" for p in exclude)] if exclude else []
-    return _git("log", "--reverse", "--oneline", f"{base}..HEAD", *pathspec)
+    return _git("log", "--reverse", "--oneline", f"{base}..HEAD", *_outside(exclude))
 
 
 def work_in_progress(exclude: str = "") -> list[str]:
@@ -129,25 +138,25 @@ def is_dirty() -> bool:
     return bool(_git("status", "--porcelain"))
 
 
-def untracked_files() -> list[str]:
-    out = _git("ls-files", "--others", "--exclude-standard")
+def untracked_files(exclude: tuple[str, ...] = ()) -> list[str]:
+    out = _git("ls-files", "--others", "--exclude-standard", *_outside(exclude))
     return [line for line in out.splitlines() if line]
 
 
-def diff_files(base: str) -> list[str]:
+def diff_files(base: str, exclude: tuple[str, ...] = ()) -> list[str]:
     """Tracked files that differ between `base` and the working tree."""
-    out = _git("diff", "--name-only", base)
+    out = _git("diff", "--name-only", base, *_outside(exclude))
     return [line for line in out.splitlines() if line]
 
 
-def diff_stat(base: str) -> str:
-    return _git("diff", "--stat", base)
+def diff_stat(base: str, exclude: tuple[str, ...] = ()) -> str:
+    return _git("diff", "--stat", base, *_outside(exclude))
 
 
-def diff_counts(base: str) -> tuple[int, int]:
+def diff_counts(base: str, exclude: tuple[str, ...] = ()) -> tuple[int, int]:
     """(insertions, deletions) across the diff. Binary files count as neither."""
     insertions = deletions = 0
-    for line in _git("diff", "--numstat", base).splitlines():
+    for line in _git("diff", "--numstat", base, *_outside(exclude)).splitlines():
         added, removed, *_ = line.split("\t")
         if added.isdigit():
             insertions += int(added)
@@ -156,5 +165,5 @@ def diff_counts(base: str) -> tuple[int, int]:
     return insertions, deletions
 
 
-def diff_text(base: str) -> str:
-    return _git("diff", base)
+def diff_text(base: str, exclude: tuple[str, ...] = ()) -> str:
+    return _git("diff", base, *_outside(exclude))

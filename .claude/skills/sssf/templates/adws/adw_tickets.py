@@ -59,7 +59,6 @@ from adw_modules.data_types import (AgentCall, AxisReviewOutput, BuildOutput, Ch
 REQUIRED_AGENTS = ["scout", "ticket_builder", "standards_reviewer", "spec_reviewer", "documenter"]
 MAX_FIX_LOOPS = 3
 PROTECTED_BRANCHES = ("main", "master")
-SSSF_PATHS = ("adws/", ".claude/skills/sssf/")   # what `just sssf-update` writes
 
 DOCUMENT_NOTES = ("Read diff_path in full before writing. Document only what the "
                   "diff shows: the whole feature, every ticket. Then copy the "
@@ -165,9 +164,9 @@ def build_feature(run, folder: str) -> int:
 
     # SSSF's own files are not the feature's work. Updating SSSF on the feature
     # branch between runs is routine, and a reviewer shown it calls it scope creep.
-    outside = " ".join(f"':(exclude){p}'" for p in SSSF_PATHS)
+    outside = " ".join(f"':(exclude){p}'" for p in git_helper.SSSF_PATHS)
     diff = f"git diff {git_helper.short_sha(base)}..HEAD -- . {outside}"
-    commits = git_helper.log_oneline(base, exclude=SSSF_PATHS)
+    commits = git_helper.log_oneline(base, exclude=git_helper.SSSF_PATHS)
     protected = ", ".join(run.cfg.defaults.protected_files)
     hands_off = (f"Protected paths, which no agent may change: {protected}. A finding that needs "
                  f"one of them changed is for the engineer, so it is never blocking.")

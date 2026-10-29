@@ -16,7 +16,7 @@ from typing import Optional
 
 import yaml
 
-from . import agent_cc, agent_pi, permissions, prompts
+from . import account, agent_cc, agent_pi, permissions, prompts
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -112,6 +112,15 @@ def prompt_variables(run, phase: Phase, call: AgentCall) -> dict[str, str]:
 def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     """One agent call: render prompts -> coding agent run -> typed parse -> gates -> envelope."""
     agent = resolve(run.cfg, phase.params.owner)
+    if agent.coding_agent == "claude_code":
+        try:
+            account.check(run.cfg.defaults.rate_limit_stop)
+        except account.RateLimitStop as stop:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rate_limit_stop",
+                                         payload={"agent": agent.name, "error": str(stop),
+                                                  "sample": account.latest()}))
+            raise
     agent_dir = run.session_dir / agent.name
     agent_dir.mkdir(parents=True, exist_ok=True)
 

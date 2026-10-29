@@ -27,6 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import account
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import operator_env
@@ -218,6 +219,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     turn = _context_tokens(event.get("message", {}).get("usage") or {})
                     if turn:
                         result.context_tokens = turn
+                elif etype == "rate_limit_event" and event.get("rate_limit_info"):
+                    account.record(event["rate_limit_info"], source=request.cwd)
                 elif etype == "result":
                     final = event
                 if on_event:

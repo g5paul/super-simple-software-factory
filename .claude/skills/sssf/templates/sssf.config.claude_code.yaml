@@ -29,6 +29,7 @@ defaults:
     # The spec is on record once commit_plan lands. Only the planner, which
     # names specs/ in its writes, may change it.
     - specs/
+  rate_limit_stop: 0.8                 # stop before an agent starts once the account's 5-hour or 7-day usage window is this full; null = off
   data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 
 observability:

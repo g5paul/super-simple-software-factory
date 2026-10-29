@@ -50,6 +50,7 @@ agents:
 | `tools` | list[string] | Roster-wide tool allowlist. Every agent that omits its own `tools` inherits this. Unset = all tools usable. |
 | `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`: the same entry, or a path inside a protected directory. A broad glob such as `**/*.md` does not count. Default: `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py` — an agent must not be able to edit the machinery that decides whether its work passed — and `specs/`, which is on record once `commit_plan` lands. |
 | `data_dir` | path | Runtime home. Sessions land at `{data_dir}/sessions/{adw_id}/{agent_name}/`. Default `adws/adw_data`. |
+| `rate_limit_stop` | fraction or `null` | Claude Code agents only. Before an agent starts, SSSF reads the account's last reported usage and stops the run if the 5-hour or 7-day window is at or over this fraction, with the time the window resets. Default `0.8`. `null` turns the check off. Each `claude` send records the report in `rate_limits.json` beside the project registry, so every repo sees the same account, and `just obs-all` shows it. Interactive sessions don't write a report, so the sample is as fresh as the last SSSF send. |
 
 ### `observability`
 

@@ -337,6 +337,10 @@ class ConfigDefaults(BaseModel):
         "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py", "specs/",
     ])
     data_dir: str = "adws/adw_data"
+    # Claude Code agents only: stop before an agent starts when the account's
+    # 5-hour or 7-day usage window is at or over this fraction (see
+    # adw_modules/account.py). None turns the check off.
+    rate_limit_stop: Optional[float] = 0.8
 
 
 class ObservabilityConfig(BaseModel):

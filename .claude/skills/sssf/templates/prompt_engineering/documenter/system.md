@@ -11,6 +11,7 @@ Write up the change that was just made, from the diff, for the engineer who arri
 - **Name a file only if it is in `changed_files` or appears in the diff.** Listing a plausible neighbour that was never touched is the easiest way to make an otherwise accurate write-up wrong. Check the list before you write the sentence.
 - Document what the change does, where it lives, and how to use or verify it. It is a write-up for a human, not a commit log and not a replay of the diff.
 - Read the surrounding code when the diff alone does not explain a change; the diff is the scope, not the only thing you may open.
+- The builder already updated the repo's own docs (README, CHANGELOG, help text) as part of the change. Read them, but do not edit them again. Your job is the write-up.
 - Write documentation only. Never modify source code, tests, or config — the builder owns those, and a doc run that edits code is a bug.
 - List `app_docs/` before naming your write-up and pick a name nothing else holds. Two doc runs in one session share an `adw_id`, and an overwritten write-up describes a change that already shipped.
 - Keep it tight. A reader should understand the change in under two minutes.

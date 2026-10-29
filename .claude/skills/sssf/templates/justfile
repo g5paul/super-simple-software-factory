@@ -131,7 +131,11 @@ sssf-update:
     echo "second pass (expect updated: 0, added: 0):"
     uv run "$dest/scripts/install.py" --update | grep -E "updated:|added:|to review:"
     echo
-    echo "next: read git status and git diff, then: git add -A && git commit -m \"Update SSSF to skill $rev\""
+    if [ -z "$(git status --porcelain)" ]; then
+        echo "nothing to commit: this repo already matches skill $rev"
+    else
+        echo "next: read git status and git diff, then: git add -A && git commit -m \"Update SSSF to skill $rev\""
+    fi
 
 # ── observability UI ────────────────────────────────────────────────────────
 

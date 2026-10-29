@@ -62,6 +62,14 @@ def test_update_refreshes_and_confirms(repo):
     assert stale.read_text() == (SKILL / "cookbooks/install.md").read_text()
     assert "sssf updated in" in result.stdout
     assert "second pass" in result.stdout and "updated: 0" in result.stdout
+    assert "git add -A && git commit" in result.stdout
+
+
+def test_update_with_nothing_new_says_so(repo):
+    result = run(repo, "just", "sssf-update")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing to commit" in result.stdout
+    assert "git commit" not in result.stdout
 
 
 def test_update_needs_the_source(repo):

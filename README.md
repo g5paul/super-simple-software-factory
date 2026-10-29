@@ -286,6 +286,13 @@ It resolves its target through `--db`, then `SSSF_DB`, then `<cwd>/adws/adw_data
 
 `just obs-all` serves every repo SSSF is installed in, from one process. `install.py` and `install.py --update` record each repo in `~/.config/sssf/projects.json` (or `$SSSF_REGISTRY`). The page opens on a list of projects, with running ones first, and each project opens its own sessions. The server reads the registry again on every listing, so a newly installed repo appears without a restart. To drop a repo, delete its entry from the file. The raw form is `bun run server/index.ts --all`.
 
+Above the projects, a panel shows the Claude account they all share. It has two parts:
+
+- **The usage limits.** These are how full the 5-hour and 7-day windows are, and when each resets. Claude Code reports them on every SSSF agent call, and SSSF keeps the newest reading in `rate_limits.json` beside the registry. Interactive sessions don't report them, so the panel says how old the reading is. `/usage` in any Claude Code session gives the current figure.
+- **Where the spend went.** This is the spend in the current 5-hour window, by kind (SSSF agents or interactive sessions), by project, and by model. The server reads it from Claude Code's transcripts in `~/.claude/projects` and estimates the cost from token counts at list price. The subscription pays that cost, but it shows what fills the windows.
+
+Before each Claude Code agent starts, SSSF checks the same reading. If either window is at or over `defaults.rate_limit_stop` (default 0.8), the run stops, with the time the window resets. That beats a run that dies halfway through a phase. See `references/config.md`.
+
 A repo on another machine is not in this registry. Run `just obs` there, and reach it through an SSH tunnel: `ssh -L 4600:localhost:4600 host`.
 
 ---

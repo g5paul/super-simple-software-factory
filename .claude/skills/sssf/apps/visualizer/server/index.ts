@@ -15,8 +15,10 @@
 import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
+import { Account } from "./account.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import type {
+  AccountUsage,
   AgentPrompts,
   ApiError,
   HealthResponse,
@@ -49,6 +51,8 @@ if (ALL) {
   }
   projects = new Projects(only);
 }
+
+const account = new Account();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -199,6 +203,15 @@ const server = listen((port) => Bun.serve({
         }),
       } satisfies ProjectsResponse),
     ),
+
+    // The Claude account behind every project: limits and where spend went.
+    "/api/account": safely(() => {
+      const sessions = new Set<string>();
+      for (const p of projects.everyProject()) {
+        for (const id of projects.db(p)?.agentSessionIds() ?? []) sessions.add(id);
+      }
+      return json(account.summary(Date.now(), sessions, (cwd) => projects.projectOf(cwd)) satisfies AccountUsage);
+    }),
 
     "/api/projects/:project/health": withDb((db) =>
       json({

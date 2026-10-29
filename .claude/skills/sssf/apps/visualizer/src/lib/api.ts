@@ -1,4 +1,5 @@
 import type {
+  AccountUsage,
   Envelope,
   EventRow,
   EventsPage,
@@ -88,4 +89,8 @@ export function fetchGates(adwId: string): Promise<GateResult[]> {
 
 export function fetchProjects(): Promise<ProjectsResponse> {
   return getJson('/api/projects') as Promise<ProjectsResponse>
+}
+
+export function fetchAccount(): Promise<AccountUsage> {
+  return getJson('/api/account') as Promise<AccountUsage>
 }

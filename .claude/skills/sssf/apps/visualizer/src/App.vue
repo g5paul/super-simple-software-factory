@@ -143,6 +143,16 @@ onMounted(async () => {
   color: var(--text);
 }
 
+/* At phone width the logo stands in for the name, so the crumbs fit. */
+@media (max-width: 520px) {
+  .topbar {
+    padding: 12px 16px;
+  }
+  .brand {
+    display: none;
+  }
+}
+
 .live-hint {
   display: inline-flex;
   align-items: center;

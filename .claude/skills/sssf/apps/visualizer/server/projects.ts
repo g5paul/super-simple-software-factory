@@ -59,6 +59,18 @@ export function projectForDb(dbPath: string): Project {
   return { name: known?.name ?? basename(root), root, dbPath };
 }
 
+const roots = new Map<string, string | null>();
+
+/** The nearest folder at or above `dir` with a .git entry; looked up once per folder. */
+function gitRoot(dir: string): string | null {
+  const known = roots.get(dir);
+  if (known !== undefined) return known;
+  const parent = dirname(dir);
+  const found = existsSync(join(dir, ".git")) ? dir : parent === dir ? null : gitRoot(parent);
+  roots.set(dir, found);
+  return found;
+}
+
 export class Projects {
   private readonly dbs = new Map<string, SssfDb>();
 
@@ -85,6 +97,29 @@ export class Projects {
     const db = new SssfDb(project.dbPath);
     this.dbs.set(project.dbPath, db);
     return db;
+  }
+
+  /**
+   * Every registered repo, plus the one being served. The account spans all
+   * of them, so even one-repo `just obs` reads them all for it.
+   */
+  everyProject(): Project[] {
+    const all = registered();
+    if (this.only && !all.some((p) => p.dbPath === this.only?.dbPath)) all.push(this.only);
+    return all;
+  }
+
+  /**
+   * The registered project whose root holds `cwd`. Otherwise the git repo that
+   * holds it, so work in a subfolder counts toward its repo, and otherwise the
+   * folder's own name.
+   */
+  projectOf(cwd: string): string {
+    const match = this.everyProject()
+      .filter((p) => cwd === p.root || cwd.startsWith(p.root + sep))
+      .toSorted((a, b) => b.root.length - a.root.length)[0];
+    if (match) return match.name;
+    return basename(gitRoot(cwd) ?? cwd) || "(unknown)";
   }
 
   close(): void {

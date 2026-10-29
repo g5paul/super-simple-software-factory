@@ -123,6 +123,12 @@ export class SssfDb {
     return this.hasColumn(table, column) ? column : `NULL AS ${column}`;
   }
 
+  /** Every Claude Code session id an agent ran under, to tell SSSF's spend from interactive spend. */
+  agentSessionIds(): string[] {
+    return (this.db.query("SELECT session_id FROM agent_sessions WHERE session_id IS NOT NULL")
+      .all() as { session_id: string }[]).map((r) => r.session_id);
+  }
+
   close(): void {
     this.writer?.close();
     this.db.close();

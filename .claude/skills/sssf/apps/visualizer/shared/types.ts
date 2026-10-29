@@ -321,3 +321,51 @@ export interface ProjectsResponse {
 export interface ApiError {
   error: string;
 }
+
+/** One window as Claude Code last reported it. utilization is 0..1. */
+export interface LimitWindow {
+  utilization: number;
+  resets_at: string;
+}
+
+/** The newest rate_limit_event any SSSF agent on this machine recorded. */
+export interface LimitSample {
+  recorded_at: string;
+  source: string;
+  age_s: number;
+  status: string | null;
+  overage_status: string | null;
+  /** null once that window has reset: the sample no longer says how full it is. */
+  five_hour: LimitWindow | null;
+  seven_day: LimitWindow | null;
+}
+
+export interface SpendRow {
+  key: string;
+  calls: number;
+  est_usd: number;
+  output_tokens: number;
+  input_tokens: number;
+}
+
+/** Spend read from Claude Code transcripts over one window. */
+export interface SpendWindow {
+  /** five_hour / seven_day: the account's live window. rolling: no live sample, so the last 5 hours or 7 days. */
+  basis: "five_hour" | "seven_day" | "rolling";
+  start: string;
+  end: string;
+  calls: number;
+  est_usd: number;
+  by_kind: SpendRow[];
+  by_project: SpendRow[];
+  by_model: SpendRow[];
+  unpriced_models: string[];
+}
+
+/** GET /api/account */
+export interface AccountUsage {
+  sample: LimitSample | null;
+  window: SpendWindow;
+  week: SpendWindow;
+  transcripts: string;
+}

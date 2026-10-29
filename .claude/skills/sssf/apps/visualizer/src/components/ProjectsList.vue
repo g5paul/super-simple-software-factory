@@ -4,6 +4,7 @@ import type { ProjectSummary } from '../lib/types'
 import { fetchProjects } from '../lib/api'
 import { fmtDate, ts } from '../lib/format'
 import { projectHref } from '../lib/router'
+import AccountPanel from './AccountPanel.vue'
 
 const projects = shallowRef<ProjectSummary[]>([])
 const apiError = ref<string | null>(null)
@@ -49,6 +50,8 @@ const ordered = computed(() =>
 <template>
   <div class="projects">
     <div v-if="apiError" class="error-bar">api unreachable — retrying {{ apiError }}</div>
+
+    <AccountPanel />
 
     <div v-if="ordered.length" class="list-head dim">{{ ordered.length }} projects</div>
 

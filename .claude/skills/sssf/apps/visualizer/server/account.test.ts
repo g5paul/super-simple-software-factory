@@ -1,0 +1,126 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Account, estimateCost } from "./account.ts";
+
+const NOW = Date.parse("2026-10-29T16:00:00Z");
+const RESET_5H = Date.parse("2026-10-29T17:30:00Z") / 1000;
+const RESET_7D = Date.parse("2026-11-01T12:00:00Z") / 1000;
+
+let dir: string;
+let transcripts: string;
+let ratesFile: string;
+
+function call(opts: { id: string; at: string; session: string; cwd: string; model?: string; out?: number; read?: number }) {
+  return JSON.stringify({
+    type: "assistant", timestamp: opts.at, sessionId: opts.session, cwd: opts.cwd, requestId: `req_${opts.id}`,
+    message: { id: `msg_${opts.id}`, model: opts.model ?? "claude-opus-5-5",
+      usage: { input_tokens: 10, output_tokens: opts.out ?? 100, cache_read_input_tokens: opts.read ?? 1000,
+        cache_creation_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 } } },
+  }) + "\n";
+}
+
+function sample(fiveHour: number, reset5h = RESET_5H) {
+  writeFileSync(ratesFile, JSON.stringify({
+    recorded_at: "2026-10-29T15:50:00Z", source: "/repos/yt",
+    info: { status: "allowed", overageStatus: "rejected",
+      unifiedWindows: { five_hour: { utilization: fiveHour, resetsAt: reset5h }, seven_day: { utilization: 0.05, resetsAt: RESET_7D } } },
+  }));
+}
+
+const projectOf = (cwd: string) => cwd.split("/").at(-1) ?? cwd;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "sssf-account-"));
+  transcripts = join(dir, "projects");
+  mkdirSync(join(transcripts, "-repos-yt"), { recursive: true });
+  ratesFile = join(dir, "rate_limits.json");
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+describe("Account", () => {
+  test("splits SSSF agents from interactive sessions, by project and model", () => {
+    const f = join(transcripts, "-repos-yt", "a.jsonl");
+    writeFileSync(f, call({ id: "1", at: "2026-10-29T15:00:00Z", session: "human", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-29T15:10:00Z", session: "agent", cwd: "/repos/yt", model: "claude-haiku-5-5" }));
+    sample(0.09);
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(["agent"]), projectOf);
+    expect(usage.window.calls).toBe(2);
+    expect(usage.window.by_kind.map((r) => [r.key, r.calls])).toEqual([["interactive", 1], ["sssf", 1]]);
+    expect(usage.window.by_project.map((r) => r.key)).toEqual(["yt"]);
+    expect(usage.window.by_model.map((r) => r.key).toSorted()).toEqual(["claude-haiku-5-5", "claude-opus-5-5"]);
+  });
+
+  test("counts a streamed message once, though it repeats per content block", () => {
+    const line = call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" });
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"), line + line + line);
+    expect(new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf).window.calls).toBe(1);
+  });
+
+  test("the window is the live 5-hour window from the sample", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "old", at: "2026-10-29T12:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "new", at: "2026-10-29T13:00:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.09);  // resets 17:30, so the window opened 12:30
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.window.basis).toBe("five_hour");
+    expect(usage.window.start).toBe("2026-10-29T12:30:00.000Z");
+    expect(usage.window.calls).toBe(1);
+    expect(usage.week.calls).toBe(2);
+    expect(usage.sample?.five_hour?.utilization).toBe(0.09);
+    expect(usage.sample?.age_s).toBe(600);
+  });
+
+  test("without a live sample, the window is the last five hours", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "1", at: "2026-10-29T10:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-29T12:00:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.5, Date.parse("2026-10-29T11:00:00Z") / 1000);  // that window already reset
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.window.basis).toBe("rolling");
+    expect(usage.window.calls).toBe(1);
+    expect(usage.sample?.five_hour).toBeNull();
+  });
+
+  test("no sample file still reports spend", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"), call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" }));
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.sample).toBeNull();
+    expect(usage.window.calls).toBe(1);
+  });
+
+  test("reads only what a growing transcript appended, and waits for a partial line", () => {
+    const f = join(transcripts, "-repos-yt", "a.jsonl");
+    writeFileSync(f, call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" }));
+    const account = new Account(transcripts, ratesFile);
+    expect(account.summary(NOW, new Set(), projectOf).window.calls).toBe(1);
+    const next = call({ id: "2", at: "2026-10-29T15:30:00Z", session: "s", cwd: "/repos/yt" });
+    appendFileSync(f, next.slice(0, 40));
+    expect(account.summary(NOW, new Set(), projectOf).window.calls).toBe(1);
+    appendFileSync(f, next.slice(40));
+    expect(account.summary(NOW, new Set(), projectOf).window.calls).toBe(2);
+  });
+
+  test("finds subagent transcripts in nested folders", () => {
+    mkdirSync(join(transcripts, "-repos-yt", "sess", "subagents"), { recursive: true });
+    writeFileSync(join(transcripts, "-repos-yt", "sess", "subagents", "agent-1.jsonl"),
+      call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" }));
+    expect(new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf).window.calls).toBe(1);
+  });
+});
+
+describe("estimateCost", () => {
+  test("weights cache reads at a tenth of input and output at five times", () => {
+    const usage = { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
+    const out = { ...usage, input: 0, output: 200_000 };
+    const reads = { ...usage, input: 0, cacheRead: 10_000_000 };
+    const one = estimateCost("claude-opus-5-5", usage)!;
+    expect(estimateCost("claude-opus-5-5", out)).toBeCloseTo(one);
+    expect(estimateCost("claude-opus-5-5", reads)).toBeCloseTo(one);
+  });
+
+  test("an unknown model has no estimate", () => {
+    expect(estimateCost("claude-mystery-9", { input: 1, output: 1, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 })).toBeNull();
+  });
+});

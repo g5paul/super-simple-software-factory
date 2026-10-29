@@ -2,7 +2,7 @@
 
 `adw_tickets` builds a feature one ticket at a time, test-first, from a folder that [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) wrote with the engineer. This cookbook is for the Claude session in the project repo. The design and its decisions are in the SSSF repo at `docs/designs/ticket-sdlc.md`.
 
-Use it for a feature that needs a spec and more than one session of work. For a single defined task, `just simple-sdlc` is cheaper. How to choose between them is in [how_to_prompt_for_the_eng.md](how_to_prompt_for_the_eng.md), section "One run, or a ticket feature".
+Use it for a feature that needs a spec and more than one session of work. For a single defined task, `just simple-sdlc` is cheaper. How to choose between them is in [choose_a_flow.md](choose_a_flow.md).
 
 ## The split
 

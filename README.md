@@ -305,7 +305,7 @@ A repo on another machine is not in this registry. Run `just obs` there, and rea
 super-simple-software-factory/          # the deployable factory, and nothing else
 └── .claude/skills/sssf/
     ├── SKILL.md                        # hard rules + request routing table
-    ├── cookbooks/                      # 9 orchestrator playbooks, loaded lazily
+    ├── cookbooks/                      # 12 orchestrator playbooks, loaded lazily
     ├── references/                     # config / handoff / observability specs
     ├── scripts/                        # install.py, make_config.py, make_adw.py
     ├── apps/visualizer/                # the read-only trace UI (Vue + Vite on Bun)
@@ -349,6 +349,8 @@ uv run adws/adw_*.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_con
 `adw_simple_sdlc` lands three commits from three authors. The plan, the code, and the write-up each get their own, and each message is the words of the agent that produced it.
 
 `adw_tickets` is the second half of [Matt Pocock's engineering skills](https://github.com/mattpocock/skills). The engineer grills, specs, and tickets a feature interactively, which leaves `.scratch/<feature>/spec.md` and one file per ticket. `just tickets .scratch/<feature>/` then builds each ticket in a fresh session, test-first at the seams the spec names, and commits each one once its checks pass. A rerun resumes at the first unfinished ticket. See `cookbooks/tickets.md`.
+
+Which one to use depends on the work. A bug fix, a rename, or a flag that follows an existing pattern is one `adw_simple_sdlc` run. A new user-facing mode or file format, a change worth an ADR, or work that splits into slices you can check one at a time is a ticket feature, and costs your time up front for the grilling, the spec, and the tickets. [`cookbooks/choose_a_flow.md`](.claude/skills/sssf/cookbooks/choose_a_flow.md) has the two questions that decide it, the signals, and what each cost on a real repo.
 
 `--adw-id` is optional everywhere. Omit it and a fresh id is minted and printed. Supply it and the run joins that session: same dirs, same `context_handoff/`, and each agent **resumes its existing context window** through `agent_map.json` instead of starting cold. That is how you chain workflows.
 

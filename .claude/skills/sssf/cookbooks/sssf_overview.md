@@ -76,6 +76,8 @@ Load one cookbook per request — this overview is the only one you read up fron
 
 | Request | Cookbook |
 |---|---|
+| Choose one run or a ticket feature | `choose_a_flow.md` |
+| Build a feature from a spec and tickets | `tickets.md` |
 | Turn a request into the prompt an ADW gets | `how_to_prompt_for_the_eng.md` — **read before every launch** |
 | Set the system up in a repo | `install.md` |
 | Write a new ADW script | `create_adw.md` |

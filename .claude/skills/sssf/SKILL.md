@@ -48,7 +48,7 @@ You run the system, observe the system, and help the user interact with it. **Yo
 | Request | Cookbook |
 |---|---|
 | bring SSSF into a new project: fit check, install, quality.py from CI, first run | [cookbooks/onboard.md](cookbooks/onboard.md) |
-| choose between one run and a ticket feature | [cookbooks/how_to_prompt_for_the_eng.md](cookbooks/how_to_prompt_for_the_eng.md), section "One run, or a ticket feature" |
+| choose between one run and a ticket feature | [cookbooks/choose_a_flow.md](cookbooks/choose_a_flow.md) |
 | build a feature from a spec and tickets (mattpocock/skills, `.scratch/<feature>/`) | [cookbooks/tickets.md](cookbooks/tickets.md) |
 | `/sssf install`, set up the factory in this repo | [cookbooks/install.md](cookbooks/install.md) |
 | update a repo to a newer SSSF skill | `just sssf-update`, then [cookbooks/install.md](cookbooks/install.md), section "Update an installed repo" |

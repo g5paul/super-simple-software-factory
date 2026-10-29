@@ -79,6 +79,60 @@ tail ADW_ID:
 procs ADW_ID:
     @sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"
 
+# ── SSSF itself ─────────────────────────────────────────────────────────────
+# Refreshes .claude/skills/sssf from SSSF_SOURCE in .env, runs install.py
+# --update, then runs it again to confirm nothing is left. It refuses to start
+# while the tree has uncommitted changes, so the update gets its own commit, or
+# while a recorded chain process is still alive. For a file it lists with `!`,
+# run install.py --update --take PATH or --keep PATH yourself.
+
+# update SSSF from the skill source in SSSF_SOURCE
+sssf-update:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="${SSSF_SOURCE:-}"
+    if [ -z "$src" ]; then
+        echo "set SSSF_SOURCE in .env to the skill's source dir, e.g. ~/github/super-simple-software-factory/.claude/skills/sssf" >&2
+        exit 1
+    fi
+    src="${src/#\~/$HOME}"
+    src="${src%/}"
+    dest=.claude/skills/sssf
+    if [ ! -f "$src/scripts/install.py" ]; then
+        echo "SSSF_SOURCE=$src has no scripts/install.py" >&2
+        exit 1
+    fi
+    if [ "$(cd "$src" && pwd -P)" = "$(cd "$dest" 2>/dev/null && pwd -P)" ]; then
+        echo "SSSF_SOURCE points at this repo's own copy; point it at the skill's source" >&2
+        exit 1
+    fi
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "commit or stash your changes first, so the update gets its own commit:" >&2
+        git status --short >&2
+        exit 1
+    fi
+    if [ -f {{db}} ]; then
+        for pid in $(sqlite3 {{db}} "select pid from processes where ended_at is null and pid is not null" 2>/dev/null); do
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "a chain is still running (pid $pid); update when it ends" >&2
+                exit 1
+            fi
+        done
+    fi
+    # The excludes keep this repo's visualizer packages and built page, so a
+    # running `just obs` keeps working.
+    rsync -a --delete --exclude apps/visualizer/node_modules --exclude apps/visualizer/dist "$src/" "$dest/"
+    find "$dest" -name __pycache__ -prune -exec rm -rf {} +
+    rev=$(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    if [ -n "$(git -C "$src" status --porcelain -- . 2>/dev/null)" ]; then rev="$rev+uncommitted"; fi
+    echo "skill copy refreshed from $src (skill $rev)"
+    uv run "$dest/scripts/install.py" --update
+    echo
+    echo "second pass (expect updated: 0, added: 0):"
+    uv run "$dest/scripts/install.py" --update | grep -E "updated:|added:|to review:"
+    echo
+    echo "next: read git status and git diff, then: git add -A && git commit -m \"Update SSSF to skill $rev\""
+
 # ── observability UI ────────────────────────────────────────────────────────
 
 # Needs bun. `obs` builds the UI, then serves UI and API from ONE process on

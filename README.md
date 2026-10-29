@@ -83,7 +83,9 @@ just obs-all               # one dashboard for every repo SSSF is installed in
 uv run adws/adw_prompt.py "reply with a one-line summary of this repo" --agent scout
 ```
 
-Re-running `install.py` is safe. It skips every file that already exists and reports what it skipped, so a second run doubles as a drift check. To bring a repo up to a newer skill, refresh its copy of the skill and run `install.py --update`. It replaces only the files the repo never changed and lists the rest. `--force` overwrites **all** stamped files including your `sssf.config.yaml`, `quality.py`, and your prompts, so commit first. See `cookbooks/install.md`.
+Re-running `install.py` is safe. It skips every file that already exists and reports what it skipped, so a second run doubles as a drift check. To bring a repo up to a newer skill, set `SSSF_SOURCE` in its `.env` and run `just sssf-update`, which refreshes the copy of the skill and runs `install.py --update`. It replaces only the files the repo never changed and lists the rest. `--force` overwrites **all** stamped files including your `sssf.config.yaml`, `quality.py`, and your prompts, so commit first. See `cookbooks/install.md`.
+
+To bring SSSF into a new project, start a Claude session in that repo and point it at `cookbooks/onboard.md`. It checks whether SSSF fits, installs it, sets `quality.py` to the commands CI runs, writes `docs/sssf.md`, and makes a first small run.
 
 Green on the smoke test means the whole path works: config validated, session minted, Pi ran, envelope parsed, events landed in `adws/adw_data/sssf.db`. Fix it there before composing anything larger, because every multi-agent chain rides this exact path.
 

@@ -37,7 +37,13 @@ Re-running is safe. `install.py` skips **every** file that already exists — yo
 
 ## Update an installed repo
 
-When the skill changes, update each repo that uses it in two steps. Commit first, so the diff shows exactly what the update changed.
+When the skill changes, set `SSSF_SOURCE` in the repo's `.env` to the skill's source directory, and run:
+
+```bash
+just sssf-update
+```
+
+It refuses to start while the tree has uncommitted changes or a chain process is alive, so the update gets its own commit. Then it does the two steps below, runs `--update` a second time to confirm nothing is left, and prints the skill commit it copied from. The steps by hand:
 
 ```bash
 # 1. refresh the repo's copy of the skill from its source. The excludes keep

@@ -368,17 +368,17 @@ class EventRecord(BaseModel):
     ended_at: Optional[str] = None
 
 
-# ── Pi coding agent interface ────────────────────────────────────────────────
+# ── Coding agent interface (agent_pi, agent_cc) ──────────────────────────────
 
-class PiRequest(BaseModel):
-    """Everything one non-interactive pi run needs."""
+class AgentRequest(BaseModel):
+    """Everything one non-interactive coding-agent run needs, pi or claude."""
 
     prompt: str
     system_prompt: str
-    model: str                      # registry pattern, resolved to provider + id
+    model: str                      # provider/id, resolved by the interface
     thinking: str = "medium"
-    session_id: str                 # pi --session-id: creates or continues
-    session_dir: str
+    session_id: str                 # pi: any string; claude: a UUID
+    session_dir: str                # pi: --session-dir; claude: SSSF's resume/cost ledger
     raw_output_path: str            # JSONL stream lands here
     tools: Optional[list[str]] = None
     extensions: list[str] = Field(default_factory=list)
@@ -433,7 +433,7 @@ class UsageBreakdown(BaseModel):
             setattr(self, field, getattr(self, field) + getattr(other, field))
 
 
-class PiResult(BaseModel):
+class AgentResult(BaseModel):
     text: str = ""
     returncode: int = 0
     session_id: str = ""

@@ -42,11 +42,11 @@ agents:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `coding_agent` | `pi` \| `claude_code` | Which interface runs the agent. **v1 implements `pi` only**; `claude_code` is specced and stubbed in `agent_cc.py`, landing in v2. |
+| `coding_agent` | `pi` \| `claude_code` | Which interface runs the agent: `agent_pi.py` or `agent_cc.py`. See [Claude Code](#claude-code-coding_agent-claude_code) for how the other fields map onto `claude`. |
 | `model` | string | Model id. For Pi, any id registered in `~/.pi/agent/models.json`. Default `gemini-3.6-flash`. |
 | `thinking` | enum | Reasoning effort — see below. Default `medium`. |
 | `color` | hex string | Lane color for every agent that does not set its own. Default empty — the visualizer falls back to its own palette. |
-| `harness_engineering` | list[string] | Coding-agent extensions. Pi: extension names. Claude Code: reserved (MCP, hooks). |
+| `harness_engineering` | list[string] | Pi extension paths. Rejected on a `claude_code` agent. |
 | `tools` | list[string] | Roster-wide tool allowlist. Every agent that omits its own `tools` inherits this. Unset = all tools usable. |
 | `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`. Default: `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py` — an agent must not be able to edit the machinery that decides whether its work passed. |
 | `data_dir` | path | Runtime home. Sessions land at `{data_dir}/sessions/{adw_id}/{agent_name}/`. Default `adws/adw_data`. |
@@ -85,7 +85,7 @@ Pi's reasoning-effort ladder, lowest to highest:
 off | minimal | low | medium | high | xhigh | max
 ```
 
-Mapped to Pi's reasoning effort control and honored when the model is registered with `reasoning: true` in `~/.pi/agent/models.json`. On a non-reasoning model the setting is inert — no error, no effect. Rough guidance: `high`/`xhigh` for planners and reviewers, `medium` for builders, `low` for mechanical read-and-report agents. (For Claude Code in v2, the same field maps to the thinking budget.)
+Mapped to Pi's reasoning effort control and honored when the model is registered with `reasoning: true` in `~/.pi/agent/models.json`. On a non-reasoning model the setting is inert — no error, no effect. Rough guidance: `high`/`xhigh` for planners and reviewers, `medium` for builders, `low` for mechanical read-and-report agents. (On Claude Code the field maps to `--effort`; see [Claude Code](#claude-code-coding_agent-claude_code).)
 
 ## Model resolution
 
@@ -197,6 +197,34 @@ Rule: **every entry in `harness_engineering` that registers a tool must have tha
 
 ## Harness engineering
 
-`harness_engineering` entries are pi extension **file paths**, passed through as `pi -e <path>`, one flag per entry, scoped to that agent only. This is where per-agent harness changes live — e.g. an output-tightening extension for an agent that keeps wrapping its envelope in prose. The starter roster ships with none. On Claude Code the field is reserved for MCP config and hooks in v2.
+`harness_engineering` entries are pi extension **file paths**, passed through as `pi -e <path>`, one flag per entry, scoped to that agent only. This is where per-agent harness changes live — e.g. an output-tightening extension for an agent that keeps wrapping its envelope in prose. The starter roster ships with none. Claude Code cannot load pi extensions, so validation rejects the field on a `claude_code` agent.
 
 **If the extension registers a tool, name that tool in the agent's `tools` list too** — `--tools` filters extension tools exactly like builtins, so an unnamed extension tool is silently unavailable no matter that the extension loaded fine. See [Extension tools must be named explicitly](#extension-tools-must-be-named-explicitly) above. Extensions that only shape output or add flags (no tool registration) need no `tools` change.
+
+## Claude Code (`coding_agent: claude_code`)
+
+`adw_modules/agent_cc.py` runs the agent as `claude -p --output-format stream-json`. It has the same contract as `agent_pi.run()`, so prompts, envelopes, gates, `writes` enforcement, and the trace all work unchanged. Set it roster-wide in `defaults.coding_agent` or per agent. Pi and Claude Code agents can share one roster.
+
+How the roster maps onto `claude`:
+
+| Field | Becomes | Notes |
+|---|---|---|
+| `model` | `--model` | Write `anthropic/<id>`, e.g. `anthropic/claude-opus-5-5`. The prefix is stripped. Any other provider fails validation. A bare id or an alias like `opus` passes through. Claude has no offline catalog, so a misspelled id fails when that agent runs, not at validation. |
+| `thinking` | `--effort` | `low` through `max` pass through. `off` and `minimal` become `low`, because `--effort` has no off switch. |
+| `tools` | `--tools` | Pi names are translated: `read`→`Read`, `bash`→`Bash`, `edit`→`Edit`, `write`→`Write`, `grep`→`Grep`, `find` and `ls`→`Glob`. Claude has no LS tool and drops that name without an error, so `ls` lands on `Glob`. A capitalized name (`WebFetch`) is taken as a Claude tool name and passed through. Anything else fails validation. Unset means Claude's default set, which includes web, task, and scheduling tools. |
+| `harness_engineering` | nothing | These are pi extensions. Validation rejects them on a `claude_code` agent. Remove them, and the `subagent_*` tools they register, before switching an agent over. |
+| `system.md` | `--append-system-prompt` | Appended, not replaced. Claude Code keeps its own tool guidance and `system.md` adds the agent's identity. |
+
+**Isolation.** Every run passes `--safe-mode` and `--disable-slash-commands`. The agent does not load the operator's `CLAUDE.md`, skills, plugins, hooks, or MCP servers. Without `--safe-mode`, `--setting-sources project` still let the global `CLAUDE.md` through. The agent sees its `system.md` and the repo, nothing else.
+
+**Permissions.** Runs use `--permission-mode bypassPermissions`, since nobody is there to answer a prompt. The boundary is `writes` and `protected_files`, enforced by `permissions.py` after the call, the same as on Pi.
+
+**Auth.** The default is the operator's subscription login. `agent_cc` removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the child's environment, because `.env` is loaded into every ADW and Claude prefers an API key when one is present. If the run's `init` event still reports an API key source (an `apiKeyHelper` in project settings, say), the run stops before the model is called. Set `SSSF_CLAUDE_AUTH=api_key` in `.env` to bill the API instead. `--bare` is never used, because it ignores OAuth.
+
+**Sessions.** Claude needs a UUID session id, creates a session with `--session-id`, and continues one with `--resume`. `agent_cc` keeps a ledger file per session in `{agent}/claude_code_sessions/{uuid}.json`. If the file exists, the send resumes. That covers JSON retries, gate corrections, and a later phase rejoining the agent through `agent_map.json`. Claude stores the conversation itself under `~/.claude/projects/`, so factory sessions show up in `claude --resume` for that repo.
+
+**Cost.** `total_cost_usd` in Claude's `result` event is a running total for the whole session, while its `usage` covers only the current send. The ledger keeps the last total, and each send is billed the difference. Only a total is reported, so the per-component cost columns in `agent_end` usage stay zero. On a subscription, cost is Claude's list-price figure for the tokens, not a charge.
+
+**Context.** `context_tokens` is the last top-level assistant turn's `input + cache_creation + cache_read + output`. `context_window` comes from the `result` event's `modelUsage`.
+
+`CLAUDE_CODE_PATH` in `.env` points at the binary when `claude` is not on PATH.

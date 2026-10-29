@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
-from .data_types import PiRequest, PiResult
+from .data_types import AgentRequest, AgentResult
 from .utils import now_iso, operator_env
 
 PI_PATH = os.environ.get("PI_PATH", "pi")
@@ -107,7 +107,10 @@ def _context_tokens(usage: dict) -> int:
 
 def context_window(provider: str, model_id: str) -> int:
     """The model's context ceiling from pi's merged model catalog."""
-    registry = json.loads(Path(MODELS_JSON).read_text())
+    # models.json only exists once a custom provider is registered; built-in
+    # providers alone are a valid setup, served by the catalog fallback below.
+    registry_path = Path(MODELS_JSON)
+    registry = json.loads(registry_path.read_text()) if registry_path.is_file() else {}
     for model in registry.get("providers", {}).get(provider, {}).get("models", []):
         if model.get("id") == model_id:
             return int(model.get("contextWindow") or 0)
@@ -128,9 +131,9 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
-def _label(tool: str, args: dict) -> str:
+def _label(tool: str, args: dict, keys: tuple[str, ...] = PRIMARY_ARGS) -> str:
     """One-line human name for a tool call: `bash: ls -la src`."""
-    value = next((args[key] for key in PRIMARY_ARGS
+    value = next((args[key] for key in keys
                   if isinstance(args.get(key), str) and args[key].strip()), "")
     if not value:
         value = next((v for v in args.values() if isinstance(v, str) and v.strip()), "")
@@ -151,38 +154,44 @@ class ToolCallTracker:
     parsing every payload.
     """
 
+    primary_args = PRIMARY_ARGS
+
     def __init__(self) -> None:
         self._open: dict[str, dict] = {}
 
-    def observe(self, event: dict) -> Optional[dict]:
-        """Returns the record for a finished tool call, else None."""
+    def observe(self, event: dict) -> list[dict]:
+        """Returns the records for tool calls this event finished, often none."""
         etype = event.get("type", "")
         if etype == "message_end":
             for block in event.get("message", {}).get("content", []) or []:
                 if isinstance(block, dict) and block.get("type") == "toolCall":
                     self._announce(block.get("id"), block.get("name"),
                                    block.get("arguments"))
-            return None
+            return []
         if etype == "tool_execution_start":
             self._announce(event.get("toolCallId"), event.get("toolName"),
                            event.get("args"))
-            return None
+            return []
         if etype != "tool_execution_end":
-            return None
+            return []
+        return [self._finish(event.get("toolCallId"), event.get("toolName"),
+                             event.get("args"), not event.get("isError", False),
+                             _text_of(event.get("result") or {}))]
 
-        call_id = str(event.get("toolCallId") or "")
+    def _finish(self, call_id, tool, args, ok: bool, result_text: str) -> dict:
+        """Close an announced call into its one normalized record."""
+        call_id = str(call_id or "")
         opened = self._open.pop(call_id, {})
-        tool = str(event.get("toolName") or opened.get("tool") or "tool")
-        args = event.get("args") or opened.get("args") or {}
+        tool = str(tool or opened.get("tool") or "tool")
+        args = args or opened.get("args") or {}
         record = {
             "tool": tool,
             "tool_call_id": call_id,
             "args": {key: _clip(value, ARG_VALUE_CHARS) if isinstance(value, str) else value
                      for key, value in args.items()},
-            "ok": not event.get("isError", False),
-            "label": _label(tool, args),
+            "ok": ok,
+            "label": _label(tool, args, self.primary_args),
         }
-        result_text = _text_of(event.get("result") or {})
         if result_text:
             record["result_snippet"] = _clip(result_text, RESULT_SNIPPET_CHARS)
         record["ended_at"] = now_iso()
@@ -205,9 +214,9 @@ class ToolCallTracker:
         }
 
 
-def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
+def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None,
         on_spawn: Optional[Callable[[int], None]] = None,
-        on_exit: Optional[Callable[[int], None]] = None) -> PiResult:
+        on_exit: Optional[Callable[[int], None]] = None) -> AgentResult:
     """Run one non-interactive pi turn.
 
     `on_spawn(pid)` and `on_exit(pid)` bracket the child process so the caller
@@ -232,7 +241,7 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
     raw_path = Path(request.raw_output_path)
     raw_path.parent.mkdir(parents=True, exist_ok=True)
 
-    result = PiResult(session_id=request.session_id,
+    result = AgentResult(session_id=request.session_id,
                       context_window=context_window(provider, model_id))
     # stdin is DEVNULL, deliberately. The prompt travels in argv, so the child
     # never needs stdin — but inheriting the parent's means pi sees a non-TTY

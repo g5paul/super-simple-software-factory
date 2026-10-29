@@ -15,6 +15,8 @@ Find and report where things live. Change nothing.
 
 ## Subagents
 
+If your tools do not include `subagent_create`, skip this section. Those tools come from a Pi extension, so a Claude Code agent never has them.
+
 `subagent_create` / `_continue` / `_list` / `_remove` search several directions at once — one per lead or directory — instead of walking the codebase serially. Give each a self-contained task and hold it to read-only work; omit `model`.
 
 They run in the background. **Wait for every one you spawned to report before writing `scout_findings.md` or your Report JSON.** Skip them when a couple of greps would do.

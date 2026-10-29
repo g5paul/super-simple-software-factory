@@ -37,3 +37,11 @@ def test_reviewer_checks_the_docs():
 
 def test_documenter_does_not_redo_the_builders_doc_edits():
     assert "do not edit them again" in system("documenter")
+
+
+def test_subagent_sections_apply_only_with_the_tools():
+    # Pi agents get subagent_* from the subagents.ts extension; Claude Code
+    # agents never do. One prompt serves both, so the section says when it applies.
+    for agent in ("planner", "scout"):
+        section = system(agent).split("## Subagents", 1)[1]
+        assert "If your tools do not include `subagent_create`, skip this section" in section, agent

@@ -95,6 +95,11 @@ class Console:
         """Free-form detail inside the current phase — what `ph.log()` recorded."""
         self._emit(f"  [dim]· {escape(_clip(message))}[/dim]")
 
+    def advise(self, message: str) -> None:
+        """What the engineer should do next, in full: never clipped, line breaks
+        kept. For a stop's explanation, where a cut-off command is useless."""
+        self._emit(f"[yellow]{escape(message)}[/yellow]", level="warning")
+
     # ── agents ──────────────────────────────────────────────────────────────
     def agent_started(self, name: str, model: str, session_id: str) -> None:
         self._emit(f"  [magenta]▸[/magenta] {escape(name)} [dim]{escape(model)}[/dim]"

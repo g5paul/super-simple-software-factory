@@ -120,6 +120,25 @@ class ReviewOutput(EnvelopeBase):
     blocking: list[str] = Field(default_factory=list)   # what must change before approval
 
 
+class AxisFinding(BaseModel):
+    """One finding on one review axis: standards, or spec."""
+
+    where: str = ""                 # file:line, or the hunk
+    problem: str
+    source: str = ""                # the standard broken, the smell, or the spec line quoted
+    blocking: bool = False          # a smell or a judgement call never is
+
+
+class AxisReviewOutput(EnvelopeBase):
+    """One axis of mattpocock/skills' two-axis code review, blind to the other."""
+
+    findings: list[AxisFinding] = Field(default_factory=list)
+
+    @property
+    def blocking(self) -> list[AxisFinding]:
+        return [f for f in self.findings if f.blocking]
+
+
 class DocumentOutput(EnvelopeBase):
     """Where the write-up of a completed change landed."""
 
@@ -292,6 +311,10 @@ class AgentCall(BaseModel):
     prompt: str
     previous: Optional[EnvelopeBase] = None
     gates: list[Callable] = Field(default_factory=list)   # gate(envelope, run) -> list[str]
+    # Calls to one agent that name the same session share its context window.
+    # "" = the agent's one session for the run. adw_tickets gives every ticket
+    # its own, so each ticket starts fresh and its retries keep their context.
+    session: str = ""
 
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -443,8 +466,32 @@ class UsageBreakdown(BaseModel):
 
     def merge(self, other: "UsageBreakdown") -> None:
         """Add another call's usage — a phase that retries spends more than once."""
-        for field in self.model_fields:
+        for field in type(self).model_fields:
             setattr(self, field, getattr(self, field) + getattr(other, field))
+
+
+class Ticket(BaseModel):
+    """One `issues/NN-<slug>.md` file from mattpocock/skills' `to-tickets`."""
+
+    number: str                     # "02", from the file name
+    slug: str                       # "02-api", the file name without .md
+    path: str
+    title: str
+    blocked_by: list[str] = Field(default_factory=list)   # ticket numbers
+    done: bool = False              # its Status line says done
+
+
+class Feature(BaseModel):
+    """A `.scratch/<feature>/` folder: the spec, and its tickets blockers first."""
+
+    slug: str
+    folder: str
+    spec: str
+    tickets: list[Ticket]
+
+    @property
+    def todo(self) -> list[Ticket]:
+        return [t for t in self.tickets if not t.done]
 
 
 class AgentResult(BaseModel):

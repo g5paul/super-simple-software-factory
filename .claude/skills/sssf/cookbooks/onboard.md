@@ -74,6 +74,10 @@ This page is how the next session, or the engineer, finds out how SSSF works in 
 - **What a run leaves.** The three commits, `specs/`, `app_docs/`, and the session folder.
 - **Update SSSF.** `just sssf-update`, then `--take` or `--keep` for a file it flags.
 
+## 5a. Optional: the ticket flow
+
+If the engineer wants to build features from a spec and tickets, run `/setup-matt-pocock-skills` now and choose **Local markdown**, then say so in `docs/sssf.md`. [tickets.md](tickets.md) covers the flow. Skip this for repos that only take one-shot tasks.
+
 ## 6. Commit the onboarding
 
 Commit the install, `quality.py`, the tool excludes, and `docs/sssf.md` together, on the branch, as one commit. Don't push unless the engineer says so.

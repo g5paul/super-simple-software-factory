@@ -145,3 +145,9 @@ Settled in the grilling session, in order.
 32. **The fork stays Matt's.** Nothing SSSF needs is changed in `~/github/skills`, so pulling upstream stays free of conflicts. The engineer's installed skills are symlinks into the fork's working tree.
 33. **This design is committed before the build starts.** Nothing is pushed without the engineer's go-ahead.
 34. **What the build found about the caps.** Tested on a subscription login on 2026-10-29: `--max-budget-usd` works there, so 22 needs no alternative. Claude Code counts it per call, even on a resumed session, and checks it after each request, so a call can go over by one request. The roster key is `max_call_cost`. The run cap is checked before every send, not only when an agent starts, so a phase's retries can't spend past it.
+35. **What the build of `adw_tickets` settled.**
+    - The read step requires the feature folder to be tracked by git, not merely un-ignored: git still commits a tracked file under an ignore rule, and the real hazard is a folder that was never committed.
+    - Only blocking findings trigger the review fix. Code smells are never blocking; spec gaps are. Judgement calls stay in the review files.
+    - The standards reviewer gets the diff and commits but not the spec, so the two reviews stay blind to each other.
+    - Resume reads commit trailers. Every commit carries `SSSF-Feature: <slug>`. The first marks where the review diff starts, and the docs commit's `SSSF-Step: documented` marks the feature finished.
+    - First sandbox run (55143e12, two tickets): 14/14 phases, $0.39, billing `none`. The builder wrote each test and its code in one step without running the test first, so the task now makes the red run an explicit step and asks for the failure it saw. Not yet re-tried.

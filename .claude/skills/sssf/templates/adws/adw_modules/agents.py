@@ -130,7 +130,8 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     prompts.save(agent_dir / "prompts", "system.md", system_text)
     prompts.save(agent_dir / "prompts", "user.md", user_text)
 
-    session_id = _agent_session_id(run, agent)
+    session_key = f"{agent.name}:{call.session}" if call.session else agent.name
+    session_id = _agent_session_id(run, agent, session_key)
     run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                  type="agent_start", name=agent.name,
                                  payload={"model": agent.model, "thinking": agent.thinking,
@@ -242,7 +243,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     run.tracer.agent_session_row(run.adw_id, agent, session_id,
                                  context_tokens=context.context_tokens,
                                  context_window=context.context_window)
-    run.save_agent_map(agent.name, {"session_id": session_id, "model": agent.model,
+    run.save_agent_map(session_key, {"session_id": session_id, "model": agent.model,
                                     "coding_agent": agent.coding_agent})
     run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                  type="handoff", name=agent.name,
@@ -272,8 +273,8 @@ def _as_report(result) -> GateReport:
     return GateReport(checks=[GateCheck(item=str(v), ok=False) for v in (result or [])])
 
 
-def _agent_session_id(run, agent: AgentConfig) -> str:
-    entry = run.agent_map.get(agent.name)
+def _agent_session_id(run, agent: AgentConfig, key: str) -> str:
+    entry = run.agent_map.get(key)
     if (entry and entry.get("model") == agent.model
             and entry.get("coding_agent", "pi") == agent.coding_agent):
         return entry["session_id"]           # rejoin the existing context window

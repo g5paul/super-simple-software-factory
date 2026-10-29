@@ -53,6 +53,44 @@ def commit_all(message: str) -> str:
     return _git("rev-parse", "--short", "HEAD")
 
 
+def feature_commits(feature: str) -> list[tuple[str, str]]:
+    """(sha, step) for every commit on HEAD carrying `SSSF-Feature: <feature>`,
+    oldest first. `step` is its `SSSF-Step` trailer, or "". adw_tickets writes
+    both trailers, so a rerun can find where the feature started and whether
+    it was finished."""
+    out = _git("log", "--reverse",
+               "--format=%H%x09%(trailers:key=SSSF-Feature,valueonly,separator=%x2C)"
+               "%x09%(trailers:key=SSSF-Step,valueonly,separator=%x2C)")
+    found = []
+    for line in out.splitlines():
+        sha, name, step = (line.split("\t") + ["", ""])[:3]
+        if name.strip() == feature:
+            found.append((sha, step.strip()))
+    return found
+
+
+def log_oneline(base: str) -> str:
+    """The commits after `base`, one line each, oldest first."""
+    return _git("log", "--reverse", "--oneline", f"{base}..HEAD")
+
+
+def work_in_progress(exclude: str = "") -> list[str]:
+    """`git status --porcelain` lines, leaving out `exclude` (the run's own data dir)."""
+    pathspec = ["--", ".", f":!{exclude}"] if exclude else []
+    out = _git("status", "--porcelain", *pathspec)
+    return [line for line in out.splitlines() if line]
+
+
+def tracked(path: str) -> bool:
+    return subprocess.run(["git", "ls-files", "--error-unmatch", path],
+                          capture_output=True).returncode == 0
+
+
+def ignored(path: str) -> bool:
+    return subprocess.run(["git", "check-ignore", "-q", path],
+                          capture_output=True).returncode == 0
+
+
 def changed_files() -> list[str]:
     out = _git("status", "--porcelain")
     return [line[3:] for line in out.splitlines() if line]

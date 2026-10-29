@@ -29,6 +29,13 @@ defaults:
     # The spec is on record once commit_plan lands. Only the planner, which
     # names specs/ in its writes, may change it.
     - specs/
+    # mattpocock/skills' interactive steps own these. The feature folder holds
+    # the approved spec and tickets, and only the engineer changes the domain
+    # language and the decisions. adw_tickets marks a ticket done in code.
+    - .scratch/
+    - GLOSSARY.md
+    - GLOSSARY-MAP.md
+    - docs/adr/
   rate_limit_stop: 0.8                 # stop before an agent starts once the account's 5-hour or 7-day usage window is this full; null = off
   max_run_cost: 5.00                   # stop before any send once the run has spent this many estimated dollars; null = off
   data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
@@ -98,6 +105,57 @@ agents:
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/reviewer/system.md
       user: adws/adw_data/prompt_engineering/reviewer/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: ticket_builder
+    max_call_cost: 1.50
+    color: "#38bdf8"
+    purpose: Build one ticket test-first at the spec's seams; report every changed file.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/ticket_builder/system.md
+      user: adws/adw_data/prompt_engineering/ticket_builder/user.md
+    # Unrestricted like builder, minus protected_files, so it cannot edit the
+    # ticket it is building or the spec it is judged against.
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - edit
+      - write
+
+  - name: standards_reviewer
+    model: anthropic/claude-opus-5-5
+    max_call_cost: 1.00
+    thinking: high
+    color: "#f97316"
+    purpose: Check a feature's diff against the repo's documented standards and a code smell baseline; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/standards_reviewer/system.md
+      user: adws/adw_data/prompt_engineering/standards_reviewer/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: spec_reviewer
+    model: anthropic/claude-opus-5-5
+    max_call_cost: 1.00
+    thinking: high
+    color: "#f43f5e"
+    purpose: Check a feature's diff against its spec and tickets; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/spec_reviewer/system.md
+      user: adws/adw_data/prompt_engineering/spec_reviewer/user.md
     writes: []
     tools:
       - read

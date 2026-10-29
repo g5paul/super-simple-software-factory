@@ -124,9 +124,18 @@ export class SssfDb {
   }
 
   /** Every Claude Code session id an agent ran under, to tell SSSF's spend from interactive spend. */
+  /**
+   * Every coding-agent session an SSSF run started. agent_sessions keeps one
+   * row per agent, its latest, so an agent that runs several sessions in one
+   * run (adw_tickets: one builder per ticket) is found through its
+   * agent_start events too.
+   */
   agentSessionIds(): string[] {
-    return (this.db.query("SELECT session_id FROM agent_sessions WHERE session_id IS NOT NULL")
-      .all() as { session_id: string }[]).map((r) => r.session_id);
+    return (this.db.query(
+      "SELECT session_id FROM agent_sessions WHERE session_id IS NOT NULL " +
+        "UNION SELECT json_extract(payload_json, '$.session_id') FROM events " +
+        "WHERE type = 'agent_start' AND json_extract(payload_json, '$.session_id') IS NOT NULL",
+    ).all() as { session_id: string }[]).map((r) => r.session_id);
   }
 
   close(): void {

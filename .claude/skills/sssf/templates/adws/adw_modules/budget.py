@@ -16,9 +16,9 @@ message says how to look at it, keep it, or drop it; nothing is discarded.
 
 from __future__ import annotations
 
-import subprocess
 from typing import Optional
 
+from . import git_helper
 from .data_types import AgentResult, EventRecord
 
 
@@ -42,12 +42,9 @@ def uncommitted_help(run) -> str:
     """How to handle uncommitted work, or "" for a clean tree. The run's own
     data dir is left out: it is the trace, not work."""
     try:
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--", ".", f":!{run.cfg.defaults.data_dir}"],
-            cwd=run.repo_root, capture_output=True, text=True, check=False).stdout
-    except OSError:
-        return ""
-    if not status.strip():
+        if not git_helper.work_in_progress(run.cfg.defaults.data_dir):
+            return ""
+    except (OSError, RuntimeError):         # not a repo, or no git: nothing to advise
         return ""
     return ("\nThe tree has uncommitted work from this run. Nothing was discarded.\n"
             "  look at it:  git status && git diff\n"

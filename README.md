@@ -344,8 +344,11 @@ uv run adws/adw_*.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_con
 | `adw_plan_build_test_quality` | same, plus lint/format/typecheck/build gates | the repo has quality commands worth enforcing |
 | `adw_document` | code(git diff), documenter | write up what just shipped |
 | `adw_simple_sdlc` | plan, build, verify (tests plus every quality check), review, document | the work is real and its shape is not obvious |
+| `adw_tickets` | scout, then per ticket: build test-first, verify, commit; standards and spec reviews, one fix, document | the feature has a spec and tickets from Matt Pocock's skills |
 
 `adw_simple_sdlc` lands three commits from three authors. The plan, the code, and the write-up each get their own, and each message is the words of the agent that produced it.
+
+`adw_tickets` is the second half of [Matt Pocock's engineering skills](https://github.com/mattpocock/skills). The engineer grills, specs, and tickets a feature interactively, which leaves `.scratch/<feature>/spec.md` and one file per ticket. `just tickets .scratch/<feature>/` then builds each ticket in a fresh session, test-first at the seams the spec names, and commits each one once its checks pass. A rerun resumes at the first unfinished ticket. See `cookbooks/tickets.md`.
 
 `--adw-id` is optional everywhere. Omit it and a fresh id is minted and printed. Supply it and the run joins that session: same dirs, same `context_handoff/`, and each agent **resumes its existing context window** through `agent_map.json` instead of starting cold. That is how you chain workflows.
 

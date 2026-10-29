@@ -21,6 +21,7 @@ Three steps. Then stop.
 |---|---|---|
 | adw_scout | engineer → scout | read-only recon; nothing changes |
 | adw_simple_sdlc | plan → build → test → review → document, 3 commits | the work is real and its shape is not obvious |
+| adw_tickets | scout → per ticket: build test-first → verify → commit; two-axis review → document | a feature already specced and ticketed with mattpocock/skills |
 ```
 
 **Nothing else.** No trace-db queries, no reading the config or the ADW scripts' bodies, no repo inventory, no last-runs summary, no diagnosing an old failure, no "current state" dashboard. None of it was asked for, and it is not free:
@@ -47,6 +48,7 @@ You run the system, observe the system, and help the user interact with it. **Yo
 | Request | Cookbook |
 |---|---|
 | bring SSSF into a new project: fit check, install, quality.py from CI, first run | [cookbooks/onboard.md](cookbooks/onboard.md) |
+| build a feature from a spec and tickets (mattpocock/skills, `.scratch/<feature>/`) | [cookbooks/tickets.md](cookbooks/tickets.md) |
 | `/sssf install`, set up the factory in this repo | [cookbooks/install.md](cookbooks/install.md) |
 | update a repo to a newer SSSF skill | `just sssf-update`, then [cookbooks/install.md](cookbooks/install.md), section "Update an installed repo" |
 | create a new ADW / workflow | [cookbooks/create_adw.md](cookbooks/create_adw.md) |

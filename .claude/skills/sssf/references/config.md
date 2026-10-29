@@ -104,6 +104,7 @@ That is `agents.validate()` doing its job — it fails before anything spawns ra
 
 Other consequences worth knowing:
 
+- **A subscription sign-in.** Pi can sign into some providers with a subscription instead of a key: `openai` with a ChatGPT login, `anthropic` with a Claude login. `pi auth check --provider openai --json` reports `"authType": "oauth"` when it has. Pi prefers that sign-in over a key in the environment, but falls back to the key when the sign-in lapses, and then bills the API. Set `SSSF_PI_AUTH=subscription` in `.env` and `agent_pi` keeps `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from Pi agents, so a lapsed sign-in fails the call instead. Keys for other providers still reach Pi. The cost Pi reports is list price, not a charge, the same as on Claude Code.
 - A model must be in the catalog before any agent can name it. An unknown id fails at resolution, before spawn. `pi --list-models` is the catalog the resolver actually reads.
 - **Ambiguity can appear without you touching the config.** Registering a new provider that carries a model you already use turns a formerly-fine bare pattern ambiguous. If a roster stops validating and nobody edited it, that is why.
 - Provider credentials come from the environment, not the config — the key that matches the provider you named (`GEMINI_API_KEY` for `google/...`, `OPENROUTER_API_KEY` for `openrouter/...`).

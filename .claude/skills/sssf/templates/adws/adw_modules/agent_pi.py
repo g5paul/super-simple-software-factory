@@ -20,6 +20,10 @@ from .data_types import AgentRequest, AgentResult
 from .utils import now_iso, operator_env
 
 PI_PATH = os.environ.get("PI_PATH", "pi")
+# Keys for the providers Pi can sign into with a subscription (ChatGPT,
+# Claude). With SSSF_PI_AUTH=subscription they are kept from Pi, so a lapsed
+# sign-in fails the call instead of falling back to billing the API.
+SUBSCRIPTION_KEY_VARS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
 MODELS_JSON = os.environ.get("PI_MODELS_PATH",
                              str(Path.home() / ".pi" / "agent" / "models.json"))
 
@@ -214,6 +218,16 @@ class ToolCallTracker:
         }
 
 
+def child_env() -> dict[str, str]:
+    """The operator's environment, less the subscription providers' keys when
+    SSSF_PI_AUTH=subscription. Read per call, since .env loads after import."""
+    env = operator_env()
+    if os.environ.get("SSSF_PI_AUTH") == "subscription":
+        for var in SUBSCRIPTION_KEY_VARS:
+            env.pop(var, None)
+    return env
+
+
 def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None,
         on_spawn: Optional[Callable[[int], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None) -> AgentResult:
@@ -252,7 +266,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=request.cwd,
-                               env=operator_env())
+                               env=child_env())
     if on_spawn:
         on_spawn(process.pid)
     with raw_path.open("a") as raw:

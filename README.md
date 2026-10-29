@@ -111,7 +111,7 @@ Green on the smoke test means the whole path works: config validated, session mi
 **The trade-offs.**
 
 - SSSF runs draw on the same usage windows as your interactive Claude sessions. A long unattended run can leave less for you, and a busy day at the keyboard can stop a run.
-- Only Claude models. A roster that mixes providers needs Pi and API keys.
+- Only Claude models. For OpenAI models on your ChatGPT subscription, run those agents on Pi signed in with your ChatGPT login (`openai/<model>`), and set `SSSF_PI_AUTH=subscription` so a lapsed sign-in can't fall back to an API key. Other providers need Pi and API keys.
 - Interactive sessions don't report the windows, so the reading SSSF checks is as fresh as its last agent call. `/usage` in any Claude Code session gives the current figure.
 
 See `references/config.md` for the details.

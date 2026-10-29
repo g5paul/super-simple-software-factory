@@ -69,9 +69,11 @@ def feature_commits(feature: str) -> list[tuple[str, str]]:
     return found
 
 
-def log_oneline(base: str) -> str:
-    """The commits after `base`, one line each, oldest first."""
-    return _git("log", "--reverse", "--oneline", f"{base}..HEAD")
+def log_oneline(base: str, exclude: tuple[str, ...] = ()) -> str:
+    """The commits after `base`, one line each, oldest first. A commit that
+    touches only `exclude` paths is left out."""
+    pathspec = ["--", ".", *(f":(exclude){p}" for p in exclude)] if exclude else []
+    return _git("log", "--reverse", "--oneline", f"{base}..HEAD", *pathspec)
 
 
 def work_in_progress(exclude: str = "") -> list[str]:

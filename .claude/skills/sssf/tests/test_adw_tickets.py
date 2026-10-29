@@ -264,3 +264,24 @@ def test_a_permission_breach_stops_cleanly(repo, monkeypatch, capsys):
     monkeypatch.setattr(adw_tickets, "build_feature", breach)
     assert run() == 1
     assert "stopped: ticket_builder is barred" in capsys.readouterr().out
+
+
+def test_the_reviewers_never_see_an_sssf_update(repo, monkeypatch):
+    # Updating SSSF on the feature branch is routine between runs, and not the
+    # feature's work: a reviewer that sees it calls it scope creep.
+    real = quality.run_quality
+    monkeypatch.setattr(quality, "run_quality",
+                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+    run()
+    Path("src/t02.py").unlink()
+    for path in ("adws/adw_modules/new.py", ".claude/skills/sssf/SKILL.md"):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text("update\n")
+    git("add", "-A")
+    git("commit", "-qm", "Update SSSF to skill abc1234")
+    monkeypatch.setattr(quality, "run_quality", real)
+    assert run() == 0
+    for name in ("standards_reviewer", "spec_reviewer"):
+        prompt = repo.of(name)[-1][2]
+        assert "Update SSSF" not in prompt and "02: B" in prompt
+        assert "':(exclude)adws/' ':(exclude).claude/skills/sssf/'" in prompt

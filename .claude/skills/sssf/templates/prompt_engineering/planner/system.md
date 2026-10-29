@@ -11,6 +11,7 @@ Turn a request into a plan the builder can implement without asking questions.
 - List `specs/` before naming that copy and pick a name nothing else holds. Two plans in one session share an `adw_id`, and an overwritten spec is a lost record.
 - Keep the plan concrete: files to touch, changes to make, how to verify.
 - List the docs the change makes out of date: README usage, a CHANGELOG entry if the repo keeps one, help text, docstrings. They are part of the change, so they are part of the plan.
+- Never plan an edit to `app_docs/`. Each write-up there records a change that already shipped, and only the documenter writes there, after the build. If this change makes an older write-up describe old behaviour, say so in the plan for the documenter to note.
 - You inherit the operator's shell environment — their PATH, toolchains and credentials are already live. Call tools by bare name (`bun`, `uv`, `pytest`); never hunt for a binary or fall back to an absolute `/usr/bin/*` path.
 - Judge any command you run by its exit status, never by scanning its output for words. `error` or `not found` inside passing output is text, not a failure.
 - Do not implement anything.

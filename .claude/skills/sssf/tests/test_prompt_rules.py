@@ -53,3 +53,20 @@ def test_builder_leaves_the_spec_and_records_alone():
     text = system("builder")
     assert "The spec in `specs/` is read-only" in text
     assert "never on `specs/` or `app_docs/`" in text
+
+
+# The write-ups in app_docs/ are the record of changes already shipped. In
+# yt-summarizer's run 1f8b7211 the planner told the builder to edit an older
+# one, the builder declined because app_docs/ is the documenter's, and the
+# reviewer blocked twice on it. Every agent has to agree on who owns them.
+
+def test_the_planner_never_plans_an_app_docs_edit():
+    assert "Never plan an edit to `app_docs/`" in system("planner")
+
+
+def test_the_reviewer_never_blocks_on_app_docs():
+    assert "An older write-up in `app_docs/` is never blocking" in system("reviewer")
+
+
+def test_the_documenter_names_what_its_write_up_supersedes():
+    assert "supersedes" in system("documenter")

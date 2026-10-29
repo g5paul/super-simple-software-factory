@@ -320,14 +320,14 @@ uv run adws/adw_*.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_con
 | `adw_scout` | engineer to scout | read-only recon, nothing changes |
 | `adw_plan` | engineer to planner | you want the spec before any code |
 | `adw_build` | engineer to builder | the plan already exists |
-| `adw_quality` | engineer to code(quality) | lint, typecheck, build, no agents at all |
+| `adw_quality` | engineer to code(quality) | lint, format, typecheck, build, no agents at all |
 | `adw_plan_build` | planner, builder, git(commit) | small, well-understood work |
 | `adw_build_test` | builder, code(test), bounded fix loop | there is a suite to satisfy |
 | `adw_build_review` | builder, reviewer, bounded revise loop | "is this what was asked for" matters more than "does it run" |
 | `adw_plan_build_test` | plan, build, code(test), git(commit) | the standard chain |
-| `adw_plan_build_test_quality` | same, plus lint/typecheck/build gates | the repo has quality commands worth enforcing |
+| `adw_plan_build_test_quality` | same, plus lint/format/typecheck/build gates | the repo has quality commands worth enforcing |
 | `adw_document` | code(git diff), documenter | write up what just shipped |
-| `adw_simple_sdlc` | plan, build, test, review, document | the work is real and its shape is not obvious |
+| `adw_simple_sdlc` | plan, build, verify (tests plus every quality check), review, document | the work is real and its shape is not obvious |
 
 `adw_simple_sdlc` lands three commits from three authors. The plan, the code, and the write-up each get their own, and each message is the words of the agent that produced it.
 

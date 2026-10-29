@@ -155,6 +155,15 @@ def lint(run) -> QualityCheckResult:
     ), run)
 
 
+def format(run) -> QualityCheckResult:
+    return _run(QualityCheckSpec(
+        name="format",
+        area="backend",
+        operation="format",
+        argv=_placeholder("format"),      # e.g. ["uv", "run", "ruff", "format", "--check", "src"]
+    ), run)
+
+
 def typecheck(run) -> QualityCheckResult:
     return _run(QualityCheckSpec(
         name="typecheck",
@@ -221,6 +230,7 @@ def run_quality(run) -> QualityResult:
     blocks: list[Callable] = [
         test,
         lint,
+        format,
         typecheck,
         build,
     ]

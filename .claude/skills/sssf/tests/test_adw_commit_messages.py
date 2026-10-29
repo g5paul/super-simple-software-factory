@@ -84,8 +84,13 @@ def run_adw(module: str) -> int:
     return adw.main("add slugify")
 
 
+def no_tests_only(_run):
+    raise AssertionError("adw_simple_sdlc must run every quality block, not run_tests() alone")
+
+
 def test_simple_sdlc_after_a_fix(repo, monkeypatch):
-    monkeypatch.setattr(quality, "run_tests", suite(False, True))
+    monkeypatch.setattr(quality, "run_quality", suite(False, True))
+    monkeypatch.setattr(quality, "run_tests", no_tests_only)
     monkeypatch.setattr(agents, "execute", _always_approve(fake_execute))
     assert run_adw("adw_simple_sdlc") == 0
     assert FEATURE in subjects()
@@ -93,7 +98,8 @@ def test_simple_sdlc_after_a_fix(repo, monkeypatch):
 
 
 def test_simple_sdlc_after_a_revision(repo, monkeypatch):
-    monkeypatch.setattr(quality, "run_tests", suite(True, True))
+    monkeypatch.setattr(quality, "run_quality", suite(True, True))
+    monkeypatch.setattr(quality, "run_tests", no_tests_only)
     assert run_adw("adw_simple_sdlc") == 0
     assert FEATURE in subjects()
     assert REPAIR not in subjects()
@@ -119,3 +125,24 @@ def _always_approve(execute):
             return ReviewOutput(status="success", summary="ok", approved=True)
         return execute(run, phase, call)
     return wrapped
+
+
+def test_simple_sdlc_sends_a_lint_failure_to_the_builder(repo, monkeypatch):
+    # The chain must check what CI checks. A failing lint or format block is a
+    # failure like a red test: the builder gets the output and repairs it.
+    calls = []
+
+    def lint_fails_once(_run):
+        calls.append(1)
+        passed = len(calls) > 1
+        return QualityResult(passed=passed,
+                             failures=[] if passed else ["lint: `ruff check` exited 1\nE501"])
+    seen = []
+
+    def execute(run, phase, call):
+        seen.append(phase.params.name)
+        return fake_execute(run, phase, call)
+    monkeypatch.setattr(quality, "run_quality", lint_fails_once)
+    monkeypatch.setattr(agents, "execute", _always_approve(execute))
+    assert run_adw("adw_simple_sdlc") == 0
+    assert "fix_1" in seen

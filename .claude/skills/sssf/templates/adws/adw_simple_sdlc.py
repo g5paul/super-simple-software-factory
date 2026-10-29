@@ -8,9 +8,9 @@ Usage:
     uv run adws/adw_simple_sdlc.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
 
 Phases: engineer(request) -> planner -> git(commit_plan)
-        -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
+        -> builder -> code(verify) [-> builder(fix) -> code(verify) ... bounded]
         -> reviewer [-> builder(revise) -> reviewer ... bounded]
-        -> code(retest, only if a revision changed code)
+        -> code(reverify, only if a revision changed code)
         -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
 
 Three commits, three work products, three authors. The plan, the code, and the
@@ -23,6 +23,10 @@ Testing is CODE, not an agent. `bun test` is a command, not a judgement call:
 an agent rediscovering it every run costs a million tokens to learn what a
 subprocess already knows. Failures travel back to the builder as an envelope,
 so the repair loop is unchanged — only the runner became free and repeatable.
+
+Verify runs EVERY block in quality.py (test, lint, format, typecheck, build),
+not the suite alone. The chain should check what CI checks before anything
+is committed; a block a repo never wired up is a placeholder that passes.
 
 Two different questions still get asked, in order. The suite asks "does it
 run"; the reviewer asks "is this what was asked for", against `plan.md` — and
@@ -98,20 +102,21 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     test = None
     for i in range(1, MAX_FIX_LOOPS + 1):
-        with run.phase(PhaseParams(name=f"test_{i}", kind="code", owner="quality",
-                                   description="Run the suite — a known command, so code runs "
-                                               "it and no agent has to rediscover it")) as ph:
-            test = quality.run_tests(run)
+        with run.phase(PhaseParams(name=f"verify_{i}", kind="code", owner="quality",
+                                   description="Run the suite and every quality check — known "
+                                               "commands, so code runs them and no agent has "
+                                               "to rediscover them")) as ph:
+            test = quality.run_quality(run)
             record(ph, test)
 
         if test.passed:
             break
 
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
-                                   description="Repair what the suite reported, from its "
+                                   description="Repair what the checks reported, from their "
                                                "verbatim output")) as ph:
             build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                                      previous=quality.as_envelope(test, "tests"),
+                                      previous=quality.as_envelope(test, "checks"),
                                       gates=[gates.diff_matches_claims]))
 
     review = None
@@ -131,13 +136,13 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                       gates=[gates.diff_matches_claims]))
             revised = True
 
-    # A revision edited code after the suite last ran, so the green light is
-    # stale. Re-run it rather than commit on a result that predates the change.
+    # A revision edited code after the checks last ran, so the green light is
+    # stale. Re-run them rather than commit on a result that predates the change.
     if revised and review is not None and review.approved:
-        with run.phase(PhaseParams(name="retest", kind="code", owner="quality",
-                                   description="Re-run the suite — the revision changed code "
+        with run.phase(PhaseParams(name="reverify", kind="code", owner="quality",
+                                   description="Re-run every check — the revision changed code "
                                                "after the last green result")) as ph:
-            test = quality.run_tests(run)
+            test = quality.run_quality(run)
             record(ph, test)
 
     # Red tests or a rejected review stop the chain here: the code stays

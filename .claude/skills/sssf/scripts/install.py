@@ -6,7 +6,7 @@
 
 Usage:
     uv run <skill>/scripts/install.py [--force] [--coding-agent pi|claude_code]
-    uv run <skill>/scripts/install.py --update [--take PATH ...]
+    uv run <skill>/scripts/install.py --update [--take PATH ...] [--keep PATH ...]
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
 (4 starter agents), adws/adw_sssf_config/sssf.config.yaml, .env.sample,
@@ -16,7 +16,9 @@ Existing files are skipped unless --force.
 Every stamped file's hash goes into adws/adw_sssf_config/stamp.json.
 --update uses it to bring the repo up to this skill's version: a file that
 still matches its record is replaced, a file the repo changed is kept and
-listed, a missing file is added. --take PATH replaces a kept file anyway.
+listed, a missing file is added. --take PATH replaces a kept file anyway;
+--keep PATH records that you reviewed it, so it stays quiet until the
+skill's version of it changes again.
 """
 
 import argparse
@@ -145,7 +147,7 @@ def install(root: Path, roster: Path, force: bool) -> int:
     return 0
 
 
-def update(root: Path, default_roster: Path, take: set[str]) -> int:
+def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> int:
     if not (root / "adws" / "adw_modules").is_dir():
         print(f"no SSSF install in {root}: run install.py first", file=sys.stderr)
         return 1
@@ -161,12 +163,15 @@ def update(root: Path, default_roster: Path, take: set[str]) -> int:
         roster = default_roster
 
     pairs = targets(root, roster)
-    unknown = take - {dest.relative_to(root).as_posix() for _, dest in pairs}
+    unknown = (take | keep) - {dest.relative_to(root).as_posix() for _, dest in pairs}
     if unknown:
-        print(f"--take: not a stamped file: {', '.join(sorted(unknown))}", file=sys.stderr)
+        print(f"not a stamped file: {', '.join(sorted(unknown))}", file=sys.stderr)
+        return 1
+    if take & keep:
+        print(f"both --take and --keep: {', '.join(sorted(take & keep))}", file=sys.stderr)
         return 1
 
-    added, updated, kept, current = [], [], [], 0
+    added, updated, review, reviewed, customized, current = [], [], [], [], 0, 0
     for src, dest in pairs:
         rel = dest.relative_to(root).as_posix()
         entry = {"source": src.relative_to(TEMPLATES).as_posix(), "sha256": sha256(src)}
@@ -176,17 +181,25 @@ def update(root: Path, default_roster: Path, take: set[str]) -> int:
             added.append(rel)
         elif sha256(dest) == entry["sha256"]:
             current += 1
-        elif (rel in take
-              or (base and base["sha256"] == sha256(dest))
-              or (base is None and is_sssf_code(rel))):
-            # Unchanged since the last stamp, or SSSF's own code in a repo
-            # stamped before stamp.json existed, or the user asked for it.
+        elif rel in take or (base and base["sha256"] == sha256(dest)):
+            # Unchanged since the last stamp, or the user asked for it.
             copy(src, dest)
             updated.append(rel)
+        elif base is None and is_sssf_code(rel):
+            copy(src, dest)
+            updated.append(f"{rel}  (SSSF code, no stamp record yet)")
+        elif rel in keep:
+            # Reviewed: the repo's version stays, measured against this template.
+            reviewed.append(rel)
+        elif base and base["sha256"] == entry["sha256"]:
+            # Changed in this repo, but the skill's version has not moved since
+            # the stamp, so there is nothing new to merge. quality.py lives here.
+            customized += 1
+            continue
         else:
-            # Changed in this repo, or no record to prove otherwise. Keep it,
-            # and keep its old record so the next update still knows the base.
-            kept.append((rel, src))
+            # Changed in this repo, and the skill's version moved (or was never
+            # recorded). Keep the old record so the next update still knows the base.
+            review.append((rel, src))
             continue
         files[rel] = entry
     save_stamp(root, record)
@@ -204,12 +217,19 @@ def update(root: Path, default_roster: Path, take: set[str]) -> int:
     for rel in added:
         print(f"    + {rel}")
     print(f"  up to date: {current}")
-    print(f"  kept: {len(kept)} (changed in this repo, or never recorded)")
-    for rel, src in kept:
+    print(f"  customized: {customized} (changed in this repo; nothing new in the skill's version)")
+    if reviewed:
+        print(f"  kept as reviewed: {len(reviewed)}")
+        for rel in reviewed:
+            print(f"    = {rel}")
+    print(f"  to review: {len(review)} (changed in this repo, and the skill's version is "
+          "newer or was never recorded)")
+    for rel, src in review:
         print(f"    ! {rel}")
         print(f"        compare: diff {src} {rel}")
-    if kept:
-        print("  to replace a kept file with the skill's version: --update --take <path>")
+    if review:
+        print("  for each: --take <path> to use the skill's version, "
+              "or --keep <path> to keep yours")
     for line in gitignore:
         print(f"  + {line}")
     if gone:
@@ -228,16 +248,19 @@ def main() -> int:
                            "keeping files the repo changed")
     parser.add_argument("--take", action="append", default=[], metavar="PATH",
                         help="with --update: replace this kept file anyway (repeatable)")
+    parser.add_argument("--keep", action="append", default=[], metavar="PATH",
+                        help="with --update: keep this file and mark it reviewed (repeatable)")
     parser.add_argument("--coding-agent", choices=sorted(ROSTERS), default="pi",
                         help="which starter roster to stamp (default: pi)")
     args = parser.parse_args()
-    if args.take and not args.update:
-        parser.error("--take needs --update")
+    if (args.take or args.keep) and not args.update:
+        parser.error("--take and --keep need --update")
 
     root = Path.cwd()
     if args.update:
         return update(root, ROSTERS[args.coding_agent],
-                      {Path(p).as_posix() for p in args.take})
+                      {Path(p).as_posix() for p in args.take},
+                      {Path(p).as_posix() for p in args.keep})
 
     code = install(root, ROSTERS[args.coding_agent], args.force)
     print("\nnext steps:")

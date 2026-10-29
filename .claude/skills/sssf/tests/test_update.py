@@ -76,13 +76,46 @@ def test_update_replaces_an_untouched_file(repo):
     assert f"~ {REVIEWER}" in out
 
 
-def test_update_keeps_a_file_the_repo_changed(repo):
+def customize_quality() -> None:
     QUALITY.write_text(QUALITY.read_text().replace('_placeholder("test")', '["make", "test"]'))
+
+
+def test_update_keeps_a_file_the_repo_changed(repo):
+    customize_quality()
     CONFIG.write_text(CONFIG.read_text() + "\n# tuned\n")
-    out = install("--update").stdout
+    install("--update")
     assert '["make", "test"]' in QUALITY.read_text()
     assert CONFIG.read_text().endswith("# tuned\n")
-    assert f"! {QUALITY}" in out and f"! {CONFIG}" in out
+
+
+def test_a_changed_file_is_quiet_while_the_skill_version_is_the_same(repo):
+    # The repo is meant to edit quality.py. With nothing new in the skill's
+    # version there is nothing to review, so it must not be flagged.
+    customize_quality()
+    out = install("--update").stdout
+    assert f"! {QUALITY}" not in out
+    assert "customized: 1" in out
+
+
+def test_a_changed_file_is_flagged_when_the_skill_version_moved(repo):
+    customize_quality()
+    record = stamp()
+    record["files"][str(QUALITY)]["sha256"] = "0" * 64      # stamped from an older template
+    STAMP.write_text(json.dumps(record))
+    out = install("--update").stdout
+    assert f"! {QUALITY}" in out
+    assert '["make", "test"]' in QUALITY.read_text()
+
+
+def test_keep_records_a_reviewed_file_so_it_goes_quiet(repo):
+    customize_quality()
+    record = stamp()
+    record["files"][str(QUALITY)]["sha256"] = "0" * 64
+    STAMP.write_text(json.dumps(record))
+    install("--update", "--keep", str(QUALITY))
+    assert '["make", "test"]' in QUALITY.read_text()
+    out = install("--update").stdout
+    assert f"! {QUALITY}" not in out
 
 
 def test_update_adds_a_missing_file(repo):
@@ -123,8 +156,16 @@ def old_repo(repo):
 
 
 def test_old_repo_gets_sssf_code_replaced(old_repo):
-    install("--update")
+    out = install("--update").stdout
     assert AGENTS.read_text() == (TEMPLATES / "adws/adw_modules/agents.py").read_text()
+    assert f"~ {AGENTS}  (SSSF code, no stamp record yet)" in out
+
+
+def test_keep_ends_the_flag_for_an_unrecorded_file(old_repo):
+    install("--update", "--keep", str(QUALITY))
+    out = install("--update").stdout
+    assert f"! {QUALITY}" not in out
+    assert '["make", "test"]' in QUALITY.read_text()
 
 
 def test_old_repo_keeps_quality_and_prompts(old_repo):

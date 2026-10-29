@@ -55,11 +55,15 @@ uv run .claude/skills/sssf/scripts/install.py --update
 | is missing | adds it (`+`) |
 | already matches the skill | leaves it (`up to date`) |
 | still matches its recorded hash, so the repo never changed it | replaces it (`~`) |
-| differs from its recorded hash, so the repo changed it | keeps it and lists it (`!`), with a `diff` command to compare |
+| differs from its recorded hash, but the skill's version has not changed since | keeps it quietly (`customized`). `quality.py` is the usual case: the repo is meant to edit it |
+| differs from its recorded hash, and the skill's version has changed since | keeps it and flags it for review (`!`), with a `diff` command to compare |
 
-So a tuned roster, the real commands in `quality.py`, and edited prompts survive an update. To take the skill's version of a kept file anyway, add `--take <path>` (repeatable).
+So a tuned roster, the real commands in `quality.py`, and edited prompts survive an update, and `!` appears only when the skill has something new for a file the repo changed. For each `!` file, choose one (both are repeatable):
 
-A repo installed before `stamp.json` existed has no record. Its first update replaces SSSF's own code (`adws/adw_modules/` except `quality.py`, and the starter `adw_*.py`), because a repo is not meant to edit it. It keeps every other file that differs, prompts included, because it cannot tell an edit from an older template. Check each listed file with the printed `diff` command and `--take` the ones you never changed. After that first update, the record exists and later updates need no checks.
+- `--take <path>` replaces the repo's version with the skill's.
+- `--keep <path>` keeps the repo's version and records it as reviewed. It stays quiet until the skill's version changes again.
+
+A repo installed before `stamp.json` existed has no record. Its first update replaces SSSF's own code (`adws/adw_modules/` except `quality.py`, and the starter `adw_*.py`), because a repo is not meant to edit it. It keeps every other file that differs, prompts included, because it cannot tell an edit from an older template. The output marks those replacements `(SSSF code, no stamp record yet)`. Check each `!` file with the printed `diff` command: `--take` the ones you never changed, and `--keep` the ones you did, such as `quality.py`. After that, each file has a record, and `!` means the skill changed something you also changed.
 
 ## Post-install checklist
 

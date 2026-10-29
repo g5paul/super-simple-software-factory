@@ -98,17 +98,24 @@ def _interface(agent: AgentConfig):
 
 # ── execution ────────────────────────────────────────────────────────────────
 
+def prompt_variables(run, phase: Phase, call: AgentCall) -> dict[str, str]:
+    """The {{placeholders}} every prompt can use. phase_name tells a repeated
+    phase (review_1, review_2) which round it is, so it can name its files."""
+    return {
+        "prompt": call.prompt,
+        "previous_envelope": call.previous.model_dump_json(indent=2) if call.previous else "(none)",
+        "context_handoff_dir": str(run.context_handoff_dir),
+        "phase_name": phase.params.name,
+    }
+
+
 def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     """One agent call: render prompts -> coding agent run -> typed parse -> gates -> envelope."""
     agent = resolve(run.cfg, phase.params.owner)
     agent_dir = run.session_dir / agent.name
     agent_dir.mkdir(parents=True, exist_ok=True)
 
-    variables = {
-        "prompt": call.prompt,
-        "previous_envelope": call.previous.model_dump_json(indent=2) if call.previous else "(none)",
-        "context_handoff_dir": str(run.context_handoff_dir),
-    }
+    variables = prompt_variables(run, phase, call)
     system_text = prompts.render(agent.prompt_engineering.system, variables)
     user_text = prompts.render(agent.prompt_engineering.user, variables)
     prompts.save(agent_dir / "prompts", "system.md", system_text)

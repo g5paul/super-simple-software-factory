@@ -86,6 +86,7 @@ There is no separate continue call to make. `agent_pi.run()` passes `--session-i
 | `{{prompt}}` | the engineer's ask (or the ADW's per-call prompt) |
 | `{{previous_envelope}}` | the upstream envelope JSON, from `AgentCall(previous=...)` |
 | `{{context_handoff_dir}}` | absolute path to this session's `context_handoff/` |
+| `{{phase_name}}` | the phase's name, e.g. `review_2`. A phase that repeats uses it to name its files, so a later round does not overwrite an earlier one. |
 
 A `user.md` declares one h3 per incoming datum, then the task, then the output contract:
 

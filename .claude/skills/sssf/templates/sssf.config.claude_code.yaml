@@ -30,6 +30,7 @@ defaults:
     # names specs/ in its writes, may change it.
     - specs/
   rate_limit_stop: 0.8                 # stop before an agent starts once the account's 5-hour or 7-day usage window is this full; null = off
+  max_run_cost: 5.00                   # stop before any send once the run has spent this many estimated dollars; null = off
   data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 
 observability:
@@ -39,6 +40,7 @@ observability:
 agents:
   - name: planner
     model: anthropic/claude-opus-5-5   # the plan sets the ceiling for everything after it
+    max_call_cost: 2.00                # one call stops itself here (claude --max-budget-usd); about twice the most one has cost
     thinking: high
     color: "#a78bfa"
     purpose: Turn a request into a plan the builder can implement without asking questions.
@@ -55,6 +57,7 @@ agents:
       - write
 
   - name: builder
+    max_call_cost: 1.50
     color: "#22d3ee"
     purpose: Implement the plan exactly; report every changed file in the envelope.
     prompt_engineering:
@@ -72,6 +75,7 @@ agents:
 
   - name: scout
     model: anthropic/claude-haiku-5-5  # search and report; speed over depth
+    max_call_cost: 0.10
     color: "#fbbf24"
     purpose: Find and report where things live; change nothing.
     prompt_engineering:
@@ -87,6 +91,7 @@ agents:
 
   - name: reviewer
     model: anthropic/claude-opus-5-5   # a different model from the builder, so it does not share its blind spots
+    max_call_cost: 1.00
     thinking: high
     color: "#fb7185"
     purpose: Confirm that what was built is what was asked for; change nothing.
@@ -103,6 +108,7 @@ agents:
 
   - name: documenter
     model: anthropic/claude-haiku-5-5
+    max_call_cost: 0.25
     color: "#e879f9"
     purpose: Write up the change that was just made, from the diff; document only.
     prompt_engineering:

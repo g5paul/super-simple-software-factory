@@ -51,6 +51,8 @@ agents:
 | `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`: the same entry, or a path inside a protected directory. A broad glob such as `**/*.md` does not count. Default: `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py` — an agent must not be able to edit the machinery that decides whether its work passed — and `specs/`, which is on record once `commit_plan` lands. |
 | `data_dir` | path | Runtime home. Sessions land at `{data_dir}/sessions/{adw_id}/{agent_name}/`. Default `adws/adw_data`. |
 | `rate_limit_stop` | fraction or `null` | Claude Code agents only. Before an agent starts, SSSF reads the account's last reported usage and stops the run if the 5-hour or 7-day window is at or over this fraction, with the time the window resets. Default `0.8`. `null` turns the check off. Each `claude` send records the report in `rate_limits.json` beside the project registry, so every repo sees the same account, and `just obs-all` shows it. Interactive sessions don't write a report, so the sample is as fresh as the last SSSF send. |
+| `max_run_cost` | dollars or `null` | Before every send, retries and corrections included, SSSF compares what the run has spent with this cap and stops the run at or over it. Spend comes from the coding agent's own cost reports, at list prices, so on a subscription login it's an estimate of usage, not a bill. A run can go over by one call. The stop is recorded as `budget_stop`, and the message says how to look at, keep, or drop any uncommitted work. Default `5.0`. `null` turns it off. |
+| `max_call_cost` | dollars or `null` | The roster-wide default for each agent's `max_call_cost`. Default `null`. |
 
 ### `observability`
 
@@ -71,6 +73,7 @@ agents:
 | `coding_agent`, `model`, `thinking`, `color`, `harness_engineering` | no | Override the corresponding `defaults` key. |
 | `tools` | no | Allowlist. **Omitting the key means all tools usable.** A capability list, not a boundary — see `writes`. |
 | `writes` | no | What this agent may modify **in the repo**, enforced after every call. Omitted = unrestricted (still barred from `protected_files`). `[]` = no repo writes at all. A list = only those paths: a trailing `/` is a directory prefix, `*` matches within one path segment, `**` crosses segments, anything else is an exact path. Naming a `protected_files` path here is what unlocks it. **The session runtime under `data_dir` is always writable** — `writes: []` means read-only with respect to the repo, not unable to write its own report. |
+| `max_call_cost` | no | Claude Code only. The most one call may spend, in estimated dollars, passed to `claude -p --max-budget-usd`. Claude Code counts it per call, even on a resumed session, and checks it after each API request. A call that hits it stops the run with no retry, recorded as `call_budget_stop`, and its spend still counts toward `max_run_cost`. A call that keeps hitting it is doing too much: split the task. |
 
 Output types are deliberately absent: config defines who an agent *is*; the ADW call site defines how it's *used*. One agent serves many calls — same system prompt, different user prompt + output type per call.
 

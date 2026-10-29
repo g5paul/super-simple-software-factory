@@ -27,7 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import account
+from . import account, budget
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import operator_env
@@ -141,6 +141,8 @@ def _command(request: AgentRequest, resume: bool) -> list[str]:
     tools = map_tools(request.tools)
     if tools is not None:
         cmd += ["--tools", ",".join(tools)]
+    if request.max_cost is not None:
+        cmd += ["--max-budget-usd", str(request.max_cost)]
     return cmd
 
 
@@ -243,6 +245,12 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     entry = models.get(model_id(request.model)) or max(
         models.values(), key=lambda m: m.get("contextWindow") or 0, default={})
     result.context_window = int(entry.get("contextWindow") or 0)
+    if final.get("subtype") == "error_max_budget_usd":
+        # Not a crash: the call ended itself at its cap. It is never retried,
+        # and what it spent still counts, so the result travels with it.
+        raise budget.CallBudgetStop(
+            f"the call reached its max_call_cost: {'; '.join(final.get('errors') or [])}.",
+            result=result)
     if final.get("is_error"):
         raise RuntimeError(f"claude ended {final.get('subtype')!r}: "
                            f"{str(final.get('result') or stderr.strip())[-800:]}")

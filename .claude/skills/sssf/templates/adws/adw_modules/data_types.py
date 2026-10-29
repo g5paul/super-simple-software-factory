@@ -320,6 +320,10 @@ class AgentConfig(BaseModel):
     #   [...] -> only these. A trailing "/" means a directory prefix; a "*"
     #            makes it a glob; anything else is an exact path.
     writes: Optional[list[str]] = None
+    # Claude Code only: the most one call may spend, in estimated dollars,
+    # passed to `claude -p --max-budget-usd` (see adw_modules/budget.py).
+    # None = no cap on the call; the run's max_run_cost still applies.
+    max_call_cost: Optional[float] = None
 
 
 class ConfigDefaults(BaseModel):
@@ -341,6 +345,10 @@ class ConfigDefaults(BaseModel):
     # 5-hour or 7-day usage window is at or over this fraction (see
     # adw_modules/account.py). None turns the check off.
     rate_limit_stop: Optional[float] = 0.8
+    # Stop before any send once the run has spent this much, in estimated
+    # dollars from the coding agent's own cost reports. None = no cap.
+    max_run_cost: Optional[float] = 5.0
+    max_call_cost: Optional[float] = None    # roster-wide default for agents
 
 
 class ObservabilityConfig(BaseModel):
@@ -388,6 +396,7 @@ class AgentRequest(BaseModel):
     tools: Optional[list[str]] = None
     extensions: list[str] = Field(default_factory=list)
     cwd: str = "."                  # set from run.repo_root — the codebase root agents work in
+    max_cost: Optional[float] = None  # claude: --max-budget-usd for this call
 
 
 class UsageBreakdown(BaseModel):

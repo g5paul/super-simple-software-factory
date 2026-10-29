@@ -293,6 +293,8 @@ Above the projects, a panel shows the Claude account they all share. It has two 
 
 Before each Claude Code agent starts, SSSF checks the same reading. If either window is at or over `defaults.rate_limit_stop` (default 0.8), the run stops, with the time the window resets. That beats a run that dies halfway through a phase. See `references/config.md`.
 
+Two cost caps stop a run that's spending too much, which matters most when nobody is watching it. `defaults.max_run_cost` (default $5) is checked before every send. Each agent's `max_call_cost` goes to `claude -p --max-budget-usd`, so a runaway call ends itself. The starter roster sets each one at about twice the most that agent has cost so far. Neither cap retries, and neither discards work: if the tree holds uncommitted changes, the stop message prints how to look at them, keep them, or drop them.
+
 A repo on another machine is not in this registry. Run `just obs` there, and reach it through an SSH tunnel: `ssh -L 4600:localhost:4600 host`.
 
 ---

@@ -48,7 +48,7 @@ agents:
 | `color` | hex string | Lane color for every agent that does not set its own. Default empty — the visualizer falls back to its own palette. |
 | `harness_engineering` | list[string] | Pi extension paths. Rejected on a `claude_code` agent. |
 | `tools` | list[string] | Roster-wide tool allowlist. Every agent that omits its own `tools` inherits this. Unset = all tools usable. |
-| `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`. Default: `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py` — an agent must not be able to edit the machinery that decides whether its work passed. |
+| `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`: the same entry, or a path inside a protected directory. A broad glob such as `**/*.md` does not count. Default: `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py` — an agent must not be able to edit the machinery that decides whether its work passed — and `specs/`, which is on record once `commit_plan` lands. |
 | `data_dir` | path | Runtime home. Sessions land at `{data_dir}/sessions/{adw_id}/{agent_name}/`. Default `adws/adw_data`. |
 
 ### `observability`
@@ -153,17 +153,25 @@ redo; a write has already happened, so re-prompting fixes nothing. Instead:
 
 ```yaml
 defaults:
-  protected_files: [adws/adw_modules/, adws/adw_sssf_config/, "adws/adw_*.py"]
+  protected_files: [adws/adw_modules/, adws/adw_sssf_config/, "adws/adw_*.py", specs/]
 
 agents:
   - name: builder      # no `writes` key -> unrestricted, minus protected_files
   - name: scout
     writes: []         # no repo writes; its findings still land in context_handoff/
   - name: planner
-    writes: [specs/]
+    writes: [specs/]   # names the protected specs/, so it may write there
   - name: documenter
-    writes: [app_docs/, docs/, "**/*.md", "*.md"]
+    writes: [app_docs/, docs/, "**/*.md", "*.md"]   # any Markdown, except specs/
 ```
+
+**Only naming a protected path unlocks it.** The planner's `specs/` names the
+protected `specs/`, so the planner may write there. The documenter's `**/*.md`
+matches every spec too, but a broad glob does not name a protected path, so the
+documenter may not change one. That keeps a spec as `commit_plan` recorded it:
+in one real run, the builder's repo-wide `ruff format .` rewrote the Python
+examples inside a committed spec, and `git add -A` carried the change into the
+code commit.
 
 **The session runtime under `data_dir` is always writable, for every agent.**
 `context_handoff/` is how agents hand work to each other, and each agent's

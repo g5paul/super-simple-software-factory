@@ -95,3 +95,31 @@ def test_install_says_to_exclude_sssf_from_the_projects_tools(repo):
     # project owns those configs, so the installer only says what to do.
     out = script("install.py").stdout
     assert "exclude adws/ and .claude/" in out
+
+
+@pytest.mark.parametrize("roster", ["sssf.config.yaml", "sssf.config.claude_code.yaml"])
+def test_only_the_planner_may_change_a_spec(roster):
+    # commit_plan puts the spec on record before any code exists. A later edit,
+    # even a formatter's, would land in the code commit under `git add -A`.
+    from adw_modules import permissions
+    cfg = agents.load_config(str(SKILL / "templates" / roster))
+    spec = "specs/abc123_feature.md"
+    by_name = {agent.name: agent for agent in cfg.agents}
+    assert permissions.permitted(spec, by_name["planner"], cfg)
+    for name in ("builder", "documenter", "reviewer", "scout"):
+        assert not permissions.permitted(spec, by_name[name], cfg), name
+
+
+def test_a_broad_glob_does_not_unlock_a_protected_path():
+    from adw_modules import permissions
+    from adw_modules.data_types import AgentConfig
+    cfg = agents.load_config(str(SKILL / "templates" / "sssf.config.claude_code.yaml"))
+    documenter = next(agent for agent in cfg.agents if agent.name == "documenter")
+    assert permissions.permitted("README.md", documenter, cfg)
+    assert permissions.permitted("app_docs/abc123_feature.md", documenter, cfg)
+    assert not permissions.permitted("specs/abc123_feature.md", documenter, cfg)
+    # A path inside a protected directory names it, so it still unlocks.
+    narrow = documenter.model_copy(update={"writes": ["specs/notes/"]})
+    assert isinstance(narrow, AgentConfig)
+    assert permissions.permitted("specs/notes/x.md", narrow, cfg)
+    assert not permissions.permitted("specs/abc123_feature.md", narrow, cfg)

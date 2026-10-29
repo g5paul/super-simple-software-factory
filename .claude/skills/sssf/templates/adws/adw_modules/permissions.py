@@ -124,14 +124,25 @@ def always_writable(cfg: SSSFConfig) -> list[str]:
     return [cfg.defaults.data_dir.rstrip("/") + "/"]
 
 
+def _names(entry: str, protected: str) -> bool:
+    """True when a `writes` entry names a protected path: the same pattern, or a
+    path inside a protected directory. A broad glob such as `**/*.md` matches
+    files there, but it does not name them, so it does not unlock them."""
+    return entry == protected or (protected.endswith("/") and entry.startswith(protected))
+
+
 def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
-    """Session runtime first, then the agent's own list, then what is protected."""
+    """Session runtime first, then what is protected, then the agent's own list."""
     if any(_matches(path, p) for p in always_writable(cfg)):
         return True
-    if any(_matches(path, p) for p in (agent.writes or [])):
-        return True                      # naming a path is what unlocks a protected one
-    if any(_matches(path, p) for p in cfg.defaults.protected_files):
-        return False
+    writes = agent.writes or []
+    guards = [p for p in cfg.defaults.protected_files if _matches(path, p)]
+    if guards:
+        # Naming a protected path is what unlocks it. The documenter's `**/*.md`
+        # reaches every Markdown file, but must not reach a spec on record.
+        return any(_matches(path, w) and _names(w, g) for w in writes for g in guards)
+    if any(_matches(path, w) for w in writes):
+        return True
     return agent.writes is None          # None = unrestricted, [] = no repo writes
 
 

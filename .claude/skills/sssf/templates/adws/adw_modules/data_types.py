@@ -331,9 +331,10 @@ class ConfigDefaults(BaseModel):
     tools: Optional[list[str]] = None    # roster-wide allowlist; None = all tools usable
     # Off-limits to every agent that has not named them in its own `writes`.
     # The factory's own code is the default: an agent must not be able to edit
-    # the machinery that decides whether its work passed.
+    # the machinery that decides whether its work passed. specs/ is on record
+    # once commit_plan lands, so only the planner, which names it, may change it.
     protected_files: list[str] = Field(default_factory=lambda: [
-        "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py",
+        "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py", "specs/",
     ])
     data_dir: str = "adws/adw_data"
 

@@ -26,6 +26,9 @@ defaults:
     - adws/adw_modules/
     - adws/adw_sssf_config/
     - adws/adw_*.py
+    # The spec is on record once commit_plan lands. Only the planner, which
+    # names specs/ in its writes, may change it.
+    - specs/
   data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 
 observability:

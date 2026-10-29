@@ -45,3 +45,11 @@ def test_subagent_sections_apply_only_with_the_tools():
     for agent in ("planner", "scout"):
         section = system(agent).split("## Subagents", 1)[1]
         assert "If your tools do not include `subagent_create`, skip this section" in section, agent
+
+
+def test_builder_leaves_the_spec_and_records_alone():
+    # Ruff 0.16 formats Python blocks inside Markdown. A builder that ran
+    # `ruff format .` rewrote a committed spec in a yt-summarizer run.
+    text = system("builder")
+    assert "The spec in `specs/` is read-only" in text
+    assert "never on `specs/` or `app_docs/`" in text

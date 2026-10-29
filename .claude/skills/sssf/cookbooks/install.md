@@ -40,8 +40,10 @@ Re-running is safe. `install.py` skips **every** file that already exists — yo
 When the skill changes, update each repo that uses it in two steps. Commit first, so the diff shows exactly what the update changed.
 
 ```bash
-# 1. refresh the repo's copy of the skill from its source
-rsync -a --delete --exclude apps/visualizer/node_modules \
+# 1. refresh the repo's copy of the skill from its source. The excludes keep
+#    each repo's own visualizer packages and built page, so a running
+#    `just obs` keeps working.
+rsync -a --delete --exclude apps/visualizer/node_modules --exclude apps/visualizer/dist \
   /path/to/super-simple-software-factory/.claude/skills/sssf/ .claude/skills/sssf/
 
 # 2. update the stamped files

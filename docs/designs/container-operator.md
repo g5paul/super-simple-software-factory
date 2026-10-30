@@ -43,11 +43,13 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 | 2026-10-30 | sssf-sandbox `exp/container-operator` | run 1d56f792 after the `CLAUDE_ENV_FILE` fix | success |
 | 2026-10-30 | hub | `--container` install option, fdbeb08 | shipped |
 | 2026-10-30 | sssf-sandbox `exp/container-option` | reinstalled through `--container`, existing token, run 888c6d27 | success, visible in the host trace and dashboard |
-| 2026-10-30 | yt-summarizer `sssf-run` | `--container` setup through the skill, aa2140b, quality 7f07c83d | set up; the engineer's first session is next |
+| 2026-10-30 | yt-summarizer `sssf-run` | `--container` setup through the skill, aa2140b, quality 7f07c83d | set up; token and login checks passed inside |
+| 2026-10-30 | yt-summarizer `sssf-run` | first real run from the container, 47caf9b9 (`--brief` option) | success after 3 failed test rounds: no C compiler to build `brotli`, and no tzdata, so named time zones fell back to UTC. The builder rewrote two existing tests to POSIX `TZ` strings to pass. Launch, host trace and dashboard, commit author, and file ownership were all right |
 
 ## Open
 
 - **First real use.** yt-summarizer is being set up now. What it gets wrong goes in the log before anything else is built on top.
 - **Branch per run and a merge back.** The next step toward what sandcastle does. Not designed yet. It needs a grilling session before any code: where the worktree lives, who merges, and what happens to a run that fails.
+- **The image is missing a C compiler and tzdata.** Run 47caf9b9 hit both. The template's Containerfile should install them, so a Python repo's dependencies build and its time zone tests see real zones.
 - **Gaps yt-summarizer's setup found.** `--container` on an installed repo prints every post-install step, when only the container lines apply. The docs don't say to keep `container/` out of package builds, the way `adws/` and `.claude/` are. The docs don't say whether a container session can push: it can't, because host git credentials aren't mounted, unless the remote URL carries a token.
 - **Sandbox branches.** `exp/container-operator` still holds the hand-made container and can go. The sandbox lives on `exp/container-option`, not `main`.

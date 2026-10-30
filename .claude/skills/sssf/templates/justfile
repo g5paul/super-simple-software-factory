@@ -114,6 +114,15 @@ sssf-update:
         echo "SSSF_SOURCE points at this repo's own copy; point it at the skill's source" >&2
         exit 1
     fi
+    # The source is a working tree, so it ships whatever branch it has checked
+    # out. pi-agent-observability once got a hub commit that was not merged yet.
+    if git -C "$src" rev-parse --verify -q main >/dev/null \
+        && ! git -C "$src" merge-base --is-ancestor HEAD main \
+        && [ -z "${SSSF_ALLOW_UNMERGED:-}" ]; then
+        echo "the skill source is on $(git -C "$src" branch --show-current || echo a detached HEAD), with commits not on its main;" >&2
+        echo "ask the hub to switch it back to main, or set SSSF_ALLOW_UNMERGED=1 to take them anyway" >&2
+        exit 1
+    fi
     if [ -n "$(git status --porcelain)" ]; then
         echo "commit or stash your changes first, so the update gets its own commit:" >&2
         git status --short >&2

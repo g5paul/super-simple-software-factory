@@ -42,8 +42,27 @@ def git(cwd: Path, *args: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def run_env(cwd: Path, env: dict, *args: str) -> subprocess.CompletedProcess:
+    base = {k: v for k, v in os.environ.items() if k != "SSSF_SOURCE"}
+    return subprocess.run(list(args), cwd=cwd, env={**base, **env}, capture_output=True, text=True, check=False)
+
+
 @pytest.fixture
-def repo(tmp_path):
+def source(tmp_path):
+    """The skill's source, as its own repo on main, so the tests do not depend
+    on which branch the real skill repo has checked out."""
+    root = tmp_path / "factory"
+    skill = root / ".claude/skills/sssf"
+    shutil.copytree(SKILL, skill,
+                    ignore=shutil.ignore_patterns("node_modules", "dist", "__pycache__", ".pytest_cache"))
+    git(root, "init", "-q", "-b", "main")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "skill")
+    return skill
+
+
+@pytest.fixture
+def repo(tmp_path, source):
     root = tmp_path / "shop"
     root.mkdir()
     git(root, "init", "-q")
@@ -52,7 +71,7 @@ def repo(tmp_path):
     result = run(root, sys.executable, ".claude/skills/sssf/scripts/install.py",
                  "--coding-agent", "claude_code")
     assert result.returncode == 0, result.stderr
-    (root / ".env").write_text(f"SSSF_SOURCE={SKILL}\n")
+    (root / ".env").write_text(f"SSSF_SOURCE={source}\n")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "install")
     return root
@@ -104,3 +123,17 @@ def test_update_refuses_while_a_chain_runs(repo):
     result = run(repo, "just", "sssf-update")
     assert result.returncode != 0
     assert "still running" in result.stderr
+
+
+def test_update_refuses_a_source_off_main(repo, source):
+    factory = source.parent.parent.parent
+    git(factory, "switch", "-qc", "fix/unmerged")
+    (source / "cookbooks/install.md").write_text("not merged yet\n")
+    git(factory, "commit", "-qam", "unmerged")
+    result = run(repo, "just", "sssf-update")
+    assert result.returncode != 0
+    assert "fix/unmerged" in result.stderr and "SSSF_ALLOW_UNMERGED" in result.stderr
+
+    result = run_env(repo, {"SSSF_ALLOW_UNMERGED": "1"}, "just", "sssf-update")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (repo / ".claude/skills/sssf/cookbooks/install.md").read_text() == "not merged yet\n"

@@ -49,7 +49,7 @@ just sssf-update
 
 If the repo's own justfile has `mod sssf 'sssf.just'`, SSSF's recipes run as a module, so every one takes the `sssf` prefix: `just sssf sssf-update`. The same goes for `just demo`, `just sessions`, and the rest. Check the justfile for the `mod sssf` line before running any of them.
 
-It refuses to start while the tree has uncommitted changes or a chain process is alive, so the update gets its own commit. The chain check reads this repo's own `processes` table in `adws/adw_data/sssf.db`, so a run in another repo does not block it, even though `pgrep` shows it. Then it does the two steps below, runs `--update` a second time to confirm nothing is left, and prints the skill commit it copied from. The steps by hand:
+It refuses to start while the tree has uncommitted changes or a chain process is alive, so the update gets its own commit. The chain check reads this repo's own `processes` table in `adws/adw_data/sssf.db`, so a run in another repo does not block it, even though `pgrep` shows it. It also refuses when the source is on a branch with commits that are not on the source's `main`, because it copies whatever the source has checked out. Ask the hub to switch the source back to `main`. `SSSF_ALLOW_UNMERGED=1` takes the branch anyway, for testing unmerged work in a test repo. Then it does the two steps below, runs `--update` a second time to confirm nothing is left, and prints the skill commit it copied from. The steps by hand:
 
 ```bash
 # 1. refresh the repo's copy of the skill from its source. The excludes keep
@@ -88,6 +88,19 @@ A repo installed before `stamp.json` existed has no record. Its first update rep
 3. Commit the update on its own: `git add -A && git commit -m "Update SSSF to skill <sha>"`, with the sha the update printed.
 4. Run `uv run adws/adw_quality.py "check after the SSSF update"`. A block reported as `not configured` is still on its placeholder, and checks nothing until you wire it in `quality.py`.
 5. Report the commit, the update's counts, anything flagged, and the quality result to the hub: the Claude session that works in the SSSF skill repo and sent the update ([onboard.md](onboard.md), "Two sessions"). With no hub session, report to the engineer.
+
+## Move a branch install to main
+
+SSSF belongs on `main` ([onboard.md](onboard.md), step 1). A repo that installed it on a branch moves it like this:
+
+1. List what the branch has that `main` lacks: `git log --oneline main..<branch>` and `git diff --stat main <branch>`.
+2. Pick the SSSF commits: the install, every "Update SSSF" commit, and every commit the install needs to pass on its own. That last group is easy to miss. `quality.py` runs the repo's own commands, and they can depend on files SSSF did not stamp: in pi-agent-observability, the typecheck block needed the repo's `tsconfig.json`, `package.json`, `bun.lock`, and the type fixes that made it pass.
+3. Ask the engineer about every other commit on the branch, such as features built there. They decide whether those go to `main` too.
+4. If `main` is an ancestor of the branch and every commit goes, fast-forward `main` to it. Otherwise cherry-pick the chosen commits onto `main`, oldest first.
+5. On `main`, check that `.claude/skills/sssf/SKILL.md` and `adws/adw_sssf_config/stamp.json` exist, that a `mod sssf` justfile still has its `mod` line, and run `uv run adws/adw_quality.py "check SSSF on main"`. Every block that passed on the branch must pass on `main`.
+6. Fix the repo's own docs that say SSSF lives on the branch. Whether to delete the branch is the engineer's call.
+
+A session that already has `/sssf` keeps it through the switch. New sessions get it on `main` and on every branch cut from it.
 
 ## Post-install checklist
 

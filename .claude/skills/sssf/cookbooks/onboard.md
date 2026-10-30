@@ -15,7 +15,7 @@ The project session never edits the skill's source. When SSSF gets something wro
 
 ## Before the session starts (the engineer)
 
-1. Clone or fork the repo. SSSF is installed and committed on `main`, so every branch and every session started in the repo has `/sssf`. ADWs run on feature branches cut from `main`, never on `main` itself. Install on a branch instead only when SSSF must stay off `main`, for example when `main` goes upstream to a repo that does not want it.
+1. Clone or fork the repo. SSSF is installed and committed on `main`, so every branch and every session started in the repo has `/sssf`. ADWs run on feature branches cut from `main`, never on `main` itself. Install on a branch instead only when SSSF must stay off `main`, for example when `main` goes upstream to a repo that does not want it. To move a branch install to `main` later, see [install.md](install.md), "Move a branch install to main".
 2. If the repo is public or a fork of a public repo, set a private commit email in it first: `git config user.email <login>@users.noreply.github.com`.
 3. Open a session in the repo and tell it: "Read `<skill source>/cookbooks/onboard.md` and onboard this repo. Report to the SSSF hub session."
 
@@ -48,6 +48,7 @@ The verify phase runs every block in `adws/adw_modules/quality.py`: test, lint, 
 1. Find the commands CI runs: `.github/workflows/`, a Makefile, `pyproject.toml`, or `package.json`.
 2. Put each one in its block as an argv list, with bare binary names. Point lint and format at the project's own paths (for example `yt_summarizer` and `tests`), not at `.`.
 3. Leave a block as its placeholder only when the project has no such check, and say so in `docs/sssf.md`.
+   If a block needs files the project did not have, such as a `tsconfig.json` added so typecheck can run, commit them with the onboarding and list them in `docs/sssf.md`. They are part of the install from then on, though SSSF does not stamp or update them.
 4. Run `uv run adws/adw_quality.py "check the tree"`. Every block must pass.
 5. Prove the checks can fail: break one thing on purpose (a test, or a line's formatting), run `adw_quality` again, see that block fail, then restore the file with `git checkout`.
 

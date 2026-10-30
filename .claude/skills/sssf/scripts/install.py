@@ -433,7 +433,16 @@ def main() -> int:
             parser.error("--container needs a Claude Code roster: the image has no Pi. "
                          "Install with --coding-agent claude_code")
 
+    adding = args.container and (root / STAMP).is_file()
     code = install(root, roster, args.force, args.container)
+    if adding:
+        # Added to a repo that is already set up: the rest of the steps were done.
+        print("\nnext steps (container only; the rest of the install is unchanged):")
+        print("  keep container/ out of package builds, as with adws/ and .claude/")
+        print("  claude setup-token, then save it as described in cookbooks/install.md;")
+        print("     skip this if ~/.config/sssf-container/token.env exists: every repo shares it")
+        print("  container/run.sh          # builds the image on first use, then starts claude")
+        return code
     # The recipes are `just demo` when SSSF's justfile is the repo's, and
     # `just sssf demo` when the repo's own justfile loads them as a module.
     j = "just sssf" if loads_module(root) else "just"
@@ -455,7 +464,9 @@ def main() -> int:
     print(f"  3. {j} sessions".ljust(27) + "# what just happened")
     print(f"  4. {j} obs".ljust(27) + "# the trace UI, needs bun")
     print(f"     {j} obs-all".ljust(27) + "# every repo SSSF is installed in, one dashboard")
-    print("  5. exclude adws/ and .claude/ from repo-wide lint, format, typecheck,")
+    dirs = ("adws/, .claude/ and container/" if (root / "container/run.sh").is_file()
+            else "adws/ and .claude/")
+    print(f"  5. exclude {dirs} from repo-wide lint, format, typecheck,")
     print("     and package builds (see cookbooks/install.md, post-install checklist)")
     if (root / "container/run.sh").is_file():
         print("  container: the operator session can run in Podman, with no permission prompts")

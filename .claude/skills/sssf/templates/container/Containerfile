@@ -7,8 +7,13 @@
 # with container/build.sh after a change.
 FROM docker.io/library/ubuntu:22.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl git sqlite3 python3 \
+# build-essential and python3-dev: a dependency with no wheel for this
+# platform compiles from source, and without a compiler every test run fails
+# before a test starts. tzdata: without it a named zone like Asia/Tokyo
+# silently falls back to UTC, and date tests fail in here but not on the host.
+# yt-summarizer's first container run (47caf9b9) hit both.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates curl git sqlite3 python3 python3-dev build-essential tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh

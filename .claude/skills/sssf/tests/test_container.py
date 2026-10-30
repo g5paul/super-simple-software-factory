@@ -76,3 +76,16 @@ def test_a_pi_roster_cannot_have_the_container(repo):
     result = install("--container", ok=False)
     assert "Claude Code roster" in result.stderr
     assert not Path("container").exists()
+
+
+def test_adding_it_to_an_installed_repo_prints_only_its_own_steps(repo):
+    install("--coding-agent", "claude_code")
+    out = install("--container").stdout
+    assert "container only" in out and "container/run.sh" in out
+    assert "just demo" not in out and ".env.sample" not in out
+
+
+def test_the_image_can_build_c_extensions_and_knows_time_zones():
+    text = (SKILL / "templates/container/Containerfile").read_text()
+    for package in ("build-essential", "python3-dev", "tzdata"):
+        assert package in text, package

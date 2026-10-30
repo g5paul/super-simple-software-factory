@@ -48,11 +48,11 @@ Ask the engineer one question here: should the operator session run in a contain
 The verify phase runs every block in `adws/adw_modules/quality.py`: test, lint, format, typecheck, and build. Each starts as a placeholder that passes, so until you fill them in, a run checks nothing.
 
 1. Find the commands CI runs: `.github/workflows/`, a Makefile, `pyproject.toml`, or `package.json`.
-2. Put each one in its block as an argv list, with bare binary names. Point lint and format at the project's own paths (for example `yt_summarizer` and `tests`), not at `.`.
+2. Put each one in its block as an argv list, with bare binary names. Point lint and format at the project's own paths (for example `yt_summarizer` and `tests`), not at `.`. Point the build's output at the block's `output_dir`, for example `uv build --out-dir <output_dir>`, so a run writes its build into the session folder and not the repo.
 3. Leave a block as its placeholder only when the project has no such check, and say so in `docs/sssf.md`.
    If a block needs files the project did not have, such as a `tsconfig.json` added so typecheck can run, commit them with the onboarding and list them in `docs/sssf.md`. They are part of the install from then on, though SSSF does not stamp or update them.
 4. Run `uv run adws/adw_quality.py "check the tree"`. Every block must pass.
-5. Prove the checks can fail: break one thing on purpose (a test, or a line's formatting), run `adw_quality` again, see that block fail, then restore the file with `git checkout`.
+5. Prove the checks can fail: break one thing on purpose (a test, or a line's formatting), run `adw_quality` again, see that block fail, then restore the file with `git checkout`. In a Python repo, breaking something `uv run` needs, such as the build backend, fails every block, since each one syncs the project first. That proves less: pick a break that only one block notices.
 
 ## 4. Keep SSSF out of the project's own tools
 

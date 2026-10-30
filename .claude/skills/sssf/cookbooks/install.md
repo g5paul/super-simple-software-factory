@@ -112,13 +112,15 @@ uv run .claude/skills/sssf/scripts/install.py --container                       
 
 | File | What it does |
 |---|---|
-| `container/Containerfile` | The image: Ubuntu, git, sqlite3, uv, just, Claude Code. **The repo's to edit**: add the tools `quality.py` runs, such as bun or node. An update keeps your edits, like `quality.py` |
+| `container/Containerfile` | The image: Ubuntu, git, sqlite3, uv, just, Claude Code, a C compiler with Python headers, and tzdata. **The repo's to edit**: add the tools `quality.py` runs, such as bun or node. An update keeps your edits, like `quality.py` |
 | `container/build.sh` | Builds the image as `localhost/sssf-operator-<repo>`. Run it again after editing the Containerfile |
 | `container/run.sh` | Starts the session. Builds the image on first use |
 
+Keep `container/` out of the repo's package builds, as with `adws/` and `.claude/`. A Python sdist includes it otherwise.
+
 The engineer sets it up once, in their own terminal:
 
-1. Make a token: `claude setup-token`. It opens a browser sign-in and prints a token that starts with `sk-ant-oat`. Save it without echoing it:
+1. Make a token, unless `~/.config/sssf-container/token.env` already exists. Every repo shares that file, and a token lasts about a year. To make one: `claude setup-token`. It opens a browser sign-in and prints a token that starts with `sk-ant-oat`. Save it without echoing it:
 
    ```bash
    mkdir -p ~/.config/sssf-container && chmod 700 ~/.config/sssf-container
@@ -130,6 +132,10 @@ The engineer sets it up once, in their own terminal:
 3. Check that the session's shells get the token: `! printenv | grep -c '^CLAUDE_CODE_OAUTH_TOKEN='` must print `1`. A Claude Code session does not pass its own login to the commands it runs, so `run.sh` exports the token through `CLAUDE_ENV_FILE`. Without it, every agent would end "Not logged in", and the run stops before the first agent with that advice.
 
 Then operate as usual. Each launch runs with no prompt, and the agents bill to the subscription: every agent's `apiKeySource` is `none`.
+
+A container session cannot push. `run.sh` mounts neither `~/.ssh` nor the host's git config, so the host's credential helper isn't there. The exception is a remote URL with a token in it, which works anywhere: check `git remote -v` before relying on this for a repo with a no-push rule.
+
+Only one session works in a repo at a time. While the container session has a task, give the repo's host session nothing, since both write to the same checkout.
 
 ## Move a branch install to main
 

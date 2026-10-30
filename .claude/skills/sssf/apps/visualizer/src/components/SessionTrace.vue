@@ -10,6 +10,7 @@ import type {
   PhaseKind,
   Session,
   RunCaps,
+  RunWorktree,
   SessionUsage,
   StopReason,
   TicketRun,
@@ -34,6 +35,7 @@ const usage = ref<SessionUsage>({ read: 0, written: 0 })
 const caps = ref<RunCaps | null>(null)
 const stop = ref<StopReason | null>(null)
 const tickets = ref<TicketRun | null>(null)
+const runWorktree = ref<RunWorktree | null>(null)
 const events = ref<EventRow[]>([])
 const envelopes = ref<Envelope[]>([])
 const gates = ref<GateResult[]>([])
@@ -59,6 +61,7 @@ async function tick() {
     caps.value = detail.caps
     stop.value = detail.stop
     tickets.value = detail.tickets
+    runWorktree.value = detail.worktree
 
     const fresh: EventRow[] = []
     let page
@@ -459,6 +462,7 @@ function selectPhase(p: Phase) {
       :caps="caps"
       :stop="stop"
       :tickets="tickets"
+      :worktree="runWorktree"
       @select="(id) => navigate(adwId, id)"
     />
 

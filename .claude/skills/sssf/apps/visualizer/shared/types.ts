@@ -56,6 +56,8 @@ export interface SessionSummary extends Session {
    * so an L1 card can color its per-agent dots without a request per card.
    */
   agents: AgentSession[];
+  /** The run's own branch, for a `--worktree` run; null for a run on the checked-out branch. */
+  branch: string | null;
 }
 
 export interface Phase {
@@ -248,6 +250,20 @@ export interface RunCaps {
   rate_limit_stop: number | null;
 }
 
+/** Where a `--worktree` run worked, from the `worktree` event its start logged. */
+export interface RunWorktree {
+  /** sssf/<adw_id> */
+  branch: string;
+  /** The run's own folder, under adws/adw_data/worktrees/. */
+  worktree: string;
+  /** The branch it was cut from, and `just merge` lands it on. */
+  launch_branch: string;
+  /** The launch branch's commit when the run started. */
+  base: string;
+  /** The launch checkout had uncommitted changes, which the run left out. */
+  launch_dirty: boolean;
+}
+
 /** Why a failed run stopped, from its own stop event or its first failed phase. */
 export interface StopReason {
   kind: "call_budget_stop" | "budget_stop" | "rate_limit_stop" | "not_accepted" | "phase_failed";
@@ -290,6 +306,8 @@ export interface SessionDetail {
   stop: StopReason | null;
   /** null unless this is an adw_tickets run. */
   tickets: TicketRun | null;
+  /** null unless the run worked on its own branch (`--worktree`). */
+  worktree: RunWorktree | null;
   /** Derived from agent_end payloads, so historical runs have it too. */
   usage: SessionUsage;
   /** Ordered by seq. */

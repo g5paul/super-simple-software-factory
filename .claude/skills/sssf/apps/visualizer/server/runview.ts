@@ -1,12 +1,13 @@
 /**
  * What the session view needs beyond the raw rows: the caps a run was held to,
- * why it stopped, and, for an adw_tickets run, its phases grouped by ticket.
+ * why it stopped, where a `--worktree` run worked, and, for an adw_tickets run,
+ * its phases grouped by ticket.
  *
  * Pure functions over phases and events, so they test without a database.
  * Everything is derived from what the tracer already wrote: a run from before
  * these events existed simply has no caps and no ticket table.
  */
-import type { Phase, RunCaps, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
+import type { Phase, RunCaps, RunWorktree, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
 
 /** The event columns these functions read. */
 export interface RunEvent {
@@ -38,6 +39,13 @@ function latest(events: RunEvent[], name: string): RunEvent | undefined {
 export function caps(events: RunEvent[]): RunCaps | null {
   const e = latest(events, "run_caps");
   return e ? payload<RunCaps>(e) : null;
+}
+
+/** Where a `--worktree` run worked, or null for a run on the checked-out branch. */
+export function worktree(events: RunEvent[]): RunWorktree | null {
+  const e = latest(events, "worktree");
+  const p = e && payload<RunWorktree>(e);
+  return p?.branch ? p : null;
 }
 
 /**

@@ -14,7 +14,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { caps, stopReason, ticketRun, type RunEvent } from "./runview.ts";
+import { caps, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
 import type {
   AgentSession,
   PiCall,
@@ -228,6 +228,7 @@ export class SssfDb {
     // Agents come along too: an L1 card draws a per-agent dot timeline, and its
     // dots are colored per agent — without this it would be one request per card.
     const agentsByAdw = this.agentsFor(ids);
+    const branchByAdw = this.branchesFor(ids);
 
     const summaries: SessionSummary[] = [];
     for (const session of rows) {
@@ -237,6 +238,7 @@ export class SssfDb {
           phases,
           phase_count: phases.length,
           agents: agentsByAdw.get(session.adw_id) ?? [],
+          branch: branchByAdw.get(session.adw_id) ?? null,
         }),
       );
     }
@@ -360,19 +362,37 @@ export class SssfDb {
       caps: caps(events),
       stop: stopReason(events, phases, session.status),
       tickets: ticketRun(events, phases),
+      worktree: worktree(events),
       usage: this.usage(adwId),
       phases,
       agents: this.agentSessions(adwId),
     };
   }
 
-  /** The few events runview reads: caps, stops, the ticket list, and agent costs. */
+  /** Each `--worktree` run's branch, for the list's cards. A plain run has no entry. */
+  private branchesFor(ids: string[]): Map<string, string> {
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = this.db
+      .query<RunEvent & { adw_id: string }, string[]>(
+        `SELECT adw_id, type, name, phase_id, payload_json FROM events
+          WHERE adw_id IN (${placeholders}) AND name = 'worktree' ORDER BY rowid`,
+      )
+      .all(...ids);
+    const byAdw = new Map<string, string>();
+    for (const row of rows) {
+      const place = worktree([row]);
+      if (place) byAdw.set(row.adw_id, place.branch);
+    }
+    return byAdw;
+  }
+
+  /** The few events runview reads: caps, stops, the worktree, the ticket list, and agent costs. */
   private runEvents(adwId: string): RunEvent[] {
     return this.db
       .query<RunEvent, [string]>(
         `SELECT type, name, phase_id, payload_json FROM events
           WHERE adw_id = ? AND (type IN ('agent_end', 'error')
-                                OR name IN ('run_caps', 'tickets'))
+                                OR name IN ('run_caps', 'tickets', 'worktree'))
           ORDER BY rowid`,
       )
       .all(adwId);

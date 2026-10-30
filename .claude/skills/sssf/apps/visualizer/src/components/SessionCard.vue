@@ -245,6 +245,7 @@ const hiddenRowCount = computed(() =>
       <StatChip kind="cost" :value="session.total_cost" />
       <StatChip kind="runtime" :value="durationMs" />
       <StatChip kind="tokens" :value="session.total_tokens" />
+      <span v-if="session.branch" class="branch dim" title="worked on its own branch (--worktree)">{{ session.branch }}</span>
     </div>
   </a>
 </template>
@@ -468,5 +469,14 @@ const hiddenRowCount = computed(() =>
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.branch {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

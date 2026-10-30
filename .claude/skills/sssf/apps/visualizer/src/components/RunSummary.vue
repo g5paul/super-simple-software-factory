@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Under the run strip: spend against the run's cap, why a failed run stopped,
- * and for an adw_tickets run one row per ticket. Each part draws only when the
+ * Under the run strip: the branch a `--worktree` run worked on, spend against
+ * the run's cap, why a failed run stopped, and for an adw_tickets run one row
+ * per ticket. Each part draws only when the
  * run recorded what it needs, so an old run shows nothing here.
  */
 import { computed } from 'vue'
-import type { RunCaps, StopReason, TicketRun, TicketStatus } from '../lib/types'
+import type { RunCaps, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
 import { fmtCost } from '../lib/format'
 
 const props = defineProps<{
@@ -13,6 +14,7 @@ const props = defineProps<{
   caps: RunCaps | null
   stop: StopReason | null
   tickets: TicketRun | null
+  worktree: RunWorktree | null
 }>()
 const emit = defineEmits<{ select: [phaseId: string] }>()
 
@@ -43,7 +45,13 @@ function open(phaseId: string | null) {
 </script>
 
 <template>
-  <div v-if="cap || stop || tickets" class="run-summary">
+  <div v-if="worktree || cap || stop || tickets" class="run-summary">
+    <div v-if="worktree" class="branch" :title="worktree.worktree">
+      <span>on <code>{{ worktree.branch }}</code></span>
+      <span class="dim">from {{ worktree.launch_branch }} at <code>{{ worktree.base }}</code></span>
+      <span v-if="worktree.launch_dirty" class="dim">· uncommitted changes in the checkout were left out</span>
+    </div>
+
     <div v-if="cap" class="budget" :title="`max_run_cost ${fmtCost(cap)}`">
       <div class="bar"><div class="fill" :class="barLevel" :style="{ width: `${spentPct}%` }" /></div>
       <span class="dim">{{ fmtCost(cost) }} of {{ fmtCost(cap) }} run cap</span>
@@ -90,6 +98,19 @@ function open(phaseId: string | null) {
 
 .dim {
   color: var(--dim);
+}
+
+.branch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.branch code {
+  font-family: var(--mono);
+  font-size: 14px;
 }
 
 .budget {

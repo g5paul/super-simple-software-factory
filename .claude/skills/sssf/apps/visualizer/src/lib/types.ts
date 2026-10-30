@@ -6,6 +6,7 @@ export type {
   SessionUsage,
   SessionDetail,
   RunCaps,
+  RunWorktree,
   StopReason,
   TicketRow,
   TicketRun,

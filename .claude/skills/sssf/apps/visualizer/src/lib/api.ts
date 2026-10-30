@@ -36,6 +36,7 @@ export async function fetchSession(adwId: string): Promise<SessionDetail> {
     caps: detail.caps ?? null,
     stop: detail.stop ?? null,
     tickets: detail.tickets ?? null,
+    worktree: detail.worktree ?? null,
     usage: detail.usage ?? { read: 0, written: 0 },
     phases: detail.phases ?? [],
     agents: detail.agents ?? [],

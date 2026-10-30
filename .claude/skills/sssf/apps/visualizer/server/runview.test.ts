@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Phase } from "../shared/types.ts";
-import { caps, stopReason, ticketRun, type RunEvent } from "./runview.ts";
+import { caps, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
 
 let seq = 0;
 function phase(name: string, status: Phase["status"], error: string | null = null): Phase {
@@ -91,4 +91,12 @@ test("the latest recorded caps win, and an old run has none", () => {
     ev("log", "run_caps", { max_run_cost: 5, rate_limit_stop: 0.8 }),
     ev("log", "run_caps", { max_run_cost: 8, rate_limit_stop: null }),
   ])).toEqual({ max_run_cost: 8, rate_limit_stop: null });
+});
+
+test("a --worktree run reports its branch, and a plain run has none", () => {
+  const place = { branch: "sssf/a1", worktree: "/r/adws/adw_data/worktrees/a1", launch_branch: "main",
+                  base: "abc1234", launch_dirty: true };
+  expect(worktree([ev("log", "worktree", place)])).toEqual(place);
+  expect(worktree([ev("log", "run_caps", { max_run_cost: 5 })])).toBeNull();
+  expect(worktree([{ type: "log", name: "worktree", phase_id: "", payload_json: "{oops" }])).toBeNull();
 });

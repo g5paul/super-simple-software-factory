@@ -56,8 +56,8 @@ export interface SessionSummary extends Session {
    * so an L1 card can color its per-agent dots without a request per card.
    */
   agents: AgentSession[];
-  /** The run's own branch, for a `--worktree` run; null for a run on the checked-out branch. */
-  branch: string | null;
+  /** Where a `--worktree` run worked; null for a run on the checked-out branch. */
+  worktree: RunWorktree | null;
 }
 
 export interface Phase {
@@ -262,6 +262,17 @@ export interface RunWorktree {
   base: string;
   /** The launch checkout had uncommitted changes, which the run left out. */
   launch_dirty: boolean;
+  /** How the branch ended: merged, or discarded. null while it waits. */
+  landed: RunLanded | null;
+}
+
+/** From the `worktree_merged` or `worktree_discarded` event `just merge` or `just discard` logs. */
+export interface RunLanded {
+  state: "merged" | "discarded";
+  /** For a merge: the launch branch, fast-forward or merge commit, and its commit after. */
+  into?: string;
+  how?: string;
+  head?: string;
 }
 
 /** Why a failed run stopped, from its own stop event or its first failed phase. */

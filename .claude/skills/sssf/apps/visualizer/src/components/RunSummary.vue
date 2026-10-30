@@ -50,6 +50,10 @@ function open(phaseId: string | null) {
       <span>on <code>{{ worktree.branch }}</code></span>
       <span class="dim">from {{ worktree.launch_branch }} at <code>{{ worktree.base }}</code></span>
       <span v-if="worktree.launch_dirty" class="dim">· uncommitted changes in the checkout were left out</span>
+      <span v-if="worktree.landed?.state === 'merged'" class="landed merged">
+        · merged into {{ worktree.landed.into }} ({{ worktree.landed.how }}) at <code>{{ worktree.landed.head }}</code>
+      </span>
+      <span v-else-if="worktree.landed?.state === 'discarded'" class="landed discarded">· discarded</span>
     </div>
 
     <div v-if="cap" class="budget" :title="`max_run_cost ${fmtCost(cap)}`">
@@ -106,6 +110,13 @@ function open(phaseId: string | null) {
   align-items: baseline;
   gap: 8px;
   font-size: 15px;
+}
+
+.landed.merged {
+  color: var(--green);
+}
+.landed.discarded {
+  color: var(--dim);
 }
 
 .branch code {

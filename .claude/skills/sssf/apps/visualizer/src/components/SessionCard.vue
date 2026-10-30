@@ -12,6 +12,14 @@ import PhaseDots from './PhaseDots.vue'
 const props = defineProps<{ session: SessionSummary; nowMs: number }>()
 const emit = defineEmits<{ archived: [adwId: string] }>()
 
+const branchTitle = computed(() => {
+  const w = props.session.worktree
+  if (!w) return ''
+  if (w.landed?.state === 'merged') return `worked on its own branch (--worktree), merged into ${w.landed.into}`
+  if (w.landed?.state === 'discarded') return 'worked on its own branch (--worktree), since discarded'
+  return `worked on its own branch (--worktree); \`just merge ${props.session.adw_id}\` lands it on ${w.launch_branch}`
+})
+
 // The card is an <a>; the button lives inside it, so the click must not
 // navigate. Told the parent optimistically — the poll would take up to half a
 // second to drop the card, and a triage click should feel instant.
@@ -245,7 +253,12 @@ const hiddenRowCount = computed(() =>
       <StatChip kind="cost" :value="session.total_cost" />
       <StatChip kind="runtime" :value="durationMs" />
       <StatChip kind="tokens" :value="session.total_tokens" />
-      <span v-if="session.branch" class="branch dim" title="worked on its own branch (--worktree)">{{ session.branch }}</span>
+      <span
+        v-if="session.worktree"
+        class="branch dim"
+        :class="{ gone: session.worktree.landed }"
+        :title="branchTitle"
+      >{{ session.worktree.branch }}<template v-if="session.worktree.landed"> · {{ session.worktree.landed.state }}</template></span>
     </div>
   </a>
 </template>
@@ -478,5 +491,9 @@ const hiddenRowCount = computed(() =>
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.branch.gone {
+  opacity: 0.6;
 }
 </style>

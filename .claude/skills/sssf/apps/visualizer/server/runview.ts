@@ -7,7 +7,7 @@
  * Everything is derived from what the tracer already wrote: a run from before
  * these events existed simply has no caps and no ticket table.
  */
-import type { Phase, RunCaps, RunWorktree, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
+import type { Phase, RunCaps, RunLanded, RunWorktree, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
 
 /** The event columns these functions read. */
 export interface RunEvent {
@@ -41,11 +41,22 @@ export function caps(events: RunEvent[]): RunCaps | null {
   return e ? payload<RunCaps>(e) : null;
 }
 
-/** Where a `--worktree` run worked, or null for a run on the checked-out branch. */
+/** The events that end a worktree run's branch, and the state each one means. */
+const LANDED = { worktree_merged: "merged", worktree_discarded: "discarded" } as const;
+
+/**
+ * Where a `--worktree` run worked, and whether `just merge` or `just discard`
+ * has ended its branch. null for a run on the checked-out branch.
+ */
 export function worktree(events: RunEvent[]): RunWorktree | null {
   const e = latest(events, "worktree");
-  const p = e && payload<RunWorktree>(e);
-  return p?.branch ? p : null;
+  const p = e && payload<Omit<RunWorktree, "landed">>(e);
+  if (!p?.branch) return null;
+  const end = events.findLast((ev) => ev.name !== null && ev.name in LANDED);
+  const landed: RunLanded | null = end
+    ? { state: LANDED[end.name as keyof typeof LANDED], ...payload<Omit<RunLanded, "state">>(end) }
+    : null;
+  return { ...p, landed };
 }
 
 /**

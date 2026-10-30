@@ -26,7 +26,8 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from .data_types import SSSFConfig
+from .data_types import EventRecord, SSSFConfig
+from .tracer import Tracer
 
 BRANCH_PREFIX = "sssf/"
 
@@ -162,6 +163,13 @@ def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
             "launch_dirty": dirty(root), "resumed": False}
 
 
+def _log(cfg: SSSFConfig, adw_id: str, name: str, payload: dict) -> None:
+    """Record how a run's branch ended, so the dashboard can tell a merged or
+    discarded branch from one still waiting."""
+    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
+    tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name=name, payload=payload))
+
+
 def _status(db: str, adw_id: str) -> str | None:
     rows = _query(db, "select status from sessions where adw_id=?", adw_id)
     return rows[0][0] if rows else None
@@ -218,6 +226,7 @@ def merge(cfg: SSSFConfig, adw_id: str, ff_only: bool = False) -> str:
     after = git("rev-parse", "--short", "HEAD", cwd=root).stdout.strip()
     how = "fast-forward" if fast_forward else "merge commit"
     _remove(root, path, branch, force_branch=False)
+    _log(cfg, adw_id, "worktree_merged", {"into": launch, "how": how, "head": after})
     return f"merged {branch} into {launch} ({how}), now at {after}; removed its worktree and branch"
 
 
@@ -232,6 +241,7 @@ def discard(cfg: SSSFConfig, adw_id: str) -> str:
     if adw_id in live_runs(db):
         raise WorktreeError(f"run {adw_id} is still going. Stop it with `just kill {adw_id}` first.")
     _remove(root, Path(record["worktree"]), record["branch"], force_branch=True)
+    _log(cfg, adw_id, "worktree_discarded", {})
     return f"discarded {record['branch']} and its worktree"
 
 

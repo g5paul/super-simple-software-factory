@@ -19,6 +19,7 @@ import type {
   AgentSession,
   PiCall,
   AgentStartPayload,
+  RunWorktree,
   Envelope,
   Event,
   EventsPage,
@@ -32,6 +33,8 @@ import type {
 
 const DEFAULT_DB_RELATIVE = "adws/adw_data/sssf.db";
 const MAX_LIMIT = 1000;
+/** The events runview.worktree reads: where a run worked, and how its branch ended. */
+const WORKTREE_EVENTS = "'worktree', 'worktree_merged', 'worktree_discarded'";
 const DEFAULT_LIMIT = 500;
 
 /**
@@ -228,7 +231,7 @@ export class SssfDb {
     // Agents come along too: an L1 card draws a per-agent dot timeline, and its
     // dots are colored per agent — without this it would be one request per card.
     const agentsByAdw = this.agentsFor(ids);
-    const branchByAdw = this.branchesFor(ids);
+    const worktreeByAdw = this.worktreesFor(ids);
 
     const summaries: SessionSummary[] = [];
     for (const session of rows) {
@@ -238,7 +241,7 @@ export class SssfDb {
           phases,
           phase_count: phases.length,
           agents: agentsByAdw.get(session.adw_id) ?? [],
-          branch: branchByAdw.get(session.adw_id) ?? null,
+          worktree: worktreeByAdw.get(session.adw_id) ?? null,
         }),
       );
     }
@@ -369,19 +372,21 @@ export class SssfDb {
     };
   }
 
-  /** Each `--worktree` run's branch, for the list's cards. A plain run has no entry. */
-  private branchesFor(ids: string[]): Map<string, string> {
+  /** Each `--worktree` run's branch and how it ended, for the list's cards. A plain run has no entry. */
+  private worktreesFor(ids: string[]): Map<string, RunWorktree> {
     const placeholders = ids.map(() => "?").join(", ");
     const rows = this.db
       .query<RunEvent & { adw_id: string }, string[]>(
         `SELECT adw_id, type, name, phase_id, payload_json FROM events
-          WHERE adw_id IN (${placeholders}) AND name = 'worktree' ORDER BY rowid`,
+          WHERE adw_id IN (${placeholders}) AND name IN (${WORKTREE_EVENTS}) ORDER BY rowid`,
       )
       .all(...ids);
-    const byAdw = new Map<string, string>();
-    for (const row of rows) {
-      const place = worktree([row]);
-      if (place) byAdw.set(row.adw_id, place.branch);
+    const eventsByAdw = new Map<string, RunEvent[]>();
+    for (const row of rows) eventsByAdw.set(row.adw_id, [...(eventsByAdw.get(row.adw_id) ?? []), row]);
+    const byAdw = new Map<string, RunWorktree>();
+    for (const [adwId, events] of eventsByAdw) {
+      const place = worktree(events);
+      if (place) byAdw.set(adwId, place);
     }
     return byAdw;
   }
@@ -392,7 +397,7 @@ export class SssfDb {
       .query<RunEvent, [string]>(
         `SELECT type, name, phase_id, payload_json FROM events
           WHERE adw_id = ? AND (type IN ('agent_end', 'error')
-                                OR name IN ('run_caps', 'tickets', 'worktree'))
+                                OR name IN ('run_caps', 'tickets', ${WORKTREE_EVENTS}))
           ORDER BY rowid`,
       )
       .all(adwId);

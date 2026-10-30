@@ -281,3 +281,35 @@ def test_the_install_stamps_repo_yaml():
     import install
     dests = [str(d) for _, d in install.targets(Path("/r"), SKILL / "templates/sssf.config.yaml")]
     assert "/r/adws/adw_sssf_config/repo.yaml" in dests
+
+
+def landed(adw_id: str) -> list[tuple[str, dict]]:
+    import json, sqlite3
+    with sqlite3.connect(SSSFConfig().observability.db) as conn:
+        rows = conn.execute("select name, payload_json from events where adw_id=? and name in "
+                            "('worktree_merged', 'worktree_discarded') order by rowid", (adw_id,))
+        return [(name, json.loads(payload)) for name, payload in rows]
+
+
+def test_a_merge_is_recorded_in_the_trace(repo):
+    cfg, _, tracer = start("wt000017")
+    work("two\n", "run")
+    finish(tracer, "wt000017")
+    os.chdir(repo)
+    worktree.merge(cfg, "wt000017")
+    [(name, payload)] = landed("wt000017")
+    assert name == "worktree_merged"
+    assert payload == {"into": "main", "how": "fast-forward",
+                       "head": git("rev-parse", "--short", "HEAD", cwd=repo)}
+
+
+def test_a_discard_is_recorded_and_a_refused_merge_is_not(repo):
+    cfg, _, tracer = start("wt000018")
+    work("broken\n", "run")
+    finish(tracer, "wt000018", ok=False)
+    os.chdir(repo)
+    with pytest.raises(worktree.WorktreeError):
+        worktree.merge(cfg, "wt000018")
+    assert landed("wt000018") == []
+    worktree.discard(cfg, "wt000018")
+    assert landed("wt000018") == [("worktree_discarded", {})]

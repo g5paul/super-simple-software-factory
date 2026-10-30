@@ -159,6 +159,33 @@ def skill_version(root: Path) -> str | None:
     return sha + ("+dirty" if git("status", "--porcelain", "--", ".") else "")
 
 
+def skill_change(root: Path, src: Path, base_sha256: str) -> str | None:
+    """A git command that shows the skill's own change to `src`: from the
+    template a repo was stamped with, to the template now.
+
+    The printed `compare` diff is the repo's file against the new template,
+    which mixes that change with every edit the repo made. To merge the
+    change by hand, this is the diff to read. It looks back through the
+    history of whichever git repo holds the template (the skill source, or
+    the repo's own copy of the skill) for the version the stamp recorded.
+    """
+    def git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, check=False)
+
+    top = git(src.parent, "rev-parse", "--show-toplevel")
+    if top.returncode != 0:
+        return None
+    top_dir = Path(top.stdout.decode().strip()).resolve()
+    rel = src.resolve().relative_to(top_dir).as_posix()
+    commits = git(top_dir, "log", "--format=%h", "-n", "200", "--", rel).stdout.decode().split()
+    for commit in commits:
+        blob = git(top_dir, "show", f"{commit}:{rel}")
+        if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == base_sha256:
+            where = "" if top_dir == root.resolve() else f"-C {top_dir} "
+            return f"git {where}diff {commit} -- {rel}"
+    return None
+
+
 def save_stamp(root: Path, record: dict) -> None:
     path = root / STAMP
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -307,7 +334,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
         else:
             # Changed in this repo, and the skill's version moved (or was never
             # recorded). Keep the old record so the next update still knows the base.
-            review.append((rel, src))
+            review.append((rel, src, skill_change(root, src, base["sha256"]) if base else None))
             continue
         files[rel] = entry
     version = skill_version(root)
@@ -322,7 +349,14 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
 
     print(f"sssf updated in {root}")
     register(root)
-    print(f"  skill: {version or 'unknown (no git source)'}")
+    if version:
+        print(f"  skill: {version}")
+    elif record.get("skill"):
+        # Run by hand from the repo's copy, e.g. for --keep: there is no skill
+        # source to read, and the recorded version still stands.
+        print(f"  skill: {record['skill']} (unchanged; no skill git source in this run)")
+    else:
+        print("  skill: unknown (no git source)")
     print(f"  updated: {len(updated)}")
     for rel in updated:
         print(f"    ~ {rel}")
@@ -339,9 +373,11 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
             print(f"    = {rel}")
     print(f"  to review: {len(review)} (changed in this repo, and the skill's version is "
           "newer or was never recorded)")
-    for rel, src in review:
+    for rel, src, change in review:
         print(f"    ! {rel}")
-        print(f"        compare: diff {src} {rel}")
+        if change:
+            print(f"        the skill's change, to copy in: {change}")
+        print(f"        yours against the skill's: diff {src} {rel}")
     if review:
         print("  for each, one of:")
         print("    uv run .claude/skills/sssf/scripts/install.py --update --take <path>"

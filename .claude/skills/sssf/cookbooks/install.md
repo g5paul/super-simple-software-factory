@@ -82,7 +82,7 @@ uv run .claude/skills/sssf/scripts/install.py --update --keep <path>
 
 - `--take <path>` replaces the repo's version with the skill's.
 - `--keep <path>` keeps the repo's version and records it as reviewed. It stays quiet until the skill's version changes again.
-- To have both, which is the usual case for `quality.py`: read the printed `diff`, copy the skill's change into the repo's file by hand, keeping the repo's own commands, then `--keep <path>`. Never `--take` a file you customized: it replaces your commands with the skill's placeholders.
+- To have both, which is the usual case for `quality.py`: run the printed "the skill's change" command, which shows only what the skill changed in that file, copy that into the repo's file by hand, keeping the repo's own commands, then `--keep <path>`. The other printed `diff` is the repo's whole file against the skill's, so it mixes that change with every edit the repo made. Never `--take` a file you customized: it replaces your commands with the skill's placeholders.
 
 A repo installed before `stamp.json` existed has no record. Its first update replaces SSSF's own code (`adws/adw_modules/` except `quality.py`, and the starter `adw_*.py`), because a repo is not meant to edit it. It keeps every other file that differs, prompts included, because it cannot tell an edit from an older template. The output marks those replacements `(SSSF code, no stamp record yet)`. Check each `!` file with the printed `diff` command: `--take` the ones you never changed, and `--keep` the ones you did, such as `quality.py`. After that, each file has a record, and `!` means the skill changed something you also changed.
 

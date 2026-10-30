@@ -300,3 +300,30 @@ def test_a_copy_inside_the_repo_is_not_taken_for_the_source(tmp_path, monkeypatc
     monkeypatch.setenv("SSSF_SOURCE", str(tmp_path / ".claude" / "skills" / "sssf"))
     install("--coding-agent", "claude_code")
     assert "skill" not in stamp()
+
+
+def test_a_hand_run_without_a_source_keeps_saying_the_recorded_skill(repo, monkeypatch):
+    record = stamp()
+    record["skill"] = "abc1234"
+    STAMP.write_text(json.dumps(record))
+    monkeypatch.setenv("SSSF_SOURCE", str(repo / "nowhere"))
+    out = install("--update").stdout
+    assert "skill: abc1234 (unchanged" in out
+    assert stamp()["skill"] == "abc1234"
+
+
+def test_a_flagged_file_shows_the_skills_own_change(repo):
+    # Stamped from quality.py as it was before 253e22e changed the template.
+    rel = "templates/adws/adw_modules/quality.py"
+    old = subprocess.run(["git", "-C", str(SKILL), "show", f"253e22e~1:./{rel}"],
+                         capture_output=True, check=True).stdout
+    customize_quality()
+    record = stamp()
+    record["files"][str(QUALITY)]["sha256"] = hashlib.sha256(old).hexdigest()
+    STAMP.write_text(json.dumps(record))
+    out = install("--update").stdout
+    assert f"! {QUALITY}" in out
+    line = next(l for l in out.splitlines() if "the skill's change" in l)
+    command = line.split("to copy in: ")[1].split()
+    diff = subprocess.run(command, capture_output=True, text=True, check=True).stdout
+    assert 'verdict = ("not configured"' in diff

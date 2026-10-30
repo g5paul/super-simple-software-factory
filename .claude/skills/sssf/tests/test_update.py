@@ -275,3 +275,28 @@ def test_next_steps_say_how_to_load_the_recipes_into_a_repos_own_justfile(tmp_pa
     Path("justfile").write_text("test:\n    bun test\n")
     out = install("--coding-agent", "claude_code").stdout
     assert "add  mod sssf 'sssf.just'  to it and run install.py again" in out
+
+
+# ── what the update reports ─────────────────────────────────────────────────
+
+def test_update_names_each_customized_file(repo):
+    customize_quality()
+    out = install("--update").stdout
+    assert "customized: 1" in out
+    assert f"    = {QUALITY}" in out
+
+
+def test_the_skill_commit_is_recorded(repo):
+    # A docs-only update changes no stamped file, so without this only a commit
+    # message would say which skill a repo is on.
+    import re
+    version = stamp().get("skill", "")
+    assert re.fullmatch(r"[0-9a-f]{7,}(\+dirty)?", version), version
+    assert f"skill: {version}" in install("--update").stdout
+
+
+def test_a_copy_inside_the_repo_is_not_taken_for_the_source(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SSSF_SOURCE", str(tmp_path / ".claude" / "skills" / "sssf"))
+    install("--coding-agent", "claude_code")
+    assert "skill" not in stamp()

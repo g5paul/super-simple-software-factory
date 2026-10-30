@@ -49,8 +49,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     built = previous
 
     def record(ph, result) -> None:
-        passed = sum(1 for check in result.checks if check.passed)
-        ph.log(passed=result.passed, checks=f"{passed}/{len(result.checks)}",
+        ph.log(passed=result.passed, checks=result.tally(),
                artifacts=", ".join(result.artifacts))
 
     test_result = None

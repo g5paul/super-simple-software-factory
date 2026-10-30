@@ -86,8 +86,7 @@ def build_feature(run, folder: str) -> int:
         ph.log(sha=git_helper.commit_all(message), message=subject)
 
     def record(ph, result) -> None:
-        passed = sum(1 for check in result.checks if check.passed)
-        ph.log(passed=result.passed, checks=f"{passed}/{len(result.checks)}",
+        ph.log(passed=result.passed, checks=result.tally(),
                artifacts=", ".join(result.artifacts))
 
     def verify(prefix: str, owner_session: str, prompt: str):

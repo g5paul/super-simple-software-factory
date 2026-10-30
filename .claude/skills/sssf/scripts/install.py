@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -125,6 +126,30 @@ def load_stamp(root: Path) -> dict:
     return json.loads(path.read_text()) if path.is_file() else {"files": {}}
 
 
+def skill_version(root: Path) -> str | None:
+    """The skill commit this install or update came from, "+dirty" when its
+    tree has changes. Without it, a docs-only update leaves stamp.json as it
+    was, and only a commit message says which skill the repo is on.
+
+    The source is SSSF_SOURCE when set, else the skill this script lives in.
+    A copy inside the repo being stamped is not a source: its git history is
+    the repo's, not the skill's.
+    """
+    source = Path(os.environ.get("SSSF_SOURCE") or TEMPLATES.parent).expanduser().resolve()
+    if source == root.resolve() or root.resolve() in source.parents:
+        return None
+
+    def git(*args: str) -> str:
+        result = subprocess.run(["git", "-C", str(source), *args],
+                                capture_output=True, text=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    sha = git("rev-parse", "--short", "HEAD")
+    if not sha:
+        return None
+    return sha + ("+dirty" if git("status", "--porcelain", "--", ".") else "")
+
+
 def save_stamp(root: Path, record: dict) -> None:
     path = root / STAMP
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -200,11 +225,15 @@ def install(root: Path, roster: Path, force: bool) -> int:
         copy(src, dest)
         record["files"][rel] = entry
         stamped.append(str(dest))
+    version = skill_version(root)
+    if version:
+        record["skill"] = version
     save_stamp(root, record)
     ensure_gitignore(root, stamped)
 
     print(f"sssf installed into {root}")
     register(root)
+    print(f"  skill: {version or 'unknown (no git source)'}")
     print(f"  stamped: {len(stamped)} file(s)")
     for s in stamped:
         print(f"    + {s}")
@@ -241,7 +270,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
         print(f"both --take and --keep: {', '.join(sorted(take & keep))}", file=sys.stderr)
         return 1
 
-    added, updated, review, reviewed, customized, current = [], [], [], [], 0, 0
+    added, updated, review, reviewed, customized, current = [], [], [], [], [], 0
     for src, dest in pairs:
         rel = dest.relative_to(root).as_posix()
         entry = {"source": src.relative_to(TEMPLATES).as_posix(), "sha256": sha256(src)}
@@ -264,7 +293,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
         elif base and base["sha256"] == entry["sha256"]:
             # Changed in this repo, but the skill's version has not moved since
             # the stamp, so there is nothing new to merge. quality.py lives here.
-            customized += 1
+            customized.append(rel)
             continue
         else:
             # Changed in this repo, and the skill's version moved (or was never
@@ -272,6 +301,9 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
             review.append((rel, src))
             continue
         files[rel] = entry
+    version = skill_version(root)
+    if version:
+        record["skill"] = version
     save_stamp(root, record)
     gitignore: list = []
     ensure_gitignore(root, gitignore)
@@ -281,6 +313,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
 
     print(f"sssf updated in {root}")
     register(root)
+    print(f"  skill: {version or 'unknown (no git source)'}")
     print(f"  updated: {len(updated)}")
     for rel in updated:
         print(f"    ~ {rel}")
@@ -288,7 +321,9 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     for rel in added:
         print(f"    + {rel}")
     print(f"  up to date: {current}")
-    print(f"  customized: {customized} (changed in this repo; nothing new in the skill's version)")
+    print(f"  customized: {len(customized)} (changed in this repo; nothing new in the skill's version)")
+    for rel in customized:
+        print(f"    = {rel}")
     if reviewed:
         print(f"  kept as reviewed: {len(reviewed)}")
         for rel in reviewed:

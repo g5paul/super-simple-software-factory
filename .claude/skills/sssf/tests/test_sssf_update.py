@@ -71,6 +71,10 @@ def test_update_refreshes_and_confirms(repo):
 
 
 def test_update_with_nothing_new_says_so(repo):
+    # The install ran from the repo's own copy, which has no skill commit to
+    # record. The first update records it, so it is the second that is a no-op.
+    assert run(repo, "just", "sssf-update").returncode == 0
+    git(repo, "commit", "-qam", "record the skill commit")
     result = run(repo, "just", "sssf-update")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "nothing to commit" in result.stdout

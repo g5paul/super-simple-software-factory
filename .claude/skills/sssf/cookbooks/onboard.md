@@ -15,7 +15,7 @@ The project session never edits the skill's source. When SSSF gets something wro
 
 ## Before the session starts (the engineer)
 
-1. Clone or fork the repo, and make a branch for the work. Never run ADWs on `main`.
+1. Clone or fork the repo. SSSF is installed and committed on `main`, so every branch and every session started in the repo has `/sssf`. ADWs run on feature branches cut from `main`, never on `main` itself. Install on a branch instead only when SSSF must stay off `main`, for example when `main` goes upstream to a repo that does not want it.
 2. If the repo is public or a fork of a public repo, set a private commit email in it first: `git config user.email <login>@users.noreply.github.com`.
 3. Open a session in the repo and tell it: "Read `<skill source>/cookbooks/onboard.md` and onboard this repo. Report to the SSSF hub session."
 
@@ -80,13 +80,13 @@ If the engineer wants to build features from a spec and tickets, run `/setup-mat
 
 ## 6. Commit the onboarding
 
-Commit the install, `quality.py`, the tool excludes, and `docs/sssf.md` together, on the branch, as one commit. Don't push unless the engineer says so.
+Commit the install, `quality.py`, the tool excludes, and `docs/sssf.md` together, on `main`, as one commit. Don't push unless the engineer says so.
 
-The skill now lives in `.claude/skills/sssf/` on this branch and nowhere else. Claude Code registers skills when a session starts, so a session started before the install, or on another branch, has no `/sssf`, and switching branches does not add it. Before the first run, the engineer restarts the session in the repo with the branch checked out. `claude --continue` keeps the conversation. Start every later operator session on this branch too. In pi-agent-observability, a session started on `main` got "Unknown skill: sssf" and fell back to reading the cookbooks by hand.
+Claude Code registers skills when a session starts, so this session, which started before the install, has no `/sssf` yet. Before the first run, the engineer restarts it in the repo. `claude --continue` keeps the conversation. If SSSF went on a branch instead of `main`, every operator session has to start with that branch checked out: a session started elsewhere has no `/sssf`, and switching branches does not add it. In pi-agent-observability, SSSF lived on a branch, a session started on `main` got "Unknown skill: sssf", and it fell back to reading the cookbooks by hand.
 
 ## 7. The first run
 
-Pick a small, real change: one flag, one function, one fix. Write the task as a file with rules, tests, docs, and an out-of-scope list. [how_to_prompt_for_the_eng.md](how_to_prompt_for_the_eng.md) shows how. Then:
+Cut a feature branch from `main` first: the run commits to the current branch. Pick a small, real change: one flag, one function, one fix. Write the task as a file with rules, tests, docs, and an out-of-scope list. [how_to_prompt_for_the_eng.md](how_to_prompt_for_the_eng.md) shows how. Then:
 
 ```bash
 just simple-sdlc specs/tasks/first-task.md

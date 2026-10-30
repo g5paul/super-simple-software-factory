@@ -181,6 +181,11 @@ class QualityCheckResult(BaseModel):
     # confidently wrong. The full log is always at output_artifact.
     output_tail: str = ""
 
+    @property
+    def configured(self) -> bool:
+        """False while the block still runs quality.py's placeholder echo."""
+        return not (self.command.startswith("echo ") and "PLACEHOLDER " in self.command)
+
 
 class QualityResult(BaseModel):
     """Aggregate result from a quality block: every check it ran, and the verdict."""
@@ -189,6 +194,15 @@ class QualityResult(BaseModel):
     checks: list[QualityCheckResult] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     artifacts: list[str] = Field(default_factory=list)
+
+    def tally(self) -> str:
+        """"5/5", or "4/4 passed, 1 not configured (build)". A block still on
+        quality.py's placeholder echo exits 0, so counting it as a pass would
+        claim a check that never ran."""
+        real = [c for c in self.checks if c.configured]
+        line = f"{sum(c.passed for c in real)}/{len(real)}"
+        idle = [c.name for c in self.checks if not c.configured]
+        return f"{line} passed, {len(idle)} not configured ({', '.join(idle)})" if idle else line
 
 
 # ── Change capture (git diff, deterministic) ─────────────────────────────────

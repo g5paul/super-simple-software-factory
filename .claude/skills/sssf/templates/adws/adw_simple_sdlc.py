@@ -75,8 +75,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     def record(ph, result) -> None:
         """Log a deterministic block's verdict — the same shape every ADW uses."""
-        passed = sum(1 for check in result.checks if check.passed)
-        ph.log(passed=result.passed, checks=f"{passed}/{len(result.checks)}",
+        ph.log(passed=result.passed, checks=result.tally(),
                artifacts=", ".join(result.artifacts))
 
     with run.phase(PhaseParams(name="request", kind="engineer", owner=run.engineer,

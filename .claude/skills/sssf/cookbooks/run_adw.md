@@ -23,6 +23,8 @@ uv run adws/<recon-chain>.py "where is auth handled" --config path/to/other.conf
 
 The prompt is inline text or a file path. Launch in the background so you can poll while it works; the `adw_id` is printed on startup — capture it, everything else keys off it.
 
+Redirect its output to a file (`> run.log 2>&1`), never through a pipe like `| head` or `| tail`. A pipe closes when that command exits, and the chain's output has nowhere to go. The trace has every line the chain prints, so read the trace, not the pipe.
+
 ### Listen for the roster
 
 The chain says *what runs*; the config says *who runs it*. **If the engineer references a roster, a config, or a model tier, pass it — do not fall through to the default.**

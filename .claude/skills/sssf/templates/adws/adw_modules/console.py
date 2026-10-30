@@ -8,6 +8,9 @@ so a CI log reads exactly like a terminal.
 
 from __future__ import annotations
 
+import os
+import sys
+
 from rich.console import Console as RichConsole
 from rich.markup import escape
 from rich.panel import Panel
@@ -24,6 +27,22 @@ def _clip(text: str, limit: int = MAX_LINE) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+class _Terminal(RichConsole):
+    """Rich, minus its exit on a closed stdout.
+
+    Rich answers a BrokenPipeError with SystemExit(1). An operator who launches
+    a chain through `| head -40` closes stdout after 40 lines, and in run
+    84f61760 that ended a passing run mid-verify with the error "1". The trace
+    already holds every line printed here, so a lost terminal costs nothing:
+    send the rest to /dev/null and keep working.
+    """
+
+    def on_broken_pipe(self) -> None:
+        self.quiet = True
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+
+
 class Console:
     """Bound to one run's tracer. Reachable as `run.console` everywhere."""
 
@@ -34,7 +53,7 @@ class Console:
         self.phase_name = ""
         self.results: list[str] = []            # phase statuses, for the summary
         self._finished = False                  # the summary panel prints once
-        self._out = RichConsole(highlight=False, soft_wrap=True)
+        self._out = _Terminal(highlight=False, soft_wrap=True)
 
     # ── the one helper: print AND trace, always together ────────────────────
     def _emit(self, markup: str, level: str = "info", renderable=None) -> None:

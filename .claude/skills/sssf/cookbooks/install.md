@@ -72,7 +72,13 @@ uv run .claude/skills/sssf/scripts/install.py --update
 | differs from its recorded hash, but the skill's version has not changed since | keeps it and lists it under `customized` (`=`). `quality.py` is the usual case: the repo is meant to edit it |
 | differs from its recorded hash, and the skill's version has changed since | keeps it and flags it for review (`!`), with a `diff` command to compare |
 
-So a tuned roster, the real commands in `quality.py`, and edited prompts survive an update, and `!` appears only when the skill has something new for a file the repo changed. For each `!` file, choose one (both are repeatable):
+So a tuned roster, the real commands in `quality.py`, and edited prompts survive an update, and `!` appears only when the skill has something new for a file the repo changed. For each `!` file, choose one. Both are flags of `--update`, and both repeat:
+
+```bash
+uv run .claude/skills/sssf/scripts/install.py --update --take <path>
+uv run .claude/skills/sssf/scripts/install.py --update --keep <path>
+```
+
 
 - `--take <path>` replaces the repo's version with the skill's.
 - `--keep <path>` keeps the repo's version and records it as reviewed. It stays quiet until the skill's version changes again.

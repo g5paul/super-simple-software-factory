@@ -343,8 +343,11 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
         print(f"    ! {rel}")
         print(f"        compare: diff {src} {rel}")
     if review:
-        print("  for each: --take <path> to use the skill's version, "
-              "or --keep <path> to keep yours")
+        print("  for each, one of:")
+        print("    uv run .claude/skills/sssf/scripts/install.py --update --take <path>"
+              "   # use the skill's version")
+        print("    uv run .claude/skills/sssf/scripts/install.py --update --keep <path>"
+              "   # keep yours, after copying in any skill change you want")
     for line in gitignore:
         print(f"  + {line}")
     if gone:

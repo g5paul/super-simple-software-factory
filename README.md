@@ -58,10 +58,13 @@ Copy `.claude/skills/sssf/` into the target repo and type `/sssf install` inside
 
 ### Manual Install
 
-**Prereqs:** [`uv`](https://docs.astral.sh/uv/), `sqlite3`, and one of two ways to run agents:
+**Prereqs:** [`uv`](https://docs.astral.sh/uv/), `sqlite3`, and one of three ways to run agents:
 
-- a Claude subscription, with [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and logged in (`claude auth status`). No API key. See [Run on your Claude subscription](#run-on-your-claude-subscription).
+- a Claude subscription, with [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and logged in (`claude auth status`). No API key.
+- a ChatGPT subscription, with [`pi`](https://github.com/mariozechner/pi-coding-agent) signed into it (`/login` inside Pi, then pick `openai`). No API key.
 - [`pi`](https://github.com/mariozechner/pi-coding-agent) and an API key for each provider your roster names. See [Which API keys you actually need](#which-api-keys-you-actually-need).
+
+For the first two, see [Run on a subscription](#run-on-a-subscription).
 
 [`bun`](https://bun.sh) only if you want the visualizer.
 
@@ -74,6 +77,11 @@ cp -r /path/to/super-simple-software-factory/.claude/skills/sssf .claude/skills/
 #    on your Claude subscription, no API key:
 uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code
 cp .env.sample .env                              # leave the API keys out
+#    or on pi with your ChatGPT subscription:
+#      uv run .claude/skills/sssf/scripts/install.py
+#      cp .env.sample .env                       # then set SSSF_PI_AUTH=subscription
+#      pi auth check --provider openai --json    # must say "authType": "oauth"
+#      then set defaults.model: openai/gpt-6.1-sol and delete the per-agent model: lines
 #    or on pi with API keys:
 #      uv run .claude/skills/sssf/scripts/install.py
 #      cp .env.sample .env                       # then set OPENROUTER_API_KEY
@@ -96,30 +104,50 @@ To bring SSSF into a new project, start a Claude session in that repo and point 
 
 Green on the smoke test means the whole path works: config validated, session minted, the agent ran, envelope parsed, events landed in `adws/adw_data/sssf.db`. Fix it there before composing anything larger, because every multi-agent chain rides this exact path.
 
-### Run on your Claude subscription
+### Run on a subscription
 
-`--coding-agent claude_code` runs every agent through Claude Code on the account you're logged into. There's nothing to put in `.env`, and no bill per token.
+SSSF can run its agents on a Claude subscription through Claude Code, or on a ChatGPT subscription through Pi. Either way, there are no keys in `.env` and no bill per token.
 
-- **No keys to leak or pay for.** `.env` is loaded into every ADW, so SSSF removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from each agent's environment. If Claude still reports an API key as its auth source, the run stops before the model is called. A stray key can't quietly turn a subscription run into an API bill. Set `SSSF_CLAUDE_AUTH=api_key` if you do want the API.
-- **A flat price.** The subscription covers the runs. What limits you is the account's 5-hour and 7-day usage windows, not money.
-- **You can see the windows.** The account panel in `just obs-all` shows how full each window is, when it resets, and which projects and models filled it.
+**What both give you.**
+
+- **A flat price.** The subscription covers the runs. What limits you is the plan's usage, not money.
+- **No key can bill the API by accident.** `.env` is loaded into every ADW, so a key in it would reach every agent. SSSF keeps it out, so a lapsed sign-in fails the run instead of quietly falling back to the API. Claude Code agents get this by default. Pi agents get it with `SSSF_PI_AUTH=subscription` in `.env`, which keeps `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from them.
+- **Dollar figures are list price, not a charge.** Every cost SSSF shows, in the console, the trace, and the dashboard, is what the tokens would cost on the API. You aren't charged it. `max_run_cost` still matters: it limits how much of your plan's usage one run can take.
+- **Spend on the dashboard.** The account panel in `just obs-all` shows what SSSF's agents spent, by project and model.
+
+**Claude, through Claude Code.** Install with `--coding-agent claude_code` and every agent runs on the account `claude` is logged into.
+
+- **You can see the usage windows.** The account panel shows how full the 5-hour and 7-day windows are, when each resets, and which projects and models filled them. It counts your interactive sessions too.
 - **A run stops before the account runs out.** Before each agent starts, SSSF checks the windows and stops the run cleanly at `defaults.rate_limit_stop` (80% by default), with the reset time. That beats a run that dies halfway through a phase.
+- **A runaway call ends itself.** Each agent's `max_call_cost` goes to `claude -p --max-budget-usd`.
 - **The agents stay isolated.** Each call runs with `--safe-mode`, so an agent never loads your own `CLAUDE.md`, skills, hooks, or MCP servers. It sees its prompt and the repo.
+- If Claude still reports an API key as its auth source, the run stops before the model is called. Set `SSSF_CLAUDE_AUTH=api_key` if you do want the API.
 
-**What the dollar figures mean here.** Every cost SSSF shows, in the console, the trace, and the dashboard, is what the tokens would cost on the API. On a subscription you aren't charged it. The caps still matter: `max_run_cost` and each agent's `max_call_cost` limit how much of your usage window one run, or one runaway call, can take.
+**ChatGPT, through Pi.** Sign Pi into ChatGPT once: run `pi`, then `/login`, and pick `openai`. `pi auth check --provider openai --json` should report `"authType": "oauth"`. Install with the default Pi roster, set `defaults.model` to an OpenAI model such as `openai/gpt-6.1-sol`, and delete the per-agent `model:` lines. Set `SSSF_PI_AUTH=subscription` in `.env`.
+
+- SSSF can't see ChatGPT's usage windows. ChatGPT doesn't send them with model responses, so the panel shows spend only, and `rate_limit_stop` doesn't cover a Pi run. Check your plan's limits in ChatGPT or Codex.
+- There is no per-call cap on Pi. `max_run_cost`, checked before every send, is the only cost limit.
+
+| | Claude via Claude Code | ChatGPT via Pi |
+|---|---|---|
+| Usage windows on the dashboard | yes | no |
+| Run stops before the plan runs out | yes, `rate_limit_stop` | no |
+| Per-call cost cap | yes, `max_call_cost` | no |
+| Run cost cap | yes, `max_run_cost` | yes, `max_run_cost` |
+| Spend on the dashboard | yes | yes |
+| Key guard | on by default | `SSSF_PI_AUTH=subscription` |
 
 **The trade-offs.**
 
-- SSSF runs draw on the same usage windows as your interactive Claude sessions. A long unattended run can leave less for you, and a busy day at the keyboard can stop a run.
-- Only Claude models. For OpenAI models on your ChatGPT subscription, run those agents on Pi signed in with your ChatGPT login (`openai/<model>`), and set `SSSF_PI_AUTH=subscription` so a lapsed sign-in can't fall back to an API key. Other providers need Pi and API keys.
-- Interactive sessions don't report the windows, so the reading SSSF checks is as fresh as its last agent call. `/usage` in any Claude Code session gives the current figure.
+- SSSF runs draw on the same plan as your own use. A long unattended run can leave less for you, and a busy day at the keyboard can stop a Claude run. Nothing warns or stops a ChatGPT run before the plan runs out.
+- Each subscription covers its own provider's models. A roster that mixes in other providers needs Pi and API keys for them.
+- Claude's interactive sessions don't report the windows, so the reading SSSF checks is as fresh as its last agent call. `/usage` in any Claude Code session gives the current figure.
 
 See `references/config.md` for the details.
 
 ### Which API keys you actually need
 
-This section is for Pi. On a Claude subscription you need none.
-
+This section is for Pi agents on API keys. On a Claude or ChatGPT subscription, those agents need no key.
 
 That depends on your roster, not on this repo. Every `model:` in `sssf.config.yaml` is written `provider/model-id`, and the provider half decides the key. Which key pi reads for a given provider comes from `~/.pi/agent/models.json`.
 

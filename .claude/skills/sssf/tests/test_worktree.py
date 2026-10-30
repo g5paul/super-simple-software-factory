@@ -257,3 +257,27 @@ def test_ff_only_still_fast_forwards(repo):
     finish(tracer, "wt000016")
     os.chdir(repo)
     assert "fast-forward" in worktree.merge(cfg, "wt000016", ff_only=True)
+
+
+def test_repo_yaml_sets_ff_only_and_env_overrides_it(repo, monkeypatch):
+    from adw_modules import repo_settings
+    monkeypatch.delenv("SSSF_MERGE_FF_ONLY", raising=False)
+    assert repo_settings.merge_ff_only(repo) is False          # no file: the default
+    path = repo / repo_settings.PATH
+    path.parent.mkdir(parents=True)
+    path.write_text((SKILL / "templates/repo.yaml").read_text())
+    assert repo_settings.merge_ff_only(repo) is False          # the stamped template
+    path.write_text("merge: ff_only\n")
+    assert repo_settings.merge_ff_only(repo) is True
+    monkeypatch.setenv("SSSF_MERGE_FF_ONLY", "0")
+    assert repo_settings.merge_ff_only(repo) is False          # one machine opts out
+    path.write_text("merge: fast_forward\n")
+    with pytest.raises(Exception):
+        repo_settings.load(repo)                               # a typo fails loudly
+
+
+def test_the_install_stamps_repo_yaml():
+    sys.path.insert(0, str(SKILL / "scripts"))
+    import install
+    dests = [str(d) for _, d in install.targets(Path("/r"), SKILL / "templates/sssf.config.yaml")]
+    assert "/r/adws/adw_sssf_config/repo.yaml" in dests

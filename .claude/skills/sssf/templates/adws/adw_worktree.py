@@ -10,18 +10,18 @@ Usage:
 
 merge: only a successful run. Fast-forward when it can, a merge commit when the
 launch branch moved on, never a rebase. A conflict aborts and keeps the branch.
---ff-only, or SSSF_MERGE_FF_ONLY=1 in the repo's .env, refuses a merge commit:
-for a repo that keeps a linear history.
+--ff-only refuses a merge commit, for a repo that keeps a linear history. So
+does `merge: ff_only` in adws/adw_sssf_config/repo.yaml, unless this machine's
+.env sets SSSF_MERGE_FF_ONLY=0.
 discard: removes the run's worktree and branch, whatever state they are in.
 
 Neither pushes. Run them in the main checkout, on the run's launch branch.
 """
 
 import argparse
-import os
 import sys
 
-from adw_modules import agents, worktree
+from adw_modules import agents, repo_settings, worktree
 
 
 def main(action: str, adw_id: str, config: str, ff_only: bool = False) -> int:
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     parser.add_argument("adw_id")
     parser.add_argument("--config", default="adws/adw_sssf_config/sssf.config.yaml")
     parser.add_argument("--ff-only", action="store_true",
-                        help="refuse a merge commit; also on when SSSF_MERGE_FF_ONLY=1")
+                        help="refuse a merge commit; repo.yaml's `merge: ff_only` turns it on too")
     args = parser.parse_args()
-    ff_only = args.ff_only or os.environ.get("SSSF_MERGE_FF_ONLY", "") not in ("", "0")
+    ff_only = args.ff_only or repo_settings.merge_ff_only(worktree.main_checkout())
     sys.exit(main(args.action, args.adw_id, args.config, ff_only))

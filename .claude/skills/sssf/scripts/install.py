@@ -9,7 +9,7 @@ Usage:
     uv run <skill>/scripts/install.py --update [--take PATH ...] [--keep PATH ...]
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
-(the starter agents), adws/adw_sssf_config/sssf.config.yaml, .env.sample,
+(the starter agents), adws/adw_sssf_config/sssf.config.yaml and repo.yaml, .env.sample,
 .gitignore entries. --container adds container/, to run the operator
 session in a Podman container (Claude Code rosters only); run it again with
 --container in an installed repo to add it later.
@@ -88,6 +88,7 @@ def targets(root: Path, roster: Path, container: bool = False) -> list[tuple[Pat
     add(TEMPLATES / "prompt_engineering", root / "adws" / "adw_data" / "prompt_engineering")
     add(TEMPLATES / "harness_engineering", root / "adws" / "adw_data" / "harness_engineering")
     add(roster, root / "adws" / "adw_sssf_config" / "sssf.config.yaml")
+    add(TEMPLATES / "repo.yaml", root / "adws" / "adw_sssf_config" / "repo.yaml")
     add(TEMPLATES / "env.sample", root / ".env.sample")
     # The recipes are part of the operating experience, and several cookbooks
     # plus the run banner tell you to use them, so a stamped repo has to have

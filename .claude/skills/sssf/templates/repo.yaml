@@ -1,0 +1,8 @@
+# This repo's SSSF rules. Commit this file: every clone and every machine
+# follows it. Stamped once, then yours to edit; an update never replaces it.
+
+# How `just merge` lands a --worktree run:
+#   any      fast-forward when it can, a merge commit when the branch moved on
+#   ff_only  fast-forward only: refuse when the branch moved on, change nothing
+# One machine can override it with SSSF_MERGE_FF_ONLY in .env (1 on, 0 off).
+merge: any

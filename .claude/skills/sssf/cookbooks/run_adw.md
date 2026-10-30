@@ -85,7 +85,7 @@ just merge <adw_id>      # only a successful run: fast-forward, or a merge commi
 just discard <adw_id>    # drop the run's branch and folder, whatever state it is in
 ```
 
-Report the branch with the result. **Run `just merge` only when the engineer says to**: the merge is the gate. It refuses unless the run succeeded, the launch branch is checked out, and the checkout is clean. In a repo that only takes fast-forwards, pass `--ff-only` or set `SSSF_MERGE_FF_ONLY=1` in `.env`; then a launch branch that moved on is refused with nothing changed, and the rebase is the engineer's call, never yours. A conflict aborts, leaves the checkout as it was, and keeps the branch; tell the engineer and show the commands it printed. Neither recipe pushes.
+Report the branch with the result. **Run `just merge` only when the engineer says to**: the merge is the gate. It refuses unless the run succeeded, the launch branch is checked out, and the checkout is clean. In a repo that only takes fast-forwards, `merge: ff_only` in `adws/adw_sssf_config/repo.yaml` (or `--ff-only` for one merge) refuses a launch branch that moved on, with nothing changed. The rebase is then the engineer's call, never yours. A conflict aborts, leaves the checkout as it was, and keeps the branch; tell the engineer and show the commands it printed. Neither recipe pushes.
 
 ## Observe
 

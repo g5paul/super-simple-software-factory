@@ -72,9 +72,10 @@ tickets *ARGS:
 # A chain started with --worktree works on branch sssf/<adw_id>, in its own
 # folder, and nothing reaches your branch until you merge it. Neither pushes.
 
+# --ff-only, or SSSF_MERGE_FF_ONLY=1 in .env, refuses a merge commit.
 # land a successful worktree run on its launch branch: just merge <adw_id>
-merge ADW_ID:
-    uv run adws/adw_worktree.py merge {{ADW_ID}} --config {{config}}
+merge ADW_ID *ARGS:
+    uv run adws/adw_worktree.py merge {{ADW_ID}} --config {{config}} "${@:2}"
 
 # drop a worktree run's branch and folder: just discard <adw_id>
 discard ADW_ID:

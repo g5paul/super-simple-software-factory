@@ -234,3 +234,26 @@ def test_a_new_ignore_entry_joins_the_existing_sssf_block(tmp_path):
     assert text.endswith("# mine\n*.log\n")
     install.ensure_gitignore(tmp_path, [])
     assert gitignore.read_text() == text
+
+
+def test_ff_only_refuses_a_merge_commit_and_changes_nothing(repo):
+    cfg, _, tracer = start("wt000015")
+    work("run's line\n", "run")
+    finish(tracer, "wt000015")
+    os.chdir(repo)
+    (repo / "other.txt").write_text("engineer\n")
+    git("add", "other.txt", cwd=repo)
+    git("commit", "-qm", "engineer moved on", cwd=repo)
+    head = git("rev-parse", "HEAD", cwd=repo)
+    with pytest.raises(worktree.WorktreeError, match="fast-forward only"):
+        worktree.merge(cfg, "wt000015", ff_only=True)
+    assert git("rev-parse", "HEAD", cwd=repo) == head
+    assert "sssf/wt000015" in git("branch", cwd=repo)
+
+
+def test_ff_only_still_fast_forwards(repo):
+    cfg, _, tracer = start("wt000016")
+    work("two\n", "run")
+    finish(tracer, "wt000016")
+    os.chdir(repo)
+    assert "fast-forward" in worktree.merge(cfg, "wt000016", ff_only=True)

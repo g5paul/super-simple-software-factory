@@ -167,12 +167,14 @@ def _status(db: str, adw_id: str) -> str | None:
     return rows[0][0] if rows else None
 
 
-def merge(cfg: SSSFConfig, adw_id: str) -> str:
+def merge(cfg: SSSFConfig, adw_id: str, ff_only: bool = False) -> str:
     """Merge a successful run's branch into its launch branch, then clean up.
 
     Fast-forward when it can, a merge commit when the launch branch moved on,
     never a rebase. A conflict is aborted, so the checkout is left as it was,
-    and the run's branch and worktree stay for a hand merge.
+    and the run's branch and worktree stay for a hand merge. With `ff_only`,
+    for a repo that keeps a linear history, a launch branch that moved on is
+    refused before anything changes.
     """
     root = main_checkout()
     anchor(cfg, root)
@@ -198,6 +200,12 @@ def merge(cfg: SSSFConfig, adw_id: str) -> str:
                             "a merge that has to abort can't promise to put them back.")
     fast_forward = git("merge-base", "--is-ancestor", "HEAD", branch, cwd=root,
                        check=False).returncode == 0
+    if ff_only and not fast_forward:
+        raise WorktreeError(
+            f"{launch} has moved on since run {adw_id} started, so {branch} can't fast-forward "
+            f"it, and this merge is fast-forward only. Nothing was changed. To land it, rebase "
+            f"the branch yourself: `git -C {path} rebase {launch}`, check the result, then "
+            f"`just merge {adw_id}` again.")
     result = git("merge", "--ff", "--no-edit", branch, cwd=root, check=False)
     if result.returncode != 0:
         if git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=root, check=False).returncode == 0:

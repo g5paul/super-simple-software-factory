@@ -37,6 +37,8 @@ The two `*_engineering` dirs mirror the two config keys of the same name: `promp
 
 Re-running is safe. `install.py` skips **every** file that already exists — your config, your prompts, and previously stamped code alike — and reports what it skipped, so a second run doubles as a drift check. `--force` overwrites ALL existing stamped files, including `sssf.config.yaml`, `quality.py`, and `prompt_engineering/`. To bring a repo up to a newer skill, use `--update` instead (next section).
 
+A repo's own `justfile` or `.env.sample`, there before SSSF, is skipped and recorded as kept, the same as `--update --keep` would record it. The first update leaves it alone, and it is only flagged again when the skill's template changes. A repo with its own justfile can pull SSSF's recipes in as a module: copy `templates/justfile` to `sssf.just` and add `mod sssf 'sssf.just'`.
+
 ## Update an installed repo
 
 When the skill changes, set `SSSF_SOURCE` in the repo's `.env` to the skill's source directory, and run:

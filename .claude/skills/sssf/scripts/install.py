@@ -174,6 +174,13 @@ def install(root: Path, roster: Path, force: bool) -> int:
             skipped.append(str(dest))
             if sha256(dest) == entry["sha256"]:
                 record["files"][rel] = entry
+            elif rel not in record["files"] and not rel.startswith("adws/"):
+                # The repo's own justfile or .env.sample, there before SSSF.
+                # Record it as kept, as `--update --keep` would, so the first
+                # update does not flag a file SSSF never wrote. Files under
+                # adws/ stay unrecorded: a leftover from an older install is
+                # SSSF's, and an update still needs to replace it.
+                record["files"][rel] = entry
             continue
         copy(src, dest)
         record["files"][rel] = entry

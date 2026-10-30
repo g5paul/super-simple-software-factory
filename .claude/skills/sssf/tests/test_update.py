@@ -143,6 +143,34 @@ def test_take_replaces_a_kept_file(repo):
     assert REVIEWER.read_text() == (TEMPLATES / "prompt_engineering/reviewer/user.md").read_text()
 
 
+# ── a repo with its own justfile and .env.sample ─────────────────────────────
+
+def test_a_repos_own_files_are_kept_at_install_and_stay_quiet(tmp_path, monkeypatch):
+    # pi-agent-observability had both before SSSF. Install skipped them but
+    # never recorded them, so its first update flagged both for review.
+    monkeypatch.chdir(tmp_path)
+    Path("justfile").write_text("mod sssf 'sssf.just'\n")
+    Path(".env.sample").write_text("OBS_PORT=43190\n")
+    install("--coding-agent", "claude_code")
+    files = stamp()["files"]
+    assert files["justfile"]["sha256"] == sha(TEMPLATES / "justfile")
+    assert files[".env.sample"]["sha256"] == sha(TEMPLATES / "env.sample")
+    out = install("--update").stdout
+    assert "to review: 0" in out
+    assert Path("justfile").read_text() == "mod sssf 'sssf.just'\n"
+    assert Path(".env.sample").read_text() == "OBS_PORT=43190\n"
+
+
+def test_a_leftover_under_adws_stays_unrecorded_at_install(tmp_path, monkeypatch):
+    # A file under adws/ that differs is SSSF's own, left by an older install,
+    # so an update must still be free to replace it.
+    monkeypatch.chdir(tmp_path)
+    AGENTS.parent.mkdir(parents=True)
+    AGENTS.write_text("# older agents.py\n")
+    install("--coding-agent", "claude_code")
+    assert str(AGENTS) not in stamp()["files"]
+
+
 # ── repos stamped before stamp.json existed ──────────────────────────────────
 
 @pytest.fixture

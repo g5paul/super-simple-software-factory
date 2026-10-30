@@ -14,6 +14,12 @@
 
 {{context_handoff_dir}}
 
+### protected_files
+
+No agent may change these paths unless its own `writes` names them:
+
+{{protected_files}}
+
 ## Task
 
 1. Read the spec, your ticket, and the scout's notes named in `prompt`. Find the seams under the spec's "Testing Decisions".

@@ -49,8 +49,8 @@ def test_every_prompt_can_name_the_protected_paths(tmp_path):
     assert variables["protected_files"] == "- `adws/adw_modules/`\n- `specs/`"
 
 
-@pytest.mark.parametrize("agent", ["planner", "builder"])
-def test_planner_and_builder_are_shown_the_protected_paths(agent):
+@pytest.mark.parametrize("agent", ["planner", "builder", "ticket_builder"])
+def test_builders_and_the_planner_are_shown_the_protected_paths(agent):
     assert "{{protected_files}}" in (PROMPTS / agent / "user.md").read_text()
 
 
@@ -64,6 +64,12 @@ def test_builder_leaves_protected_edits_alone():
     text = (PROMPTS / "builder" / "system.md").read_text()
     assert "Never modify a path in `protected_files`" in text
     assert "## For the engineer" in text
+
+
+def test_ticket_builder_leaves_protected_edits_to_the_engineer():
+    text = (PROMPTS / "ticket_builder" / "system.md").read_text()
+    assert "Never modify a path in `protected_files`" in text
+    assert "say what the engineer must change" in text
 
 
 def git(*args: str) -> None:

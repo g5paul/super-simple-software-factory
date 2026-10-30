@@ -218,16 +218,25 @@ class ToolCallTracker:
         }
 
 
-def child_env(agent_name: str = "") -> dict[str, str]:
+def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
     """The operator's environment, less the subscription providers' keys when
     SSSF_PI_AUTH=subscription. Read per call, since .env loads after import.
 
-    OBS_NAME is set to the roster name, so the pi-observability extension shows
-    "builder" or "reviewer" on the dashboard rather than an unnamed session.
+    The rest is for the pi-observability extension. OBS_NAME is the roster
+    name, so the dashboard shows "builder" rather than an unnamed session.
+    OBS_POOL puts each run in its own pool, sssf-<adw_id>, so the usage panel
+    totals one run per row; an operator's own OBS_POOL wins. OBS_TAG gains
+    "sssf" and "adw-<adw_id>", added to the operator's tags, not replacing them.
     """
     env = operator_env()
     if agent_name:
         env["OBS_NAME"] = agent_name
+    if adw_id:
+        if not env.get("OBS_POOL"):
+            env["OBS_POOL"] = f"sssf-{adw_id}"
+        tags = [t.strip() for t in env.get("OBS_TAG", "").split(",") if t.strip()]
+        tags += [t for t in ("sssf", f"adw-{adw_id}") if t not in tags]
+        env["OBS_TAG"] = ",".join(tags)
     if os.environ.get("SSSF_PI_AUTH") == "subscription":
         for var in SUBSCRIPTION_KEY_VARS:
             env.pop(var, None)
@@ -272,7 +281,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=request.cwd,
-                               env=child_env(request.agent_name))
+                               env=child_env(request.agent_name, request.adw_id))
     if on_spawn:
         on_spawn(process.pid)
     with raw_path.open("a") as raw:

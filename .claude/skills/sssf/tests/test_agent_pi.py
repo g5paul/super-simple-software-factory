@@ -44,3 +44,24 @@ def test_pi_is_named_for_the_obs_extension(monkeypatch):
     monkeypatch.setenv("OBS_NAME", "the operator's name")
     assert agent_pi.child_env("builder")["OBS_NAME"] == "builder"
     assert agent_pi.child_env()["OBS_NAME"] == "the operator's name"
+
+
+def test_each_run_gets_its_own_pool_and_tags(monkeypatch):
+    monkeypatch.delenv("OBS_POOL", raising=False)
+    monkeypatch.delenv("OBS_TAG", raising=False)
+    env = agent_pi.child_env("scout", "d6af5329")
+    assert env["OBS_POOL"] == "sssf-d6af5329"
+    assert env["OBS_TAG"] == "sssf,adw-d6af5329"
+
+
+def test_the_operators_pool_and_tags_are_kept(monkeypatch):
+    monkeypatch.setenv("OBS_POOL", "sssf-pi-gpt")
+    monkeypatch.setenv("OBS_TAG", "nightly, sssf")
+    env = agent_pi.child_env("scout", "d6af5329")
+    assert env["OBS_POOL"] == "sssf-pi-gpt"
+    assert env["OBS_TAG"] == "nightly,sssf,adw-d6af5329"
+
+
+def test_an_empty_operator_pool_still_gets_the_run_pool(monkeypatch):
+    monkeypatch.setenv("OBS_POOL", "")
+    assert agent_pi.child_env("scout", "d6af5329")["OBS_POOL"] == "sssf-d6af5329"

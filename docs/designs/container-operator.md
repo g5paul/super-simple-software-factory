@@ -51,5 +51,5 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 ## Open
 
 - **First real use: done.** yt-summarizer runs from the container. Its first run exposed the missing compiler and tzdata, and the doc gaps its setup found are closed. Its second run, after the fix, passed every check on the first round.
-- **Branch per run and a merge back.** The next step toward what sandcastle does. Not designed yet. It needs a grilling session before any code: where the worktree lives, who merges, and what happens to a run that fails.
-- **Sandbox branches.** `exp/container-operator` still holds the hand-made container and can go. The sandbox lives on `exp/container-option`, not `main`.
+- **Branch per run and a merge back.** Designed in [branch-per-run.md](branch-per-run.md), settled 2026-10-30. Not built yet. It also records the sandbox seam that would let sandcastle, or another sandbox, sit beside this container.
+- **Sandbox branches: done.** sssf-sandbox is back on its trunk, `master`, with every branch merged or deleted, and on SSSF 63a2fb0.

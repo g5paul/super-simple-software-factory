@@ -116,6 +116,13 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     agent = resolve(run.cfg, phase.params.owner)
     if agent.coding_agent == "claude_code":
         try:
+            agent_cc.check_login()
+        except agent_cc.NotLoggedIn as stop:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="not_logged_in",
+                                         payload={"agent": agent.name, "error": str(stop)}))
+            raise
+        try:
             account.check(run.cfg.defaults.rate_limit_stop)
         except account.RateLimitStop as stop:
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,

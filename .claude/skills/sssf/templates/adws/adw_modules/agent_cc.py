@@ -75,6 +75,40 @@ def map_tools(tools: Optional[list[str]]) -> Optional[list[str]]:
     return mapped
 
 
+class NotLoggedIn(RuntimeError):
+    pass
+
+
+_logged_in = False
+
+
+def check_login() -> None:
+    """Stop before the first agent when claude has no login it can use.
+
+    In the operator container, the session signed in from its token but the
+    shell that launched the ADW did not have it, and the planner ended "Not
+    logged in" (sssf-sandbox a03e7b00). The check runs with the agents' own
+    environment, once per process.
+    """
+    global _logged_in
+    if _logged_in:
+        return
+    result = subprocess.run([CLAUDE_PATH, "auth", "status"], capture_output=True,
+                            text=True, check=False, env=child_env())
+    try:
+        status = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        status = {}
+    if not status.get("loggedIn"):
+        raise NotLoggedIn(
+            "claude has no login the agents can use (claude auth status: "
+            f"{status.get('authMethod', 'no answer')}). Log in with `claude`, or, "
+            "with a token, export CLAUDE_CODE_OAUTH_TOKEN where the ADW is "
+            "launched; a Claude Code session does not pass its own token to "
+            "the shells it runs.")
+    _logged_in = True
+
+
 def child_env() -> dict[str, str]:
     env = operator_env()
     if AUTH == "subscription":

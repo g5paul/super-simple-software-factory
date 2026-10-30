@@ -273,3 +273,40 @@ def test_validate_rejects_non_anthropic_models(tmp_path):
     cfg.agents[0].model = "google/gemini-3.6-flash"
     with pytest.raises(SystemExit, match="google"):
         agents.validate(cfg, ["scout"])
+
+
+# ── login check ─────────────────────────────────────────────────────────────
+
+FAKE_AUTH = """#!/usr/bin/env python3
+import json, os, sys
+logged_in = "FAKE_TOKEN" in os.environ
+print(json.dumps({"loggedIn": logged_in, "authMethod": "oauth_token" if logged_in else "none"}))
+sys.exit(0 if logged_in else 1)
+"""
+
+
+@pytest.fixture
+def auth(tmp_path, monkeypatch):
+    binary = tmp_path / "claude"
+    binary.write_text(FAKE_AUTH)
+    binary.chmod(0o755)
+    monkeypatch.setattr(agent_cc, "CLAUDE_PATH", str(binary))
+    monkeypatch.setattr(agent_cc, "_logged_in", False)
+
+
+def test_no_login_stops_with_the_fix(auth, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    with pytest.raises(agent_cc.NotLoggedIn, match="CLAUDE_CODE_OAUTH_TOKEN"):
+        agent_cc.check_login()
+
+
+def test_a_login_is_checked_once(auth, monkeypatch, tmp_path):
+    monkeypatch.setenv("FAKE_TOKEN", "1")
+    agent_cc.check_login()
+    (tmp_path / "claude").write_text("#!/bin/sh\nexit 1\n")
+    agent_cc.check_login()
+
+
+def test_not_logged_in_is_a_stop():
+    from adw_modules import session
+    assert agent_cc.NotLoggedIn in session.STOPS

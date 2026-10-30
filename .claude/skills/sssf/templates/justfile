@@ -99,8 +99,8 @@ tail ADW_ID:
 procs ADW_ID:
     @sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"
 
-# stop a run, the chain first, then its agents: just kill <adw_id>
 # Checks each pid is still the process the trace recorded; pids get reused.
+# stop a run, the chain first, then its agents: just kill <adw_id>
 kill ADW_ID:
     uv run adws/adw_kill.py {{ADW_ID}} --config {{config}}
 

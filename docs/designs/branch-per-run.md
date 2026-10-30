@@ -1,6 +1,6 @@
 # Design: a branch per run, with a merge back
 
-Status: settled in a grilling session on 2026-10-30. The decisions below are the record. Not built yet. Where the text and a decision disagree, the decision wins.
+Status: settled in a grilling session on 2026-10-30, built and proven the same day, and rolled out to both projects. The decisions below are the record, with the changes the build made noted in place. Where the text and a decision disagree, the decision wins.
 
 SSSF's README lists what the core leaves out: "It runs on your current branch. There is no sandbox, no branch per run, no merge step..." The container option ([container-operator.md](container-operator.md)) added the sandbox. This design adds the next two: each run works on its own branch, in its own folder, and its work reaches your branch only when you merge it.
 
@@ -43,7 +43,7 @@ We don't use it as a library. Its unit of work is one agent call: worktree, agen
 7. **Cut from the launch branch's tip, merged back into it.** The launch branch is whatever is checked out when the run starts.
 8. **SSSF runs from the launch checkout. Work happens in the worktree.** The chain's code, roster, and prompts come from the checkout the run is launched in. Agents' working folder, quality checks, plan checks, the tree check around each agent, the change capture for the documenter, and every commit use the worktree. One copy of SSSF is in play per run, and an uncommitted roster tweak still applies.
 9. **One trace, in the main checkout.** The trace db and run folders stay at the main checkout's `adws/adw_data/`, so the dashboard and the update's running-chain check see worktree runs. Today those paths are relative to the folder a process starts in, so the build must anchor them to the main checkout.
-10. **The trace records where a run worked.** The request phase logs the branch, the worktree path, and the launch branch. The dashboard can show them later; that isn't part of this work.
+10. **The trace records where a run worked.** The run's start logs a `worktree` event with the branch, the worktree path, the launch branch, and its base commit. (Built at the start, not in the request phase: merge, discard, and resume read it before any phase exists.) The dashboard can show them later; that isn't part of this work.
 11. **A dirty checkout doesn't block a launch.** A run without `--worktree` still refuses one where it does today. A worktree run goes ahead and prints that your uncommitted changes aren't part of the run.
 12. **One worktree run per repo at a time.** A second one refuses to start while one is alive. Two would share the container's project environment, and that's untested. Parallel runs lift this when they're designed.
 13. **Resume stays in the worktree.** `--adw-id <id>` on a worktree run resumes inside its worktree, on its branch. It refuses once the run has been merged or discarded.
@@ -51,8 +51,8 @@ We don't use it as a library. Its unit of work is one agent call: worktree, agen
 
 ### Merge and cleanup
 
-15. **Nothing merges on its own.** A run ends with its branch ready. `just merge <adw_id>` merges it when the engineer says so, and only for a run whose status is success. To take a failed run's work, merge its branch by hand with git.
-16. **How it merges.** It fast-forwards when it can, and makes a merge commit when the launch branch has moved on. It never rebases, so the run's three commits (spec, code, write-up) keep their shas.
+15. **Nothing merges on its own.** A run ends with its branch ready. `just merge <adw_id>` merges it when the engineer says so, and only for a run whose status is success, with the launch branch checked out and no uncommitted changes. (The last check was added in the build: a merge that has to abort can't promise to put uncommitted changes back.) To take a failed run's work, merge its branch by hand with git.
+16. **How it merges.** It fast-forwards when it can, and makes a merge commit when the launch branch has moved on. It never rebases, so the run's three commits (spec, code, write-up) keep their shas. (Added after rollout: a repo that keeps a linear history sets `merge: ff_only` in its committed `adws/adw_sssf_config/repo.yaml`, and then a launch branch that moved on is refused with nothing changed. `--ff-only` does the same for one merge, and `SSSF_MERGE_FF_ONLY` in `.env` overrides the file on one machine.)
 17. **A conflict leaves nothing behind.** The recipe aborts the merge, so your checkout is clean, keeps the run's branch and worktree, and prints the commands to merge by hand.
 18. **A clean merge cleans up.** It removes the worktree and deletes `sssf/<adw_id>`.
 19. **Failed runs stay for inspection.** A run that fails keeps its worktree and branch. `just discard <adw_id>` removes them. A worktree run's start runs `git worktree prune`, which drops records of worktrees whose folders are gone, as sandcastle does.
@@ -77,3 +77,19 @@ Then yt-summarizer and pi-agent-observability get it through a normal SSSF updat
 | Date | Repo | What | Result |
 |---|---|---|---|
 | 2026-10-30 | hub | grilling session, this design | settled |
+| 2026-10-30 | hub | `--worktree`, `just merge`, `just discard`, 3ee8bc3 | built; the install adds `adws/adw_data/worktrees/` to `.gitignore`, without which a live worktree made the checkout look dirty |
+| 2026-10-30 | sssf-sandbox | case 1, run 80796ad4 on the host with an uncommitted edit | success: the edit stayed out of the run; merge refused the dirty checkout, then fast-forwarded |
+| 2026-10-30 | sssf-sandbox | case 6, a second worktree run while a839d183 was alive | refused, naming a839d183 |
+| 2026-10-30 | sssf-sandbox | case 4, run a839d183 after a commit on master | merge commit, no rebase |
+| 2026-10-30 | sssf-sandbox | case 5, run f400a6db against a conflicting README edit | merge aborted, master clean and unchanged, branch and worktree kept. The first try, 80ba30ec, didn't conflict: the function it targeted already existed |
+| 2026-10-30 | sssf-sandbox | case 3, run 2f25b95b stopped mid-plan | `fail`; merge refused it; discard removed branch and folder |
+| 2026-10-30 | sssf-sandbox | case 7, run accb2a16 stopped mid-build, resumed by `--adw-id` with no flag | resumed in its worktree, merged; resuming again after the merge refused |
+| 2026-10-30 | sssf-sandbox | case 2, container run 84f61760 | failed mid-verify with the error "1": the operator launched it through `\| head -40`, and Rich exits on a closed stdout. Not the worktree; the same verify passed on the host |
+| 2026-10-30 | hub | the console goes quiet on a closed stdout; run_adw.md says never pipe a chain's output, f0203e8 | shipped |
+| 2026-10-30 | sssf-sandbox | case 2 again, container run d8fc85aa | success: the operator chose `adw_simple_sdlc --worktree` from the request's wording, logged to a file, and merged when told. Its prompt file in the checkout blocked the first merge, so run_adw.md now says to keep prompt files out (24db188) |
+| 2026-10-30 | hub | merged and pushed, 24db188 | shipped |
+| 2026-10-30 | hub | `just kill`, 7a582c3 and ea718ae | shipped. The starter justfile never had it, though run_adw.md named it. Live test c716a01b hung 10s: the chain can't exit while its agent runs, so kill now stops the agents once the chain has closed the run (9d83c72f: 0.8s) |
+| 2026-10-30 | yt-summarizer, pi-agent-observability | SSSF update to ea718ae | updated; quality 5/5 in both |
+| 2026-10-30 | hub | one `# sssf runtime` block in `.gitignore`, 836ff09 | shipped; each update had been adding its own header |
+| 2026-10-30 | hub | `--ff-only` and `SSSF_MERGE_FF_ONLY`, 4523b6c; then `repo.yaml` with `merge: ff_only`, 9191931 | shipped. pi-agent-observability only takes fast-forwards, and a rule in the untracked `.env` never reaches a fresh clone. Live run ff8d0878 refused under `ff_only` and merged with the `.env` override set to 0 |
+| 2026-10-30 | yt-summarizer, pi-agent-observability | SSSF update to 9191931 | updated; pi-agent-observability keeps `merge: ff_only` in `repo.yaml` (2ad5fd6) |

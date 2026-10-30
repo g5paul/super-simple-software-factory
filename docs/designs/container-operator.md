@@ -47,9 +47,10 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 | 2026-10-30 | yt-summarizer `sssf-run` | first real run from the container, 47caf9b9 (`--brief` option) | success after 3 failed test rounds: no C compiler to build `brotli`, and no tzdata, so named time zones fell back to UTC. The builder rewrote two existing tests to POSIX `TZ` strings to pass. Launch, host trace and dashboard, commit author, and file ownership were all right |
 | 2026-10-30 | hub | image gets build-essential, python3-dev and tzdata; container doc gaps closed, bbcff04 | shipped |
 | 2026-10-30 | yt-summarizer `sssf-run` | rebuilt image, run 650cbab9 (`--brief` shows progress) | success: all 5 checks passed on the first round, 10 phases, about 3 minutes. Author and file ownership right |
+| 2026-10-30 | sssf-sandbox `master` | worktree runs from the container: 84f61760, then d8fc85aa | the first died on a closed output pipe, not the container; the second merged. See [branch-per-run.md](branch-per-run.md) |
 
 ## Open
 
 - **First real use: done.** yt-summarizer runs from the container. Its first run exposed the missing compiler and tzdata, and the doc gaps its setup found are closed. Its second run, after the fix, passed every check on the first round.
-- **Branch per run and a merge back.** Designed in [branch-per-run.md](branch-per-run.md), settled 2026-10-30. Not built yet. It also records the sandbox seam that would let sandcastle, or another sandbox, sit beside this container.
-- **Sandbox branches: done.** sssf-sandbox is back on its trunk, `master`, with every branch merged or deleted, and on SSSF 63a2fb0.
+- **Branch per run and a merge back: done.** Built to [branch-per-run.md](branch-per-run.md) on 2026-10-30, proven in sssf-sandbox on the host and in this container (run d8fc85aa), and rolled out to both projects. Still open there: the sandbox seam that would let sandcastle, or another sandbox, sit beside this container. Its code waits for a second sandbox.
+- **Sandbox branches: done.** sssf-sandbox is on its trunk, `master`, with no other branches.

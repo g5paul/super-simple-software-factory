@@ -39,7 +39,7 @@ uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code
 claude auth status            # must show a logged-in subscription account
 ```
 
-The install prints `dashboard: registered as <name>`, so the repo shows up in `just obs-all`. Copy `.env.sample` to `.env` and set `SSSF_SOURCE` in it to the skill source, so `just sssf-update` works later. Agents bill to the Claude subscription login, so `.env` needs no API key. Don't add one.
+The install prints `dashboard: registered as <name>`, so the repo shows up in `just obs-all`. Copy `.env.sample` to `.env` and set `SSSF_SOURCE` in it to the skill source, so `just sssf-update` works later (`just sssf sssf-update` if the repo's justfile loads SSSF with `mod sssf`, see [install.md](install.md)). Agents bill to the Claude subscription login, so `.env` needs no API key. Don't add one.
 
 ## 3. Make quality.py check what CI checks
 
@@ -72,7 +72,7 @@ This page is how the next session, or the engineer, finds out how SSSF works in 
 - **Run a chain.** `just simple-sdlc path/to/task.md`, and what each phase does.
 - **Watch a run.** `just obs`, `just obs-all`, and the `just sessions` and `just phases` reads.
 - **What a run leaves.** The three commits, `specs/`, `app_docs/`, and the session folder.
-- **Update SSSF.** `just sssf-update`, then `--take` or `--keep` for a file it flags.
+- **Update SSSF.** The exact command for this repo, `just sssf-update` or `just sssf sssf-update`, then `--take` or `--keep` for a file it flags.
 
 ## 5a. Optional: the ticket flow
 
@@ -104,7 +104,7 @@ When it ends:
 When the hub sends an update, start it only while no chain is running and the tree is clean:
 
 ```bash
-just sssf-update
+just sssf-update          # or: just sssf sssf-update, where the justfile has `mod sssf`
 ```
 
 It refreshes the skill copy from `SSSF_SOURCE`, runs `install.py --update`, and runs it again to confirm. It refuses to start on a dirty tree or while a chain process is alive. Read what it lists. A file marked `!` changed in the repo and in the skill, so compare the two, then `--take` or `--keep` it ([install.md](install.md), "Update an installed repo"). Commit the update on its own, and report the commit and the update output to the hub.

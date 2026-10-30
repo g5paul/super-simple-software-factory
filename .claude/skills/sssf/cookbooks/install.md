@@ -47,6 +47,8 @@ When the skill changes, set `SSSF_SOURCE` in the repo's `.env` to the skill's so
 just sssf-update
 ```
 
+If the repo's own justfile has `mod sssf 'sssf.just'`, SSSF's recipes run as a module, so every one takes the `sssf` prefix: `just sssf sssf-update`. The same goes for `just demo`, `just sessions`, and the rest. Check the justfile for the `mod sssf` line before running any of them.
+
 It refuses to start while the tree has uncommitted changes or a chain process is alive, so the update gets its own commit. Then it does the two steps below, runs `--update` a second time to confirm nothing is left, and prints the skill commit it copied from. The steps by hand:
 
 ```bash
@@ -81,11 +83,11 @@ A repo installed before `stamp.json` existed has no record. Its first update rep
 
 ### Finish the update
 
-1. Resolve every `!` file with `--take` or `--keep`, and run `just sssf-update` again until `to review` is 0.
+1. Resolve every `!` file with `--take` or `--keep`, and run the update again until `to review` is 0.
 2. Read `git status` and `git diff`. Expect the files the update listed, `stamp.json`, and the skill copy under `.claude/skills/sssf/`. A file you did not expect is a question for the hub, not something to commit.
 3. Commit the update on its own: `git add -A && git commit -m "Update SSSF to skill <sha>"`, with the sha the update printed.
 4. Run `uv run adws/adw_quality.py "check after the SSSF update"`. A block reported as `not configured` is still on its placeholder, and checks nothing until you wire it in `quality.py`.
-5. Report to the hub: the commit, the update's counts, anything flagged, and the quality result.
+5. Report the commit, the update's counts, anything flagged, and the quality result to the hub: the Claude session that works in the SSSF skill repo and sent the update ([onboard.md](onboard.md), "Two sessions"). With no hub session, report to the engineer.
 
 ## Post-install checklist
 

@@ -137,6 +137,18 @@ SSSF can run its agents on a Claude subscription through Claude Code, or on a Ch
 | Spend on the dashboard | yes | yes |
 | Key guard | on by default | `SSSF_PI_AUTH=subscription` |
 
+**Models as of 2026-10-29.** The stamped `sssf.config.yaml` is the source of truth, and new models will make this table stale. The Claude column is the Claude Code roster that `install.py --coding-agent claude_code` stamps, used for every Claude run so far. SSSF has no ChatGPT roster yet. The ChatGPT column is the one setup tested so far: gpt-6.1-sol for every agent, in one simple-sdlc run. Lighter models for the scout and documenter haven't been tried.
+
+| Agent | Claude via Claude Code | ChatGPT via Pi (tested) | Thinking |
+|---|---|---|---|
+| planner | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
+| builder, ticket_builder | `anthropic/claude-sonnet-5-5` | `openai/gpt-6.1-sol` | medium |
+| reviewer, standards_reviewer, spec_reviewer | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
+| scout | `anthropic/claude-haiku-5-5` | `openai/gpt-6.1-sol` | medium |
+| documenter | `anthropic/claude-haiku-5-5` | `openai/gpt-6.1-sol` | medium |
+
+The Claude roster gives the reviewers a different model from the builder, so they don't share its blind spots. With one model for every agent, as in the ChatGPT column, the reviewers can't have that.
+
 **The trade-offs.**
 
 - SSSF runs draw on the same plan as your own use. A long unattended run can leave less for you, and a busy day at the keyboard can stop a Claude run. Nothing warns or stops a ChatGPT run before the plan runs out.

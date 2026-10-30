@@ -149,7 +149,7 @@ def test_a_repos_own_files_are_kept_at_install_and_stay_quiet(tmp_path, monkeypa
     # pi-agent-observability had both before SSSF. Install skipped them but
     # never recorded them, so its first update flagged both for review.
     monkeypatch.chdir(tmp_path)
-    Path("justfile").write_text("mod sssf 'sssf.just'\n")
+    Path("justfile").write_text("test:\n    bun test\n")
     Path(".env.sample").write_text("OBS_PORT=43190\n")
     install("--coding-agent", "claude_code")
     files = stamp()["files"]
@@ -157,7 +157,7 @@ def test_a_repos_own_files_are_kept_at_install_and_stay_quiet(tmp_path, monkeypa
     assert files[".env.sample"]["sha256"] == sha(TEMPLATES / "env.sample")
     out = install("--update").stdout
     assert "to review: 0" in out
-    assert Path("justfile").read_text() == "mod sssf 'sssf.just'\n"
+    assert Path("justfile").read_text() == "test:\n    bun test\n"
     assert Path(".env.sample").read_text() == "OBS_PORT=43190\n"
 
 
@@ -170,6 +170,41 @@ def test_a_leftover_under_adws_stays_unrecorded_at_install(tmp_path, monkeypatch
     install("--coding-agent", "claude_code")
     assert str(AGENTS) not in stamp()["files"]
 
+
+
+# ── a repo that loads SSSF's recipes with `mod sssf` ─────────────────────────
+
+MODULE = Path("sssf.just")
+OWN_JUSTFILE = "mod sssf 'sssf.just'\n\ntest:\n    bun test\n"
+
+
+def test_a_repo_that_loads_the_module_gets_sssf_just_stamped(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("justfile").write_text(OWN_JUSTFILE)
+    install("--coding-agent", "claude_code")
+    assert MODULE.read_text() == (TEMPLATES / "justfile").read_text()
+    files = stamp()["files"]
+    assert files["sssf.just"]["sha256"] == sha(TEMPLATES / "justfile")
+    assert "justfile" not in files
+    assert Path("justfile").read_text() == OWN_JUSTFILE
+
+
+def test_a_hand_copied_sssf_just_is_brought_up_to_date(tmp_path, monkeypatch):
+    # pi-agent-observability copied sssf.just by hand, and install recorded its
+    # own justfile as kept. The update never touched sssf.just, so it missed
+    # every later change to SSSF's recipes.
+    monkeypatch.chdir(tmp_path)
+    install("--coding-agent", "claude_code")
+    Path("justfile").write_text(OWN_JUSTFILE)
+    MODULE.write_text("# an older copy of SSSF's recipes\n")
+    out = install("--update").stdout
+    assert "sssf.just  (SSSF code, no stamp record yet)" in out
+    assert "to review: 0" in out
+    assert MODULE.read_text() == (TEMPLATES / "justfile").read_text()
+    files = stamp()["files"]
+    assert "sssf.just" in files and "justfile" not in files
+    assert Path("justfile").read_text() == OWN_JUSTFILE
+    assert "updated: 0" in install("--update").stdout
 
 # ── repos stamped before stamp.json existed ──────────────────────────────────
 

@@ -29,6 +29,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -85,9 +86,21 @@ def targets(root: Path, roster: Path) -> list[tuple[Path, Path]]:
     add(TEMPLATES / "env.sample", root / ".env.sample")
     # The recipes are part of the operating experience, and several cookbooks
     # plus the run banner tell you to use them, so a stamped repo has to have
-    # them. Skipped like any other file if the repo already has a justfile.
-    add(TEMPLATES / "justfile", root / "justfile")
+    # them. A repo with its own justfile loads them as a module, and then they
+    # are stamped into sssf.just. Otherwise they are the justfile, skipped like
+    # any other file if the repo already has one.
+    add(TEMPLATES / "justfile", root / (MODULE if loads_module(root) else "justfile"))
     return pairs
+
+
+MODULE = "sssf.just"
+MOD_LINE = re.compile(r"^\s*mod\s+sssf(\s+['\"]sssf\.just['\"])?\s*$", re.MULTILINE)
+
+
+def loads_module(root: Path) -> bool:
+    """True when the repo's own justfile loads SSSF's recipes with `mod sssf`."""
+    justfile = root / "justfile"
+    return justfile.is_file() and MOD_LINE.search(justfile.read_text()) is not None
 
 
 def sha256(path: Path) -> str:
@@ -99,6 +112,8 @@ def is_sssf_code(rel: str) -> bool:
     the repo's own test, lint, and typecheck commands."""
     if rel == "adws/adw_modules/quality.py":
         return False
+    if rel == MODULE:
+        return True        # SSSF's recipes; the repo's own go in its justfile
     parts = rel.split("/")
     return (rel.startswith("adws/adw_modules/")
             or (len(parts) == 2 and parts[0] == "adws" and parts[1].startswith("adw_")
@@ -214,6 +229,10 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
         roster = default_roster
 
     pairs = targets(root, roster)
+    if loads_module(root) and files.get("justfile", {}).get("source") == "justfile":
+        # The repo's own justfile, recorded as kept before sssf.just was
+        # tracked. SSSF's recipes are in sssf.just now, so it has no claim on it.
+        del files["justfile"]
     unknown = (take | keep) - {dest.relative_to(root).as_posix() for _, dest in pairs}
     if unknown:
         print(f"not a stamped file: {', '.join(sorted(unknown))}", file=sys.stderr)

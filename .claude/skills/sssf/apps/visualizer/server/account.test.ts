@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Account, estimateCost } from "./account.ts";
+import { Account, estimateCost, piSpend } from "./account.ts";
 
 const NOW = Date.parse("2026-10-29T16:00:00Z");
 const RESET_5H = Date.parse("2026-10-29T17:30:00Z") / 1000;
@@ -122,5 +122,31 @@ describe("estimateCost", () => {
 
   test("an unknown model has no estimate", () => {
     expect(estimateCost("claude-mystery-9", { input: 1, output: 1, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 })).toBeNull();
+  });
+});
+
+describe("Pi agents' spend", () => {
+  const pi = (at: string, project: string, model: string, cost: number) =>
+    ({ at: Date.parse(at), project, model, cost, input_tokens: 1000, output_tokens: 100 });
+
+  test("adds up the last 5 hours and 7 days by project and model", () => {
+    const spend = piSpend([
+      pi("2026-10-29T15:00:00Z", "yt", "openai/gpt-6.1-sol", 0.4),
+      pi("2026-10-29T14:00:00Z", "sandbox", "openai/gpt-6.1-sol", 0.1),
+      pi("2026-10-27T09:00:00Z", "yt", "google/gemini-3.6-flash", 0.05),
+      pi("2026-10-20T09:00:00Z", "yt", "openai/gpt-6.1-sol", 9),
+    ], NOW);
+    expect(spend.window.calls).toBe(2);
+    expect(spend.window.est_usd).toBeCloseTo(0.5);
+    expect(spend.window.by_project.map((r) => r.key)).toEqual(["yt", "sandbox"]);
+    expect(spend.week.calls).toBe(3);
+    expect(spend.week.by_model.map((r) => [r.key, Number(r.est_usd.toFixed(2))])).toEqual([
+      ["openai/gpt-6.1-sol", 0.5], ["google/gemini-3.6-flash", 0.05],
+    ]);
+  });
+
+  test("no Pi calls means empty windows, not an error", () => {
+    const spend = piSpend([], NOW);
+    expect([spend.window.calls, spend.week.calls]).toEqual([0, 0]);
   });
 });

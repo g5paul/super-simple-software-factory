@@ -408,10 +408,31 @@ export interface SpendWindow {
   unpriced_models: string[];
 }
 
+/** One Pi agent call from a project's trace db. Cost is Pi's list-price figure. */
+export interface PiCall {
+  at: string;
+  model: string;
+  cost: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/** Pi agents' spend over the last 5 hours or 7 days. Pi reports no usage windows. */
+export interface PiSpendWindow {
+  start: string;
+  end: string;
+  calls: number;
+  est_usd: number;
+  by_project: SpendRow[];
+  by_model: SpendRow[];
+}
+
 /** GET /api/account */
 export interface AccountUsage {
   sample: LimitSample | null;
   window: SpendWindow;
   week: SpendWindow;
   transcripts: string;
+  /** SSSF's own Pi agents, from every registered project's trace db. */
+  pi: { window: PiSpendWindow; week: PiSpendWindow };
 }

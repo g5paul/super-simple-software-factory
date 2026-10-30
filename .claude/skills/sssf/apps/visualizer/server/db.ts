@@ -17,6 +17,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { caps, stopReason, ticketRun, type RunEvent } from "./runview.ts";
 import type {
   AgentSession,
+  PiCall,
   AgentStartPayload,
   Envelope,
   Event,
@@ -137,6 +138,30 @@ export class SssfDb {
         "UNION SELECT json_extract(payload_json, '$.session_id') FROM events " +
         "WHERE type = 'agent_start' AND json_extract(payload_json, '$.session_id') IS NOT NULL",
     ).all() as { session_id: string }[]).map((r) => r.session_id);
+  }
+
+  /**
+   * Every Pi agent call since `since`, with the model its agent started with.
+   * An agent_end names its agent, so it pairs with that agent's latest
+   * agent_start in the same run.
+   */
+  piCalls(since: string): PiCall[] {
+    return this.db.query(
+      `SELECT at, json_extract(start, '$.model') AS model, cost, input_tokens, output_tokens FROM (
+         SELECT e.started_at AS at,
+                json_extract(e.payload_json, '$.cost') AS cost,
+                coalesce(json_extract(e.payload_json, '$.usage.input_tokens'), 0)
+                  + coalesce(json_extract(e.payload_json, '$.usage.cache_read_tokens'), 0)
+                  + coalesce(json_extract(e.payload_json, '$.usage.cache_write_tokens'), 0) AS input_tokens,
+                coalesce(json_extract(e.payload_json, '$.usage.output_tokens'), 0) AS output_tokens,
+                (SELECT payload_json FROM events
+                  WHERE adw_id = e.adw_id AND name = e.name AND type = 'agent_start' AND started_at <= e.started_at
+                  ORDER BY started_at DESC LIMIT 1) AS start
+         FROM events e
+         WHERE e.type = 'agent_end' AND e.started_at >= ?)
+       WHERE json_extract(start, '$.coding_agent') = 'pi'
+       ORDER BY at`,
+    ).all(since) as PiCall[];
   }
 
   close(): void {

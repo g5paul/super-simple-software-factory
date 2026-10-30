@@ -35,3 +35,21 @@ test("every agent session counts as SSSF's, not only each agent's latest", () =>
   expect(db.agentSessionIds().toSorted()).toEqual(["s-old", "s-t01", "s-t02"]);
   db.close();
 });
+
+test("Pi calls carry the model their agent started with, and Claude Code calls are left out", () => {
+  const path = join(dir, "pi.db");
+  const db = new Database(path);
+  db.exec("CREATE TABLE events (adw_id TEXT, type TEXT, name TEXT, payload_json TEXT, started_at TEXT)");
+  const ev = db.query("INSERT INTO events VALUES (?, ?, ?, ?, ?)");
+  ev.run("p1", "agent_start", "builder", JSON.stringify({ coding_agent: "pi", model: "openai/gpt-6.1-sol" }), "2026-10-29T10:00:00Z");
+  ev.run("p1", "agent_end", "builder", JSON.stringify({ cost: 0.3, usage: { input_tokens: 50, cache_read_tokens: 950, output_tokens: 20 } }), "2026-10-29T10:05:00Z");
+  ev.run("c1", "agent_start", "builder", JSON.stringify({ coding_agent: "claude_code", model: "anthropic/claude-sonnet-5-5" }), "2026-10-29T11:00:00Z");
+  ev.run("c1", "agent_end", "builder", JSON.stringify({ cost: 1.2, usage: {} }), "2026-10-29T11:05:00Z");
+  ev.run("p1", "agent_end", "builder", JSON.stringify({ cost: 5 }), "2026-10-01T10:05:00Z");
+  db.close();
+  const sssf = new SssfDb(path);
+  expect(sssf.piCalls("2026-10-20T00:00:00Z")).toEqual([
+    { at: "2026-10-29T10:05:00Z", model: "openai/gpt-6.1-sol", cost: 0.3, input_tokens: 1000, output_tokens: 20 },
+  ]);
+  sssf.close();
+});

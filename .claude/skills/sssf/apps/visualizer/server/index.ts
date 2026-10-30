@@ -15,7 +15,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
-import { Account } from "./account.ts";
+import { Account, type PiCallAt } from "./account.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import type {
   AccountUsage,
@@ -206,11 +206,16 @@ const server = listen((port) => Bun.serve({
 
     // The Claude account behind every project: limits and where spend went.
     "/api/account": safely(() => {
+      const now = Date.now();
+      const since = new Date(now - 7 * 24 * 3_600_000).toISOString();
       const sessions = new Set<string>();
+      const piCalls: PiCallAt[] = [];
       for (const p of projects.everyProject()) {
-        for (const id of projects.db(p)?.agentSessionIds() ?? []) sessions.add(id);
+        const db = projects.db(p);
+        for (const id of db?.agentSessionIds() ?? []) sessions.add(id);
+        for (const c of db?.piCalls(since) ?? []) piCalls.push({ ...c, at: Date.parse(c.at), project: p.name });
       }
-      return json(account.summary(Date.now(), sessions, (cwd) => projects.projectOf(cwd)) satisfies AccountUsage);
+      return json(account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls) satisfies AccountUsage);
     }),
 
     "/api/projects/:project/health": withDb((db) =>

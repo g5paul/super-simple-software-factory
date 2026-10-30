@@ -124,6 +124,38 @@ function share(row: SpendRow, total: number): string {
         </template>
       </div>
     </div>
+
+    <div v-if="usage?.pi.week.calls" class="spend pi">
+      <div class="spend-head">
+        <span>
+          <b>Pi agents</b>, last 5 hours: <b>{{ fmtCost(usage.pi.window.est_usd) }}</b> est. over
+          {{ usage.pi.window.calls }} calls
+        </span>
+        <span class="dim">last 7 days: {{ fmtCost(usage.pi.week.est_usd) }}</span>
+      </div>
+      <div class="tables">
+        <table v-for="t in [
+          { name: 'by project', rows: usage.pi.window.by_project },
+          { name: 'by model', rows: usage.pi.window.by_model },
+        ]" :key="t.name">
+          <thead><tr><th>{{ t.name }}</th><th>calls</th><th>est.</th><th></th><th>out</th></tr></thead>
+          <tbody>
+            <tr v-for="r in t.rows.slice(0, 8)" :key="r.key">
+              <td class="key" :title="r.key">{{ r.key }}</td>
+              <td>{{ r.calls }}</td>
+              <td>{{ fmtCost(r.est_usd) }}</td>
+              <td class="dim">{{ share(r, usage.pi.window.est_usd) }}</td>
+              <td class="dim">{{ fmtTokens(r.output_tokens) }}</td>
+            </tr>
+            <tr v-if="!t.rows.length"><td colspan="5" class="dim">no Pi calls in the last 5 hours</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="faint small">
+        Cost is Pi's list-price figure. A subscription sign-in, such as ChatGPT, pays it. Pi's providers
+        report no usage limits to SSSF, so check a ChatGPT plan's limits in ChatGPT or Codex.
+      </div>
+    </div>
   </section>
 </template>
 
@@ -196,6 +228,11 @@ function share(row: SpendRow, total: number): string {
 .mid .fill { background: var(--amber); }
 .high .fill { background: var(--red); }
 .high .pct { color: var(--red); }
+
+.pi {
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
 
 .spend-head {
   display: flex;

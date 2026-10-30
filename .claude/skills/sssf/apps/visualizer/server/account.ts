@@ -19,7 +19,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AccountUsage, LimitSample, LimitWindow, SpendRow, SpendWindow } from "../shared/types.ts";
+import type { AccountUsage, LimitSample, LimitWindow, PiSpendWindow, SpendRow, SpendWindow } from "../shared/types.ts";
 import { registryPath } from "./projects.ts";
 
 /**
@@ -157,6 +157,51 @@ function rows(calls: Call[], keyOf: (c: Call) => string): SpendRow[] {
   return [...by.values()].toSorted((a, b) => b.est_usd - a.est_usd || a.key.localeCompare(b.key));
 }
 
+/** A Pi call placed in its project, with its time parsed. */
+export interface PiCallAt {
+  at: number;
+  project: string;
+  model: string;
+  cost: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+function piRows(calls: PiCallAt[], keyOf: (c: PiCallAt) => string): SpendRow[] {
+  const by = new Map<string, SpendRow>();
+  for (const c of calls) {
+    const key = keyOf(c);
+    const row = by.get(key) ?? { key, calls: 0, est_usd: 0, output_tokens: 0, input_tokens: 0 };
+    row.calls += 1;
+    row.est_usd += c.cost;
+    row.output_tokens += c.output_tokens;
+    row.input_tokens += c.input_tokens;
+    by.set(key, row);
+  }
+  return [...by.values()].toSorted((a, b) => b.est_usd - a.est_usd || a.key.localeCompare(b.key));
+}
+
+/**
+ * SSSF's Pi agents over the last 5 hours and 7 days. Pi's providers (a
+ * ChatGPT sign-in, say) report no usage windows, so both spans are rolling,
+ * and the cost is Pi's own list-price figure.
+ */
+export function piSpend(calls: PiCallAt[], now: number): { window: PiSpendWindow; week: PiSpendWindow } {
+  const span = (ms: number): PiSpendWindow => {
+    const start = now - ms;
+    const inside = calls.filter((c) => c.at >= start && c.at <= now);
+    return {
+      start: new Date(start).toISOString(),
+      end: new Date(now).toISOString(),
+      calls: inside.length,
+      est_usd: inside.reduce((sum, c) => sum + c.cost, 0),
+      by_project: piRows(inside, (c) => c.project),
+      by_model: piRows(inside, (c) => c.model),
+    };
+  };
+  return { window: span(WINDOW_MS.five_hour), week: span(WINDOW_MS.seven_day) };
+}
+
 export class Account {
   private readonly files = new Map<string, FileState>();
   private readonly seen = new Set<string>();
@@ -199,7 +244,7 @@ export class Account {
     return [...this.files.values()].flatMap((s) => s.calls);
   }
 
-  summary(now: number, sssfSessions: Set<string>, projectOf: (cwd: string) => string): AccountUsage {
+  summary(now: number, sssfSessions: Set<string>, projectOf: (cwd: string) => string, piCalls: PiCallAt[] = []): AccountUsage {
     const calls = this.refresh(now);
     const sample = readSample(this.ratesFile, now);
     const span = (live: LimitWindow | null, kind: "five_hour" | "seven_day"): SpendWindow => {
@@ -224,6 +269,7 @@ export class Account {
       window: span(sample?.five_hour ?? null, "five_hour"),
       week: span(sample?.seven_day ?? null, "seven_day"),
       transcripts: this.transcripts,
+      pi: piSpend(piCalls, now),
     };
   }
 }

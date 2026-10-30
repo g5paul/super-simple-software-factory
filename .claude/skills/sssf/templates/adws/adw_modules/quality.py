@@ -209,7 +209,7 @@ def as_envelope(result: QualityResult, what: str) -> VerifyOutput:
     """
     return VerifyOutput(
         status="success" if result.passed else "fail",
-        summary=(f"{what}: {result.tally()}" if result.passed
+        summary=(f"{what}: all {len(result.checks)} check(s) passed" if result.passed
                  else f"{what}: {len(result.failures)} of {len(result.checks)} check(s) failed"),
         artifacts=result.artifacts,
         notes_for_next_agent=("" if result.passed else

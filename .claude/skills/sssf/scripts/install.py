@@ -48,6 +48,7 @@ ROSTERS = {
 # --chatgpt: still Pi, with every model on the ChatGPT subscription sign-in.
 CHATGPT_ROSTER = TEMPLATES / "sssf.config.chatgpt.yaml"
 
+GITIGNORE_HEADER = "# sssf runtime"
 GITIGNORE_ENTRIES = [
     "adws/adw_data/sessions/",
     "adws/adw_data/sssf.db*",
@@ -202,10 +203,19 @@ def ensure_gitignore(root: Path, stamped: list) -> None:
     gitignore = root / ".gitignore"
     existing = gitignore.read_text().splitlines() if gitignore.exists() else []
     missing = [e for e in GITIGNORE_ENTRIES if e not in existing]
-    if missing:
-        with gitignore.open("a") as f:
-            f.write("\n# sssf runtime\n" + "\n".join(missing) + "\n")
-        stamped.append(f"{gitignore} (+{len(missing)} entries)")
+    if not missing:
+        return
+    if GITIGNORE_HEADER in existing:
+        # Join the block an earlier install wrote, at its last line, rather
+        # than start another one: each update used to add its own header.
+        end = existing.index(GITIGNORE_HEADER) + 1
+        while end < len(existing) and existing[end].strip() and not existing[end].startswith("#"):
+            end += 1
+        lines = existing[:end] + missing + existing[end:]
+    else:
+        lines = existing + ["", GITIGNORE_HEADER] + missing
+    gitignore.write_text("\n".join(lines) + "\n")
+    stamped.append(f"{gitignore} (+{len(missing)} entries)")
 
 
 def registry_path() -> Path:

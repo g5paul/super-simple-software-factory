@@ -218,3 +218,19 @@ def test_a_live_worktree_leaves_the_checkout_clean(repo):
     start("wt000014")
     work("two\n", "run")
     assert git("status", "--porcelain", cwd=repo) == ""
+
+
+def test_a_new_ignore_entry_joins_the_existing_sssf_block(tmp_path):
+    """yt-summarizer's .gitignore had three `# sssf runtime` headers, one per update."""
+    sys.path.insert(0, str(SKILL / "scripts"))
+    import install
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("node_modules/\n\n# sssf runtime\nadws/adw_data/sessions/\n\n# mine\n*.log\n")
+    install.ensure_gitignore(tmp_path, [])
+    text = gitignore.read_text()
+    assert text.count("# sssf runtime") == 1
+    block = text.split("# sssf runtime\n")[1].split("\n\n")[0].splitlines()
+    assert "adws/adw_data/worktrees/" in block and "adws/adw_data/sessions/" in block
+    assert text.endswith("# mine\n*.log\n")
+    install.ensure_gitignore(tmp_path, [])
+    assert gitignore.read_text() == text

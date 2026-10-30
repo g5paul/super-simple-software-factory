@@ -413,6 +413,7 @@ class AgentRequest(BaseModel):
 
     prompt: str
     system_prompt: str
+    agent_name: str = ""            # the roster name, for observers such as the obs extension
     model: str                      # provider/id, resolved by the interface
     thinking: str = "medium"
     session_id: str                 # pi: any string; claude: a UUID

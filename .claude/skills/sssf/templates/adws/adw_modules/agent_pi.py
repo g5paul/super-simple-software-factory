@@ -218,10 +218,16 @@ class ToolCallTracker:
         }
 
 
-def child_env() -> dict[str, str]:
+def child_env(agent_name: str = "") -> dict[str, str]:
     """The operator's environment, less the subscription providers' keys when
-    SSSF_PI_AUTH=subscription. Read per call, since .env loads after import."""
+    SSSF_PI_AUTH=subscription. Read per call, since .env loads after import.
+
+    OBS_NAME is set to the roster name, so the pi-observability extension shows
+    "builder" or "reviewer" on the dashboard rather than an unnamed session.
+    """
     env = operator_env()
+    if agent_name:
+        env["OBS_NAME"] = agent_name
     if os.environ.get("SSSF_PI_AUTH") == "subscription":
         for var in SUBSCRIPTION_KEY_VARS:
             env.pop(var, None)
@@ -266,7 +272,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=request.cwd,
-                               env=child_env())
+                               env=child_env(request.agent_name))
     if on_spawn:
         on_spawn(process.pid)
     with raw_path.open("a") as raw:

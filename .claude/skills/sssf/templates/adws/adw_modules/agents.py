@@ -159,6 +159,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         request = AgentRequest(
             prompt=prompt_text,
             system_prompt=system_text,
+            agent_name=agent.name,
             model=agent.model,
             thinking=agent.thinking,
             session_id=session_id,

@@ -38,3 +38,9 @@ def test_on_a_subscription_pi_gets_no_key_a_sign_in_covers(monkeypatch):
     env = agent_pi.child_env()
     assert "OPENAI_API_KEY" not in env and "ANTHROPIC_API_KEY" not in env
     assert env["OPENROUTER_API_KEY"] == "sk-z"      # no sign-in for it, so the key stays
+
+
+def test_pi_is_named_for_the_obs_extension(monkeypatch):
+    monkeypatch.setenv("OBS_NAME", "the operator's name")
+    assert agent_pi.child_env("builder")["OBS_NAME"] == "builder"
+    assert agent_pi.child_env()["OBS_NAME"] == "the operator's name"

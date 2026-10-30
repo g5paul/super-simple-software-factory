@@ -12,6 +12,9 @@ set positional-arguments
 # swaps the whole roster for one run.
 config := env_var_or_default("SSSF_CONFIG", "adws/adw_sssf_config/sssf.config.yaml")
 db     := "adws/adw_data/sssf.db"
+# How to call these recipes: `just` when this is the repo's justfile, `just sssf`
+# when a repo with its own justfile loads it with `mod sssf 'sssf.just'`.
+just   := if source_file() == justfile() { "just" } else { "just sssf" }
 
 # list every recipe
 default:
@@ -31,7 +34,7 @@ demo:
     uv run adws/adw_prompt.py --config {{config}} --agent scout "reply with a one-line summary of this repo"
     @echo "\n2/2  adw_scout: read-only recon"
     uv run adws/adw_scout.py --config {{config}} "list the top-level directories in this repo and what each is for. change nothing."
-    @echo "\nboth done. now run:  just sessions    (or: just obs)"
+    @echo "\nboth done. now run:  {{just}} sessions    (or: {{just}} obs)"
 
 # ── run a workflow ──────────────────────────────────────────────────────────
 # Args pass straight through: "<prompt or path/to/prompt.md>" [--adw-id X]

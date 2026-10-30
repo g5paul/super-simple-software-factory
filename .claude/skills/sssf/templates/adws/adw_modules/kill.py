@@ -8,6 +8,10 @@ the adw_id is enough to find them. Two things decide the order and the checks:
   SIGTERM into a clean exit that marks the run `fail` (session._finalize_when_killed).
 - That exit also marks every process row ended, while the agent it was waiting
   on is still alive. So the rows are read before any signal is sent.
+- The chain can't finish exiting while its agent runs: a thread reading the
+  agent's output keeps it alive. So kill waits only until the chain has closed
+  the run, which means no retry can start, then stops the agents, then waits
+  for everything.
 
 A pid can be reused once its process is gone, so each one is checked before it
 is signalled: its command has to name what was recorded (the chain's script,
@@ -81,13 +85,19 @@ def identify(kind: str, command: str, started_at: str, live: tuple[int, str]) ->
     return ""
 
 
-def _gone(pid: int) -> bool:
-    deadline = time.monotonic() + WAIT_SECONDS
+def _closed(db: str, adw_id: str) -> bool:
+    with sqlite3.connect(db) as conn:
+        row = conn.execute("select status from sessions where adw_id=?", (adw_id,)).fetchone()
+    return not row or row[0] != "running"
+
+
+def _wait(until, seconds: float = WAIT_SECONDS) -> bool:
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if _live(pid) is None:
+        if until():
             return True
         time.sleep(0.2)
-    return False
+    return until()
 
 
 def kill(db: str, adw_id: str) -> list[str]:
@@ -97,24 +107,30 @@ def kill(db: str, adw_id: str) -> list[str]:
     rows = _rows(db, adw_id)
     if not rows:
         return [f"no live processes recorded for {adw_id}"]
-    report = []
+    report: dict[int, str] = {}
+    signalled: list[tuple[str, int]] = []
     for kind, name, pid, command, started_at in rows:
         label = f"{kind} {name} {pid}".replace("  ", " ")
         live = _live(pid)
         if live is None:
-            report.append(f"{label}: already gone")
+            report[pid] = f"{label}: already gone"
             continue
         why = identify(kind, command, started_at, live)
         if why:
-            report.append(f"{label}: NOT stopped, {why}")
+            report[pid] = f"{label}: NOT stopped, {why}"
             continue
         os.kill(pid, signal.SIGTERM)
-        report.append(f"{label}: stopped" if _gone(pid) else
-                      f"{label}: sent SIGTERM, still running after {WAIT_SECONDS}s")
+        signalled.append((label, pid))
+        if kind == "adw":
+            # Rows come chain first. Once it has closed the run, it can't
+            # start another agent, so its agents are safe to stop.
+            _wait(lambda: _closed(db, adw_id) or _live(pid) is None)
+    _wait(lambda: all(_live(pid) is None for _, pid in signalled))
+    for label, pid in signalled:
+        report[pid] = (f"{label}: stopped" if _live(pid) is None else
+                       f"{label}: sent SIGTERM, still running after {WAIT_SECONDS}s")
     # A chain that was already dead, or was killed some other way, never
     # finalized. Close the run so the trace stops saying it is in flight.
-    with sqlite3.connect(db) as conn:
-        status = conn.execute("select status from sessions where adw_id=?", (adw_id,)).fetchone()
-    if status and status[0] == "running" and all(_live(r[2]) is None for r in rows if r[0] == "adw"):
+    if not _closed(db, adw_id) and all(_live(r[2]) is None for r in rows if r[0] == "adw"):
         Tracer(db, os.devnull).session_finish(adw_id, ok=False)
-    return report
+    return [report[row[2]] for row in rows]

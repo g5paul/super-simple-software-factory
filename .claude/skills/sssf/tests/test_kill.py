@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -96,3 +97,42 @@ def test_nothing_recorded_is_said_plainly(trace):
                                            ("3-02:01:05", 266465)])
 def test_ps_elapsed_time_parses(etime, seconds):
     assert kill._seconds(etime) == seconds
+
+
+CHAIN = """import signal, sqlite3, subprocess, sys, time
+db, agent_script, pid_file = sys.argv[1:4]
+agent = subprocess.Popen([sys.executable, agent_script])
+open(pid_file, "w").write(str(agent.pid))
+def closed(signum, frame):
+    # What session._finalize_when_killed does: close the run, then unwind.
+    with sqlite3.connect(db) as conn:
+        conn.execute("update sessions set status='fail' where adw_id='k1'")
+    raise SystemExit(143)
+signal.signal(signal.SIGTERM, closed)
+try:
+    while True:
+        time.sleep(0.1)
+finally:
+    agent.wait()    # like the thread reading the agent's output: no exit while it runs
+"""
+
+
+def test_the_agent_is_stopped_while_the_chain_waits_on_it(tmp_path, trace):
+    """Live test c716a01b: the chain closed the run at once but could not exit
+    until its agent did, and kill waited 10s on it before touching the agent."""
+    db, tracer = trace
+    (tmp_path / "claude").write_text(SLEEPER)
+    (tmp_path / "adw_fake.py").write_text(CHAIN)
+    pid_file = tmp_path / "agent.pid"
+    chain = subprocess.Popen([sys.executable, str(tmp_path / "adw_fake.py"), str(db),
+                              str(tmp_path / "claude"), str(pid_file)])
+    while not pid_file.exists() or not pid_file.read_text():
+        pass
+    agent_pid = int(pid_file.read_text())
+    tracer.process_start("k1", "adw", "", chain.pid, "adw_fake.py do the thing")
+    tracer.process_start("k1", "agent", "builder", agent_pid, "claude_code builder some/model")
+    started = time.monotonic()
+    report = kill.kill(str(db), "k1")
+    assert report == [f"adw {chain.pid}: stopped", f"agent builder {agent_pid}: stopped"]
+    assert time.monotonic() - started < kill.WAIT_SECONDS
+    chain.wait(5)

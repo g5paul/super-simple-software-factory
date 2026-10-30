@@ -192,5 +192,12 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str]) -> list[str]
              else f"limited to {agent.writes}" if agent.writes
              else f"barred from {run.cfg.defaults.protected_files}")
     detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
-    raise PermissionBreach(
-        f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}")
+    message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
+    # The run stops here, so the agent's permitted changes are never verified,
+    # reviewed, or committed. Name them, so the engineer knows what is sitting
+    # uncommitted in the tree and has to be finished or discarded by hand.
+    kept = [p for p in touched if p not in outcomes]
+    if kept:
+        message += ("\nIts other changes are left uncommitted and unreviewed:\n"
+                    + "\n".join(f"  - {p}" for p in kept))
+    raise PermissionBreach(message)

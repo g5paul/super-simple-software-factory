@@ -19,13 +19,13 @@ SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agents, prompts
-from adw_modules.data_types import AgentCall, GenericOutput
+from adw_modules.data_types import AgentCall, GenericOutput, SSSFConfig
 
 REVIEWER = SKILL / "templates" / "prompt_engineering" / "reviewer" / "user.md"
 
 
 def variables(phase_name: str) -> dict[str, str]:
-    run = SimpleNamespace(context_handoff_dir=Path("/handoff"))
+    run = SimpleNamespace(context_handoff_dir=Path("/handoff"), cfg=SSSFConfig())
     phase = SimpleNamespace(params=SimpleNamespace(name=phase_name))
     return agents.prompt_variables(run, phase, AgentCall(output_type=GenericOutput, prompt="p"))
 

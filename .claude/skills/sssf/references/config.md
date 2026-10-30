@@ -156,6 +156,18 @@ redo; a write has already happened, so re-prompting fixes nothing. Instead:
    the same harm this module exists to prevent;
 3. the phase fails and names every path with what happened to it.
 
+The run stops there, so the agent's permitted changes are never verified,
+reviewed, or committed. The breach message lists them as left uncommitted, for
+the engineer to finish or discard.
+
+To keep a breach from happening at all, the planner and builder prompts get the
+`protected_files` list as `{{protected_files}}`. The planner puts any change the
+request needs on a protected path under a `## For the engineer` heading, out of
+the builder's steps, and the builder leaves those steps alone. When you write a
+task that needs a protected edit, such as a new check in `quality.py`, say in the
+task that the engineer makes that edit. The agents then build everything around
+it, and you add it by hand after the run.
+
 ```yaml
 defaults:
   protected_files: [adws/adw_modules/, adws/adw_sssf_config/, "adws/adw_*.py", specs/]

@@ -14,6 +14,12 @@
 
 {{context_handoff_dir}}
 
+### protected_files
+
+No agent may change these paths unless its own `writes` names them:
+
+{{protected_files}}
+
 ## Task
 
 Implement the work described in `prompt`, guided by `previous_envelope` if present, then emit your `Report` JSON.

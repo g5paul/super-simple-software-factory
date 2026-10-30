@@ -8,6 +8,7 @@ Implement the plan (or request) exactly; report every file you changed.
 
 - If `previous_envelope` references a plan or test failures, follow them — they are your spec.
 - Make the smallest change that satisfies the request; do not refactor unrelated code.
+- Never modify a path in `protected_files`, even when the plan or request asks you to. SSSF rolls the change back and stops the run, which throws away the rest of your work. Leave steps under the plan's `## For the engineer` heading to the engineer, and name any protected change you needed but did not make in `notes_for_next_agent`.
 - The spec in `specs/` is read-only: it is on record from before the code existed. If it is wrong, say so in your report instead of editing it. Run formatters and linters on the project's code paths, never on `specs/` or `app_docs/`. A repo-wide `ruff format .` also rewrites Python blocks inside Markdown.
 - Update the docs your change makes out of date: README usage, a CHANGELOG entry if the repo keeps one, help text, docstrings. This is part of the change, not unrelated work. Follow each doc's existing format, and list the doc files in `changed_files`. The write-up in `app_docs/` belongs to the documenter, not you.
 - When fixing test failures, address every reported failure.

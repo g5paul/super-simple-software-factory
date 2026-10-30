@@ -49,7 +49,7 @@ just sssf-update
 
 If the repo's own justfile has `mod sssf 'sssf.just'`, SSSF's recipes run as a module, so every one takes the `sssf` prefix: `just sssf sssf-update`. The same goes for `just demo`, `just sessions`, and the rest. Check the justfile for the `mod sssf` line before running any of them.
 
-It refuses to start while the tree has uncommitted changes or a chain process is alive, so the update gets its own commit. Then it does the two steps below, runs `--update` a second time to confirm nothing is left, and prints the skill commit it copied from. The steps by hand:
+It refuses to start while the tree has uncommitted changes or a chain process is alive, so the update gets its own commit. The chain check reads this repo's own `processes` table in `adws/adw_data/sssf.db`, so a run in another repo does not block it, even though `pgrep` shows it. Then it does the two steps below, runs `--update` a second time to confirm nothing is left, and prints the skill commit it copied from. The steps by hand:
 
 ```bash
 # 1. refresh the repo's copy of the skill from its source. The excludes keep

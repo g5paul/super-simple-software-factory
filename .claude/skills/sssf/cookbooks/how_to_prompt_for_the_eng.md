@@ -89,7 +89,7 @@ The table above picks a chain for one task. Whether the work is one task at all,
 ## Workflow
 
 1. **Read it twice.** Mark every noun that could point at two things.
-2. **Verify before you write.** Every path, route, and symbol you put in the prompt must exist — check it. A wrong path costs a whole build phase.
+2. **Verify what the engineer named.** Every path, route, and symbol the engineer named must exist. Check each one, and if one does not, ask. A wrong path costs a whole build phase. Do not look up paths they did not name and add them: finding the code is the planner's job, and a path you add is a guess the planner then treats as an instruction.
 3. **Draft the four lines.**
 4. **Diff against the original.** Every specific thing they said, still there? Anything in your draft they did not say? Delete it.
 5. **Ask at most one question**, only when two readings would produce different code. Otherwise state your assumption in the prompt and say so when you report.

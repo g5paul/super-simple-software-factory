@@ -82,6 +82,8 @@ If the engineer wants to build features from a spec and tickets, run `/setup-mat
 
 Commit the install, `quality.py`, the tool excludes, and `docs/sssf.md` together, on the branch, as one commit. Don't push unless the engineer says so.
 
+The skill now lives in `.claude/skills/sssf/` on this branch and nowhere else. Claude Code registers skills when a session starts, so a session started before the install, or on another branch, has no `/sssf`, and switching branches does not add it. Before the first run, the engineer restarts the session in the repo with the branch checked out. `claude --continue` keeps the conversation. Start every later operator session on this branch too. In pi-agent-observability, a session started on `main` got "Unknown skill: sssf" and fell back to reading the cookbooks by hand.
+
 ## 7. The first run
 
 Pick a small, real change: one flag, one function, one fix. Write the task as a file with rules, tests, docs, and an out-of-scope list. [how_to_prompt_for_the_eng.md](how_to_prompt_for_the_eng.md) shows how. Then:

@@ -79,6 +79,7 @@ A repo installed before `stamp.json` existed has no record. Its first update rep
 
 ## Post-install checklist
 
+0. **Restart the session on the branch.** Claude Code registers `/sssf` when a session starts. A session that was running before the install, or that started on a branch without `.claude/skills/sssf/`, cannot load it, and switching branches does not help. Restart it with the SSSF branch checked out (`claude --continue` keeps the conversation).
 1. **Env** — `cp .env.sample .env`, then set `OPENROUTER_API_KEY` in `.env`. (Claude Code agents need no key: they run on the operator's `claude` login, and `agent_cc` strips `ANTHROPIC_API_KEY` from them unless `SSSF_CLAUDE_AUTH=api_key`.)
 2. **Pi is installed and on PATH** — `pi --version`. Set `PI_PATH` in `.env` if it is not.
 3. **The model resolves** — the config's default `gemini-3.6-flash` must be a registered id in `~/.pi/agent/models.json`. Check with `pi --list-models` or read the file directly; see `references/config.md` for model resolution.

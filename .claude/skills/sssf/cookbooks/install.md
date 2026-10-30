@@ -96,7 +96,7 @@ Run the update the way the repo takes any change: on a short branch cut from `ma
 
 1. Resolve every `!` file with `--take` or `--keep`, and run the update again until `to review` is 0.
 2. Read `git status` and `git diff`. Expect the files the update listed, `stamp.json`, and the skill copy under `.claude/skills/sssf/`. A file you did not expect is a question for the hub, not something to commit.
-3. Commit the update on its own: `git add -A && git commit -m "Update SSSF to skill <sha>"`, with the sha the update printed.
+3. Commit the update on its own: `git add -A && git commit -m "Update SSSF to skill <sha>"`, with the sha the update printed. A file the update just added (`+`) that you edit straight away, such as `repo.yaml`, can go into this commit with your edit, since it never existed without it.
 4. Run `uv run adws/adw_quality.py "check after the SSSF update"`. A block reported as `not configured` is still on its placeholder, and checks nothing until you wire it in `quality.py`.
    Quality never starts an agent, so it cannot tell you the agents can still sign in. On a Claude Code roster, check that too, with the agents' own environment: `just login-check` (`just sssf login-check` with `mod sssf`). It runs the same check a chain runs before its first agent.
 5. Report the commit, the update's counts, anything flagged, and the quality result to the hub: the Claude session that works in the SSSF skill repo and sent the update ([onboard.md](onboard.md), "Two sessions"). With no hub session, report to the engineer.

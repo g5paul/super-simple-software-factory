@@ -12,6 +12,8 @@ Run from the **target repo root** — the cwd is where everything lands. If the 
 
 To run every agent on Claude Code instead of Pi, add `--coding-agent claude_code`. The installer then stamps `templates/sssf.config.claude_code.yaml` as the roster. It has the same prompts, purposes, and `writes` boundaries as the Pi roster, with Anthropic models and no pi extensions. It uses your `claude` subscription login, so `.env` needs no API key. Check the login with `claude auth status`.
 
+To run every agent on Pi signed into a ChatGPT subscription, add `--chatgpt`. The installer stamps `templates/sssf.config.chatgpt.yaml`: the same prompts, purposes, and `writes` as the Pi roster, with gpt-6.1-sol for the planner, builders, and reviewers, and gpt-6.1-terra for the scout and documenter. Sign Pi in first with `pi`, then `/login`, then `openai`, and check it with `pi auth check --provider openai --json`, which must report `"authType": "oauth"`. Set `SSSF_PI_AUTH=subscription` in `.env` so a lapsed sign-in fails the run instead of billing an API key.
+
 ## What gets stamped
 
 `install.py` copies `templates/` into the cwd:

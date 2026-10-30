@@ -5,7 +5,7 @@
 """/install — stamp the SSSF factory from the skill into the cwd. Idempotent.
 
 Usage:
-    uv run <skill>/scripts/install.py [--force] [--coding-agent pi|claude_code]
+    uv run <skill>/scripts/install.py [--force] [--coding-agent pi|claude_code] [--chatgpt]
     uv run <skill>/scripts/install.py --update [--take PATH ...] [--keep PATH ...]
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
@@ -41,6 +41,8 @@ ROSTERS = {
     "pi": TEMPLATES / "sssf.config.yaml",
     "claude_code": TEMPLATES / "sssf.config.claude_code.yaml",
 }
+# --chatgpt: still Pi, with every model on the ChatGPT subscription sign-in.
+CHATGPT_ROSTER = TEMPLATES / "sssf.config.chatgpt.yaml"
 
 GITIGNORE_ENTRIES = [
     "adws/adw_data/sessions/",
@@ -295,20 +297,29 @@ def main() -> int:
                         help="with --update: keep this file and mark it reviewed (repeatable)")
     parser.add_argument("--coding-agent", choices=sorted(ROSTERS), default="pi",
                         help="which starter roster to stamp (default: pi)")
+    parser.add_argument("--chatgpt", action="store_true",
+                        help="stamp the Pi roster for a ChatGPT subscription sign-in")
     args = parser.parse_args()
     if (args.take or args.keep) and not args.update:
         parser.error("--take and --keep need --update")
+    if args.chatgpt and args.coding_agent != "pi":
+        parser.error("--chatgpt runs on Pi; leave out --coding-agent")
+    roster = CHATGPT_ROSTER if args.chatgpt else ROSTERS[args.coding_agent]
 
     root = Path.cwd().resolve()
     if args.update:
-        return update(root, ROSTERS[args.coding_agent],
+        return update(root, roster,
                       {Path(p).as_posix() for p in args.take},
                       {Path(p).as_posix() for p in args.keep})
 
-    code = install(root, ROSTERS[args.coding_agent], args.force)
+    code = install(root, roster, args.force)
     print("\nnext steps:")
     if args.coding_agent == "claude_code":
         print("  1. claude auth status    # must be logged in; no API key needed")
+    elif args.chatgpt:
+        print("  1. pi, then /login, pick openai     # sign Pi into ChatGPT; no API key needed")
+        print("     pi auth check --provider openai --json   # must say \"authType\": \"oauth\"")
+        print("     cp .env.sample .env, then set SSSF_PI_AUTH=subscription")
     else:
         print("  1. cp .env.sample .env   # then set the key(s) your roster needs")
     print("  2. just demo             # two cheap read-only runs, end to end")

@@ -1,7 +1,8 @@
-"""The two starter rosters install, validate, and agree on everything but the harness.
+"""The starter rosters install, validate, and agree on everything but the harness.
 
 `install.py --coding-agent claude_code` stamps a roster that runs on Claude
-Code without edits. The Pi roster stays the default. Both rosters must give
+Code without edits, and `install.py --chatgpt` one that runs on Pi signed into
+a ChatGPT subscription. The Pi roster stays the default. Both rosters must give
 each agent the same prompts and the same write boundary: switching harness
 must never widen what an agent may change.
 
@@ -62,6 +63,48 @@ def test_make_config_writes_the_claude_code_roster(repo):
     assert yaml.safe_load(CONFIG.read_text())["defaults"]["coding_agent"] == "claude_code"
 
 
+def test_install_stamps_a_chatgpt_roster_that_validates(repo):
+    result = script("install.py", "--chatgpt")
+    assert result.returncode == 0, result.stderr
+    cfg = agents.load_config(str(CONFIG))
+    assert {agent.coding_agent for agent in cfg.agents} == {"pi"}
+    assert all(agent.model.startswith("openai/") for agent in cfg.agents)
+    agents.validate(cfg, ROSTER)
+
+
+def test_the_chatgpt_roster_uses_the_tested_models(repo):
+    # README "Models as of 2026-10-29": sol for the agents that plan, build,
+    # and review; terra for the scout and documenter.
+    script("install.py", "--chatgpt")
+    models = {agent.name: agent.model for agent in agents.load_config(str(CONFIG)).agents}
+    assert models["scout"] == models["documenter"] == "openai/gpt-6.1-terra"
+    for name in ("planner", "builder", "ticket_builder", "reviewer", "standards_reviewer", "spec_reviewer"):
+        assert models[name] == "openai/gpt-6.1-sol", name
+
+
+def test_install_tells_a_chatgpt_user_how_to_sign_in_and_guard_keys(repo):
+    out = script("install.py", "--chatgpt").stdout
+    assert "/login" in out and "SSSF_PI_AUTH=subscription" in out
+
+
+def test_chatgpt_runs_on_pi_only(repo):
+    result = script("install.py", "--chatgpt", "--coding-agent", "claude_code")
+    assert result.returncode != 0
+    assert not CONFIG.exists()
+
+
+def test_update_keeps_the_chatgpt_roster(repo):
+    script("install.py", "--chatgpt")
+    CONFIG.unlink()
+    assert script("install.py", "--update").returncode == 0
+    assert yaml.safe_load(CONFIG.read_text())["agents"][0]["model"].startswith("openai/")
+
+
+def test_make_config_writes_the_chatgpt_roster(repo):
+    assert script("make_config.py", "--chatgpt").returncode == 0
+    assert yaml.safe_load(CONFIG.read_text())["defaults"]["model"].startswith("openai/")
+
+
 def test_unknown_coding_agent_is_refused(repo):
     assert script("install.py", "--coding-agent", "codex").returncode != 0
 
@@ -70,8 +113,9 @@ def _roster(name: str) -> dict:
     return yaml.safe_load((SKILL / "templates" / name).read_text())
 
 
-def test_rosters_agree_on_prompts_and_write_boundaries():
-    pi, cc = _roster("sssf.config.yaml"), _roster("sssf.config.claude_code.yaml")
+@pytest.mark.parametrize("other", ["sssf.config.claude_code.yaml", "sssf.config.chatgpt.yaml"])
+def test_rosters_agree_on_prompts_and_write_boundaries(other):
+    pi, cc = _roster("sssf.config.yaml"), _roster(other)
     assert cc["defaults"]["protected_files"] == pi["defaults"]["protected_files"]
     assert cc["defaults"]["data_dir"] == pi["defaults"]["data_dir"]
     by_name = {agent["name"]: agent for agent in pi["agents"]}
@@ -97,7 +141,7 @@ def test_install_says_to_exclude_sssf_from_the_projects_tools(repo):
     assert "exclude adws/ and .claude/" in out
 
 
-@pytest.mark.parametrize("roster", ["sssf.config.yaml", "sssf.config.claude_code.yaml"])
+@pytest.mark.parametrize("roster", ["sssf.config.yaml", "sssf.config.claude_code.yaml", "sssf.config.chatgpt.yaml"])
 def test_only_the_planner_may_change_a_spec(roster):
     # commit_plan puts the spec on record before any code exists. A later edit,
     # even a formatter's, would land in the code commit under `git add -A`.

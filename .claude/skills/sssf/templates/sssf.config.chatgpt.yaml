@@ -1,0 +1,176 @@
+# sssf.config.yaml — the factory's agent roster, ChatGPT edition.
+# Stamped by `install.py --chatgpt`. Every agent runs on Pi signed into your
+# ChatGPT subscription (`pi`, then `/login`, then pick openai): no API key.
+# Set SSSF_PI_AUTH=subscription in .env so a lapsed sign-in fails instead of
+# billing the API. Same prompts, purposes, and write boundaries as the Pi
+# roster; only the models differ. Models as tested on 2026-10-29: sol where
+# the work is planning, building, and reviewing; terra for the scout and
+# documenter. See references/config.md.
+defaults:
+  coding_agent: pi
+  model: openai/gpt-6.1-sol            # openai/* runs on the ChatGPT sign-in
+  thinking: medium                     # off | minimal | low | medium | high | xhigh | max
+  harness_engineering: []              # pi extensions loaded into the harness (-e)
+  tools:
+    - read
+    - bash
+    - edit
+    - write
+    - grep
+    - find
+  # Off-limits to every agent that does not name them in its own `writes`.
+  # Enforced in adw_modules/permissions.py after each call.
+  protected_files:
+    - adws/adw_modules/
+    - adws/adw_sssf_config/
+    - adws/adw_*.py
+    # The spec is on record once commit_plan lands. Only the planner, which
+    # names specs/ in its writes, may change it.
+    - specs/
+    # mattpocock/skills' interactive steps own these. The feature folder holds
+    # the approved spec and tickets, and only the engineer changes the domain
+    # language and the decisions. adw_tickets marks a ticket done in code.
+    - .scratch/
+    - GLOSSARY.md
+    - GLOSSARY-MAP.md
+    - docs/adr/
+  # rate_limit_stop reads Claude's usage windows only; ChatGPT reports none to SSSF.
+  max_run_cost: 5.00                   # stop before any send once the run has spent this many estimated dollars; null = off
+  data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
+
+observability:
+  db: adws/adw_data/sssf.db
+  poll_ms: 500
+
+agents:
+  - name: planner
+    model: openai/gpt-6.1-sol         # the plan sets the ceiling for everything after it
+    thinking: high
+    color: "#a78bfa"
+    purpose: Turn a request into a plan the builder can implement without asking questions.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/planner/system.md
+      user: adws/adw_data/prompt_engineering/planner/user.md
+    writes:
+      - specs/
+    tools:                             # recon + write for the spec; no edit
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: builder
+    color: "#22d3ee"
+    purpose: Implement the plan exactly; report every changed file in the envelope.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/builder/system.md
+      user: adws/adw_data/prompt_engineering/builder/user.md
+    # No `writes` key: unrestricted, and the only agent that is. It still cannot
+    # touch defaults.protected_files.
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - edit
+      - write
+
+  - name: scout
+    model: openai/gpt-6.1-terra       # search and report; as correct as sol at a quarter of the cost
+    color: "#fbbf24"
+    purpose: Find and report where things live; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/scout/system.md
+      user: adws/adw_data/prompt_engineering/scout/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: reviewer
+    model: openai/gpt-6.1-sol         # the same model as the builder: no stronger ChatGPT model was tested
+    thinking: high
+    color: "#fb7185"
+    purpose: Confirm that what was built is what was asked for; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/reviewer/system.md
+      user: adws/adw_data/prompt_engineering/reviewer/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: ticket_builder
+    color: "#38bdf8"
+    purpose: Build one ticket test-first at the spec's seams; report every changed file.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/ticket_builder/system.md
+      user: adws/adw_data/prompt_engineering/ticket_builder/user.md
+    # Unrestricted like builder, minus protected_files, so it cannot edit the
+    # ticket it is building or the spec it is judged against.
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - edit
+      - write
+
+  - name: standards_reviewer
+    model: openai/gpt-6.1-sol
+    thinking: high
+    color: "#f97316"
+    purpose: Check a feature's diff against the repo's documented standards and a code smell baseline; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/standards_reviewer/system.md
+      user: adws/adw_data/prompt_engineering/standards_reviewer/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: spec_reviewer
+    model: openai/gpt-6.1-sol
+    thinking: high
+    color: "#f43f5e"
+    purpose: Check a feature's diff against its spec and tickets; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/spec_reviewer/system.md
+      user: adws/adw_data/prompt_engineering/spec_reviewer/user.md
+    writes: []
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+
+  - name: documenter
+    model: openai/gpt-6.1-terra
+    color: "#e879f9"
+    purpose: Write up the change that was just made, from the diff; document only.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/documenter/system.md
+      user: adws/adw_data/prompt_engineering/documenter/user.md
+    writes:
+      - app_docs/
+      - docs/
+      - "**/*.md"
+      - "*.md"
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - write
+      - edit

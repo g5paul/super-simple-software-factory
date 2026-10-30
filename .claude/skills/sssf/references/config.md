@@ -214,6 +214,14 @@ Rule: **every entry in `harness_engineering` that registers a tool must have tha
 
 **If the extension registers a tool, name that tool in the agent's `tools` list too** — `--tools` filters extension tools exactly like builtins, so an unnamed extension tool is silently unavailable no matter that the extension loaded fine. See [Extension tools must be named explicitly](#extension-tools-must-be-named-explicitly) above. Extensions that only shape output or add flags (no tool registration) need no `tools` change.
 
+## ChatGPT (Pi on a ChatGPT subscription)
+
+`install.py --chatgpt` (or `make_config.py --chatgpt`) stamps `templates/sssf.config.chatgpt.yaml`. The harness stays Pi, so every field above applies unchanged. Only the models differ: `openai/gpt-6.1-sol` for the planner, builders, and reviewers, and `openai/gpt-6.1-terra` for the scout and documenter, as tested on 2026-10-29. The reviewers share the builder's model, so they don't get a second model's view.
+
+Pi signs into ChatGPT with `pi`, then `/login`, then `openai`. Set `SSSF_PI_AUTH=subscription` in `.env`, so `agent_pi.py` keeps `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` out of each agent and a lapsed sign-in fails instead of billing the API. ChatGPT sends no usage windows with its responses, so `rate_limit_stop` doesn't apply, and the roster leaves it out. `max_run_cost` is the only cost limit.
+
+`--chatgpt` can't be combined with `--coding-agent claude_code`. `install.py --update` keeps the ChatGPT roster, because `stamp.json` records which template each repo was stamped from.
+
 ## Claude Code (`coding_agent: claude_code`)
 
 `install.py --coding-agent claude_code` (or `make_config.py --coding-agent claude_code`) stamps a ready roster from `templates/sssf.config.claude_code.yaml`. It keeps the Pi roster's prompts, purposes, and `writes`, and changes only the harness, the models, and the tool lists.

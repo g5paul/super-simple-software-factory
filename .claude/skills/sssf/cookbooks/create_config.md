@@ -12,6 +12,8 @@ Writes `adws/adw_sssf_config/sssf.config.yaml` — creating the directory if nee
 
 `--coding-agent claude_code` writes the Claude Code roster instead: planner and reviewer on Opus with high thinking, builder on Sonnet, scout and documenter on Haiku. See `references/config.md`, section "Claude Code".
 
+`--chatgpt` writes the ChatGPT roster: still Pi, with gpt-6.1-sol for the planner, builders, and reviewers, and gpt-6.1-terra for the scout and documenter. See `references/config.md`, section "ChatGPT".
+
 ## The rule
 
 **One agent, one prompt, one purpose.** An entry defines who an agent *is*: its coding agent, model, thinking level, and exactly one system prompt plus one user prompt. How it gets *used* — the output type, a per-call user prompt override — lives at the ADW call site, never here.

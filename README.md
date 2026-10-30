@@ -81,7 +81,7 @@ cp .env.sample .env                              # leave the API keys out
 #      uv run .claude/skills/sssf/scripts/install.py
 #      cp .env.sample .env                       # then set SSSF_PI_AUTH=subscription
 #      pi auth check --provider openai --json    # must say "authType": "oauth"
-#      then set defaults.model: openai/gpt-6.1-sol and delete the per-agent model: lines
+#      then set the models from "Models as of 2026-10-29" below
 #    or on pi with API keys:
 #      uv run .claude/skills/sssf/scripts/install.py
 #      cp .env.sample .env                       # then set OPENROUTER_API_KEY
@@ -123,7 +123,7 @@ SSSF can run its agents on a Claude subscription through Claude Code, or on a Ch
 - **The agents stay isolated.** Each call runs with `--safe-mode`, so an agent never loads your own `CLAUDE.md`, skills, hooks, or MCP servers. It sees its prompt and the repo.
 - If Claude still reports an API key as its auth source, the run stops before the model is called. Set `SSSF_CLAUDE_AUTH=api_key` if you do want the API.
 
-**ChatGPT, through Pi.** Sign Pi into ChatGPT once: run `pi`, then `/login`, and pick `openai`. `pi auth check --provider openai --json` should report `"authType": "oauth"`. Install with the default Pi roster, set `defaults.model` to an OpenAI model such as `openai/gpt-6.1-sol`, and delete the per-agent `model:` lines. Set `SSSF_PI_AUTH=subscription` in `.env`.
+**ChatGPT, through Pi.** Sign Pi into ChatGPT once: run `pi`, then `/login`, and pick `openai`. `pi auth check --provider openai --json` should report `"authType": "oauth"`. Install with the default Pi roster, set `defaults.model` to an OpenAI model such as `openai/gpt-6.1-sol`, and set the per-agent `model:` lines as in the table below. Set `SSSF_PI_AUTH=subscription` in `.env`.
 
 - SSSF can't see ChatGPT's usage windows. ChatGPT doesn't send them with model responses, so the panel shows spend only, and `rate_limit_stop` doesn't cover a Pi run. Check your plan's limits in ChatGPT or Codex.
 - There is no per-call cap on Pi. `max_run_cost`, checked before every send, is the only cost limit.
@@ -137,17 +137,17 @@ SSSF can run its agents on a Claude subscription through Claude Code, or on a Ch
 | Spend on the dashboard | yes | yes |
 | Key guard | on by default | `SSSF_PI_AUTH=subscription` |
 
-**Models as of 2026-10-29.** The stamped `sssf.config.yaml` is the source of truth, and new models will make this table stale. The Claude column is the Claude Code roster that `install.py --coding-agent claude_code` stamps, used for every Claude run so far. SSSF has no ChatGPT roster yet. The ChatGPT column is the one setup tested so far: gpt-6.1-sol for every agent, in one simple-sdlc run. Lighter models for the scout and documenter haven't been tried.
+**Models as of 2026-10-29.** The stamped `sssf.config.yaml` is the source of truth, and new models will make this table stale. The Claude column is the Claude Code roster that `install.py --coding-agent claude_code` stamps, used for every Claude run so far. SSSF has no ChatGPT roster yet. The ChatGPT column is what has been tested so far. gpt-6.1-sol ran every agent in one simple-sdlc run. For the scout and documenter, gpt-6.1-terra and gpt-6-luna were then tried against sol on one small feature. All three were correct. Terra cost about a quarter of sol and kept nearly all the detail. Luna cost about a twentieth but left detail out.
 
 | Agent | Claude via Claude Code | ChatGPT via Pi (tested) | Thinking |
 |---|---|---|---|
 | planner | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
 | builder, ticket_builder | `anthropic/claude-sonnet-5-5` | `openai/gpt-6.1-sol` | medium |
 | reviewer, standards_reviewer, spec_reviewer | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
-| scout | `anthropic/claude-haiku-5-5` | `openai/gpt-6.1-sol` | medium |
-| documenter | `anthropic/claude-haiku-5-5` | `openai/gpt-6.1-sol` | medium |
+| scout | `anthropic/claude-haiku-5-5` | `openai/gpt-6.1-terra` | medium |
+| documenter | `anthropic/claude-haiku-5-5` | `openai/gpt-6.1-terra` | medium |
 
-The Claude roster gives the reviewers a different model from the builder, so they don't share its blind spots. With one model for every agent, as in the ChatGPT column, the reviewers can't have that.
+The Claude roster gives the reviewers a different model from the builder, so they don't share its blind spots. In the ChatGPT column the reviewers share the builder's model, so they can't have that.
 
 **The trade-offs.**
 

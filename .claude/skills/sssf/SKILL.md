@@ -51,6 +51,7 @@ You run the system, observe the system, and help the user interact with it. **Yo
 | choose between one run and a ticket feature | [cookbooks/choose_a_flow.md](cookbooks/choose_a_flow.md) |
 | build a feature from a spec and tickets (mattpocock/skills, `.scratch/<feature>/`) | [cookbooks/tickets.md](cookbooks/tickets.md) |
 | `/sssf install`, set up the factory in this repo | [cookbooks/install.md](cookbooks/install.md) |
+| run the operator session in a container, with no permission prompts | [cookbooks/install.md](cookbooks/install.md), section "Run the operator session in a container" |
 | update a repo to a newer SSSF skill | `just sssf-update` (`just sssf sssf-update` where the repo's justfile has `mod sssf`), then [cookbooks/install.md](cookbooks/install.md), section "Update an installed repo" |
 | create a new ADW / workflow | [cookbooks/create_adw.md](cookbooks/create_adw.md) |
 | modify an existing ADW chain | [cookbooks/update_adw.md](cookbooks/update_adw.md) |

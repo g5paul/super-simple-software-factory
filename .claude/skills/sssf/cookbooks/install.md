@@ -89,6 +89,38 @@ A repo installed before `stamp.json` existed has no record. Its first update rep
 4. Run `uv run adws/adw_quality.py "check after the SSSF update"`. A block reported as `not configured` is still on its placeholder, and checks nothing until you wire it in `quality.py`.
 5. Report the commit, the update's counts, anything flagged, and the quality result to the hub: the Claude session that works in the SSSF skill repo and sent the update ([onboard.md](onboard.md), "Two sessions"). With no hub session, report to the engineer.
 
+## Run the operator session in a container
+
+On the host, Claude Code's auto mode blocks the command that launches a chain, so the engineer approves each launch. `--container` stamps a Podman setup that runs the operator session with `--dangerously-skip-permissions` instead. Inside it, the session can reach only the repo and `~/.config/sssf`, both mounted at their host paths, so the trace and `just obs-all` on the host see every run. It covers the operator session and every agent it starts. It does not give each run its own branch: a run still commits to the branch that is checked out.
+
+It needs Podman and a Claude Code roster. The image has no Pi.
+
+```bash
+uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code --container   # new install
+uv run .claude/skills/sssf/scripts/install.py --container                              # add it to an installed repo
+```
+
+| File | What it does |
+|---|---|
+| `container/Containerfile` | The image: Ubuntu, git, sqlite3, uv, just, Claude Code. **The repo's to edit**: add the tools `quality.py` runs, such as bun or node. An update keeps your edits, like `quality.py` |
+| `container/build.sh` | Builds the image as `localhost/sssf-operator-<repo>`. Run it again after editing the Containerfile |
+| `container/run.sh` | Starts the session. Builds the image on first use |
+
+The engineer sets it up once, in their own terminal:
+
+1. Make a token: `claude setup-token`. It opens a browser sign-in and prints a token that starts with `sk-ant-oat`. Save it without echoing it:
+
+   ```bash
+   mkdir -p ~/.config/sssf-container && chmod 700 ~/.config/sssf-container
+   read -rs -p "Paste token, then Enter: " T && printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$T" > ~/.config/sssf-container/token.env && unset T && chmod 600 ~/.config/sssf-container/token.env
+   ```
+
+   `SSSF_CONTAINER_TOKEN` points `run.sh` at another file. The token signs in to the subscription: keep it out of the repo and out of chat.
+2. Start the session: `container/run.sh`. It skips Claude's first-run login menu, since the token already signs it in. Answer yes to trusting the folder, and accept the bypass-permissions warning. A home volume, `sssf-operator-home`, remembers both.
+3. Check that the session's shells get the token: `! printenv | grep -c '^CLAUDE_CODE_OAUTH_TOKEN='` must print `1`. A Claude Code session does not pass its own login to the commands it runs, so `run.sh` exports the token through `CLAUDE_ENV_FILE`. Without it, every agent would end "Not logged in", and the run stops before the first agent with that advice.
+
+Then operate as usual. Each launch runs with no prompt, and the agents bill to the subscription: every agent's `apiKeySource` is `none`.
+
 ## Move a branch install to main
 
 SSSF belongs on `main` ([onboard.md](onboard.md), step 1). A repo that installed it on a branch moves it like this:

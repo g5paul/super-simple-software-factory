@@ -1,0 +1,20 @@
+# The SSSF operator session, in a container, so it can run Claude Code with
+# --dangerously-skip-permissions. On the host, auto mode blocks the command
+# that launches a chain; in here the session can reach only what run.sh mounts.
+#
+# This file is the repo's to edit: add the tools your quality.py blocks run
+# (bun, node, a compiler) the same way uv and just are added below. Rebuild
+# with container/build.sh after a change.
+FROM docker.io/library/ubuntu:22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git sqlite3 python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+# The installer puts claude under root's home; copy the binary out so every
+# user can run it. Updates come from rebuilding the image.
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && cp -L /root/.local/bin/claude /usr/local/bin/claude

@@ -5,12 +5,14 @@
 """/install — stamp the SSSF factory from the skill into the cwd. Idempotent.
 
 Usage:
-    uv run <skill>/scripts/install.py [--force] [--coding-agent pi|claude_code] [--chatgpt]
+    uv run <skill>/scripts/install.py [--force] [--coding-agent pi|claude_code] [--chatgpt] [--container]
     uv run <skill>/scripts/install.py --update [--take PATH ...] [--keep PATH ...]
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
 (the starter agents), adws/adw_sssf_config/sssf.config.yaml, .env.sample,
-.gitignore entries.
+.gitignore entries. --container adds container/, to run the operator
+session in a Podman container (Claude Code rosters only); run it again with
+--container in an installed repo to add it later.
 Existing files are skipped unless --force.
 
 Every stamped file's hash goes into adws/adw_sssf_config/stamp.json.
@@ -68,7 +70,7 @@ STAMP = Path("adws/adw_sssf_config/stamp.json")
 DB = "adws/adw_data/sssf.db"
 
 
-def targets(root: Path, roster: Path) -> list[tuple[Path, Path]]:
+def targets(root: Path, roster: Path, container: bool = False) -> list[tuple[Path, Path]]:
     """Every (template, destination) pair the factory is made of."""
     pairs: list[tuple[Path, Path]] = []
 
@@ -91,7 +93,14 @@ def targets(root: Path, roster: Path) -> list[tuple[Path, Path]]:
     # are stamped into sssf.just. Otherwise they are the justfile, skipped like
     # any other file if the repo already has one.
     add(TEMPLATES / "justfile", root / (MODULE if loads_module(root) else "justfile"))
+    if container:
+        add(TEMPLATES / "container", root / "container")
     return pairs
+
+
+def has_container(record: dict) -> bool:
+    """A repo gets container/ only by asking for it, and keeps it current from then on."""
+    return any(rel.startswith("container/") for rel in record["files"])
 
 
 MODULE = "sssf.just"
@@ -204,10 +213,10 @@ def register(root: Path) -> None:
         print(f"  could not record this repo in {path}: {err}")
 
 
-def install(root: Path, roster: Path, force: bool) -> int:
+def install(root: Path, roster: Path, force: bool, container: bool = False) -> int:
     record = load_stamp(root)
     stamped, skipped = [], []
-    for src, dest in targets(root, roster):
+    for src, dest in targets(root, roster, container or has_container(record)):
         rel = dest.relative_to(root).as_posix()
         entry = {"source": src.relative_to(TEMPLATES).as_posix(), "sha256": sha256(src)}
         if dest.exists() and not force:
@@ -257,7 +266,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     else:
         roster = default_roster
 
-    pairs = targets(root, roster)
+    pairs = targets(root, roster, has_container(record))
     if loads_module(root) and files.get("justfile", {}).get("source") == "justfile":
         # The repo's own justfile, recorded as kept before sssf.just was
         # tracked. SSSF's recipes are in sssf.just now, so it has no claim on it.
@@ -360,6 +369,9 @@ def main() -> int:
                         help="which starter roster to stamp (default: pi)")
     parser.add_argument("--chatgpt", action="store_true",
                         help="stamp the Pi roster for a ChatGPT subscription sign-in")
+    parser.add_argument("--container", action="store_true",
+                        help="also stamp container/, to run the operator session in a "
+                             "Podman container (Claude Code rosters only)")
     args = parser.parse_args()
     if (args.take or args.keep) and not args.update:
         parser.error("--take and --keep need --update")
@@ -373,7 +385,16 @@ def main() -> int:
                       {Path(p).as_posix() for p in args.take},
                       {Path(p).as_posix() for p in args.keep})
 
-    code = install(root, roster, args.force)
+    if args.container and args.update:
+        parser.error("--container is an install option; run install.py --container to add it")
+    if args.container:
+        config = root / "adws/adw_sssf_config/sssf.config.yaml"
+        text = config.read_text() if config.is_file() else roster.read_text()
+        if "coding_agent: claude_code" not in text:
+            parser.error("--container needs a Claude Code roster: the image has no Pi. "
+                         "Install with --coding-agent claude_code")
+
+    code = install(root, roster, args.force, args.container)
     # The recipes are `just demo` when SSSF's justfile is the repo's, and
     # `just sssf demo` when the repo's own justfile loads them as a module.
     j = "just sssf" if loads_module(root) else "just"
@@ -397,6 +418,10 @@ def main() -> int:
     print(f"     {j} obs-all".ljust(27) + "# every repo SSSF is installed in, one dashboard")
     print("  5. exclude adws/ and .claude/ from repo-wide lint, format, typecheck,")
     print("     and package builds (see cookbooks/install.md, post-install checklist)")
+    if (root / "container/run.sh").is_file():
+        print("  container: the operator session can run in Podman, with no permission prompts")
+        print("     claude setup-token, then save it as described in cookbooks/install.md")
+        print("     container/run.sh          # builds the image on first use, then starts claude")
     print("\n  no just? the raw form of step 2 is:")
     print("     uv run adws/adw_prompt.py \"say hello\" --agent scout")
     return code

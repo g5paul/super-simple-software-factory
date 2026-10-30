@@ -41,6 +41,8 @@ claude auth status            # must show a logged-in subscription account
 
 The install prints `dashboard: registered as <name>`, so the repo shows up in `just obs-all`. Copy `.env.sample` to `.env` and set `SSSF_SOURCE` in it to the skill source, so `just sssf-update` works later (`just sssf sssf-update` if the repo's justfile loads SSSF with `mod sssf`, see [install.md](install.md)). Agents bill to the Claude subscription login, so `.env` needs no API key. Don't add one.
 
+Ask the engineer one question here: should the operator session run in a container? Claude Code's auto mode blocks the command that launches a chain, so on the host the engineer runs each launch themselves with `!`, or approves it in default mode. In a Podman container, the session runs with no permission prompts and can reach only the repo. The cost is Podman, a token, and about ten minutes the first time. If they say yes, run `install.py --container` and follow [install.md](install.md), "Run the operator session in a container". It needs a Claude Code roster.
+
 ## 3. Make quality.py check what CI checks
 
 The verify phase runs every block in `adws/adw_modules/quality.py`: test, lint, format, typecheck, and build. Each starts as a placeholder that passes, so until you fill them in, a run checks nothing.

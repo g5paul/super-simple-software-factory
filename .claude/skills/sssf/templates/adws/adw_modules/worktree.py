@@ -149,7 +149,7 @@ def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
     if others:
         raise WorktreeError(
             f"worktree run {', '.join(others)} is still going in this repo, and only one runs "
-            "at a time for now. Wait for it, or stop it first: `just procs <adw_id>` lists its pids.")
+            "at a time for now. Wait for it, or stop it with `just kill <adw_id>`.")
     git("worktree", "prune")
     branch = branch_for(adw_id)
     if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0:
@@ -222,7 +222,7 @@ def discard(cfg: SSSFConfig, adw_id: str) -> str:
     if not record:
         raise WorktreeError(f"run {adw_id} did not run in a worktree; there is nothing to discard.")
     if adw_id in live_runs(db):
-        raise WorktreeError(f"run {adw_id} is still going. Stop it first: `just procs {adw_id}` lists its pids.")
+        raise WorktreeError(f"run {adw_id} is still going. Stop it with `just kill {adw_id}` first.")
     _remove(root, Path(record["worktree"]), record["branch"], force_branch=True)
     return f"discarded {record['branch']} and its worktree"
 

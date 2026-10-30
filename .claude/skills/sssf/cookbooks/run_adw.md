@@ -129,12 +129,12 @@ A hung coding agent produces no events at all, so the trace goes quiet rather th
 ```bash
 just phases <adw_id>     # which phase is still `running`
 just procs <adw_id>      # what that phase is actually running, with pids
-just kill <adw_id>       # stop it — children first, then the workflow
+just kill <adw_id>       # stop it: the chain first, then its agents
 ```
 
-`processes` rows with `ended_at IS NULL` are the live ones. If `procs` shows a pi child but the phase has produced no `tool_call` events and its `raw_output.jsonl` is empty, the agent never got started properly — check the model resolves and that nothing is blocking the subprocess, rather than waiting it out. `just kill` verifies each pid still matches the command that was recorded before signalling, because pids get recycled.
+`processes` rows with `ended_at IS NULL` are the live ones. If `procs` shows a pi child but the phase has produced no `tool_call` events and its `raw_output.jsonl` is empty, the agent never got started properly — check the model resolves and that nothing is blocking the subprocess, rather than waiting it out. `just kill` stops the chain first, so it can't retry the phase with a new agent, and then the agents. Pids get reused, so before signalling one it checks the live process still runs the recorded script or agent binary, and started no later than the trace recorded it. Any pid that fails the check is left alone and reported as `NOT stopped`.
 
-A killed run marks itself `fail` and closes its process rows, so the trace never claims work is in flight that is already dead.
+A killed run ends `fail` and its process rows close, so the trace never claims work is in flight that is already dead. A killed worktree run keeps its branch and folder; `just discard <adw_id>` removes them.
 
 ## Report
 

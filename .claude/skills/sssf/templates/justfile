@@ -2,7 +2,7 @@
 #
 # Deliberately small. These are the handful you need on day one: run something,
 # watch it, and open the trace. Add your own as your chains grow, and see the
-# example branch for the fuller set (orchestrator agents, kill, rosters, ipi).
+# example branch for the fuller set (orchestrator agents, rosters, ipi).
 
 # `.env` reaches every ADW through this, so keys work without exporting them.
 set dotenv-load
@@ -98,6 +98,11 @@ tail ADW_ID:
 # what a run has alive right now, with pids: just procs <adw_id>
 procs ADW_ID:
     @sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"
+
+# stop a run, the chain first, then its agents: just kill <adw_id>
+# Checks each pid is still the process the trace recorded; pids get reused.
+kill ADW_ID:
+    uv run adws/adw_kill.py {{ADW_ID}} --config {{config}}
 
 # ── SSSF itself ─────────────────────────────────────────────────────────────
 # Refreshes .claude/skills/sssf from SSSF_SOURCE in .env, runs install.py

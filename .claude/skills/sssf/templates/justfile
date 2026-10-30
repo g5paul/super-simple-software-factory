@@ -75,7 +75,7 @@ tickets *ARGS:
 # --ff-only, or SSSF_MERGE_FF_ONLY=1 in .env, refuses a merge commit.
 # land a successful worktree run on its launch branch: just merge <adw_id>
 merge ADW_ID *ARGS:
-    uv run adws/adw_worktree.py merge {{ADW_ID}} --config {{config}} "${@:2}"
+    uv run adws/adw_worktree.py merge --config {{config}} "$@"
 
 # drop a worktree run's branch and folder: just discard <adw_id>
 discard ADW_ID:

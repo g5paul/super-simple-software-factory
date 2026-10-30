@@ -1,6 +1,6 @@
 # Design: run the operator session in a container
 
-Status: built and shipped as an opt-in install option (`install.py --container`, fdbeb08). It's in its first real use, in yt-summarizer. This file tracks the experiment: what was decided, what was tested, and what's still open. Add to the log as it moves.
+Status: built and shipped as an opt-in install option (`install.py --container`, fdbeb08). In real use in yt-summarizer since 2026-10-30. This file tracks the experiment: what was decided, what was tested, and what's still open. Add to the log as it moves.
 
 ## Why
 
@@ -45,11 +45,11 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 | 2026-10-30 | sssf-sandbox `exp/container-option` | reinstalled through `--container`, existing token, run 888c6d27 | success, visible in the host trace and dashboard |
 | 2026-10-30 | yt-summarizer `sssf-run` | `--container` setup through the skill, aa2140b, quality 7f07c83d | set up; token and login checks passed inside |
 | 2026-10-30 | yt-summarizer `sssf-run` | first real run from the container, 47caf9b9 (`--brief` option) | success after 3 failed test rounds: no C compiler to build `brotli`, and no tzdata, so named time zones fell back to UTC. The builder rewrote two existing tests to POSIX `TZ` strings to pass. Launch, host trace and dashboard, commit author, and file ownership were all right |
+| 2026-10-30 | hub | image gets build-essential, python3-dev and tzdata; container doc gaps closed, bbcff04 | shipped |
+| 2026-10-30 | yt-summarizer `sssf-run` | rebuilt image, run 650cbab9 (`--brief` shows progress) | success: all 5 checks passed on the first round, 10 phases, about 3 minutes. Author and file ownership right |
 
 ## Open
 
-- **First real use.** yt-summarizer is being set up now. What it gets wrong goes in the log before anything else is built on top.
+- **First real use: done.** yt-summarizer runs from the container. Its first run exposed the missing compiler and tzdata, and the doc gaps its setup found are closed. Its second run, after the fix, passed every check on the first round.
 - **Branch per run and a merge back.** The next step toward what sandcastle does. Not designed yet. It needs a grilling session before any code: where the worktree lives, who merges, and what happens to a run that fails.
-- **The image is missing a C compiler and tzdata.** Run 47caf9b9 hit both. The template's Containerfile should install them, so a Python repo's dependencies build and its time zone tests see real zones.
-- **Gaps yt-summarizer's setup found.** `--container` on an installed repo prints every post-install step, when only the container lines apply. The docs don't say to keep `container/` out of package builds, the way `adws/` and `.claude/` are. The docs don't say whether a container session can push: it can't, because host git credentials aren't mounted, unless the remote URL carries a token.
 - **Sandbox branches.** `exp/container-operator` still holds the hand-made container and can go. The sandbox lives on `exp/container-option`, not `main`.

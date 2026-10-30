@@ -43,10 +43,11 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 | 2026-10-30 | sssf-sandbox `exp/container-operator` | run 1d56f792 after the `CLAUDE_ENV_FILE` fix | success |
 | 2026-10-30 | hub | `--container` install option, fdbeb08 | shipped |
 | 2026-10-30 | sssf-sandbox `exp/container-option` | reinstalled through `--container`, existing token, run 888c6d27 | success, visible in the host trace and dashboard |
-| 2026-10-30 | yt-summarizer `sssf-run` | first real project setup | in progress |
+| 2026-10-30 | yt-summarizer `sssf-run` | `--container` setup through the skill, aa2140b, quality 7f07c83d | set up; the engineer's first session is next |
 
 ## Open
 
 - **First real use.** yt-summarizer is being set up now. What it gets wrong goes in the log before anything else is built on top.
 - **Branch per run and a merge back.** The next step toward what sandcastle does. Not designed yet. It needs a grilling session before any code: where the worktree lives, who merges, and what happens to a run that fails.
+- **Gaps yt-summarizer's setup found.** `--container` on an installed repo prints every post-install step, when only the container lines apply. The docs don't say to keep `container/` out of package builds, the way `adws/` and `.claude/` are. The docs don't say whether a container session can push: it can't, because host git credentials aren't mounted, unless the remote URL carries a token.
 - **Sandbox branches.** `exp/container-operator` still holds the hand-made container and can go. The sandbox lives on `exp/container-option`, not `main`.

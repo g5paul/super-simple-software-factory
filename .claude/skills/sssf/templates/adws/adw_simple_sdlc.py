@@ -48,7 +48,7 @@ pinned before the first commit phase and printed in the request phase.
 import argparse
 import sys
 
-from adw_modules import agents, changes, gates, git_helper, quality, session, utils
+from adw_modules import agents, changes, gates, git_helper, plan_checks, quality, session, utils
 from adw_modules.data_types import (AgentCall, BuildOutput, ChangeCapture,
                                     DocumentOutput, PhaseParams, PlanOutput,
                                     ReviewOutput)
@@ -105,7 +105,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                    description="Run the suite and every quality check — known "
                                                "commands, so code runs them and no agent has "
                                                "to rediscover them")) as ph:
-            test = quality.run_quality(run)
+            test = plan_checks.verify(run, plan)
             record(ph, test)
 
         if test.passed:
@@ -141,7 +141,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name="reverify", kind="code", owner="quality",
                                    description="Re-run every check — the revision changed code "
                                                "after the last green result")) as ph:
-            test = quality.run_quality(run)
+            test = plan_checks.verify(run, plan)
             record(ph, test)
 
     # Red tests or a rejected review stop the chain here: the code stays

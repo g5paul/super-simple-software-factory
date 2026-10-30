@@ -17,7 +17,7 @@ builder as an envelope, and only an exhausted fix loop fails the run.
 import argparse
 import sys
 
-from adw_modules import agents, gates, git_helper, quality, session, utils
+from adw_modules import agents, gates, git_helper, plan_checks, quality, session, utils
 from adw_modules.data_types import AgentCall, BuildOutput, PhaseParams, PlanOutput
 
 REQUIRED_AGENTS = ["planner", "builder"]
@@ -55,7 +55,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name=f"test_{i}", kind="code", owner="quality",
                                    description="Run the suite — a known command, so code runs "
                                                "it and no agent has to rediscover it")) as ph:
-            test = quality.run_tests(run)
+            test = plan_checks.verify(run, plan, base=quality.run_tests)
             record(ph, test)
 
         if test.passed:

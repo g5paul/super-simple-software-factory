@@ -53,3 +53,16 @@ def test_every_adw_reports_the_tally():
         text = path.read_text()
         if "result.checks" in text or "run_quality" in text:
             assert "result.tally()" in text, path.name
+
+
+def test_the_console_line_says_not_configured(tmp_path):
+    from types import SimpleNamespace
+    from adw_modules.data_types import QualityCheckSpec
+    notes = []
+    run = SimpleNamespace(adw_id="a", repo_root=tmp_path, context_handoff_dir=tmp_path,
+                          phases=[SimpleNamespace(seq=1, phase_id="p")],
+                          tracer=SimpleNamespace(event=lambda e: None),
+                          console=SimpleNamespace(note=notes.append))
+    quality._run(QualityCheckSpec(name="build", area="backend", operation="build",
+                                  argv=quality._placeholder("build")), run)
+    assert notes[-1].startswith("quality build: not configured")

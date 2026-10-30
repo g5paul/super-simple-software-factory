@@ -115,11 +115,7 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
         started_at=started_at,
         ended_at=now_iso(),
     ))
-    run.console.note(
-        f"quality {spec.name}: {'passed' if passed else 'failed'} "
-        f"(exit {returncode}, {duration:.1f}s)"
-    )
-    return QualityCheckResult(
+    result = QualityCheckResult(
         name=spec.name,
         area=spec.area,
         operation=spec.operation,
@@ -130,6 +126,10 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
         output_artifact=str(output_artifact),
         output_tail=(stdout + stderr)[-TAIL_CHARS:],
     )
+    verdict = ("not configured" if not result.configured
+               else "passed" if passed else "failed")
+    run.console.note(f"quality {spec.name}: {verdict} (exit {returncode}, {duration:.1f}s)")
+    return result
 
 
 # ── Blocks ────────────────────────────────────────────────────────────────────

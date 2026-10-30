@@ -88,6 +88,11 @@ class PlanOutput(EnvelopeBase):
     # work product, so a chain that commits per step never reuses one agent's
     # words for another agent's diff.
     commit_message: str = ""
+    # Commands that prove THIS plan is done, beyond quality.py's fixed blocks:
+    # a validation script the plan adds, a targeted test file. Verify runs
+    # them as code beside the blocks, so a check the plan requires cannot pass
+    # on a reviewer's reading alone (pi-agent-observability 0e822c23).
+    checks: list[str] = Field(default_factory=list)
 
 
 class BuildOutput(EnvelopeBase):
@@ -149,8 +154,8 @@ class DocumentOutput(EnvelopeBase):
 
 # ── Deterministic quality blocks ─────────────────────────────────────────────
 
-QualityArea = Literal["frontend", "backend"]
-QualityOperation = Literal["lint", "format", "typecheck", "build"]
+QualityArea = Literal["frontend", "backend", "plan"]
+QualityOperation = Literal["lint", "format", "typecheck", "build", "check"]
 
 
 class QualityCheckSpec(BaseModel):

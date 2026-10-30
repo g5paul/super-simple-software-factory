@@ -94,6 +94,11 @@ procs ADW_ID:
 # while a recorded chain process is still alive. For a file it lists with `!`,
 # run install.py --update --take PATH or --keep PATH yourself.
 
+# check that Claude Code agents can sign in, with the agents' own environment
+login-check:
+    @uv run --no-project -q --with pydantic --with pyyaml --with python-dotenv --with rich \
+      python -c "import sys; sys.path.insert(0, 'adws'); from adw_modules import agent_cc; agent_cc.check_login(); print('login ok: Claude Code agents can sign in')"
+
 # update SSSF from the skill source in SSSF_SOURCE
 sssf-update:
     #!/usr/bin/env bash

@@ -44,8 +44,11 @@ Respond with ONLY valid JSON matching `PlanOutput` — no prose before or after:
   "summary": "<one sentence describing the plan>",
   "artifacts": ["<context_handoff_dir>/plan.md", "specs/<adw_id>_<slug>.md"],
   "commit_message": "<imperative one-line git subject for committing THIS PLAN DOCUMENT, not the work it describes — e.g. 'Add spec for the /health endpoint'>",
+  "checks": ["<shell command that proves this plan is done, beyond the repo's quality checks — e.g. 'bun scripts/validate-sidebar-ui.ts'>"],
   "notes_for_next_agent": "<what the builder must know>"
 }
 ```
+
+`checks` lists every command your plan's verification section requires that the repo's own test, lint, format, typecheck, and build commands do not already run: a validation script the plan adds, a test file outside the usual suite. SSSF runs each from the repo root after every build, and a non-zero exit sends the output back to the builder. Each must run without a prompt and exit 0 only when the check passes. Leave it `[]` when the repo's own commands cover the plan. A check that needs a tool the repo does not declare is a dependency: name it in the plan, so the reviewer sees it.
 
 Both `artifacts` entries are the paths you ACTUALLY wrote, `_v2` suffix and all. Gates open these files — a name you meant to use fails them.

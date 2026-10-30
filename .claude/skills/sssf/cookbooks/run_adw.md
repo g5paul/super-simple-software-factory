@@ -74,6 +74,7 @@ Without it, a chain works and commits on the branch that is checked out, in the 
 
 - **Add it only when the engineer asks** for a separate branch, a branch per run, or to keep working while it runs. Never add it on your own judgement.
 - The engineer's uncommitted changes are not part of the run. The run says so on startup.
+- Write a prompt file outside the checkout, in your scratchpad. A file left in the checkout makes `just merge` refuse until it's gone.
 - Only one worktree run per repo at a time; a second refuses to start while one is alive.
 - `--adw-id` resumes a worktree run inside its own folder, with or without the flag, and refuses once it has been merged or discarded.
 - The trace stays in the main checkout, so watching it works the same.

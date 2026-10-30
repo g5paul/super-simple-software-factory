@@ -160,6 +160,10 @@ The run stops there, so the agent's permitted changes are never verified,
 reviewed, or committed. The breach message lists them as left uncommitted, for
 the engineer to finish or discard.
 
+The run ends with that message in full and exit code 1, not a Python
+traceback. Gate failures and budget and rate-limit stops end the same way.
+A traceback means SSSF crashed, which is a bug to report.
+
 To keep a breach from happening at all, the planner and builder prompts get the
 `protected_files` list as `{{protected_files}}`. The planner puts any change the
 request needs on a protected path under a `## For the engineer` heading, out of

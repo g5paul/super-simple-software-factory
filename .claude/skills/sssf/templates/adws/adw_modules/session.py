@@ -12,6 +12,7 @@ import signal
 import sys
 from pathlib import Path
 
+from . import account, agents, budget, permissions
 from .data_types import EventRecord, SSSFConfig
 from .runner import Run
 from .tracer import Tracer
@@ -35,6 +36,31 @@ def _finalize_when_killed(run: Run) -> None:
         signal.signal(sig, handler)
 
 
+# Failures SSSF raises on purpose. Each one's message says what happened and
+# what to do, and the trace already holds the failed phase, so a Python
+# traceback on top adds nothing but noise. Anything else is a crash, and
+# keeps its traceback.
+STOPS = (agents.GateFailure, permissions.PermissionBreach,
+         budget.BudgetStop, account.RateLimitStop)
+
+
+def _report_stops_plainly(run: Run) -> None:
+    """A stop ends the run with its full message and exit code 1, not a traceback.
+
+    The phase line clips its error to one line, and a breach message lists
+    paths over several, so the message is printed again here in full.
+    """
+    default = sys.excepthook
+
+    def hook(kind, error, trace):
+        if isinstance(error, STOPS):
+            run.console.advise(f"{kind.__name__}: {error}")
+        else:
+            default(kind, error, trace)
+
+    sys.excepthook = hook
+
+
 def ensure(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
     adw_id = adw_id or new_id(8)
     tracer = Tracer(cfg.observability.db,
@@ -51,5 +77,6 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
                              payload={"max_run_cost": cfg.defaults.max_run_cost,
                                       "rate_limit_stop": cfg.defaults.rate_limit_stop}))
     _finalize_when_killed(run)
+    _report_stops_plainly(run)
     run.console.session_started(adw_id, run.engineer)
     return run

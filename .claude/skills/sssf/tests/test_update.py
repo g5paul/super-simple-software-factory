@@ -253,3 +253,25 @@ def test_update_refuses_without_an_install(tmp_path, monkeypatch):
                             capture_output=True, text=True, check=False)
     assert result.returncode != 0
     assert "install" in result.stderr
+
+
+# ── what install tells you to run next ──────────────────────────────────────
+
+def test_next_steps_use_just_when_sssf_owns_the_justfile(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out = install("--coding-agent", "claude_code").stdout
+    assert "  2. just demo " in out and "mod sssf" not in out
+
+
+def test_next_steps_use_just_sssf_for_the_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("justfile").write_text(OWN_JUSTFILE)
+    out = install("--coding-agent", "claude_code").stdout
+    assert "  2. just sssf demo " in out and "  3. just sssf sessions " in out
+
+
+def test_next_steps_say_how_to_load_the_recipes_into_a_repos_own_justfile(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("justfile").write_text("test:\n    bun test\n")
+    out = install("--coding-agent", "claude_code").stdout
+    assert "add  mod sssf 'sssf.just'  to it and run install.py again" in out

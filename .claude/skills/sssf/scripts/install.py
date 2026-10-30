@@ -339,6 +339,11 @@ def main() -> int:
                       {Path(p).as_posix() for p in args.keep})
 
     code = install(root, roster, args.force)
+    # The recipes are `just demo` when SSSF's justfile is the repo's, and
+    # `just sssf demo` when the repo's own justfile loads them as a module.
+    j = "just sssf" if loads_module(root) else "just"
+    own = not loads_module(root) and load_stamp(root)["files"].get("justfile", {}).get(
+        "sha256") != sha256(root / "justfile")
     print("\nnext steps:")
     if args.coding_agent == "claude_code":
         print("  1. claude auth status    # must be logged in; no API key needed")
@@ -348,10 +353,13 @@ def main() -> int:
         print("     cp .env.sample .env, then set SSSF_PI_AUTH=subscription")
     else:
         print("  1. cp .env.sample .env   # then set the key(s) your roster needs")
-    print("  2. just demo             # two cheap read-only runs, end to end")
-    print("  3. just sessions         # what just happened")
-    print("  4. just obs              # the trace UI, needs bun")
-    print("     just obs-all          # every repo SSSF is installed in, one dashboard")
+    if own:
+        print("     this repo has its own justfile, so SSSF's recipes are not in it:")
+        print("     add  mod sssf 'sssf.just'  to it and run install.py again")
+    print(f"  2. {j} demo".ljust(27) + "# two cheap read-only runs, end to end")
+    print(f"  3. {j} sessions".ljust(27) + "# what just happened")
+    print(f"  4. {j} obs".ljust(27) + "# the trace UI, needs bun")
+    print(f"     {j} obs-all".ljust(27) + "# every repo SSSF is installed in, one dashboard")
     print("  5. exclude adws/ and .claude/ from repo-wide lint, format, typecheck,")
     print("     and package builds (see cookbooks/install.md, post-install checklist)")
     print("\n  no just? the raw form of step 2 is:")

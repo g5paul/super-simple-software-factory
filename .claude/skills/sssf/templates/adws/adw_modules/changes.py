@@ -18,17 +18,23 @@ from __future__ import annotations
 from . import git_helper
 from .data_types import BaseRef, ChangeCapture, ChangeSet, ChangesOutput
 
+
+class ChangeCaptureError(RuntimeError):
+    """The change set cannot be taken as asked: no repo, no such base, or
+    nothing changed. The message says what to do; it is not a crash."""
+
+
 DIFF_FILENAME = "changes.diff"
 
 
 def resolve_base(ref: str) -> BaseRef:
     """Pick the commit the work is measured from, and record why that one."""
     if not git_helper.is_repo():
-        raise RuntimeError(
+        raise ChangeCaptureError(
             "not a git repository — change capture needs one. Run `git init` in "
             "the repo root before running an ADW that documents a change.")
     if not git_helper.ref_exists(ref):
-        raise RuntimeError(
+        raise ChangeCaptureError(
             f"base ref {ref!r} does not exist in this repository — pass --base "
             f"with a ref that does (e.g. --base master, --base HEAD~1).")
 

@@ -161,7 +161,9 @@ reviewed, or committed. The breach message lists them as left uncommitted, for
 the engineer to finish or discard.
 
 The run ends with that message in full and exit code 1, not a Python
-traceback. Gate failures and budget and rate-limit stops end the same way.
+traceback. Gate failures, budget and rate-limit stops, and a change set
+that cannot be taken (no git repo, no such `--base`, nothing changed) end
+the same way.
 A traceback means SSSF crashed, which is a bug to report.
 
 To keep a breach from happening at all, the planner and builder prompts get the

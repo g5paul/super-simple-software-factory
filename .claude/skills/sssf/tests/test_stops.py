@@ -25,7 +25,7 @@ SCRIPT = """
 import sys
 from types import SimpleNamespace
 sys.path.insert(0, {adws!r})
-from adw_modules import permissions, session
+from adw_modules import changes, permissions, session
 
 run = SimpleNamespace(console=SimpleNamespace(advise=lambda m: print("ADVISE " + m)))
 session._report_stops_plainly(run)
@@ -43,6 +43,13 @@ def test_a_stop_prints_its_whole_message_and_exits_1():
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
     assert "ADVISE PermissionBreach: builder modified 1 path(s):\n  - x.py" in result.stdout
+
+
+def test_a_change_set_that_cannot_be_taken_is_a_stop():
+    result = end_with('changes.ChangeCaptureError("nothing changed since main")')
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "ADVISE ChangeCaptureError: nothing changed since main" in result.stdout
 
 
 @pytest.mark.parametrize("error", ["ValueError('a bug')", "RuntimeError('a bug')"])

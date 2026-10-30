@@ -52,7 +52,7 @@ def main(prompt: str, base: str = "main",
                lines=f"+{changeset.insertions} -{changeset.deletions}",
                diff=changeset.diff_path)
         if changeset.empty:
-            raise RuntimeError(
+            raise changes.ChangeCaptureError(
                 f"nothing changed since {changeset.base.label} ({changeset.base.reason}) "
                 f"— documenting runs after a build. Build something first, or point "
                 f"--base at the ref the work should be measured from.")

@@ -13,6 +13,7 @@ Run from the skill root:
 
 from __future__ import annotations
 
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -29,7 +30,11 @@ pytestmark = pytest.mark.skipif(
 
 
 def run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, check=False)
+    """SSSF_SOURCE comes from each repo's .env only. In an installed copy,
+    importing adw_modules loads that repo's own .env into os.environ, and an
+    inherited value would override the test repo's."""
+    env = {k: v for k, v in os.environ.items() if k != "SSSF_SOURCE"}
+    return subprocess.run(list(args), cwd=cwd, env=env, capture_output=True, text=True, check=False)
 
 
 def git(cwd: Path, *args: str) -> None:

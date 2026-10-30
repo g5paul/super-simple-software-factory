@@ -385,6 +385,9 @@ class ConfigDefaults(BaseModel):
         "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py", "specs/",
     ])
     data_dir: str = "adws/adw_data"
+    # Set at run time, never in the yaml: data_dir as an absolute path in the
+    # launch checkout, where a worktree run still keeps its trace and run folders.
+    data_root: str = ""
     # Claude Code agents only: stop before an agent starts when the account's
     # 5-hour or 7-day usage window is at or over this fraction (see
     # adw_modules/account.py). None turns the check off.

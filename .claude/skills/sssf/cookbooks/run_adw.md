@@ -66,6 +66,24 @@ Two things that bite:
 
 `--adw-id` is optional on **every** ADW. Given one, the run joins that session if it exists or creates it pinned to exactly that id: same `sessions/{adw_id}/` dirs, same `context_handoff/`, envelopes appended, and each agent resumes its existing coding-agent context window via `agent_map.json`. That is how you chain ADWs — plan under one id, then build under the same id.
 
+### On its own branch: `--worktree`
+
+Without it, a chain works and commits on the branch that is checked out, in the engineer's own checkout. With `--worktree`, the run gets branch `sssf/<adw_id>`, cut from the tip of the checked-out branch, in its own folder at `adws/adw_data/worktrees/<adw_id>`. The engineer can keep working while it runs, and nothing reaches their branch until it's merged. It applies to `adw_simple_sdlc`, `adw_plan_build_test`, `adw_plan_build_test_quality`, and `adw_build_test`. `adw_tickets` keeps its own rule: it runs on the feature branch the engineer made.
+
+- **Add it only when the engineer asks** for a separate branch, a branch per run, or to keep working while it runs. Never add it on your own judgement.
+- The engineer's uncommitted changes are not part of the run. The run says so on startup.
+- Only one worktree run per repo at a time; a second refuses to start while one is alive.
+- `--adw-id` resumes a worktree run inside its own folder, with or without the flag, and refuses once it has been merged or discarded.
+- The trace stays in the main checkout, so watching it works the same.
+
+```bash
+uv run adws/<chain>.py "<prompt>" --worktree
+just merge <adw_id>      # only a successful run: fast-forward, or a merge commit if the branch moved on
+just discard <adw_id>    # drop the run's branch and folder, whatever state it is in
+```
+
+Report the branch with the result. **Run `just merge` only when the engineer says to**: the merge is the gate. It refuses unless the run succeeded, the launch branch is checked out, and the checkout is clean. A conflict aborts, leaves the checkout as it was, and keeps the branch; tell the engineer and show the commands it printed. Neither recipe pushes.
+
 ## Observe
 
 The trace db is `adws/adw_data/sssf.db`. It is WAL, so reads never block the running writers — poll it as often as you like.

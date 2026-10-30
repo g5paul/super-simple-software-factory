@@ -12,7 +12,7 @@ import signal
 import sys
 from pathlib import Path
 
-from . import account, agent_cc, agents, budget, changes, permissions
+from . import account, agent_cc, agents, budget, changes, permissions, worktree
 from .data_types import EventRecord, SSSFConfig
 from .runner import Run
 from .tracer import Tracer
@@ -62,10 +62,17 @@ def _report_stops_plainly(run: Run) -> None:
     sys.excepthook = hook
 
 
-def ensure(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
+def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False) -> Run:
+    """Join or create the session. With `use_worktree`, or when this adw_id
+    already has a worktree, the process moves into the run's worktree first
+    (see worktree.py), so everything after this works there."""
     adw_id = adw_id or new_id(8)
+    try:
+        place = worktree.enter(cfg, adw_id, use_worktree)
+    except worktree.WorktreeError as error:
+        raise SystemExit(f"WorktreeError: {error}") from None
     tracer = Tracer(cfg.observability.db,
-                    f"{cfg.defaults.data_dir}/sessions/{adw_id}/events.jsonl")
+                    f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
     run = Run(cfg=cfg, adw_id=adw_id, tracer=tracer, engineer=engineer_name())
     tracer.session_start(adw_id, run.engineer, adw_name=Path(sys.argv[0]).stem)
     # This process is the run. Record it before any phase opens, so a run that
@@ -77,7 +84,17 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
     tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="run_caps",
                              payload={"max_run_cost": cfg.defaults.max_run_cost,
                                       "rate_limit_stop": cfg.defaults.rate_limit_stop}))
+    if place and not place["resumed"]:
+        tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="worktree",
+                                 payload={k: v for k, v in place.items() if k != "resumed"}))
     _finalize_when_killed(run)
     _report_stops_plainly(run)
     run.console.session_started(adw_id, run.engineer)
+    if place:
+        verb = "resuming in" if place["resumed"] else "working in"
+        run.console.note(f"{verb} {place['worktree']} on {place['branch']}, from "
+                         f"{place['launch_branch']} at {place['base']}; "
+                         f"`just merge {adw_id}` lands it")
+        if place.get("launch_dirty") and not place["resumed"]:
+            run.console.note("the launch checkout has uncommitted changes; they are not part of this run")
     return run

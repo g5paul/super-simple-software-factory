@@ -68,6 +68,18 @@ simple-sdlc *ARGS:
 tickets *ARGS:
     uv run adws/adw_tickets.py --config {{config}} "$@"
 
+# ── land a worktree run ─────────────────────────────────────────────────────
+# A chain started with --worktree works on branch sssf/<adw_id>, in its own
+# folder, and nothing reaches your branch until you merge it. Neither pushes.
+
+# land a successful worktree run on its launch branch: just merge <adw_id>
+merge ADW_ID:
+    uv run adws/adw_worktree.py merge {{ADW_ID}} --config {{config}}
+
+# drop a worktree run's branch and folder: just discard <adw_id>
+discard ADW_ID:
+    uv run adws/adw_worktree.py discard {{ADW_ID}} --config {{config}}
+
 # ── watch it ────────────────────────────────────────────────────────────────
 # Reads never block a running workflow, the db is WAL. Poll as hard as you like.
 

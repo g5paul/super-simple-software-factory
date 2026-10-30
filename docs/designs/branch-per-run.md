@@ -39,7 +39,7 @@ We don't use it as a library. Its unit of work is one agent call: worktree, agen
 
 ### Mechanics
 
-6. **A worktree per run.** `git worktree add -b sssf/<adw_id> adws/adw_data/worktrees/<adw_id> <launch tip>`. The folder is already gitignored, and the setup checklist already keeps `adws/` out of linters and package builds, so nothing new needs excluding. It must be inside the repo, or a container session can't reach it.
+6. **A worktree per run.** `git worktree add -b sssf/<adw_id> adws/adw_data/worktrees/<adw_id> <launch tip>`. The install adds `adws/adw_data/worktrees/` to `.gitignore`, so a live worktree doesn't make the checkout look dirty, and the setup checklist already keeps `adws/` out of linters and package builds. It must be inside the repo, or a container session can't reach it.
 7. **Cut from the launch branch's tip, merged back into it.** The launch branch is whatever is checked out when the run starts.
 8. **SSSF runs from the launch checkout. Work happens in the worktree.** The chain's code, roster, and prompts come from the checkout the run is launched in. Agents' working folder, quality checks, plan checks, the tree check around each agent, the change capture for the documenter, and every commit use the worktree. One copy of SSSF is in play per run, and an uncommitted roster tweak still applies.
 9. **One trace, in the main checkout.** The trace db and run folders stay at the main checkout's `adws/adw_data/`, so the dashboard and the update's running-chain check see worktree runs. Today those paths are relative to the folder a process starts in, so the build must anchor them to the main checkout.

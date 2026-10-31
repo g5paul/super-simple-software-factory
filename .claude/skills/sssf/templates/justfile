@@ -90,6 +90,12 @@ rosters:
 merge ADW_ID *ARGS:
     uv run adws/adw_worktree.py merge --config {{config}} "$@"
 
+# Only for a repo with `merge: ff_only`, and only when you ask: a conflict or a
+# failed check puts the branch back. `just merge` itself never rebases.
+# move a run's branch onto its launch branch and recheck it: just rebase <adw_id>
+rebase ADW_ID:
+    uv run adws/adw_worktree.py rebase {{ADW_ID}} --config {{config}}
+
 # drop a worktree run's branch and folder: just discard <adw_id>
 discard ADW_ID:
     uv run adws/adw_worktree.py discard {{ADW_ID}} --config {{config}}

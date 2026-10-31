@@ -8,6 +8,7 @@ WAL mode so the UI can read while ADW processes write.
 from __future__ import annotations
 
 import json
+import socket
 import sqlite3
 from pathlib import Path
 
@@ -75,7 +76,8 @@ CREATE TABLE IF NOT EXISTS processes (
   name          TEXT,                -- '' for the adw, the agent name for a child
   pid           INTEGER,
   command       TEXT,                -- what the pid was, so a recycled pid is not killed by mistake
-  started_at    TEXT, ended_at TEXT  -- ended_at NULL = believed alive
+  started_at    TEXT, ended_at TEXT, -- ended_at NULL = believed alive
+  host          TEXT                 -- the pid only means something on this host
 );
 CREATE TABLE IF NOT EXISTS agent_sessions (
   adw_id        TEXT REFERENCES sessions,
@@ -96,7 +98,8 @@ MIGRATIONS = [("agent_sessions", "color", "TEXT"),
               ("sessions", "adw_name", "TEXT"),
               ("agent_sessions", "context_tokens", "INTEGER"),
               ("agent_sessions", "context_window", "INTEGER"),
-              ("sessions", "archived", "INTEGER DEFAULT 0")]
+              ("sessions", "archived", "INTEGER DEFAULT 0"),
+              ("processes", "host", "TEXT")]
 
 
 class Tracer:
@@ -108,7 +111,9 @@ class Tracer:
         self.conn = sqlite3.connect(self.db_path, isolation_level=None)
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA synchronous=NORMAL;")
-        self.conn.execute("PRAGMA busy_timeout=5000;")
+        # Parallel worktree runs share this db: wait out another run's write
+        # rather than fail the phase.
+        self.conn.execute("PRAGMA busy_timeout=30000;")
         self.conn.executescript(SCHEMA)
         self._migrate()
 
@@ -117,7 +122,12 @@ class Tracer:
         for table, column, decl in MIGRATIONS:
             columns = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in columns:
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                try:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                except sqlite3.OperationalError as error:
+                    # Another run opened the same old db a moment earlier.
+                    if "duplicate column" not in str(error):
+                        raise
 
     # ── events ──────────────────────────────────────────────────────────────
     def event(self, record: EventRecord) -> str:
@@ -181,9 +191,9 @@ class Tracer:
         run running, and how do I stop it".
         """
         self.conn.execute(
-            "INSERT INTO processes (adw_id, kind, name, pid, command, started_at)"
-            " VALUES (?,?,?,?,?,?)",
-            (adw_id, kind, name, pid, command[:500], now_iso()),
+            "INSERT INTO processes (adw_id, kind, name, pid, command, started_at, host)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (adw_id, kind, name, pid, command[:500], now_iso(), socket.gethostname()),
         )
 
     def process_end(self, adw_id: str, pid: int) -> None:

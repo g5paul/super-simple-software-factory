@@ -1,6 +1,6 @@
 # Design: parallel worktree runs
 
-Status: settled in a grilling session on 2026-10-30. The decisions below are the record. Not built yet. Where the text and a decision disagree, the decision wins.
+Status: settled in a grilling session on 2026-10-30, and built on branch `parallel-runs`. Proof runs (decision 12) not done yet. Where the text and a decision disagree, the decision wins.
 
 [Branch per run](branch-per-run.md) gave each run its own branch and folder, but only one at a time: its decision 12 refused a second worktree run while one was alive, because in the container every run shared one project environment, and that was untested. This design lifts that limit, so a repo can have more than one `--worktree` run going at once.
 
@@ -59,3 +59,4 @@ A read-only survey of the skill, before the decisions:
 | Date | Repo | What | Result |
 |---|---|---|---|
 | 2026-10-30 | hub | grilling session, this design | settled |
+| 2026-10-30 | hub | built decisions 3, 5 to 11, 13, 14: cap, locks, hosts, per-run environment, `just rebase`, cookbooks | 237 Python tests pass, 9 new |

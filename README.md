@@ -447,9 +447,12 @@ By default a chain works and commits on the branch you have checked out. With `-
 uv run adws/adw_simple_sdlc.py "add a /health endpoint" --worktree
 just merge <adw_id>      # a successful run only: fast-forward, or a merge commit if your branch moved on
 just discard <adw_id>    # drop the run's branch and folder, whatever state it is in
+just rebase <adw_id>     # ff_only repos: onto your branch's tip, then recheck
 ```
 
-`just merge` refuses unless the run succeeded, its launch branch is checked out, and the checkout is clean. It never rebases. A conflict aborts the merge, leaves your checkout as it was, keeps the branch, and prints the commands to merge by hand. A repo that keeps a linear history sets `merge: ff_only` in `adws/adw_sssf_config/repo.yaml`, and then a merge that can't fast-forward is refused with nothing changed. One worktree run per repo goes at a time. `--adw-id` resumes a worktree run in its own folder. Neither recipe pushes.
+`just merge` refuses unless the run succeeded, its launch branch is checked out, and the checkout is clean. It never rebases. A conflict aborts the merge, leaves your checkout as it was, keeps the branch, and prints the commands to merge by hand. A repo that keeps a linear history sets `merge: ff_only` in `adws/adw_sssf_config/repo.yaml`, and then a merge that can't fast-forward is refused with nothing changed. `just rebase <adw_id>` then moves the run's branch onto yours and reruns the quality checks in its folder; a conflict or a failed check puts the branch back. `--adw-id` resumes a worktree run in its own folder. None of these recipes pushes.
+
+Two worktree runs can go at once, each its own launch with its own adw_id, merged on its own. `max_worktree_runs` in `repo.yaml` sets how many, 2 by default; set it to 1 if your quality checks bind a fixed port or share a test database. Each run's `max_run_cost` holds for that run alone, so two runs can spend up to twice it. A lock keeps two launches from both passing the cap, and two merges from meeting in your checkout. In the container, each run gets its own project environment. Design: [`docs/designs/parallel-worktree-runs.md`](docs/designs/parallel-worktree-runs.md).
 
 Watch a run with the trace db directly:
 

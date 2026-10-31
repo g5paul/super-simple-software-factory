@@ -186,12 +186,127 @@ def test_a_merged_run_cannot_be_resumed(repo):
         start("wt000010", requested=False)
 
 
-def test_a_second_worktree_run_refuses_while_one_is_alive(repo):
-    _, _, tracer = start("wt000011")
-    tracer.process_start("wt000011", "adw", "", os.getpid(), "adw_simple_sdlc.py")
+def alive(adw_id: str) -> Tracer:
+    """Start a worktree run and record this test process as its live chain."""
+    _, _, tracer = start(adw_id)
+    tracer.process_start(adw_id, "adw", "", os.getpid(), "adw_simple_sdlc.py")
+    os.chdir(worktree.main_checkout())
+    return tracer
+
+
+def test_two_run_at_once_and_a_third_refuses_naming_both(repo):
+    alive("wt000011")
+    alive("wt000012")
+    with pytest.raises(worktree.WorktreeError, match="wt000011, wt000012 are still going.*allows 2"):
+        start("wt000014")
+
+
+def test_max_worktree_runs_1_keeps_one_at_a_time(repo):
+    (repo / "adws/adw_sssf_config").mkdir(parents=True)
+    (repo / "adws/adw_sssf_config/repo.yaml").write_text("max_worktree_runs: 1\n")
+    alive("wt000015")
+    with pytest.raises(worktree.WorktreeError, match="wt000015 is still going.*allows 1"):
+        start("wt000016")
+
+
+def test_a_run_from_the_other_side_counts_while_its_session_is_running(repo):
+    _, _, tracer = start("wt000017")
+    # A pid this host can't judge: the container's, say. Its own pid here would
+    # be some other process or none.
+    tracer.process_start("wt000017", "adw", "", 999999, "adw_simple_sdlc.py")
+    tracer.conn.execute("update processes set host='sssf-operator-repo' where adw_id='wt000017'")
+    db = SSSFConfig().observability.db
     os.chdir(repo)
-    with pytest.raises(worktree.WorktreeError, match="only one runs at a time"):
-        start("wt000012")
+    assert worktree.live_runs(str(repo / db)) == ["wt000017"]
+    finish(tracer, "wt000017")
+    assert worktree.live_runs(str(repo / db)) == []
+
+
+def test_a_container_run_gets_its_own_environment_and_loses_it_on_discard(repo, tmp_path, monkeypatch):
+    shared = tmp_path / "venvs" / "repo"
+    shared.parent.mkdir()
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(shared))
+    cfg, place, tracer = start("wt000018")
+    assert place["environment"] == f"{shared}-wt000018"
+    assert os.environ["UV_PROJECT_ENVIRONMENT"] == f"{shared}-wt000018"
+    Path(place["environment"]).mkdir()
+    finish(tracer, "wt000018", ok=False)
+    os.chdir(repo)
+    assert "and its environment" in worktree.discard(cfg, "wt000018")
+    assert not Path(place["environment"]).exists()
+
+
+def test_a_second_land_waits_for_the_lock_then_refuses(repo, monkeypatch):
+    cfg, _, tracer = start("wt000019")
+    work("two\n", "change")
+    finish(tracer, "wt000019")
+    os.chdir(repo)
+    monkeypatch.setattr(worktree, "LOCK_SECONDS", 1)
+    with worktree.locked("land", "a test's own merge"):
+        with pytest.raises(worktree.WorktreeError, match="merge, rebase, or discard.*held its lock"):
+            worktree.merge(cfg, "wt000019")
+    assert git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo) == "main"
+    assert "fast-forward" in worktree.merge(cfg, "wt000019")
+
+
+def last_event(adw_id: str, name: str) -> dict | None:
+    import json, sqlite3
+    with sqlite3.connect(SSSFConfig().observability.db) as conn:
+        row = conn.execute("select payload_json from events where adw_id=? and name=? "
+                           "order by rowid desc limit 1", (adw_id, name)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def two_from_one_tip(repo: Path, text_a: str, text_b: str, file_b: str = "other.txt"):
+    """Two successful runs cut from the same tip; the first is merged."""
+    cfg, _, ta = start("wt000020")
+    work(text_a, "first run")
+    finish(ta, "wt000020")
+    os.chdir(repo)
+    _, _, tb = start("wt000021")
+    Path(file_b).write_text(text_b)
+    subprocess.run(["git", "add", "-A"], check=True)
+    subprocess.run(["git", "commit", "-qm", "second run"], check=True)
+    finish(tb, "wt000021")
+    os.chdir(repo)
+    worktree.merge(cfg, "wt000020", ff_only=True)
+    return cfg
+
+
+def test_ff_only_points_at_rebase_which_rechecks_then_merge_fast_forwards(repo, monkeypatch):
+    checked = []
+    monkeypatch.setattr(worktree, "_recheck", lambda *a: checked.append(a[3]) or True)
+    cfg = two_from_one_tip(repo, "two\n", "new\n")
+    with pytest.raises(worktree.WorktreeError, match="just rebase wt000021"):
+        worktree.merge(cfg, "wt000021", ff_only=True)
+    assert "checks passed" in worktree.rebase(cfg, "wt000021")
+    assert checked == ["wt000021"]
+    assert "fast-forward" in worktree.merge(cfg, "wt000021", ff_only=True)
+    assert git("log", "--format=%s", cwd=repo).splitlines() == ["second run", "first run", "start"]
+    rebased = last_event("wt000021", "worktree_rebased")
+    assert rebased["onto"] == "main" and rebased["kept"] is True
+
+
+def test_a_rebase_conflict_aborts_and_leaves_the_branch_as_it_was(repo, monkeypatch):
+    monkeypatch.setattr(worktree, "_recheck", lambda *a: True)
+    cfg = two_from_one_tip(repo, "two\n", "three\n", file_b="app.txt")
+    before = git("rev-parse", "sssf/wt000021", cwd=repo)
+    with pytest.raises(worktree.WorktreeError, match="conflict, so it was aborted"):
+        worktree.rebase(cfg, "wt000021")
+    assert git("rev-parse", "sssf/wt000021", cwd=repo) == before
+    path = repo / "adws/adw_data/worktrees/wt000021"
+    assert git("status", "--porcelain", cwd=path) == ""
+    assert last_event("wt000021", "worktree_rebased") is None
+
+
+def test_a_rebase_whose_checks_fail_is_put_back(repo, monkeypatch):
+    monkeypatch.setattr(worktree, "_recheck", lambda *a: False)
+    cfg = two_from_one_tip(repo, "two\n", "new\n")
+    before = git("rev-parse", "sssf/wt000021", cwd=repo)
+    with pytest.raises(worktree.WorktreeError, match="checks failed.*back at"):
+        worktree.rebase(cfg, "wt000021")
+    assert git("rev-parse", "sssf/wt000021", cwd=repo) == before
+    assert last_event("wt000021", "worktree_rebased")["kept"] is False
 
 
 def test_a_detached_head_cannot_start_one(repo):

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 PATH = "adws/adw_sssf_config/repo.yaml"
 
@@ -24,6 +24,7 @@ PATH = "adws/adw_sssf_config/repo.yaml"
 class RepoSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")   # a misspelled rule fails, never silently defaults
     merge: Literal["any", "ff_only"] = "any"
+    max_worktree_runs: int = Field(2, ge=1)
 
 
 def load(root: Path) -> RepoSettings:
@@ -39,3 +40,8 @@ def merge_ff_only(root: Path) -> bool:
     if override:
         return override != "0"
     return load(root).merge == "ff_only"
+
+
+def max_worktree_runs(root: Path) -> int:
+    """How many --worktree runs may be alive in this repo at once."""
+    return load(root).max_worktree_runs

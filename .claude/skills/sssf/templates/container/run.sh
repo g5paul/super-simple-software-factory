@@ -33,7 +33,10 @@ if not d.get("hasCompletedOnboarding"):
     p.write_text(json.dumps(d, indent=2))
 ' 2> >(quiet)
 
+# The hostname is fixed so the trace can tell this container's processes from
+# the host's: their pids live in different namespaces (see live_runs, kill).
 exec podman run --rm -it --userns=keep-id --name "sssf-operator-$(basename "$repo")" \
+    --hostname "sssf-operator-$(basename "$repo")" \
     --env-file "$token" \
     -e DISABLE_AUTOUPDATER=1 \
     -e UV_PROJECT_ENVIRONMENT="$HOME/.cache/sssf-container-venv/$(basename "$repo")" \

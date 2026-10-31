@@ -77,7 +77,7 @@ Without it, a chain works and commits on the branch that is checked out, in the 
 - **Add it only when the engineer asks** for a separate branch, a branch per run, or to keep working while it runs. Never add it on your own judgement.
 - The engineer's uncommitted changes are not part of the run. The run says so on startup.
 - Write a prompt file outside the checkout, in your scratchpad. A file left in the checkout makes `just merge` refuse until it's gone.
-- Only one worktree run per repo at a time; a second refuses to start while one is alive.
+- Up to `max_worktree_runs` in `adws/adw_sssf_config/repo.yaml` go at once, 2 by default. A launch over the cap refuses and names the runs alive. See "Beside another run" below.
 - `--adw-id` resumes a worktree run inside its own folder, with or without the flag, and refuses once it has been merged or discarded.
 - The trace stays in the main checkout, so watching it works the same.
 
@@ -85,9 +85,21 @@ Without it, a chain works and commits on the branch that is checked out, in the 
 uv run adws/<chain>.py "<prompt>" --worktree
 just merge <adw_id>      # only a successful run: fast-forward, or a merge commit if the branch moved on
 just discard <adw_id>    # drop the run's branch and folder, whatever state it is in
+just rebase <adw_id>     # ff_only repos, only on the engineer's word: onto the launch branch, then recheck
 ```
 
-Report the branch with the result. **Run `just merge` only when the engineer says to**: the merge is the gate. It refuses unless the run succeeded, the launch branch is checked out, and the checkout is clean. In a repo that only takes fast-forwards, `merge: ff_only` in `adws/adw_sssf_config/repo.yaml` (or `--ff-only` for one merge) refuses a launch branch that moved on, with nothing changed. The rebase is then the engineer's call, never yours. A conflict aborts, leaves the checkout as it was, and keeps the branch; tell the engineer and show the commands it printed. Neither recipe pushes.
+Report the branch with the result. **Run `just merge` only when the engineer says to**: the merge is the gate. It refuses unless the run succeeded, the launch branch is checked out, and the checkout is clean. In a repo that only takes fast-forwards, `merge: ff_only` in `adws/adw_sssf_config/repo.yaml` (or `--ff-only` for one merge) refuses a launch branch that moved on, with nothing changed. The rebase is then the engineer's call, never yours. When they say to, `just rebase <adw_id>` moves the branch onto the launch branch and reruns `adw_quality` in the worktree. A conflict or a failed check puts the branch back as it was. Then `just merge` again. A conflict aborts, leaves the checkout as it was, and keeps the branch; tell the engineer and show the commands it printed. Neither recipe pushes.
+
+### Beside another run
+
+A repo can have more than one worktree run going, up to its `max_worktree_runs`. Each is its own launch with its own adw_id, merged on its own.
+
+- **Start a second only when the engineer asks for one.** If a request arrives while a run is going, say which run is going and ask: start this one beside it, or wait. Never decide that yourself.
+- Both need `--worktree`. A plain run works in the engineer's checkout, which a worktree run's merge needs clean.
+- Watch each by its adw_id. Report each one when it finishes, with its own adw_id, status, cost, and branch, without waiting for the other.
+- Merge neither without the engineer's word, and merge one at a time. The first fast-forwards. The second makes a merge commit, or, in an `ff_only` repo, refuses until the engineer has you run `just rebase`.
+- Each run's `max_run_cost` holds for that run alone, so two runs can spend up to twice it between them. The usage check before each agent's first call doesn't see the other run's calls either, so two runs can pass `rate_limit_stop` together and go a little over it.
+- In the container, each worktree run gets its own project environment, built on its first `uv run`, so its first check is slower. Merge and discard remove it.
 
 ## Observe
 

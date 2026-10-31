@@ -53,6 +53,7 @@ The verify phase runs every block in `adws/adw_modules/quality.py`: test, lint, 
    If a block needs files the project did not have, such as a `tsconfig.json` added so typecheck can run, commit them with the onboarding and list them in `docs/sssf.md`. They are part of the install from then on, though SSSF does not stamp or update them.
 4. Run `uv run adws/adw_quality.py "check the tree"`. Every block must pass.
 5. Prove the checks can fail: break one thing on purpose (a test, or a line's formatting), run `adw_quality` again, see that block fail, then restore the file with `git checkout`. In a Python repo, breaking something `uv run` needs, such as the build backend, fails every block, since each one syncs the project first. That proves less: pick a break that only one block notices.
+6. Is `quality.py` safe to run twice at the same moment? Two worktree runs check in two folders at once, so a check that binds a fixed port, writes a fixed temp path, or uses one shared test database breaks the other run's checks. If it isn't, set `max_worktree_runs: 1` in `adws/adw_sssf_config/repo.yaml` and say why in `docs/sssf.md`. If it is, leave the default of 2.
 
 ## 4. Keep SSSF out of the project's own tools
 

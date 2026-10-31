@@ -6,3 +6,8 @@
 #   ff_only  fast-forward only: refuse when the branch moved on, change nothing
 # One machine can override it with SSSF_MERGE_FF_ONLY in .env (1 on, 0 off).
 merge: any
+
+# How many --worktree runs may be alive at once. Raise it only if quality.py is
+# safe to run twice at the same moment: no fixed port, temp path, or shared
+# database. 1 means one at a time.
+max_worktree_runs: 2

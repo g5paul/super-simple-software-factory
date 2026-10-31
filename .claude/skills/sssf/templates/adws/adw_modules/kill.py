@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import sqlite3
 import subprocess
 import time
@@ -38,10 +39,10 @@ CLOCK_SLACK_SECONDS = 5     # the row is written just after the spawn, not befor
 WAIT_SECONDS = 10
 
 
-def _rows(db: str, adw_id: str) -> list[tuple[str, str, int, str, str]]:
+def _rows(db: str, adw_id: str) -> list[tuple[str, str, int, str, str, str | None]]:
     with sqlite3.connect(db) as conn:
         return conn.execute(
-            "select kind, name, pid, command, started_at from processes "
+            "select kind, name, pid, command, started_at, host from processes "
             "where adw_id=? and ended_at is null order by case kind when 'adw' then 0 else 1 end, id",
             (adw_id,)).fetchall()
 
@@ -107,9 +108,16 @@ def kill(db: str, adw_id: str) -> list[str]:
     rows = _rows(db, adw_id)
     if not rows:
         return [f"no live processes recorded for {adw_id}"]
+    # A pid is only this host's to signal when this host recorded it. The
+    # container and the machine it runs on share the trace, not their pids.
+    here = socket.gethostname()
+    away = sorted({row[5] for row in rows if row[5] and row[5] != here})
+    if away:
+        return [f"{adw_id}: NOT stopped, it runs on {', '.join(away)} and this is {here}. "
+                "Run `just kill` there."]
     report: dict[int, str] = {}
     signalled: list[tuple[str, int]] = []
-    for kind, name, pid, command, started_at in rows:
+    for kind, name, pid, command, started_at, _ in rows:
         label = f"{kind} {name} {pid}".replace("  ", " ")
         live = _live(pid)
         if live is None:

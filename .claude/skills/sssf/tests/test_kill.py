@@ -136,3 +136,14 @@ def test_the_agent_is_stopped_while_the_chain_waits_on_it(tmp_path, trace):
     assert report == [f"adw {chain.pid}: stopped", f"agent builder {agent_pid}: stopped"]
     assert time.monotonic() - started < kill.WAIT_SECONDS
     chain.wait(5)
+
+
+def test_a_run_recorded_on_another_host_is_refused_and_names_it(tmp_path, trace):
+    db, tracer = trace
+    chain = spawn(tmp_path, "adw_fake.py")
+    tracer.process_start("k1", "adw", "", chain.pid, "adw_fake.py do the thing")
+    tracer.conn.execute("update processes set host='sssf-operator-repo' where adw_id='k1'")
+    report = kill.kill(str(db), "k1")
+    assert len(report) == 1 and "NOT stopped, it runs on sssf-operator-repo" in report[0]
+    assert chain.poll() is None and status(db) == "running"
+    chain.kill()

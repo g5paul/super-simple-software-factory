@@ -62,15 +62,7 @@ def _report_stops_plainly(run: Run) -> None:
     sys.excepthook = hook
 
 
-def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False) -> Run:
-    """Join or create the session. With `use_worktree`, or when this adw_id
-    already has a worktree, the process moves into the run's worktree first
-    (see worktree.py), so everything after this works there."""
-    adw_id = adw_id or new_id(8)
-    try:
-        place = worktree.enter(cfg, adw_id, use_worktree)
-    except worktree.WorktreeError as error:
-        raise SystemExit(f"WorktreeError: {error}") from None
+def _start(cfg: SSSFConfig, adw_id: str, place: dict | None) -> tuple[Tracer, Run]:
     tracer = Tracer(cfg.observability.db,
                     f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
     run = Run(cfg=cfg, adw_id=adw_id, tracer=tracer, engineer=engineer_name())
@@ -79,14 +71,30 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
     # hangs in its first agent call is still killable by adw_id.
     tracer.process_start(adw_id, "adw", "", os.getpid(),
                          " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]))
+    if place and not place["resumed"]:
+        tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="worktree",
+                                 payload={k: v for k, v in place.items() if k != "resumed"}))
+    return tracer, run
+
+
+def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False) -> Run:
+    """Join or create the session. With `use_worktree`, or when this adw_id
+    already has a worktree, the process moves into the run's worktree first
+    (see worktree.py), so everything after this works there."""
+    adw_id = adw_id or new_id(8)
+    try:
+        # Held until this run's process and worktree rows are written, so two
+        # launches at once can't both count the other runs before either counts.
+        with worktree.launching():
+            place = worktree.enter(cfg, adw_id, use_worktree)
+            tracer, run = _start(cfg, adw_id, place)
+    except worktree.WorktreeError as error:
+        raise SystemExit(f"WorktreeError: {error}") from None
     # The caps this run is held to, so the dashboard can draw spend against
     # them. A joined run records them again; the latest row wins.
     tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="run_caps",
                              payload={"max_run_cost": cfg.defaults.max_run_cost,
                                       "rate_limit_stop": cfg.defaults.rate_limit_stop}))
-    if place and not place["resumed"]:
-        tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="worktree",
-                                 payload={k: v for k, v in place.items() if k != "resumed"}))
     _finalize_when_killed(run)
     _report_stops_plainly(run)
     run.console.session_started(adw_id, run.engineer)

@@ -135,6 +135,7 @@ SSSF can run its agents on a Claude subscription through Claude Code, or on a Ch
 | Run stops before the plan runs out | yes, `rate_limit_stop` | no |
 | Per-call cost cap | yes, `max_call_cost` | no |
 | Run cost cap | yes, `max_run_cost` | yes, `max_run_cost` |
+| Cap on what live runs spend together | yes, `max_live_cost` | yes, `max_live_cost` |
 | Spend on the dashboard | yes | yes |
 | Key guard | on by default | `SSSF_PI_AUTH=subscription` |
 
@@ -368,7 +369,7 @@ Above the projects, a panel shows the Claude account they all share. It has two 
 
 Before each Claude Code agent starts, SSSF checks the same reading. If either window is at or over `defaults.rate_limit_stop` (default 0.8), the run stops, with the time the window resets. That beats a run that dies halfway through a phase. See `references/config.md`.
 
-Two cost caps stop a run that's spending too much, which matters most when nobody is watching it. `defaults.max_run_cost` (default $5) is checked before every send. Each agent's `max_call_cost` goes to `claude -p --max-budget-usd`, so a runaway call ends itself. The starter roster sets each one at about twice the most that agent has cost so far. Neither cap retries, and neither discards work: if the tree holds uncommitted changes, the stop message prints how to look at them, keep them, or drop them.
+Two cost caps stop a run that's spending too much, which matters most when nobody is watching it. `defaults.max_run_cost` (default $5) is checked before every send. Each agent's `max_call_cost` goes to `claude -p --max-budget-usd`, so a runaway call ends itself. The starter roster sets each one at about twice the most that agent has cost so far. A third cap is the repo's own: `max_live_cost` in `adws/adw_sssf_config/repo.yaml`, off unless set, caps what every live run spends together. It's checked before every send and at launch, so a run stops, or a new one doesn't start, while the live runs are at it. No cap retries, and none discards work: if the tree holds uncommitted changes, the stop message prints how to look at them, keep them, or drop them.
 
 A repo on another machine is not in this registry. Run `just obs` there, and reach it through an SSH tunnel: `ssh -L 4600:localhost:4600 host`.
 
@@ -496,6 +497,7 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 - pi agents have no usage-window guard; `rate_limit_stop` reads what Claude Code reports.
 - One request tried several ways, with the best merged, is left room for but not built.
 - A seam for a second sandbox beside the Podman container waits for one to exist.
+- Every worktree run runs all of `worktree_setup`, even when it touches one package.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

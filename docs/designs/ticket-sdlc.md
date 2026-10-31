@@ -1,6 +1,6 @@
 # Design: a ticket SDLC for SSSF
 
-Status: built. Settled in a grilling session on 2026-10-29. `adw_tickets` and its dashboard view shipped, and decision 37 records the first real run (yt-summarizer, six tickets). Still not built: the items under "Not in the first version", and a worktree per ticket run (out of scope in [parallel-worktree-runs.md](parallel-worktree-runs.md)). The decisions at the end are the record. Where the text and a decision disagree, the decision wins.
+Status: built. Settled in a grilling session on 2026-10-29. `adw_tickets` and its dashboard view shipped, and decision 37 records the first real run (yt-summarizer, six tickets). A ticket run can take `--worktree`, one branch per feature, built to decisions 26 to 38 of [parallel-worktree-runs.md](parallel-worktree-runs.md). Still not built: the items under "Not in the first version". The decisions at the end are the record. Where the text and a decision disagree, the decision wins.
 
 SSSF's chains follow disler's SDLC: one task in, one plan, one build, checks, review, docs, three commits, all headless. This design adds a second way to build, based on Matt Pocock's engineering skills ([mattpocock/skills](https://github.com/mattpocock/skills), MIT, read from the fork at `~/github/skills`, commit `a496f55`). It sits beside the current chains and replaces none of them. It also adds cost caps to every chain, because keeping unattended spend under control is the engineer's main concern as SSSF grows.
 

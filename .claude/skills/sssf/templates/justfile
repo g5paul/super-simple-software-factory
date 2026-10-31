@@ -71,20 +71,15 @@ tickets *ARGS:
 # these recipes. This is how you find the path to pass.
 # every roster on disk, and the model each agent runs: just rosters
 rosters:
-    #!/usr/bin/env bash
-    for f in adws/adw_sssf_config/sssf*.yaml; do
-      printf '%s\n' "$f"
-      awk '
-        /^agents:/ { in_agents = 1 }
-        /^  model:/ && !in_agents { default_model = $2 }
-        /^  - name:/ {
-          if (name) printf "    %-18s %s\n", name, (model ? model : default_model " (inherited)")
-          name = $3; model = ""
-        }
-        /^    model:/ { model = $2 }
-        END { if (name) printf "    %-18s %s\n", name, (model ? model : default_model " (inherited)") }
-      ' "$f"
-    done
+    #!/usr/bin/env -S uv run --no-project -q --with pyyaml python
+    import glob, yaml
+    for path in sorted(glob.glob("adws/adw_sssf_config/sssf*.yaml")):
+        cfg = yaml.safe_load(open(path)) or {}
+        default = (cfg.get("defaults") or {}).get("model", "?")
+        print(path)
+        for agent in cfg.get("agents") or []:
+            model = agent.get("model") or f"{default} (inherited)"
+            print(f"    {agent['name']:<18} {model}")
 
 # ── land a worktree run ─────────────────────────────────────────────────────
 # A chain started with --worktree works on branch sssf/<adw_id>, in its own

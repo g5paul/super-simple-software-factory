@@ -12,6 +12,8 @@ The ADW is the worker. Your job is to launch it, watch the trace, and tell the e
 
 ## Launch
 
+**Check how the repo loads SSSF's recipes first.** If its own justfile has a `mod sssf 'sssf.just'` line, every recipe in this cookbook takes the `sssf` prefix: `just sssf rosters`, `just sssf phases <adw_id>`, `just sssf procs <adw_id>`, `just sssf kill <adw_id>`, `just sssf merge <adw_id>`. Otherwise run them as written.
+
 Which chain to launch is decided in `how_to_prompt_for_the_eng.md`, and the short version is: **the ADW the engineer named, or else the most complete composed chain the work justifies — never a single-agent one.** Read `ls adws/adw_*.py` and the `Phases:` line in each docstring to see what this repo has; the names below are shape, not a menu.
 
 ```bash

@@ -42,7 +42,7 @@ def _finalize_when_killed(run: Run) -> None:
 # keeps its traceback.
 STOPS = (agents.GateFailure, permissions.PermissionBreach,
          budget.BudgetStop, account.RateLimitStop, changes.ChangeCaptureError,
-         agent_cc.NotLoggedIn)
+         agent_cc.NotLoggedIn, worktree.SetupFailed)
 
 
 def _report_stops_plainly(run: Run) -> None:
@@ -105,4 +105,6 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
                          f"`just merge {adw_id}` lands it")
         if place.get("launch_dirty") and not place["resumed"]:
             run.console.note("the launch checkout has uncommitted changes; they are not part of this run")
+        if not place["resumed"]:
+            worktree.set_up(run)
     return run

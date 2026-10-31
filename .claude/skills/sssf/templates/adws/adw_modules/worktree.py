@@ -239,6 +239,52 @@ def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
     return place
 
 
+class SetupFailed(RuntimeError):
+    """A worktree_setup command failed, so the run stops before any agent."""
+
+
+def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path) -> str:
+    """Run repo.yaml's worktree_setup in a worktree. Returns "" when every
+    command passed, or why the first that failed did, with its output's tail.
+    Each command's output goes to `log_dir/NN.log`."""
+    from .utils import operator_env
+    log_dir.mkdir(parents=True, exist_ok=True)
+    for n, command in enumerate(commands, 1):
+        try:
+            done = subprocess.run(["sh", "-c", command], cwd=cwd, env=operator_env(),
+                                  capture_output=True, text=True, timeout=timeout)
+            code, out = done.returncode, done.stdout + done.stderr
+        except subprocess.TimeoutExpired as error:
+            # Its output comes back as bytes even with text=True.
+            code = 124
+            out = "".join(part.decode(errors="replace") if isinstance(part, bytes) else part
+                          for part in (error.stdout or "", error.stderr or ""))
+            out += f"\nTimed out after {timeout}s."
+        log = log_dir / f"{n:02d}.log"
+        log.write_text(f"$ {command}\nexit: {code}\n\n{out}")
+        if code != 0:
+            tail = "\n".join(out.strip().splitlines()[-15:])
+            return f"`{command}` exited {code}. The last of its output ({log}):\n{tail}"
+    return ""
+
+
+def set_up(run) -> None:
+    """The setup phase: repo.yaml's worktree_setup, before the run's first agent."""
+    from .data_types import PhaseParams
+    settings = repo_settings.load(main_checkout())
+    if not settings.worktree_setup:
+        return
+    with run.phase(PhaseParams(name="setup", kind="code", owner="worktree",
+                               description="Run repo.yaml's worktree_setup in the new worktree")) as ph:
+        why = run_setup(settings.worktree_setup, Path.cwd(), settings.worktree_setup_timeout,
+                        run.context_handoff_dir / "setup")
+        ph.log(commands=len(settings.worktree_setup), passed=not why)
+        if why:
+            raise SetupFailed(f"worktree_setup failed, so no agent started. {why}\n"
+                              f"Fix repo.yaml or the repo, then `just discard {run.adw_id}` "
+                              "and run the request again.")
+
+
 def _own_environment(environment: str | None) -> None:
     """Point uv at this run's own project environment.
 
@@ -390,6 +436,18 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
             f"is still at {old}:\n{said}\n"
             f"To land it, merge it by hand, or `just discard {adw_id}` and run the request again.")
     new = git("rev-parse", "--short", "HEAD", cwd=path).stdout.strip()
+    # The rebase may bring in a changed lockfile, so set the worktree up again.
+    settings = repo_settings.load(root)
+    why = (_with_environment(record, lambda: run_setup(
+        settings.worktree_setup, path, settings.worktree_setup_timeout,
+        Path(cfg.defaults.data_root) / "sessions" / adw_id / "context_handoff" / "rebase_setup"))
+        if settings.worktree_setup else "")
+    if why:
+        git("reset", "--hard", old, cwd=path)
+        _log(cfg, adw_id, "worktree_rebased", {"onto": launch, "old": old, "new": new,
+                                               "setup": False, "kept": False})
+        raise WorktreeError(f"{branch} rebased cleanly onto {launch}, but worktree_setup failed "
+                            f"on the result, so the branch is back at {old}. {why}")
     checks = new_id(8)
     passed = _recheck(root, path, record, adw_id, checks)
     payload = {"onto": launch, "old": old, "new": new, "checks": checks, "passed": passed}
@@ -402,6 +460,20 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
     _log(cfg, adw_id, "worktree_rebased", {**payload, "kept": True})
     return (f"rebased {branch} onto {launch}, {old} to {new}, and the checks passed (run "
             f"{checks}). `just merge {adw_id}` lands it.")
+
+
+def _with_environment(record: dict, call):
+    """Call with the run's own UV_PROJECT_ENVIRONMENT in place, if it has one."""
+    saved = os.environ.get("UV_PROJECT_ENVIRONMENT")
+    if record.get("environment"):
+        os.environ["UV_PROJECT_ENVIRONMENT"] = record["environment"]
+    try:
+        return call()
+    finally:
+        if saved is None:
+            os.environ.pop("UV_PROJECT_ENVIRONMENT", None)
+        else:
+            os.environ["UV_PROJECT_ENVIRONMENT"] = saved
 
 
 def _recheck(root: Path, path: Path, record: dict, adw_id: str, checks: str) -> bool:

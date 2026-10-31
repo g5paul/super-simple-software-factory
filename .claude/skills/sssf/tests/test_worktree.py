@@ -442,3 +442,34 @@ def test_a_discard_is_recorded_and_a_refused_merge_is_not(repo):
     assert landed("wt000018") == []
     worktree.discard(cfg, "wt000018")
     assert landed("wt000018") == [("worktree_discarded", {})]
+
+
+def test_setup_runs_each_command_in_order_and_stops_at_the_first_failure(tmp_path):
+    logs = tmp_path / "logs"
+    assert worktree.run_setup(["echo one > a.txt", "cd sub 2>/dev/null || mkdir sub",
+                               "cat a.txt > sub/b.txt"], tmp_path, 10, logs) == ""
+    assert (tmp_path / "sub/b.txt").read_text() == "one\n"
+    why = worktree.run_setup(["true", "echo broken >&2; exit 3", "touch never"], tmp_path, 10, logs)
+    assert "`echo broken >&2; exit 3` exited 3" in why and "broken" in why
+    assert not (tmp_path / "never").exists()
+    assert "exit: 3" in (logs / "02.log").read_text()
+
+
+def test_a_setup_command_over_its_time_fails(tmp_path):
+    why = worktree.run_setup(["echo started; sleep 5"], tmp_path, 1, tmp_path / "logs")
+    assert "exited 124" in why and "Timed out after 1s" in why and "started" in why
+
+
+def test_a_rebase_reruns_setup_and_a_failed_setup_puts_the_branch_back(repo, monkeypatch):
+    monkeypatch.setattr(worktree, "_recheck", lambda *a: True)
+    cfg = two_from_one_tip(repo, "two\n", "new\n")
+    (repo / "adws/adw_sssf_config").mkdir(parents=True, exist_ok=True)
+    settings = repo / "adws/adw_sssf_config/repo.yaml"
+    settings.write_text("worktree_setup:\n  - exit 7\n")
+    before = git("rev-parse", "sssf/wt000021", cwd=repo)
+    with pytest.raises(worktree.WorktreeError, match="worktree_setup failed.*back at.*exited 7"):
+        worktree.rebase(cfg, "wt000021")
+    assert git("rev-parse", "sssf/wt000021", cwd=repo) == before
+    settings.write_text("worktree_setup:\n  - touch set_up.marker\n")
+    assert "checks passed" in worktree.rebase(cfg, "wt000021")
+    assert (repo / "adws/adw_data/worktrees/wt000021/set_up.marker").exists()

@@ -12,3 +12,14 @@ merge: any
 # safe to run twice at the same moment: no fixed port, temp path, or shared
 # database. 1 means one at a time.
 max_worktree_runs: 2
+
+# What a fresh checkout needs before the checks can run, such as the untracked
+# dependencies a worktree run's folder starts without. Shell commands, run in
+# order from the worktree's root before its first agent. A Python repo on uv
+# needs none: uv builds each worktree its own environment.
+#   worktree_setup:
+#     - bun install --frozen-lockfile
+#     - cd web && bun install --frozen-lockfile
+worktree_setup: []
+# Seconds each setup command may take before the run stops.
+worktree_setup_timeout: 600

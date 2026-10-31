@@ -54,6 +54,7 @@ The verify phase runs every block in `adws/adw_modules/quality.py`: test, lint, 
 4. Run `uv run adws/adw_quality.py "check the tree"`. Every block must pass.
 5. Prove the checks can fail: break one thing on purpose (a test, or a line's formatting), run `adw_quality` again, see that block fail, then restore the file with `git checkout`. In a Python repo, breaking something `uv run` needs, such as the build backend, fails every block, since each one syncs the project first. That proves less: pick a break that only one block notices.
 6. Is `quality.py` safe to run twice at the same moment? Two worktree runs check in two folders at once, so a check that binds a fixed port, writes a fixed temp path, or uses one shared test database breaks the other run's checks. Write the answer into `adws/adw_sssf_config/repo.yaml`: `max_worktree_runs: 1` if it isn't, or 2 if it is, with a one-line comment above it saying why.
+7. What does a fresh checkout need before the checks can run? A worktree run's folder is a new checkout, so it has none of the untracked dependencies yours has, such as `node_modules`. List the commands that install them under `worktree_setup` in `adws/adw_sssf_config/repo.yaml`, the way the README installs them, for example `cd web && bun install --frozen-lockfile`. They must only create gitignored files. A Python repo on uv needs none.
 
 ## 4. Keep SSSF out of the project's own tools
 

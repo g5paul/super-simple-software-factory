@@ -25,6 +25,8 @@ class RepoSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")   # a misspelled rule fails, never silently defaults
     merge: Literal["any", "ff_only"] = "any"
     max_worktree_runs: int = Field(2, ge=1)
+    worktree_setup: list[str] = Field(default_factory=list)
+    worktree_setup_timeout: int = Field(600, ge=1)
 
 
 def load(root: Path) -> RepoSettings:

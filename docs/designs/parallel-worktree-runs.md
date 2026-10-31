@@ -54,6 +54,21 @@ A read-only survey of the skill, before the decisions:
 14. **The operator watches each run.** `run_adw.md` gets a section on running beside another run: ask first (decision 4), watch both, report each by adw_id as it finishes, and never merge either without the engineer's word.
 15. **Scope.** `adw_tickets` stays out, as it was for branch per run.
 
+### Setting up a worktree
+
+The pi-agent-observability update found the gap: a worktree is a fresh checkout, so it has none of the untracked dependencies the main checkout has. That repo has five `node_modules` folders and four bun lockfiles, and its checks call `tsc`, `vue-tsc`, and `vite` through `npm exec`. A Python repo never hit this, because uv builds each worktree its own `.venv` on its first `uv run`. These decisions hold for any worktree run, one at a time or not.
+
+16. **`worktree_setup` in repo.yaml.** A list of shell commands, run in order with `sh -c` from the worktree's root, stopping at the first that fails. Empty by default, so a repo without it runs as before. They are the repo's own lines, written the way its README writes them, such as `cd extension && bun install --frozen-lockfile`.
+17. **A traced first phase.** `setup`, kind `code`, after the launch lock is released and before any agent starts. Each command's output goes to the run's `context_handoff/setup/`, the way quality checks keep theirs.
+18. **A failure ends the run there.** Before any agent spends anything. The worktree and branch stay for a look, and `just discard` removes them. No retry.
+19. **A resume skips setup; a rebase reruns it.** A resumed run's worktree is already set up. A rebase can bring in a changed lockfile, so `just rebase` runs setup again before its checks, and a failed setup puts the branch back, like a failed check.
+20. **The quality checks' environment.** The engineer's own environment, plus the run's own `UV_PROJECT_ENVIRONMENT` in the container.
+21. **Rollout.** The onboard and post-install checklists ask what a fresh checkout needs before the checks run, and the answer goes into `worktree_setup`. An update that brings the key in has the project session work out its repo's commands, the way it chose `max_worktree_runs`.
+22. **Proof.** In sssf-sandbox: a setup that writes a file the tests need, so the run passes only if setup ran; a setup that fails and stops the run before its first agent; and a rebase that reruns setup. Then one worktree run in pi-agent-observability, by that session, on the engineer's word: the only proof of `node_modules`.
+23. **Worktree runs only.** A plain run works in the engineer's checkout, which has its dependencies already.
+24. **600s per command.** `worktree_setup_timeout` in repo.yaml raises it. A timeout is a failed setup.
+25. **Recorded here,** not in a separate doc.
+
 ## Log
 
 | Date | Repo | What | Result |
@@ -66,3 +81,4 @@ A read-only survey of the skill, before the decisions:
 | 2026-10-30 | sssf-sandbox | case 6: pr6sixty and pr6eight edit the same line | the rebase hit the conflict and aborted. Branch at the same commit, worktree and checkout clean, no event logged. git's `--continue` hints left the message (a6a8967). $0.35 |
 | 2026-10-30 | sssf-sandbox | case 3: pr3conso and pr3title at once in the container | both success, each in `sssf-sandbox-<adw_id>` beside the shared environment. Merge and discard in the container removed each one's environment. $0.54 |
 | 2026-10-30 | sssf-sandbox | case 4: pr4hostr on the host, pr4contr in the container | both sides counted both, a third launch from the container refused, and `just kill` from each side refused the other side's run, naming both hostnames. A discard from the host printed the command to remove the container run's environment. $0.75 |
+| 2026-10-30 | hub | grilling session: setting up a worktree, decisions 16 to 25 | settled |

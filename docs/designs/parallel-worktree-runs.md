@@ -87,11 +87,27 @@ Settled in a third grilling session on 2026-10-30. A ticket run is the longest w
 37. **Done marks live on the branch until the merge.** The feature folder in the engineer's checkout shows no ticket done until then. The finish and stop messages say so in one line, and SSSF writes nothing to the checkout. The dashboard's ticket table reads the trace, so it shows the real progress.
 38. **Proof.** In sssf-sandbox, a two-ticket feature launched from `master` with `--worktree`: stopped after ticket 1 by a low `max_run_cost`, rejoined with `--adw-id`, which skips the scout and ticket 1, finished, and merged. Then three refusals: a second run on the held feature, an uncommitted edit to the feature folder, and a plain run on `master`. Then the cookbooks, and a rollout on the engineer's word.
 
+### A cap on what live runs spend together
+
+Settled in a fourth grilling session on 2026-10-30. Decision 6 kept every cap per run, so two runs at once can spend up to twice `max_run_cost`. `rate_limit_stop` already reads one account-wide sample, so it needs no change. Dollars were the open part.
+
+39. **What it caps.** What the live runs spend together, against one cap. A budget over time, across finished runs too, is a different feature and goes on the open list.
+40. **`max_live_cost` in repo.yaml.** The roster is chosen per run, so two runs on different rosters would disagree about a shared limit. repo.yaml holds the repo's own rules, beside `max_worktree_runs`.
+41. **Finished calls count.** The trace learns a call's cost when it ends, so each live run can overshoot by one call, at most its `max_call_cost`. The docs say so. Nothing is reserved when a call starts.
+42. **Every live run counts.** Plain or worktree, on either host, by the liveness test `max_worktree_runs` uses: a live process on this host, or a running session on the other.
+43. **Off by default.** An update changes nothing until someone sets it. Onboarding asks the engineer, and suggests `max_run_cost` times 1.5. An update only mentions it.
+44. **A budget stop at the next send.** The run about to send stops before it, as a `BudgetStop`, with a `live_budget_stop` event, the dashboard's stop reason, and the usual leftover-work help. The message names each live run and what it has spent. The others stop at their own next send.
+45. **Checked before every send, and at launch.** Beside `check_run`, one trace query each. At launch, under the launch lock and before any worktree or setup, a new run refuses while the live runs are already at the cap.
+46. **Each run counts this attempt only.** A live run's spend is what its calls have cost since its current process started, as decision 33 made `max_run_cost` per attempt.
+47. **On the dashboard.** `run_caps` records `max_live_cost`, and the stop reason has its own label. No repo-wide spend chart.
+48. **Proof.** In sssf-sandbox with `max_live_cost` at about $0.15: two worktree runs at once, where one stops with `live_budget_stop` naming the other; a third launch refused before any worktree while they are at the cap; and with the setting removed, the same two runs as today. Then the cookbooks, and a rollout on the engineer's word, in which the repos set nothing.
+
 ## Open
 
 Known, and not built. None of them blocks a run.
 
-- **Spend across runs.** Two runs can spend up to twice `max_run_cost`, and can go a little past `rate_limit_stop` (decision 6). That is documented, not guarded. A guard across a repo's runs would need shared accounting between processes.
+- **A budget over time.** `max_live_cost` caps what live runs spend together (decisions 39 to 48). Nothing caps what a repo spends in a day across runs that have finished.
+- **pi agents have no usage-window guard.** `rate_limit_stop` reads what Claude Code reports. A pi roster, such as the ChatGPT one, has `max_run_cost` and `max_live_cost` only.
 - **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
 
@@ -125,3 +141,4 @@ Known, and not built. None of them blocks a run.
 | 2026-10-30 | sssf-sandbox | ticket case 3: rejoin tw1words with `--adw-id` and the $5 cap | no setup, scout skipped with a note, ticket 1 skipped; ticket 2 built in a new builder session, both reviewers approved with one non-blocking finding each, docs committed. Success, $0.53 for both attempts. `just merge tw1words` fast-forwarded `master` to c71e396, and the done marks then showed in the checkout |
 | 2026-10-30 | sssf-sandbox | ticket case 4: an uncommitted edit to word-stats' spec, then `--worktree` | refused, naming the file, before any worktree or session |
 | 2026-10-30 | sssf-sandbox | ticket case 5: a plain run on `master` | refused in the read step, $0.00, no agent |
+| 2026-10-30 | hub | grilling session: a cap on what live runs spend together, decisions 39 to 48 | settled |

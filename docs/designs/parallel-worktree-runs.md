@@ -1,6 +1,6 @@
 # Design: parallel worktree runs
 
-Status: settled in a grilling session on 2026-10-30, and built on branch `parallel-runs`. Proof runs (decision 12) not done yet. Where the text and a decision disagree, the decision wins.
+Status: settled in a grilling session on 2026-10-30, built on branch `parallel-runs`, and proven in sssf-sandbox: all seven cases of decision 12 passed. Where the text and a decision disagree, the decision wins.
 
 [Branch per run](branch-per-run.md) gave each run its own branch and folder, but only one at a time: its decision 12 refused a second worktree run while one was alive, because in the container every run shared one project environment, and that was untested. This design lifts that limit, so a repo can have more than one `--worktree` run going at once.
 
@@ -60,3 +60,9 @@ A read-only survey of the skill, before the decisions:
 |---|---|---|---|
 | 2026-10-30 | hub | grilling session, this design | settled |
 | 2026-10-30 | hub | built decisions 3, 5 to 11, 13, 14: cap, locks, hosts, per-run environment, `just rebase`, cookbooks | 237 Python tests pass, 9 new |
+| 2026-10-30 | sssf-sandbox | first launch of the proof | failed before any run started: `live_runs` read the new `host` column before anything migrated the existing trace. Fixed in 9b7f256, with a test on an old trace |
+| 2026-10-30 | sssf-sandbox | cases 1, 2, 7: pr1vowel and pr1palin at once on the host | both success over the same 45s, $0.50. A third launch refused naming both. With the land lock held 6s by `flock`, both merges started together, waited, and landed 0.5s apart: fast-forward, then merge commit f638e56 |
+| 2026-10-30 | sssf-sandbox | case 5: pr5initl and pr5rever, `--ff-only` | the second merge refused and pointed at `just rebase`. The rebase reran the checks as run d6d2bfe4, 89 tests in the rebased worktree, logged `worktree_rebased`, and the merge fast-forwarded. $0.51 |
+| 2026-10-30 | sssf-sandbox | case 6: pr6sixty and pr6eight edit the same line | the rebase hit the conflict and aborted. Branch at the same commit, worktree and checkout clean, no event logged. git's `--continue` hints left the message (a6a8967). $0.35 |
+| 2026-10-30 | sssf-sandbox | case 3: pr3conso and pr3title at once in the container | both success, each in `sssf-sandbox-<adw_id>` beside the shared environment. Merge and discard in the container removed each one's environment. $0.54 |
+| 2026-10-30 | sssf-sandbox | case 4: pr4hostr on the host, pr4contr in the container | both sides counted both, a third launch from the container refused, and `just kill` from each side refused the other side's run, naming both hostnames. A discard from the host printed the command to remove the container run's environment. $0.75 |

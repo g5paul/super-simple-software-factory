@@ -433,7 +433,7 @@ def _remove(root: Path, path: Path, branch: str, environment: str | None,
         return ""
     if Path(environment).is_dir():
         shutil.rmtree(environment, ignore_errors=True)
-        return " and its environment"
+        return ", and its environment"
     if Path(environment).parent.is_dir():
         return ""   # never built: the run synced nothing
     return (f"; its environment {environment} is in the container, so remove it from there "

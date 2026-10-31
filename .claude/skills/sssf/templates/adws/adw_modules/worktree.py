@@ -165,6 +165,9 @@ def live_runs(db: str, exclude: str = "") -> list[str]:
     A row from before hosts were recorded is taken to be from this one.
     """
     here = socket.gethostname()
+    # This runs before the run opens its own Tracer, so bring an older trace
+    # up to date first: it may not have the host column yet.
+    Tracer(db, os.devnull).conn.close()
     rows = _query(db, "select distinct p.adw_id, p.pid, p.host, s.status from processes p "
                       "join events e on e.adw_id = p.adw_id and e.name = 'worktree' "
                       "left join sessions s on s.adw_id = p.adw_id "

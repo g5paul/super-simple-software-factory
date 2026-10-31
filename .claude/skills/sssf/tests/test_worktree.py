@@ -222,6 +222,20 @@ def test_a_run_from_the_other_side_counts_while_its_session_is_running(repo):
     assert worktree.live_runs(str(repo / db)) == []
 
 
+def test_a_trace_from_before_hosts_were_recorded_still_counts(repo):
+    import sqlite3
+    db = repo / SSSFConfig().observability.db
+    db.parent.mkdir(parents=True)
+    with sqlite3.connect(db) as conn:
+        conn.execute("create table processes (id integer primary key, adw_id text, kind text, "
+                     "name text, pid integer, command text, started_at text, ended_at text)")
+    assert worktree.live_runs(str(db)) == []
+    alive("wt000022")
+    with sqlite3.connect(db) as conn:
+        conn.execute("update processes set host=null")
+    assert worktree.live_runs(str(db)) == ["wt000022"]
+
+
 def test_a_container_run_gets_its_own_environment_and_loses_it_on_discard(repo, tmp_path, monkeypatch):
     shared = tmp_path / "venvs" / "repo"
     shared.parent.mkdir()

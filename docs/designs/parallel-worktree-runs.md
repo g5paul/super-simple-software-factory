@@ -102,11 +102,26 @@ Settled in a fourth grilling session on 2026-10-30. Decision 6 kept every cap pe
 47. **On the dashboard.** `run_caps` records `max_live_cost`, and the stop reason has its own label. No repo-wide spend chart.
 48. **Proof.** In sssf-sandbox with `max_live_cost` at about $0.15: two worktree runs at once, where one stops with `live_budget_stop` naming the other; a third launch refused before any worktree while they are at the cap; and with the setting removed, the same two runs as today. Then the cookbooks, and a rollout on the engineer's word, in which the repos set nothing.
 
+### A cap on what a repo spends in a day
+
+Settled in a fifth grilling session on 2026-10-31. `max_live_cost` stops runs that spend together, but once they finish, the next ones start from zero. Nothing held what a repo spends over a day. yt-summarizer's busiest day so far cost $34.20 over 58 runs; its others, and pi-agent-observability's, cost a few dollars.
+
+49. **One repo, in repo.yaml.** `max_daily_cost` caps one repo's trace, beside `max_live_cost`. A cap across every repo on the machine would need a setting outside any repo and a read of every trace; it goes on the open list.
+50. **The last 24 hours, rolling.** No time zone, and no midnight reset that lets a run spend the cap at 23:50 and again at 00:10.
+51. **What counts.** Every `agent_end` cost that ended inside the window: any chain, any status, Claude Code or pi. Each live run adds its in-process count where that is higher, as decision 46's build found the trace lags a call in correction. A run that began yesterday counts only its calls inside the window.
+52. **Checked before every send, and at launch.** Beside `check_run` and `check_live`, and at launch under the launch lock, before any worktree. Its own `DailyBudgetStop` and `daily_budget_stop` event. A run can still overshoot by one call.
+53. **The message says when it clears.** The last 24 hours' spend, the cap, and the UTC time the spend drops under it if nothing else runs, found by walking the window's calls from the oldest. Then how to raise it, and, on a stop, the usual leftover-work help.
+54. **repo.yaml only.** Every check reads it fresh from the main checkout, so a raise takes effect at the next send. No `.env` override: a cap one line can quietly lift guards less. A stopped run resumes with `--adw-id`.
+55. **Off by default.** Onboarding and the post-install checklist ask the engineer, suggesting 4 × `max_run_cost`. An update only mentions it.
+56. **On the dashboard.** `run_caps` records `max_daily_cost`, and the stop has its own label. A gauge of the last 24 hours goes on the open list.
+57. **Proof.** In sssf-sandbox: a launch refused because the trace's last 24 hours are already at the cap, naming when it clears, at $0; a `simple_sdlc` run with the cap just above the last 24 hours, stopped before its second call; and a run with the setting off, as today. About $0.50. Then a rollout on the engineer's word, in which the repos set nothing.
+
 ## Open
 
 Known, and not built. None of them blocks a run.
 
-- **A budget over time.** `max_live_cost` caps what live runs spend together (decisions 39 to 48). Nothing caps what a repo spends in a day across runs that have finished.
+- **One cap across every repo.** `max_daily_cost` holds one repo's trace (decision 49). Two repos running unattended on one machine each spend up to their own.
+- **A 24-hour gauge.** The dashboard shows `max_daily_cost` only in `run_caps` and on a stop (decision 56), not how close the repo is.
 - **pi agents have no usage-window guard.** `rate_limit_stop` reads what Claude Code reports. A pi roster, such as the ChatGPT one, has `max_run_cost` and `max_live_cost` only.
 - **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
@@ -147,3 +162,4 @@ Known, and not built. None of them blocks a run.
 | 2026-10-30 | sssf-sandbox | live-cost case 2: lc1third launched while lc1paus sat in its checks at $0.07 | refused with `LiveBudgetStop` before any worktree or session |
 | 2026-10-30 | sssf-sandbox | live-cost case 3: the same pair with `max_live_cost` off, lc2paus and lc2stop | both succeeded, $0.06 and $0.45, no `live_budget_stop`; `run_caps` recorded the cap as off. All four runs discarded, the pause test removed |
 | 2026-10-30 | yt-summarizer, pi-agent-observability | rollout of 223043b, with `max_live_cost` | yt-summarizer 9488ed4 on `sssf-run`, quality 71f9e481; pi-agent-observability 31d1e90 on `main`, quality bcc276ad. Each took the commented `max_live_cost` block into its own `repo.yaml` and left the cap off: the value is the engineer's choice, $7.50 suggested for both |
+| 2026-10-31 | hub | grilling session: a cap on what a repo spends in a day, decisions 49 to 57 | settled |

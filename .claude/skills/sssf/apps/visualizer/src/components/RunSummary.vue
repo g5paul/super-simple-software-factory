@@ -35,6 +35,7 @@ const barLevel = computed(() => (spentPct.value >= 90 ? 'high' : spentPct.value 
 const STOP_LABELS: Record<StopReason['kind'], string> = {
   call_budget_stop: 'an agent call hit its max_call_cost',
   budget_stop: 'the run hit its max_run_cost',
+  live_budget_stop: 'the live runs together hit max_live_cost',
   rate_limit_stop: 'the account neared its usage limit',
   not_accepted: 'the result was not accepted',
   phase_failed: 'a phase failed',

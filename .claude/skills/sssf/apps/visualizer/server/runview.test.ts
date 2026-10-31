@@ -66,6 +66,12 @@ test("a cap stop is the reason, over the phase it failed", () => {
   });
 });
 
+test("the live runs' shared cap is a stop reason of its own", () => {
+  const phases = [phase("build", "fail", "LiveBudgetStop: the live runs have spent $1.10")];
+  const events = [ev("error", "live_budget_stop", { error: "the live runs have spent $1.10 together" }, phases[0].phase_id)];
+  expect(stopReason(events, phases, "fail")?.kind).toBe("live_budget_stop");
+});
+
 test("a run that finished its phases but was not accepted says why", () => {
   const phases = [phase("t02_verify_3", "success")];
   const events = [ev("error", "not_accepted", { reason: "ticket 02 still failed" }, phases[0].phase_id)];

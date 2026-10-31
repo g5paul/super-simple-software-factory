@@ -195,4 +195,86 @@ def test_none_turns_the_run_cap_off(factory):
 
 def test_a_run_records_its_caps_so_the_dashboard_can_draw_them(factory):
     run = factory([result(0.1)], max_run_cost=3.0)
-    assert events(run, "run_caps")[-1] == {"max_run_cost": 3.0, "rate_limit_stop": 0.8}
+    assert events(run, "run_caps")[-1] == {"max_run_cost": 3.0, "rate_limit_stop": 0.8, "max_live_cost": None}
+
+
+# ── max_live_cost: what live runs spend together (parallel-worktree-runs 39 to 48) ──
+
+def live_cap(cap: float) -> None:
+    path = Path("adws/adw_sssf_config/repo.yaml")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"max_live_cost: {cap}\n")
+
+
+def live_run(adw_id: str, spent: float, earlier: float = 0.0, pid: int | None = None) -> None:
+    """Another run in the trace: its process started at 00:01, it spent `spent`
+    since, and `earlier` in an attempt before that one."""
+    import os
+    import socket
+    with sqlite3.connect("adws/adw_data/sssf.db") as conn:
+        conn.execute("insert into sessions (adw_id, status, engineer, started_at) "
+                     "values (?, 'running', 't', '2026-01-01T00:00:00.000+00:00')", (adw_id,))
+        conn.execute("insert into processes (adw_id, kind, name, pid, command, host, started_at) "
+                     "values (?, 'adw', '', ?, 'adw_x.py', ?, '2026-01-01T00:01:00.000+00:00')",
+                     (adw_id, pid or os.getpid(), socket.gethostname()))
+        for i, (cost, at) in enumerate(((earlier, "00:00:30"), (spent, "00:02:00"))):
+            conn.execute("insert into events (event_id, adw_id, phase_id, type, name, payload_json, "
+                         "started_at) values (?, ?, '', 'agent_end', 'builder', ?, ?)",
+                         (f"evt_{adw_id}_{i}", adw_id, json.dumps({"cost": cost}),
+                          f"2026-01-01T{at}.000+00:00"))
+
+
+def test_live_runs_stop_together_at_max_live_cost(factory):
+    run = factory([result(0.1)])
+    live_cap(1.0)
+    live_run("other111", 1.0)
+    with pytest.raises(budget.LiveBudgetStop, match=r"max_live_cost \$1.00.*other111 \$1.00"):
+        build(run)
+    assert factory.calls == []
+    assert events(run, "live_budget_stop")[0]["cap"] == 1.0
+
+
+def test_this_runs_own_spend_counts_and_is_checked_before_every_send(factory):
+    run = factory([result(0.5, text="not json"), result(0.1)])
+    live_cap(1.0)
+    live_run("other111", 0.6)
+    with pytest.raises(budget.LiveBudgetStop, match=rf"{run.adw_id} \$0.50"):
+        build(run)
+    assert len(factory.calls) == 1
+
+
+def test_only_each_runs_current_attempt_counts(factory):
+    run = factory([result(0.1)])
+    live_cap(1.0)
+    live_run("other111", 0.5, earlier=5.0)
+    build(run)
+
+
+def test_a_dead_run_does_not_count(factory):
+    done = subprocess.Popen(["true"])
+    done.wait()
+    run = factory([result(0.1)])
+    live_cap(1.0)
+    live_run("other111", 5.0, pid=done.pid)
+    build(run)
+
+
+def test_max_live_cost_is_off_by_default(factory):
+    run = factory([result(0.1)])
+    live_run("other111", 100.0)
+    build(run)
+
+
+def test_a_launch_at_the_cap_is_refused_before_any_worktree(factory):
+    run = factory([])
+    live_cap(1.0)
+    live_run("other111", 1.0)
+    with pytest.raises(SystemExit, match=r"LiveBudgetStop: .*other111 \$1.00"):
+        session.ensure(run.cfg, None, use_worktree=True)
+    assert not Path("adws/adw_data/worktrees").exists()
+
+
+def test_a_run_records_max_live_cost_for_the_dashboard(factory):
+    live_cap(2.5)
+    run = factory([])
+    assert events(run, "run_caps")[-1]["max_live_cost"] == 2.5

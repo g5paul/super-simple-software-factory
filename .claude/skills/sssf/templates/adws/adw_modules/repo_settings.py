@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +25,8 @@ class RepoSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")   # a misspelled rule fails, never silently defaults
     merge: Literal["any", "ff_only"] = "any"
     max_worktree_runs: int = Field(2, ge=1)
+    # What every live run in the repo may spend together, in dollars. None = off.
+    max_live_cost: Optional[float] = Field(None, gt=0)
     worktree_setup: list[str] = Field(default_factory=list)
     worktree_setup_timeout: int = Field(600, ge=1)
 

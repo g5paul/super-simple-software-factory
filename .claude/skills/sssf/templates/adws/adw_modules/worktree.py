@@ -176,6 +176,25 @@ def live_runs(db: str, exclude: str = "") -> list[str]:
                    if (_alive(pid) if pid and (host or here) == here else status == "running")})
 
 
+def live_spend(db: str) -> dict[str, float]:
+    """What each live run, plain or worktree, has spent in its current attempt:
+    the cost of the calls that ended since its process started. Alive means
+    what it means for live_runs."""
+    here = socket.gethostname()
+    Tracer(db, os.devnull).conn.close()
+    rows = _query(db, "select p.adw_id, p.pid, p.host, s.status, coalesce((select "
+                      "sum(json_extract(e.payload_json, '$.cost')) from events e "
+                      "where e.adw_id = p.adw_id and e.type = 'agent_end' "
+                      "and e.started_at >= p.started_at), 0) from processes p "
+                      "left join sessions s on s.adw_id = p.adw_id "
+                      "where p.kind = 'adw' and p.ended_at is null")
+    spent: dict[str, float] = {}
+    for adw_id, pid, host, status, cost in rows:
+        if _alive(pid) if pid and (host or here) == here else status == "running":
+            spent[adw_id] = max(spent.get(adw_id, 0.0), float(cost))
+    return spent
+
+
 def dirty(root: Path) -> bool:
     return bool(git("status", "--porcelain", cwd=root).stdout.strip())
 

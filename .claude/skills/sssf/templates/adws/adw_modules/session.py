@@ -86,15 +86,17 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
         # Held until this run's process and worktree rows are written, so two
         # launches at once can't both count the other runs before either counts.
         with worktree.launching():
+            budget.check_launch(cfg)
             place = worktree.enter(cfg, adw_id, use_worktree)
             tracer, run = _start(cfg, adw_id, place)
-    except worktree.WorktreeError as error:
-        raise SystemExit(f"WorktreeError: {error}") from None
+    except (worktree.WorktreeError, budget.LiveBudgetStop) as error:
+        raise SystemExit(f"{type(error).__name__}: {error}") from None
     # The caps this run is held to, so the dashboard can draw spend against
     # them. A joined run records them again; the latest row wins.
     tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="run_caps",
                              payload={"max_run_cost": cfg.defaults.max_run_cost,
-                                      "rate_limit_stop": cfg.defaults.rate_limit_stop}))
+                                      "rate_limit_stop": cfg.defaults.rate_limit_stop,
+                                      "max_live_cost": budget.max_live_cost()}))
     _finalize_when_killed(run)
     _report_stops_plainly(run)
     run.console.session_started(adw_id, run.engineer)

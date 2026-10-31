@@ -163,6 +163,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         nonlocal latest
         # Before every send, not once per agent: retries spend too.
         budget.check_run(run, agent.name, phase.phase_id)
+        budget.check_live(run, agent.name, phase.phase_id)
         request = AgentRequest(
             prompt=prompt_text,
             system_prompt=system_text,

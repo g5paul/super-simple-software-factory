@@ -452,7 +452,7 @@ just rebase <adw_id>     # ff_only repos: onto your branch's tip, then recheck
 
 `just merge` refuses unless the run succeeded, its launch branch is checked out, and the checkout is clean. It never rebases. A conflict aborts the merge, leaves your checkout as it was, keeps the branch, and prints the commands to merge by hand. A repo that keeps a linear history sets `merge: ff_only` in `adws/adw_sssf_config/repo.yaml`, and then a merge that can't fast-forward is refused with nothing changed. `just rebase <adw_id>` then moves the run's branch onto yours and reruns the quality checks in its folder; a conflict or a failed check puts the branch back. `--adw-id` resumes a worktree run in its own folder. None of these recipes pushes.
 
-Two worktree runs can go at once, each its own launch with its own adw_id, merged on its own. `max_worktree_runs` in `repo.yaml` sets how many, 2 by default; set it to 1 if your quality checks bind a fixed port or share a test database. Each run's `max_run_cost` holds for that run alone, so two runs can spend up to twice it. A lock keeps two launches from both passing the cap, and two merges from meeting in your checkout. In the container, each run gets its own project environment. A run's folder is a fresh checkout without your untracked dependencies, so `worktree_setup` in `repo.yaml` lists the commands that install them, such as `bun install --frozen-lockfile`; they run as the run's first phase, before any agent. Design: [`docs/designs/parallel-worktree-runs.md`](docs/designs/parallel-worktree-runs.md).
+Two worktree runs can go at once, each its own launch with its own adw_id, merged on its own. `max_worktree_runs` in `repo.yaml` sets how many, 2 by default; set it to 1 if your quality checks bind a fixed port or share a test database. Each run's `max_run_cost` holds for that run alone, so two runs can spend up to twice it, unless `max_live_cost` in `repo.yaml` caps what live runs spend together. A lock keeps two launches from both passing the cap, and two merges from meeting in your checkout. In the container, each run gets its own project environment. A run's folder is a fresh checkout without your untracked dependencies, so `worktree_setup` in `repo.yaml` lists the commands that install them, such as `bun install --frozen-lockfile`; they run as the run's first phase, before any agent. Design: [`docs/designs/parallel-worktree-runs.md`](docs/designs/parallel-worktree-runs.md).
 
 Watch a run with the trace db directly:
 
@@ -483,7 +483,7 @@ Honest edges, because knowing them is cheaper than discovering them.
 | Commit phase has nothing to commit | `commit_all` raises if the cwd is not a git repo or nothing changed | `git init` with one commit first. A no-op build fails the phase rather than committing nothing |
 | `install.py --force` | Overwrites **all** stamped files, config and prompts included | Use `--update` to refresh a repo. Commit before you force |
 | A worktree run's checks fail on missing packages | Its folder is a fresh checkout, without your untracked `node_modules` or other installed dependencies | List the install commands under `worktree_setup` in `repo.yaml`. They run before the first agent |
-| Two runs spend more than the cap | `defaults.max_run_cost` in `sssf.config.yaml` holds per run, so two at once can spend up to twice it | Lower the cap, or set `max_worktree_runs: 1` in `repo.yaml` |
+| Two runs spend more than the cap | `defaults.max_run_cost` in `sssf.config.yaml` holds per run, so two at once can spend up to twice it | Set `max_live_cost` in `repo.yaml`, which every live run shares. Each can still overshoot it by one call |
 | The second of two runs won't merge | In an `ff_only` repo, it can't fast-forward once the first has landed | `just rebase <adw_id>` on your word, then `just merge <adw_id>` |
 
 A run works on your current branch unless you ask for one of its own. For real work, use `--worktree` and merge with `just merge`, and consider `--container` at install for a sandbox around the operator.
@@ -492,7 +492,8 @@ A run works on your current branch unless you ask for one of its own. For real w
 
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list.
 
-- No guard holds spend across parallel runs; each run has its own cap.
+- Nothing caps what a repo spends over a day; `max_live_cost` covers only runs that are live.
+- pi agents have no usage-window guard; `rate_limit_stop` reads what Claude Code reports.
 - One request tried several ways, with the best merged, is left room for but not built.
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 

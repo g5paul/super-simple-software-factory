@@ -13,6 +13,11 @@ merge: any
 # database. 1 means one at a time.
 max_worktree_runs: 2
 
+# What every live run in the repo may spend together, in dollars, checked
+# before each agent call and at launch. Each run counts only its current
+# attempt, and a call in flight counts once it ends. Off unless set.
+#   max_live_cost: 7.50
+
 # What a fresh checkout needs before the checks can run, such as the untracked
 # dependencies a worktree run's folder starts without. Shell commands, run in
 # order from the worktree's root before its first agent. A Python repo on uv

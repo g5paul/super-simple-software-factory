@@ -248,6 +248,8 @@ export interface SessionUsage {
 export interface RunCaps {
   max_run_cost: number | null;
   rate_limit_stop: number | null;
+  /** repo.yaml's cap on what live runs spend together. Absent on runs from before it existed. */
+  max_live_cost?: number | null;
 }
 
 /** Where a `--worktree` run worked, from the `worktree` event its start logged. */
@@ -299,7 +301,7 @@ export interface RunLanded {
 
 /** Why a failed run stopped, from its own stop event or its first failed phase. */
 export interface StopReason {
-  kind: "call_budget_stop" | "budget_stop" | "rate_limit_stop" | "not_accepted" | "phase_failed";
+  kind: "call_budget_stop" | "budget_stop" | "live_budget_stop" | "rate_limit_stop" | "not_accepted" | "phase_failed";
   /** The full message the run printed, git advice included. */
   message: string;
   /** The phase it stopped in, to jump to. */

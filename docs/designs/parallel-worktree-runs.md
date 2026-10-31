@@ -1,6 +1,6 @@
 # Design: parallel worktree runs
 
-Status: done. Settled in two grilling sessions on 2026-10-30, built, proven in sssf-sandbox (all seven cases of decision 12, the three setup cases of decision 22, and the three spend-cap cases of decision 48), proven on a real worktree run in pi-agent-observability (70f9e62e), and rolled out to yt-summarizer and pi-agent-observability. What is still open is under "Open", below the decisions. Where the text and a decision disagree, the decision wins.
+Status: done. Settled in two grilling sessions on 2026-10-30, built, proven in sssf-sandbox (all seven cases of decision 12, the three setup cases of decision 22, the three spend-cap cases of decision 48, and the three daily-cap cases of decision 57), proven on a real worktree run in pi-agent-observability (70f9e62e), and rolled out to yt-summarizer and pi-agent-observability. What is still open is under "Open", below the decisions. Where the text and a decision disagree, the decision wins.
 
 [Branch per run](branch-per-run.md) gave each run its own branch and folder, but only one at a time: its decision 12 refused a second worktree run while one was alive, because in the container every run shared one project environment, and that was untested. This design lifts that limit, so a repo can have more than one `--worktree` run going at once.
 
@@ -163,3 +163,7 @@ Known, and not built. None of them blocks a run.
 | 2026-10-30 | sssf-sandbox | live-cost case 3: the same pair with `max_live_cost` off, lc2paus and lc2stop | both succeeded, $0.06 and $0.45, no `live_budget_stop`; `run_caps` recorded the cap as off. All four runs discarded, the pause test removed |
 | 2026-10-30 | yt-summarizer, pi-agent-observability | rollout of 223043b, with `max_live_cost` | yt-summarizer 9488ed4 on `sssf-run`, quality 71f9e481; pi-agent-observability 31d1e90 on `main`, quality bcc276ad. Each took the commented `max_live_cost` block into its own `repo.yaml` and left the cap off: the value is the engineer's choice, $7.50 suggested for both |
 | 2026-10-31 | hub | grilling session: a cap on what a repo spends in a day, decisions 49 to 57 | settled |
+| 2026-10-31 | hub | built decisions 49 to 56 (1016ca4) | 260 Python tests pass, 7 new |
+| 2026-10-31 | sssf-sandbox `master` | daily case 1: dc1refus launched with `max_daily_cost` $7.00, the last 24 hours at $7.56 from the earlier proofs | refused with `DailyBudgetStop` before any worktree or session, clearing at 15:41 UTC. Recomputed by hand from the trace: the same total and time. $0 |
+| 2026-10-31 | sssf-sandbox | daily case 2: dc2stop (`adw_simple_sdlc`, `--worktree`) with the cap $0.05 over the last 24 hours, $7.61 | the plan call cost $0.29, and the build send stopped with `daily_budget_stop`: $7.85 against $7.61, clearing at 15:21 UTC. `run_caps` recorded 7.61. Discarded |
+| 2026-10-31 | sssf-sandbox | daily case 3: dc3off (`adw_prompt`) with the setting off, the last 24 hours at $7.85 | success, $0.004, no `daily_budget_stop`, `run_caps` recorded the cap as off. The sandbox is clean at a2950ba, with the cap off |

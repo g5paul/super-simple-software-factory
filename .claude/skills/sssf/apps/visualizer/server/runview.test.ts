@@ -72,6 +72,12 @@ test("the live runs' shared cap is a stop reason of its own", () => {
   expect(stopReason(events, phases, "fail")?.kind).toBe("live_budget_stop");
 });
 
+test("the repo's daily cap is a stop reason of its own", () => {
+  const phases = [phase("build", "fail", "DailyBudgetStop: this repo's runs have spent $20.10")];
+  const events = [ev("error", "daily_budget_stop", { error: "this repo's runs have spent $20.10 in the last 24 hours" }, phases[0].phase_id)];
+  expect(stopReason(events, phases, "fail")?.kind).toBe("daily_budget_stop");
+});
+
 test("a run that finished its phases but was not accepted says why", () => {
   const phases = [phase("t02_verify_3", "success")];
   const events = [ev("error", "not_accepted", { reason: "ticket 02 still failed" }, phases[0].phase_id)];

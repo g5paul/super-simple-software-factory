@@ -18,7 +18,7 @@ export interface RunEvent {
 }
 
 /** Stops that name their own reason, most specific first. */
-const STOP_EVENTS = ["call_budget_stop", "budget_stop", "live_budget_stop", "rate_limit_stop", "not_accepted"] as const;
+const STOP_EVENTS = ["call_budget_stop", "budget_stop", "live_budget_stop", "daily_budget_stop", "rate_limit_stop", "not_accepted"] as const;
 
 /** A ticket phase's name: t03_build, t03_verify_2, t03_fix_1, t03_commit. */
 const TICKET_PHASE = /^t(\d{2,3})_(build|verify_\d+|fix_\d+|commit)$/;

@@ -27,6 +27,8 @@ class RepoSettings(BaseModel):
     max_worktree_runs: int = Field(2, ge=1)
     # What every live run in the repo may spend together, in dollars. None = off.
     max_live_cost: Optional[float] = Field(None, gt=0)
+    # What the repo's runs may spend in the last 24 hours, rolling, in dollars. None = off.
+    max_daily_cost: Optional[float] = Field(None, gt=0)
     worktree_setup: list[str] = Field(default_factory=list)
     worktree_setup_timeout: int = Field(600, ge=1)
 

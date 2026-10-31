@@ -195,6 +195,15 @@ def live_spend(db: str) -> dict[str, float]:
     return spent
 
 
+
+def spend_since(db: str, since: str) -> list[tuple[str, float]]:
+    """Every call that ended at or after `since`, oldest first: when, and what it cost."""
+    Tracer(db, os.devnull).conn.close()
+    return [(at, float(cost or 0)) for at, cost in
+            _query(db, "select started_at, json_extract(payload_json, '$.cost') from events "
+                       "where type = 'agent_end' and started_at >= ? order by started_at", since)]
+
+
 def dirty(root: Path) -> bool:
     return bool(git("status", "--porcelain", cwd=root).stdout.strip())
 

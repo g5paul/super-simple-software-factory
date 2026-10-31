@@ -79,6 +79,7 @@ Without it, a chain works and commits on the branch that is checked out, in the 
 - Write a prompt file outside the checkout, in your scratchpad. A file left in the checkout makes `just merge` refuse until it's gone.
 - Up to `max_worktree_runs` in `adws/adw_sssf_config/repo.yaml` go at once, 2 by default. A launch over the cap refuses and names the runs alive. See "Beside another run" below.
 - If `repo.yaml` sets `max_live_cost`, every live run, plain or worktree, shares it. A launch while they're at it refuses, and a run stops at its next call with `LiveBudgetStop`, naming each run and its spend. Report that to the engineer; resume after a run finishes, or with a higher cap.
+- If `repo.yaml` sets `max_daily_cost`, the repo's runs in the last 24 hours share it, finished ones too. A launch over it refuses, and a run stops at its next call with `DailyBudgetStop`. Both say when it drops under. Report that time to the engineer; resume with `--adw-id` then, or with a higher cap.
 - `--adw-id` resumes a worktree run inside its own folder, with or without the flag, and refuses once it has been merged or discarded.
 - The trace stays in the main checkout, so watching it works the same.
 - If `repo.yaml` has `worktree_setup`, the run's first phase is `setup`, which installs what a fresh checkout lacks. When it fails, no agent has started: report its message, and the log it names, to the engineer. A resume skips it, and `just rebase` runs it again.

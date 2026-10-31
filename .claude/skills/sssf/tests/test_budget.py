@@ -1,6 +1,7 @@
 """Cost caps: SSSF stops spending before an unattended run gets expensive.
 
-Two caps, both in the roster:
+Two caps are in the roster, and two more, max_live_cost and max_daily_cost,
+in repo.yaml (tested at the end):
 
 - `max_call_cost` on an agent is passed to `claude -p --max-budget-usd`, so a
   runaway call ends itself. Claude Code counts it per call, not per session,
@@ -25,6 +26,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -195,7 +197,8 @@ def test_none_turns_the_run_cap_off(factory):
 
 def test_a_run_records_its_caps_so_the_dashboard_can_draw_them(factory):
     run = factory([result(0.1)], max_run_cost=3.0)
-    assert events(run, "run_caps")[-1] == {"max_run_cost": 3.0, "rate_limit_stop": 0.8, "max_live_cost": None}
+    assert events(run, "run_caps")[-1] == {"max_run_cost": 3.0, "rate_limit_stop": 0.8, "max_live_cost": None,
+                                           "max_daily_cost": None}
 
 
 # ── max_live_cost: what live runs spend together (parallel-worktree-runs 39 to 48) ──
@@ -278,3 +281,81 @@ def test_a_run_records_max_live_cost_for_the_dashboard(factory):
     live_cap(2.5)
     run = factory([])
     assert events(run, "run_caps")[-1]["max_live_cost"] == 2.5
+
+
+# ── max_daily_cost: what the repo spent in the last 24 hours (parallel-worktree-runs 49 to 57) ──
+
+def daily_cap(cap: float) -> None:
+    path = Path("adws/adw_sssf_config/repo.yaml")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"max_daily_cost: {cap}\n")
+
+
+def spent_ago(adw_id: str, cost: float, hours: float) -> datetime:
+    """A finished run's call that ended `hours` ago. Returns when."""
+    at = datetime.now(timezone.utc) - timedelta(hours=hours)
+    with sqlite3.connect("adws/adw_data/sssf.db") as conn:
+        conn.execute("insert or ignore into sessions (adw_id, status, engineer, started_at) "
+                     "values (?, 'success', 't', ?)", (adw_id, at.isoformat(timespec="milliseconds")))
+        conn.execute("insert into events (event_id, adw_id, phase_id, type, name, payload_json, "
+                     "started_at) values (?, ?, '', 'agent_end', 'builder', ?, ?)",
+                     (f"evt_{adw_id}_{hours}", adw_id, json.dumps({"cost": cost}),
+                      at.isoformat(timespec="milliseconds")))
+    return at
+
+
+def test_finished_runs_in_the_last_24_hours_stop_a_run(factory):
+    run = factory([result(0.1)])
+    daily_cap(1.0)
+    spent_ago("done1111", 1.0, hours=2)
+    with pytest.raises(budget.DailyBudgetStop, match=r"\$1.00 in the last 24 hours.*max_daily_cost \$1.00"):
+        build(run)
+    assert factory.calls == []
+    assert events(run, "daily_budget_stop")[0]["cap"] == 1.0
+
+
+def test_spend_older_than_24_hours_does_not_count(factory):
+    run = factory([result(0.1)])
+    daily_cap(1.0)
+    spent_ago("done1111", 5.0, hours=25)
+    build(run)
+
+
+def test_the_stop_says_when_enough_spend_ages_out(factory):
+    run = factory([result(0.1)])
+    daily_cap(1.0)
+    oldest = spent_ago("done1111", 0.6, hours=20)
+    spent_ago("done2222", 0.6, hours=2)
+    clears = oldest + timedelta(hours=24)
+    with pytest.raises(budget.DailyBudgetStop, match=f"drops under at {clears:%Y-%m-%d %H:%M} UTC"):
+        build(run)
+
+
+def test_this_runs_own_spend_counts_toward_the_day_before_every_send(factory):
+    run = factory([result(0.5, text="not json"), result(0.1)])
+    daily_cap(1.0)
+    spent_ago("done1111", 0.6, hours=2)
+    with pytest.raises(budget.DailyBudgetStop, match=r"\$1.10 in the last 24 hours"):
+        build(run)
+    assert len(factory.calls) == 1
+
+
+def test_max_daily_cost_is_off_by_default(factory):
+    run = factory([result(0.1)])
+    spent_ago("done1111", 100.0, hours=1)
+    build(run)
+
+
+def test_a_launch_over_the_day_is_refused_before_any_worktree(factory):
+    run = factory([])
+    daily_cap(1.0)
+    spent_ago("done1111", 1.0, hours=1)
+    with pytest.raises(SystemExit, match=r"DailyBudgetStop: .*drops under at .* UTC"):
+        session.ensure(run.cfg, None, use_worktree=True)
+    assert not Path("adws/adw_data/worktrees").exists()
+
+
+def test_a_run_records_max_daily_cost_for_the_dashboard(factory):
+    daily_cap(20.0)
+    run = factory([])
+    assert events(run, "run_caps")[-1]["max_daily_cost"] == 20.0

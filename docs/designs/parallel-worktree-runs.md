@@ -1,6 +1,6 @@
 # Design: parallel worktree runs
 
-Status: settled in a grilling session on 2026-10-30, built on branch `parallel-runs`, and proven in sssf-sandbox: all seven cases of decision 12 passed. Where the text and a decision disagree, the decision wins.
+Status: done. Settled in two grilling sessions on 2026-10-30, built, proven in sssf-sandbox (all seven cases of decision 12, and the three setup cases of decision 22), proven on a real worktree run in pi-agent-observability (70f9e62e), and rolled out to yt-summarizer and pi-agent-observability. What is still open is under "Open", below the decisions. Where the text and a decision disagree, the decision wins.
 
 [Branch per run](branch-per-run.md) gave each run its own branch and folder, but only one at a time: its decision 12 refused a second worktree run while one was alive, because in the container every run shared one project environment, and that was untested. This design lifts that limit, so a repo can have more than one `--worktree` run going at once.
 
@@ -69,6 +69,17 @@ The pi-agent-observability update found the gap: a worktree is a fresh checkout,
 24. **600s per command.** `worktree_setup_timeout` in repo.yaml raises it. A timeout is a failed setup.
 25. **Recorded here,** not in a separate doc.
 
+## Open
+
+Known, and not built. None of them blocks a run.
+
+- **Rebases on the dashboard.** `just rebase` logs `worktree_rebased`, but a run's card shows only merged or discarded. A rebased run looks like any other until it lands.
+- **Editable installs in the container.** Case 3 showed each container run building and using its own environment. It did not show that each environment's editable install points at its own worktree: the check printed nothing, so it proved nothing either way.
+- **Spend across runs.** Two runs can spend up to twice `max_run_cost`, and can go a little past `rate_limit_stop` (decision 6). That is documented, not guarded. A guard across a repo's runs would need shared accounting between processes.
+- **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
+- **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
+- **`adw_tickets` with `--worktree`.** Out of scope (decision 15). A ticket run still works on the feature branch the engineer made.
+
 ## Log
 
 | Date | Repo | What | Result |
@@ -86,3 +97,7 @@ The pi-agent-observability update found the gap: a worktree is a fresh checkout,
 | 2026-10-30 | sssf-sandbox | setup case 1: ws1acron and ws1squas, with a gitignored `.setup-marker` standing in for `node_modules` and a test that needs it | both success, `setup` phase 1 in each, the marker written in each worktree, 104 tests passed in the run. $0.40 |
 | 2026-10-30 | sssf-sandbox | setup case 3: rebase ws1squas after ws1acron merged | the marker deleted from the worktree first; the rebase reran setup, which wrote it back, and the checks passed (run f78c2494). Merge fast-forwarded |
 | 2026-10-30 | sssf-sandbox | setup case 2: ws2fail with a setup that exits 4 | `setup` failed, session `fail` at $0.00, no agent sessions or processes. The message named the command, its exit code, the tail of its output, and its log. Worktree kept until `just discard` |
+| 2026-10-30 | yt-summarizer, pi-agent-observability | rollout of e8b822d: each session chose `max_worktree_runs` from its own `quality.py` | both 2, with a reason in `repo.yaml`. pi-agent-observability's update found the `node_modules` gap that decisions 16 to 25 answer |
+| 2026-10-30 | yt-summarizer, pi-agent-observability | rollout of 88532f5: each session chose `worktree_setup` | yt-summarizer `[]`, checked in a fresh worktree. pi-agent-observability four `bun install --frozen-lockfile` commands; in a fresh worktree, quality passed 5/5 with them (2784c9c0) and 3 checks failed without (83a44605) |
+| 2026-10-30 | pi-agent-observability | first worktree run, 70f9e62e: "Remove all from swimlane" | success, 11/11 phases, $0.50. `setup` phase 1 ran the four installs, and all six checks passed in the worktree, the three that failed without setup among them. Merged as a fast-forward under `ff_only` (4ad56bd), on the engineer's word |
+| 2026-10-30 | hub, both projects | the run banner said `just merge` where pi-agent-observability needs `just sssf merge` | every message that names a recipe now goes through `utils.just()` (8431eed). pi-agent-observability's banner reads `just sssf phases 39027a65` |

@@ -1,6 +1,6 @@
 # Design: a branch per run, with a merge back
 
-Status: settled in a grilling session on 2026-10-30, built and proven the same day, and rolled out to both projects. The decisions below are the record, with the changes the build made noted in place. Where the text and a decision disagree, the decision wins.
+Status: done. Settled in a grilling session on 2026-10-30, built and proven the same day, and rolled out to both projects. [parallel-worktree-runs.md](parallel-worktree-runs.md) then lifted decision 12's one-at-a-time limit, added `just rebase` for fast-forward-only repos, and added `worktree_setup` for what a fresh checkout lacks. The decisions below are the record, with the changes the build made noted in place. Where the text and a decision disagree, the decision wins.
 
 SSSF's README lists what the core leaves out: "It runs on your current branch. There is no sandbox, no branch per run, no merge step..." The container option ([container-operator.md](container-operator.md)) added the sandbox. This design adds the next two: each run works on its own branch, in its own folder, and its work reaches your branch only when you merge it.
 

@@ -482,8 +482,21 @@ Honest edges, because knowing them is cheaper than discovering them.
 | An agent edits something it should not | Detected and rolled back after the call, and the phase fails | Expected. Widen that agent's `writes` if the change was legitimate |
 | Commit phase has nothing to commit | `commit_all` raises if the cwd is not a git repo or nothing changed | `git init` with one commit first. A no-op build fails the phase rather than committing nothing |
 | `install.py --force` | Overwrites **all** stamped files, config and prompts included | Use `--update` to refresh a repo. Commit before you force |
+| A worktree run's checks fail on missing packages | Its folder is a fresh checkout, without your untracked `node_modules` or other installed dependencies | List the install commands under `worktree_setup` in `repo.yaml`. They run before the first agent |
+| Two runs spend more than the cap | `defaults.max_run_cost` in `sssf.config.yaml` holds per run, so two at once can spend up to twice it | Lower the cap, or set `max_worktree_runs: 1` in `repo.yaml` |
+| The second of two runs won't merge | In an `ff_only` repo, it can't fast-forward once the first has landed | `just rebase <adw_id>` on your word, then `just merge <adw_id>` |
 
 A run works on your current branch unless you ask for one of its own. For real work, use `--worktree` and merge with `just merge`, and consider `--container` at install for a sandbox around the operator.
+
+### Still open
+
+Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list.
+
+- The dashboard doesn't show that a run was rebased.
+- No guard holds spend across parallel runs; each run has its own cap.
+- One request tried several ways, with the best merged, is left room for but not built.
+- `adw_tickets` doesn't take `--worktree`.
+- A seam for a second sandbox beside the Podman container waits for one to exist.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

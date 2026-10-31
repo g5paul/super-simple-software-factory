@@ -8,6 +8,7 @@ export type {
   RunCaps,
   RunWorktree,
   RunLanded,
+  RunRebased,
   StopReason,
   TicketRow,
   TicketRun,

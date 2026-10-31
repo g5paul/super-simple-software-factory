@@ -18,6 +18,16 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [phaseId: string] }>()
 
+// The latest `just rebase`, in words. Its checks ran as their own adw_quality run.
+const rebase = computed(() => {
+  const r = props.worktree?.rebased
+  if (!r) return ''
+  if (r.conflict) return `rebase onto ${r.onto} hit a conflict and was aborted; the branch is still at ${r.old}`
+  if (r.setup === false) return `rebased onto ${r.onto}, but worktree_setup failed, so the branch is back at ${r.old}`
+  if (!r.kept) return `rebased onto ${r.onto}, but the checks failed (run ${r.checks}), so the branch is back at ${r.old}`
+  return `rebased onto ${r.onto}, ${r.old} to ${r.new}, checks passed (run ${r.checks})`
+})
+
 const cap = computed(() => props.caps?.max_run_cost ?? null)
 const spentPct = computed(() => (cap.value ? Math.min(100, ((props.cost ?? 0) / cap.value) * 100) : 0))
 const barLevel = computed(() => (spentPct.value >= 90 ? 'high' : spentPct.value >= 60 ? 'mid' : 'low'))
@@ -54,6 +64,7 @@ function open(phaseId: string | null) {
         · merged into {{ worktree.landed.into }} ({{ worktree.landed.how }}) at <code>{{ worktree.landed.head }}</code>
       </span>
       <span v-else-if="worktree.landed?.state === 'discarded'" class="landed discarded">· discarded</span>
+      <span v-if="rebase" class="rebase" :class="{ put_back: !worktree.rebased?.kept }">· {{ rebase }}</span>
     </div>
 
     <div v-if="cap" class="budget" :title="`max_run_cost ${fmtCost(cap)}`">
@@ -116,6 +127,9 @@ function open(phaseId: string | null) {
   color: var(--green);
 }
 .landed.discarded {
+  color: var(--dim);
+}
+.rebase.put_back {
   color: var(--dim);
 }
 

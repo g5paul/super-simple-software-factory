@@ -262,8 +262,30 @@ export interface RunWorktree {
   base: string;
   /** The launch checkout had uncommitted changes, which the run left out. */
   launch_dirty: boolean;
+  /** How this repo runs SSSF's recipes, `just` or `just sssf`. Absent on runs from before it was recorded. */
+  just?: string;
   /** How the branch ended: merged, or discarded. null while it waits. */
   landed: RunLanded | null;
+  /** The latest `just rebase` of the branch. null if it was never rebased. */
+  rebased: RunRebased | null;
+}
+
+/** From the `worktree_rebased` event `just rebase` logs, kept or not. */
+export interface RunRebased {
+  /** The launch branch it was rebased onto, and the branch's commit before. */
+  onto: string;
+  old: string;
+  /** The branch's commit after the rebase. Absent when it hit a conflict. */
+  new?: string;
+  /** The adw_quality run that rechecked it, and whether that passed. */
+  checks?: string;
+  passed?: boolean;
+  /** false when worktree_setup failed on the rebased branch. */
+  setup?: boolean;
+  /** The rebase hit a conflict and was aborted. */
+  conflict?: boolean;
+  /** The branch moved to `new`. Otherwise it was put back at `old`. */
+  kept: boolean;
 }
 
 /** From the `worktree_merged` or `worktree_discarded` event `just merge` or `just discard` logs. */

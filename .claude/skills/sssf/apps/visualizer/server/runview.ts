@@ -7,7 +7,7 @@
  * Everything is derived from what the tracer already wrote: a run from before
  * these events existed simply has no caps and no ticket table.
  */
-import type { Phase, RunCaps, RunLanded, RunWorktree, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
+import type { Phase, RunCaps, RunLanded, RunRebased, RunWorktree, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
 
 /** The event columns these functions read. */
 export interface RunEvent {
@@ -50,13 +50,14 @@ const LANDED = { worktree_merged: "merged", worktree_discarded: "discarded" } as
  */
 export function worktree(events: RunEvent[]): RunWorktree | null {
   const e = latest(events, "worktree");
-  const p = e && payload<Omit<RunWorktree, "landed">>(e);
+  const p = e && payload<Omit<RunWorktree, "landed" | "rebased">>(e);
   if (!p?.branch) return null;
   const end = events.findLast((ev) => ev.name !== null && ev.name in LANDED);
   const landed: RunLanded | null = end
     ? { state: LANDED[end.name as keyof typeof LANDED], ...payload<Omit<RunLanded, "state">>(end) }
     : null;
-  return { ...p, landed };
+  const rebase = latest(events, "worktree_rebased");
+  return { ...p, landed, rebased: rebase ? payload<RunRebased>(rebase) : null };
 }
 
 /**

@@ -231,7 +231,7 @@ def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
     os.chdir(path)
     place = {"branch": branch, "worktree": str(path), "launch_branch": launch,
              "base": git("rev-parse", "--short", "HEAD").stdout.strip(),
-             "launch_dirty": dirty(root), "resumed": False}
+             "launch_dirty": dirty(root), "resumed": False, "just": just("").strip()}
     shared = os.environ.get("UV_PROJECT_ENVIRONMENT", "")
     if shared:
         place["environment"] = f"{shared.rstrip('/')}-{adw_id}"
@@ -428,6 +428,7 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
     result = git("rebase", launch, cwd=path, check=False)
     if result.returncode != 0:
         git("rebase", "--abort", cwd=path, check=False)
+        _log(cfg, adw_id, "worktree_rebased", {"onto": launch, "old": old, "conflict": True, "kept": False})
         # git's hints say how to continue the rebase, which is already aborted.
         said = "\n".join(line for line in (result.stdout + result.stderr).strip().splitlines()
                          if not line.startswith("hint:"))

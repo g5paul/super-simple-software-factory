@@ -17,7 +17,8 @@ const branchTitle = computed(() => {
   if (!w) return ''
   if (w.landed?.state === 'merged') return `worked on its own branch (--worktree), merged into ${w.landed.into}`
   if (w.landed?.state === 'discarded') return 'worked on its own branch (--worktree), since discarded'
-  return `worked on its own branch (--worktree); \`just merge ${props.session.adw_id}\` lands it on ${w.launch_branch}`
+  const rebased = w.rebased?.kept ? `, rebased onto ${w.rebased.onto}` : ''
+  return `worked on its own branch (--worktree)${rebased}; \`${w.just ?? 'just'} merge ${props.session.adw_id}\` lands it on ${w.launch_branch}`
 })
 
 // The card is an <a>; the button lives inside it, so the click must not
@@ -258,7 +259,7 @@ const hiddenRowCount = computed(() =>
         class="branch dim"
         :class="{ gone: session.worktree.landed }"
         :title="branchTitle"
-      >{{ session.worktree.branch }}<template v-if="session.worktree.landed"> · {{ session.worktree.landed.state }}</template></span>
+      >{{ session.worktree.branch }}<template v-if="session.worktree.landed"> · {{ session.worktree.landed.state }}</template><template v-else-if="session.worktree.rebased?.kept"> · rebased</template></span>
     </div>
   </a>
 </template>

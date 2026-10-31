@@ -310,7 +310,7 @@ def test_a_rebase_conflict_aborts_and_leaves_the_branch_as_it_was(repo, monkeypa
     assert git("rev-parse", "sssf/wt000021", cwd=repo) == before
     path = repo / "adws/adw_data/worktrees/wt000021"
     assert git("status", "--porcelain", cwd=path) == ""
-    assert last_event("wt000021", "worktree_rebased") is None
+    assert last_event("wt000021", "worktree_rebased") == {"onto": "main", "old": before[:7], "conflict": True, "kept": False}
 
 
 def test_a_rebase_whose_checks_fail_is_put_back(repo, monkeypatch):
@@ -482,6 +482,9 @@ def test_messages_name_recipes_with_the_sssf_prefix_when_the_repo_loads_the_modu
     (repo / "justfile").write_text("mod sssf 'sssf.just'\n\ndefault:\n    @just --list\n")
     utils._recipe_prefix.cache_clear()
     assert utils.just("merge ab12") == "just sssf merge ab12"
+    _, place, _ = start("wt000024")
+    assert place["just"] == "just sssf"
+    os.chdir(repo)
     alive("wt000023")
     with pytest.raises(worktree.WorktreeError, match="just sssf kill wt000023"):
         worktree.discard(SSSFConfig(), "wt000023")

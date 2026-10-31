@@ -96,7 +96,7 @@ test("the latest recorded caps win, and an old run has none", () => {
 test("a --worktree run reports its branch, and a plain run has none", () => {
   const place = { branch: "sssf/a1", worktree: "/r/adws/adw_data/worktrees/a1", launch_branch: "main",
                   base: "abc1234", launch_dirty: true };
-  expect(worktree([ev("log", "worktree", place)])).toEqual({ ...place, landed: null });
+  expect(worktree([ev("log", "worktree", place)])).toEqual({ ...place, landed: null, rebased: null });
   expect(worktree([ev("log", "run_caps", { max_run_cost: 5 })])).toBeNull();
   expect(worktree([{ type: "log", name: "worktree", phase_id: "", payload_json: "{oops" }])).toBeNull();
 });
@@ -108,4 +108,15 @@ test("a merged or discarded branch says so, and the latest end wins", () => {
   expect(worktree([start, merged])?.landed).toEqual({ state: "merged", into: "main", how: "fast-forward",
                                                       head: "def5678" });
   expect(worktree([start, ev("log", "worktree_discarded", {})])?.landed).toEqual({ state: "discarded" });
+});
+
+test("a rebase is reported, the latest attempt wins, and a run never rebased has none", () => {
+  const start = ev("log", "worktree", { branch: "sssf/a1", worktree: "/w", launch_branch: "main",
+                                         base: "abc1234", launch_dirty: false });
+  const conflict = ev("log", "worktree_rebased", { onto: "main", old: "abc1234", conflict: true, kept: false });
+  const kept = ev("log", "worktree_rebased", { onto: "main", old: "abc1234", new: "fed4321", checks: "c1",
+                                               passed: true, kept: true });
+  expect(worktree([start])?.rebased).toBeNull();
+  expect(worktree([start, conflict])?.rebased).toEqual({ onto: "main", old: "abc1234", conflict: true, kept: false });
+  expect(worktree([start, conflict, kept])?.rebased?.kept).toBe(true);
 });

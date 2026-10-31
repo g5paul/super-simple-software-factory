@@ -492,7 +492,6 @@ A run works on your current branch unless you ask for one of its own. For real w
 
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list.
 
-- The dashboard doesn't show that a run was rebased.
 - No guard holds spend across parallel runs; each run has its own cap.
 - One request tried several ways, with the best merged, is left room for but not built.
 - `adw_tickets` doesn't take `--worktree`.

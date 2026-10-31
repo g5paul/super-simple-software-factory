@@ -376,6 +376,15 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     for rel in added:
         print(f"    + {rel}")
     print(f"  up to date: {current}")
+    # A run.sh change takes effect at the next container start; only a new
+    # Containerfile needs a new image.
+    container = [rel.split()[0] for rel in updated + added if rel.startswith("container/")]
+    container += [rel for rel, _, _ in review if rel.startswith("container/")]
+    if container:
+        rebuild = any(rel.endswith("Containerfile") for rel in container)
+        print("  container: " + ("the Containerfile changed: run container/build.sh, then "
+                                 "restart the container session" if rebuild else
+                                 "no rebuild needed; restart the container session to use it"))
     print(f"  customized: {len(customized)} (changed in this repo; nothing new in the skill's version)")
     for rel in customized:
         print(f"    = {rel}")

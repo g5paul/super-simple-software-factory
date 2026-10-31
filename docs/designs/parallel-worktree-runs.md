@@ -52,7 +52,7 @@ A read-only survey of the skill, before the decisions:
     7. Two `just merge` at the same moment: one waits for the other's lock.
 13. **Existing repos choose their cap.** When an update brings `max_worktree_runs` into a repo, the project session checks its `quality.py` against decision 11 and writes 1 or 2 into `repo.yaml`, with a one-line reason.
 14. **The operator watches each run.** `run_adw.md` gets a section on running beside another run: ask first (decision 4), watch both, report each by adw_id as it finishes, and never merge either without the engineer's word.
-15. **Scope.** `adw_tickets` stays out, as it was for branch per run.
+15. **Scope.** `adw_tickets` stays out, as it was for branch per run. Superseded by decisions 26 to 38.
 
 ### Setting up a worktree
 
@@ -69,6 +69,24 @@ The pi-agent-observability update found the gap: a worktree is a fresh checkout,
 24. **600s per command.** `worktree_setup_timeout` in repo.yaml raises it. A timeout is a failed setup.
 25. **Recorded here,** not in a separate doc.
 
+### A ticket run on its own branch
+
+Settled in a third grilling session on 2026-10-30. A ticket run is the longest work SSSF does, about $3 for six tickets, so it gains the most from being kept apart. Two things made it more than a flag. A ticket run resumes by git history, finding its feature's "NN:" commits, while a worktree run resumes by adw_id. And a ticket run's guard refuses `main`, which a worktree makes needless.
+
+26. **One branch for the whole feature.** A `--worktree` ticket run builds every ticket in order on `sssf/<adw_id>`, in one worktree, and counts as one run against `max_worktree_runs`. Parallel tickets stay deferred.
+27. **It may launch from `main`.** With `--worktree`, a ticket run's commits land on its own branch, and only `just merge` moves them, so the `main`/`master` refusal is lifted. Without the flag it stays.
+28. **The feature folder must be committed.** A worktree checks out the launch branch's last commit, so an uncommitted edit to the spec or a ticket would not reach the agents. A new `--worktree` ticket run refuses while the feature folder has uncommitted changes in the launch checkout, and names the files. Other uncommitted changes get the usual warning.
+29. **Opt-in,** as on the other chains.
+30. **Only a finished run merges.** A run that gives up partway is `fail`, and `just merge` lands only a successful run. A half-built feature waits on its branch for a rejoin, or for a merge by hand.
+31. **A rerun rejoins its run.** A stopped `--worktree` ticket run resumes with `--adw-id <id>`, in the same worktree and on the same branch. Its stop message prints the command. A new adw_id never adopts another run's branch: one adw_id owns one worktree, and `just merge`, `rebase`, and `discard` rely on that.
+32. **One branch per feature at a time.** While an unlanded worktree run holds a feature folder, any other ticket run on that folder refuses, with `--worktree` or without, before any worktree or agent. The refusal names the holding run and how to resume or discard it.
+33. **The cap stays per attempt.** Each attempt gets its own `max_run_cost`, as each rerun does today. The stop message gives the feature's total across every attempt, as it already does.
+34. **Leftover work stays in the worktree.** A stop's look, keep, and drop commands start with `cd <worktree>` when the run worked in one, for every chain. A rejoin on a dirty worktree refuses, as a rerun on a dirty tree does.
+35. **Every agent starts fresh on a rejoin.** A rejoin would resume each agent's context window from `agent_map.json`. A ticket run starts every attempt with an empty map, so the unfinished ticket's builder doesn't carry its failed attempt, as a rerun with a new adw_id never did.
+36. **A rejoin reuses the scout's notes.** They cover the whole feature and sit in the run's `context_handoff/`. A rejoin that finds them skips the scout and says so in the read step.
+37. **Done marks live on the branch until the merge.** The feature folder in the engineer's checkout shows no ticket done until then. The finish and stop messages say so in one line, and SSSF writes nothing to the checkout. The dashboard's ticket table reads the trace, so it shows the real progress.
+38. **Proof.** In sssf-sandbox, a two-ticket feature launched from `master` with `--worktree`: stopped after ticket 1 by a low `max_run_cost`, rejoined with `--adw-id`, which skips the scout and ticket 1, finished, and merged. Then three refusals: a second run on the held feature, an uncommitted edit to the feature folder, and a plain run on `master`. Then the cookbooks, and a rollout on the engineer's word.
+
 ## Open
 
 Known, and not built. None of them blocks a run.
@@ -76,7 +94,6 @@ Known, and not built. None of them blocks a run.
 - **Spend across runs.** Two runs can spend up to twice `max_run_cost`, and can go a little past `rate_limit_stop` (decision 6). That is documented, not guarded. A guard across a repo's runs would need shared accounting between processes.
 - **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
-- **`adw_tickets` with `--worktree`.** Out of scope (decision 15). A ticket run still works on the feature branch the engineer made.
 
 ## Log
 
@@ -101,3 +118,4 @@ Known, and not built. None of them blocks a run.
 | 2026-10-30 | hub, both projects | the run banner said `just merge` where pi-agent-observability needs `just sssf merge` | every message that names a recipe now goes through `utils.just()` (8431eed). pi-agent-observability's banner reads `just sssf phases 39027a65` |
 | 2026-10-30 | hub | the dashboard showed a rebased run like any other | the run summary says how the latest `just rebase` went: kept, put back after failed checks or setup, or aborted on a conflict, which now logs `worktree_rebased` too. The card tags a kept rebase. The `worktree` event records `just` or `just sssf`, and the card's merge hint uses it. Read back right from sandbox runs pr5rever and ws1squas |
 | 2026-10-30 | scratch repo | does each per-run environment's editable install point at its own worktree? Case 3's check printed nothing because sssf-sandbox has no `[build-system]`, so it never installs editable | a package with two worktrees, one environment each: each imports its own worktree's code, on the host (uv 0.10.3) and in the sandbox's container image (uv 0.13.6). One shared environment, synced from both, gave the first run the second's code, which is why decision 9 gives each run its own |
+| 2026-10-30 | hub | grilling session: a ticket run on its own branch, decisions 26 to 38 | settled |

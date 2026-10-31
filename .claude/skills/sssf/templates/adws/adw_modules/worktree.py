@@ -382,9 +382,12 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
     result = git("rebase", launch, cwd=path, check=False)
     if result.returncode != 0:
         git("rebase", "--abort", cwd=path, check=False)
+        # git's hints say how to continue the rebase, which is already aborted.
+        said = "\n".join(line for line in (result.stdout + result.stderr).strip().splitlines()
+                         if not line.startswith("hint:"))
         raise WorktreeError(
             f"rebasing {branch} onto {launch} hit a conflict, so it was aborted and the branch "
-            f"is still at {old}:\n{(result.stdout + result.stderr).strip()}\n"
+            f"is still at {old}:\n{said}\n"
             f"To land it, merge it by hand, or `just discard {adw_id}` and run the request again.")
     new = git("rev-parse", "--short", "HEAD", cwd=path).stdout.strip()
     checks = new_id(8)

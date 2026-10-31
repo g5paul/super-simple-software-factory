@@ -408,7 +408,7 @@ Every ADW takes the same shape:
 uv run adws/adw_*.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree]
 ```
 
-`--worktree` works on the four single-task chains: `adw_build_test`, `adw_plan_build_test`, `adw_plan_build_test_quality`, and `adw_simple_sdlc`. See [A branch per run](#a-branch-per-run).
+`--worktree` works on the four single-task chains, `adw_build_test`, `adw_plan_build_test`, `adw_plan_build_test_quality`, and `adw_simple_sdlc`, and on `adw_tickets`, which builds the whole feature on one branch. See [A branch per run](#a-branch-per-run).
 
 | ADW | Chain | Reach for it when |
 |---|---|---|
@@ -494,7 +494,6 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 
 - No guard holds spend across parallel runs; each run has its own cap.
 - One request tried several ways, with the best merged, is left room for but not built.
-- `adw_tickets` doesn't take `--worktree`.
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
@@ -518,7 +517,7 @@ Where to start, roughly in the order that pays off fastest:
 | Your definition of done | `adws/adw_modules/gates.py` | A gate is one function. Whatever "done" means where you work, write it here |
 | Your agent capabilities | `adws/adw_data/harness_engineering/` | Pi extensions, a different set per agent if that is what the job needs |
 
-And what it deliberately does not do. A branch per run, the merge step, and the sandbox are opt-in: `--worktree`, `just merge`, and `--container`. There are no parallel worktree runs, no cloud, and no human-in-the-loop approval phase. Those are the obvious next things to build. They are left out so the core stays small enough to read in one sitting, which is the only reason you would trust it enough to change it.
+And what it deliberately does not do. A branch per run, the merge step, and the sandbox are opt-in: `--worktree`, `just merge`, and `--container`. There is no cloud and no human-in-the-loop approval phase. Those are the obvious next things to build. They are left out so the core stays small enough to read in one sitting, which is the only reason you would trust it enough to change it.
 
 So take it. Fork it, strip the parts you do not need, rename the agents, throw out half the workflows, and roll what is left into the factory your product actually needs. The specific chains in here matter far less than the shape: code owns the loop, agents own the phases, and every run leaves a trace you can go read.
 

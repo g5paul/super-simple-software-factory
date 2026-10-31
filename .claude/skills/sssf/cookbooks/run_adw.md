@@ -72,7 +72,7 @@ Two things that bite:
 
 ### On its own branch: `--worktree`
 
-Without it, a chain works and commits on the branch that is checked out, in the engineer's own checkout. With `--worktree`, the run gets branch `sssf/<adw_id>`, cut from the tip of the checked-out branch, in its own folder at `adws/adw_data/worktrees/<adw_id>`. The engineer can keep working while it runs, and nothing reaches their branch until it's merged. It applies to `adw_simple_sdlc`, `adw_plan_build_test`, `adw_plan_build_test_quality`, and `adw_build_test`. `adw_tickets` keeps its own rule: it runs on the feature branch the engineer made.
+Without it, a chain works and commits on the branch that is checked out, in the engineer's own checkout. With `--worktree`, the run gets branch `sssf/<adw_id>`, cut from the tip of the checked-out branch, in its own folder at `adws/adw_data/worktrees/<adw_id>`. The engineer can keep working while it runs, and nothing reaches their branch until it's merged. It applies to `adw_simple_sdlc`, `adw_plan_build_test`, `adw_plan_build_test_quality`, `adw_build_test`, and `adw_tickets`, which builds the whole feature on the one branch (see `cookbooks/tickets.md`).
 
 - **Add it only when the engineer asks** for a separate branch, a branch per run, or to keep working while it runs. Never add it on your own judgement.
 - The engineer's uncommitted changes are not part of the run. The run says so on startup.

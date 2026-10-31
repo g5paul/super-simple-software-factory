@@ -17,6 +17,7 @@ ticket. `done`, which adw_tickets wrote before, still reads as finished.
 from __future__ import annotations
 
 import heapq
+import json
 import re
 import sqlite3
 from collections import defaultdict
@@ -128,6 +129,26 @@ def spent_on(db: str | Path, folder: str) -> float:
         row = conn.execute(f"SELECT COALESCE(SUM(total_cost), 0) FROM sessions s "
                            f"WHERE {TICKET_RUNS} AND request = ?", (folder,)).fetchone()
     return float(row[0])
+
+
+def held_by(db: str | Path, folder: str, exclude: str = "") -> str | None:
+    """The adw_id of a worktree ticket run that still holds this feature folder:
+    its branch is neither merged nor discarded and its folder is still there.
+    One branch per feature at a time, so a second run never builds it twice."""
+    if not Path(db).is_file():
+        return None
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            f"SELECT s.adw_id, (SELECT payload_json FROM events w WHERE w.adw_id = s.adw_id "
+            f"AND w.name = 'worktree' ORDER BY w.rowid DESC LIMIT 1) FROM sessions s "
+            f"WHERE {TICKET_RUNS} AND request = ? AND s.adw_id != ? AND NOT EXISTS ("
+            f"SELECT 1 FROM events e WHERE e.adw_id = s.adw_id "
+            f"AND e.name IN ('worktree_merged', 'worktree_discarded')) "
+            f"ORDER BY s.started_at DESC", (folder, exclude)).fetchall()
+    for adw_id, place in rows:
+        if place and Path(json.loads(place).get("worktree", "")).is_dir():
+            return adw_id
+    return None
 
 
 def estimate(db: str | Path, remaining: int) -> str:

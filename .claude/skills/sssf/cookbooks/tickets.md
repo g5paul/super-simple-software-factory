@@ -30,7 +30,9 @@ Run `/setup-matt-pocock-skills` and choose **Local markdown**. The skills then w
 just tickets .scratch/<feature>/
 ```
 
-The read step runs before any agent and prints the ticket order, what the feature has cost so far, and an estimate from past ticket runs. It stops the run on `main`, on a dirty tree, on an untracked folder, on a spec with no seams, on a blocker that isn't a ticket, and on a cycle.
+To build it on its own branch, add `--worktree`: `just tickets .scratch/<feature>/ --worktree`. Every ticket lands on `sssf/<adw_id>` in its own folder, and nothing reaches the engineer's branch until `just merge <adw_id>`. With it, the run may start from `main`. The feature folder must be committed first, since the worktree checks out what is committed, and the run refuses while it has uncommitted changes. Ask the engineer which they want; it's their branch.
+
+The read step runs before any agent and prints the ticket order, what the feature has cost so far, and an estimate from past ticket runs. It stops the run on `main` without `--worktree`, on a dirty tree, on an untracked folder, on a spec with no seams, on a blocker that isn't a ticket, and on a cycle.
 
 Then one Haiku scout explores for the whole feature. Each ticket gets a fresh builder session with the spec, its ticket, the scout's notes, and the commits so far. A ticket lands as its own commit, `NN: title`, once every `quality.py` check passes, and that commit sets its `Status:` to `resolved`, the tracker's word for a finished ticket.
 
@@ -49,6 +51,8 @@ Every stop leaves finished tickets committed and the unfinished one in the tree.
 | The read step refused | The message names the problem and the file. |
 
 A rerun skips done tickets, so it resumes at the first unfinished one. Once every ticket is done, a rerun goes straight to review. A feature whose docs are committed is finished, and a rerun says so and does nothing.
+
+A `--worktree` run resumes differently. Rejoin it with the command its stop message prints, `just tickets <folder> --adw-id <adw_id>`, so it continues on its own branch. The leftover ticket is in the run's worktree, and the message's look, keep, and drop commands start with `cd` to it; a rejoin refuses until that tree is clean. A rejoin starts every agent fresh and reuses the scout's notes. While the run's branch is neither merged nor discarded, any other run on that feature folder refuses and names it. Its done marks are on its branch, so the feature folder in the engineer's checkout shows them only after the merge. Only a finished run merges; to keep a half-built feature, merge its branch by hand with git, or `just discard <adw_id>` to drop it.
 
 ## 5. Report
 

@@ -16,9 +16,10 @@ message says how to look at it, keep it, or drop it; nothing is discarded.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
-from . import git_helper
+from . import git_helper, worktree
 from .data_types import AgentResult, EventRecord
 
 
@@ -46,10 +47,13 @@ def uncommitted_help(run) -> str:
             return ""
     except (OSError, RuntimeError):         # not a repo, or no git: nothing to advise
         return ""
+    # A worktree run's work is in its own folder, not the engineer's checkout.
+    root = git_helper.repo_root()
+    cd = f"cd {root} && " if Path(root).resolve() != worktree.main_checkout() else ""
     return ("\nThe tree has uncommitted work from this run. Nothing was discarded.\n"
-            "  look at it:  git status && git diff\n"
-            "  keep it:     git stash\n"
-            "  drop it:     git checkout . && git clean -fd")
+            f"  look at it:  {cd}git status && git diff\n"
+            f"  keep it:     {cd}git stash\n"
+            f"  drop it:     {cd}git checkout . && git clean -fd")
 
 
 def check_run(run, agent_name: str, phase_id: str) -> None:

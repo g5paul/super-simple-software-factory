@@ -5,7 +5,7 @@
 """ADW Tickets — build an approved feature one ticket at a time, test-first.
 
 Usage:
-    uv run adws/adw_tickets.py .scratch/<feature>/ [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
+    uv run adws/adw_tickets.py .scratch/<feature>/ [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree]
 
 The engineer's half runs first, interactively, with mattpocock/skills:
 `grill-with-docs`, then `to-spec`, then `to-tickets` on the local markdown
@@ -43,6 +43,12 @@ pass follows, only for blocking findings, then the checks again.
 A stop never discards work. A ticket that still fails, a cost cap, or a usage
 window leaves earlier tickets committed and says how to look at, keep, or drop
 whatever is uncommitted.
+
+With --worktree the whole feature is built on branch sssf/<adw_id>, in its own
+worktree, and may launch from main; `just merge <adw_id>` lands it. A stopped
+run resumes by rejoining with --adw-id, which starts every agent fresh and
+reuses the scout's notes. While a worktree run holds a feature folder, no
+other run builds it. See docs/designs/parallel-worktree-runs.md, 26 to 38.
 """
 
 import argparse
@@ -51,10 +57,11 @@ import sys
 from pathlib import Path
 
 from adw_modules import (account, agents, budget, changes, gates, git_helper, permissions, quality,
-                         session, tickets)
+                         session, tickets, worktree)
 from adw_modules.data_types import (AgentCall, AxisReviewOutput, BuildOutput, ChangeCapture,
                                     DocumentOutput, EventRecord, GenericOutput, PhaseParams,
                                     ScoutOutput)
+from adw_modules.utils import just
 
 REQUIRED_AGENTS = ["scout", "ticket_builder", "standards_reviewer", "spec_reviewer", "documenter"]
 MAX_FIX_LOOPS = 3
@@ -65,13 +72,21 @@ DOCUMENT_NOTES = ("Read diff_path in full before writing. Document only what the
                   "write-up into app_docs/ as your task describes.")
 
 
-def main(folder: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None) -> int:
+def main(folder: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None,
+         use_worktree: bool = False) -> int:
     cfg = agents.load_config(config)
     agents.validate(cfg, REQUIRED_AGENTS)
-    run = session.ensure(cfg, adw_id)
+    claim(cfg, folder, adw_id, use_worktree)
+    run = session.ensure(cfg, adw_id, use_worktree=use_worktree)
+    # Every attempt starts its agents fresh, so a rejoin's builder doesn't
+    # carry the attempt that failed. Within an attempt, fixes keep their session.
+    run.agent_map = {}
     folder = os.path.relpath(Path(folder).resolve(), run.repo_root)
     try:
-        return build_feature(run, folder)
+        code = build_feature(run, folder)
+        if worktree.recorded(run.cfg.observability.db, run.adw_id):
+            run.console.note(done_marks(run))
+        return code
     except Exception as error:
         stopped(run, folder, error)
         if isinstance(error, (budget.BudgetStop, account.RateLimitStop, permissions.PermissionBreach)):
@@ -111,6 +126,7 @@ def build_feature(run, folder: str) -> int:
                                description="Capture the feature folder to build")) as ph:
         ph.log(input=folder)
 
+    notes = run.context_handoff_dir / "scout_findings.md"
     with run.phase(PhaseParams(name="read", kind="code", owner="tickets",
                                description="Check the feature folder and order its tickets, "
                                            "before any agent spends money")) as ph:
@@ -131,12 +147,13 @@ def build_feature(run, folder: str) -> int:
                base=git_helper.short_sha(base),
                spent_so_far=f"${tickets.spent_on(run.cfg.observability.db, folder):.2f}",
                estimate=tickets.estimate(run.cfg.observability.db, len(feature.todo)))
+        if feature.todo and notes.is_file():
+            ph.log(scout=f"skipped, reusing {notes.name} from an earlier attempt")
     if finished:
         run.console.note(f"{feature.slug} is already built and documented; nothing to do.")
         return run.finish()
 
-    notes = run.context_handoff_dir / "scout_findings.md"
-    if feature.todo:
+    if feature.todo and not notes.is_file():
         with run.phase(PhaseParams(name="scout", kind="agent", owner="scout",
                                    description="Explore once for the whole feature, so no "
                                                "builder has to find its own way")) as ph:
@@ -240,6 +257,31 @@ def build_feature(run, folder: str) -> int:
     return run.finish()
 
 
+def claim(cfg, folder: str, adw_id: str | None, use_worktree: bool) -> None:
+    """Before any worktree or agent: one branch per feature at a time, and a new
+    worktree run builds from the feature folder as committed."""
+    folder = os.path.relpath(Path(folder).resolve(), git_helper.repo_root())
+    holder = tickets.held_by(cfg.observability.db, folder, exclude=adw_id or "")
+    if holder:
+        raise SystemExit(
+            f"FeatureError: run {holder} is building {folder} on its own branch, sssf/{holder}. "
+            f"Resume it with `{just(f'tickets {folder} --adw-id {holder}')}`, or drop it with "
+            f"`{just(f'discard {holder}')}` first.")
+    if not use_worktree or (adw_id and worktree.recorded(cfg.observability.db, adw_id)):
+        return
+    edited = git_helper.work_in_progress(cfg.defaults.data_dir)
+    edited = [line for line in edited if line.split(maxsplit=1)[-1].startswith(folder.rstrip("/") + "/")]
+    if edited:
+        raise SystemExit(
+            f"FeatureError: {folder} has uncommitted changes, and a worktree run builds from what is "
+            f"committed. Commit them first:\n" + "\n".join(edited[:10]))
+
+
+def done_marks(run) -> str:
+    return (f"done marks are on sssf/{run.adw_id} until `{just(f'merge {run.adw_id}')}`; "
+            f"the feature folder in your checkout shows them after the merge.")
+
+
 def preflight(run, feature) -> None:
     """The guards that keep a headless run's commits where the engineer expects them."""
     branch = git_helper.current_branch()
@@ -290,6 +332,9 @@ def stopped(run, folder: str, error: Exception | str) -> None:
     except Exception:
         spent = run.cost
     message = f"stopped: {error}\nthis feature has cost ${spent:.2f} so far, across every run."
+    if worktree.recorded(run.cfg.observability.db, run.adw_id):
+        message += (f"\nresume it with `{just(f'tickets {folder} --adw-id {run.adw_id}')}`. "
+                    + done_marks(run))
     if "git stash" not in str(error):
         message += budget.uncommitted_help(run)
     run.console.advise(message)
@@ -300,5 +345,7 @@ if __name__ == "__main__":
     parser.add_argument("folder", help="the feature folder: .scratch/<feature>/")
     parser.add_argument("--config", default="adws/adw_sssf_config/sssf.config.yaml")
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
+    parser.add_argument("--worktree", action="store_true",
+                        help="build on branch sssf/<adw_id> in its own worktree; `just merge <adw_id>` lands it")
     args = parser.parse_args()
-    sys.exit(main(args.folder, args.config, args.adw_id))
+    sys.exit(main(args.folder, args.config, args.adw_id, args.worktree))

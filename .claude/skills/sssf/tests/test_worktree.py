@@ -329,12 +329,13 @@ def test_a_detached_head_cannot_start_one(repo):
         start("wt000013")
 
 
-def test_every_single_task_chain_takes_the_flag():
+def test_every_building_chain_takes_the_flag():
     for name in ("adw_simple_sdlc.py", "adw_plan_build_test.py",
                  "adw_plan_build_test_quality.py", "adw_build_test.py"):
         text = (SKILL / "templates/adws" / name).read_text()
         assert '"--worktree"' in text and "use_worktree=worktree" in text, name
-    assert '"--worktree"' not in (SKILL / "templates/adws/adw_tickets.py").read_text()
+    text = (SKILL / "templates/adws/adw_tickets.py").read_text()
+    assert '"--worktree"' in text and "use_worktree=use_worktree" in text
 
 
 def test_the_install_ignores_the_worktrees_folder():

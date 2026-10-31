@@ -285,3 +285,76 @@ def test_the_reviewers_never_see_an_sssf_update(repo, monkeypatch):
         prompt = repo.of(name)[-1][2]
         assert "Update SSSF" not in prompt and "02: B" in prompt
         assert "':(exclude)adws/' ':(exclude).claude/skills/sssf/'" in prompt
+
+
+# ── a ticket run on its own branch (parallel-worktree-runs decisions 26 to 38) ──
+
+def on_branch(branch: str) -> list[str]:
+    return git("log", "--reverse", "--format=%s", f"main..{branch}").splitlines()
+
+
+@pytest.fixture
+def from_main(repo, monkeypatch):
+    """The engineer's checkout on main, with the feature folder committed."""
+    git("checkout", "-qb", "main")
+    root = Path.cwd()
+    yield repo
+    monkeypatch.chdir(root)
+
+
+def test_a_worktree_run_builds_the_feature_on_its_own_branch_from_main(from_main, capsys):
+    assert adw_tickets.main(FOLDER, adw_id="tk000001", use_worktree=True) == 0
+    assert on_branch("sssf/tk000001") == ["01: A", "03: C", "02: B", "Document summaries"]
+    assert git("-C", str(Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")).parent),
+               "log", "-1", "--format=%s", "main") == "init"
+    assert "done marks are on sssf/tk000001" in capsys.readouterr().out
+
+
+def test_a_stopped_worktree_run_rejoins_fresh_and_reuses_the_scouts_notes(from_main, monkeypatch, capsys):
+    launch = Path.cwd()
+    real = quality.run_quality
+    monkeypatch.setattr(quality, "run_quality",
+                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+    assert adw_tickets.main(FOLDER, adw_id="tk000002", use_worktree=True) == 1
+    out = capsys.readouterr().out
+    place = launch / "adws/adw_data/worktrees/tk000002"
+    assert "--adw-id tk000002" in out
+    assert f"cd {place}" in out
+    assert "done marks are on sssf/tk000002" in out
+    first = {s for _, s, p in from_main.of("ticket_builder") if "Build ticket 02" in p}
+
+    monkeypatch.chdir(launch)
+    with pytest.raises(tickets.FeatureError, match="uncommitted changes"):
+        adw_tickets.main(FOLDER, adw_id="tk000002")         # the leftover ticket is still there
+
+    (place / "src/t02.py").unlink()
+    monkeypatch.chdir(launch)
+    monkeypatch.setattr(quality, "run_quality", real)
+    assert adw_tickets.main(FOLDER, adw_id="tk000002") == 0
+    assert on_branch("sssf/tk000002") == ["01: A", "03: C", "02: B", "Document summaries"]
+    assert len(from_main.of("scout")) == 1
+    again = {s for _, s, p in from_main.of("ticket_builder") if "Build ticket 02" in p} - first
+    assert again                                             # a fresh session, not the failed one
+    assert "scout" in capsys.readouterr().out
+
+
+def test_a_held_feature_refuses_every_other_run_before_any_worktree(from_main, monkeypatch):
+    launch = Path.cwd()
+    monkeypatch.setattr(quality, "run_quality",
+                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+    assert adw_tickets.main(FOLDER, adw_id="tk000003", use_worktree=True) == 1
+    calls = len(from_main.calls)
+    for use_worktree in (True, False):
+        monkeypatch.chdir(launch)
+        with pytest.raises(SystemExit, match=r"tk000003.*--adw-id tk000003"):
+            adw_tickets.main(FOLDER, adw_id="tk000004", use_worktree=use_worktree)
+    assert len(from_main.calls) == calls
+    assert not (launch / "adws/adw_data/worktrees/tk000004").exists()
+
+
+def test_a_worktree_run_refuses_an_uncommitted_feature_folder(from_main):
+    Path(FOLDER, "spec.md").write_text(SPEC + "\nOne more line.\n")
+    with pytest.raises(SystemExit, match=r"\.scratch/summaries/spec\.md"):
+        adw_tickets.main(FOLDER, adw_id="tk000005", use_worktree=True)
+    assert from_main.calls == []
+    assert not Path("adws/adw_data/worktrees/tk000005").exists()

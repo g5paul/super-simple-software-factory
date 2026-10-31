@@ -48,7 +48,8 @@ With --worktree the whole feature is built on branch sssf/<adw_id>, in its own
 worktree, and may launch from main; `just merge <adw_id>` lands it. A stopped
 run resumes by rejoining with --adw-id, which starts every agent fresh and
 reuses the scout's notes. While a worktree run holds a feature folder, no
-other run builds it. See docs/designs/parallel-worktree-runs.md, 26 to 38.
+other run builds it. Design: docs/designs/parallel-worktree-runs.md in the SSSF
+repo, decisions 26 to 38.
 """
 
 import argparse

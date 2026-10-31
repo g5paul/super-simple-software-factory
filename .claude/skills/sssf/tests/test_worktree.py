@@ -473,3 +473,16 @@ def test_a_rebase_reruns_setup_and_a_failed_setup_puts_the_branch_back(repo, mon
     settings.write_text("worktree_setup:\n  - touch set_up.marker\n")
     assert "checks passed" in worktree.rebase(cfg, "wt000021")
     assert (repo / "adws/adw_data/worktrees/wt000021/set_up.marker").exists()
+
+
+def test_messages_name_recipes_with_the_sssf_prefix_when_the_repo_loads_the_module(repo):
+    from adw_modules import utils
+    utils._recipe_prefix.cache_clear()
+    assert utils.just("merge ab12") == "just merge ab12"
+    (repo / "justfile").write_text("mod sssf 'sssf.just'\n\ndefault:\n    @just --list\n")
+    utils._recipe_prefix.cache_clear()
+    assert utils.just("merge ab12") == "just sssf merge ab12"
+    alive("wt000023")
+    with pytest.raises(worktree.WorktreeError, match="just sssf kill wt000023"):
+        worktree.discard(SSSFConfig(), "wt000023")
+    utils._recipe_prefix.cache_clear()

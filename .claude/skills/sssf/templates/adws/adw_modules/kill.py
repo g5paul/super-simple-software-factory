@@ -33,6 +33,7 @@ from pathlib import Path
 from .agent_cc import CLAUDE_PATH
 from .agent_pi import PI_PATH
 from .tracer import Tracer
+from .utils import just
 
 BINARIES = {"claude_code": Path(CLAUDE_PATH).name, "pi": Path(PI_PATH).name}
 CLOCK_SLACK_SECONDS = 5     # the row is written just after the spawn, not before
@@ -114,7 +115,7 @@ def kill(db: str, adw_id: str) -> list[str]:
     away = sorted({row[5] for row in rows if row[5] and row[5] != here})
     if away:
         return [f"{adw_id}: NOT stopped, it runs on {', '.join(away)} and this is {here}. "
-                "Run `just kill` there."]
+                f"Run `{just('kill')}` there."]
     report: dict[int, str] = {}
     signalled: list[tuple[str, int]] = []
     for kind, name, pid, command, started_at, _ in rows:

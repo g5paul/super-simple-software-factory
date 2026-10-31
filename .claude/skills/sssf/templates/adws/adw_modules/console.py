@@ -17,6 +17,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from .data_types import EnvelopeBase, EventRecord, Phase
+from .utils import just
 
 KIND_COLOR = {"engineer": "cyan", "agent": "magenta", "code": "yellow"}
 MAX_LINE = 160          # dynamic text (summaries, violations, errors) is clipped
@@ -81,7 +82,7 @@ class Console:
                 f" [dim]cost[/dim]     ${cost:.4f}",
                 f" [dim]adw_id[/dim]   {escape(self.adw_id)}",
                 f" [dim]db[/dim]       {escape(str(db_path))}",
-                f" [dim]next[/dim]     [bold]just phases {escape(self.adw_id)}[/bold]"]
+                f" [dim]next[/dim]     [bold]{escape(just(f'phases {self.adw_id}'))}[/bold]"]
         panel = Panel(Text.from_markup("\n".join(rows)),
                       title="[bold]ADW complete[/bold]",
                       border_style="green" if ok else "red", expand=False)

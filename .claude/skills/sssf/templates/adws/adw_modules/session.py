@@ -16,7 +16,7 @@ from . import account, agent_cc, agents, budget, changes, permissions, worktree
 from .data_types import EventRecord, SSSFConfig
 from .runner import Run
 from .tracer import Tracer
-from .utils import engineer_name, new_id
+from .utils import engineer_name, just, new_id
 
 
 def _finalize_when_killed(run: Run) -> None:
@@ -102,7 +102,7 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
         verb = "resuming in" if place["resumed"] else "working in"
         run.console.note(f"{verb} {place['worktree']} on {place['branch']}, from "
                          f"{place['launch_branch']} at {place['base']}; "
-                         f"`just merge {adw_id}` lands it")
+                         f"`{just(f'merge {adw_id}')}` lands it")
         if place.get("launch_dirty") and not place["resumed"]:
             run.console.note("the launch checkout has uncommitted changes; they are not part of this run")
         if not place["resumed"]:

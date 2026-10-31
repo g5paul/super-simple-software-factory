@@ -40,7 +40,7 @@ from pathlib import Path
 from . import repo_settings
 from .data_types import EventRecord, SSSFConfig
 from .tracer import Tracer
-from .utils import new_id
+from .utils import just, new_id
 
 BRANCH_PREFIX = "sssf/"
 LOCK_SECONDS = 30
@@ -221,7 +221,7 @@ def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
             f"worktree run{'s' if len(others) > 1 else ''} {', '.join(others)} "
             f"{'are' if len(others) > 1 else 'is'} still going in this repo, and "
             f"max_worktree_runs in {repo_settings.PATH} allows {cap} at once. Wait for one, "
-            "or stop it with `just kill <adw_id>`.")
+            f"or stop it with `{just('kill <adw_id>')}`.")
     git("worktree", "prune")
     branch = branch_for(adw_id)
     if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0:
@@ -281,7 +281,7 @@ def set_up(run) -> None:
         ph.log(commands=len(settings.worktree_setup), passed=not why)
         if why:
             raise SetupFailed(f"worktree_setup failed, so no agent started. {why}\n"
-                              f"Fix repo.yaml or the repo, then `just discard {run.adw_id}` "
+                              f"Fix repo.yaml or the repo, then `{just(f'discard {run.adw_id}')}` "
                               "and run the request again.")
 
 
@@ -352,8 +352,8 @@ def _merge(cfg: SSSFConfig, adw_id: str, ff_only: bool) -> str:
         raise WorktreeError(
             f"{launch} has moved on since run {adw_id} started, so {branch} can't fast-forward "
             f"it, and this merge is fast-forward only. Nothing was changed. To land it, "
-            f"`just rebase {adw_id}` moves it onto {launch} and reruns the checks, then "
-            f"`just merge {adw_id}` again.")
+            f"`{just(f'rebase {adw_id}')}` moves it onto {launch} and reruns the checks, then "
+            f"`{just(f'merge {adw_id}')}` again.")
     result = git("merge", "--ff", "--no-edit", branch, cwd=root, check=False)
     if result.returncode != 0:
         if git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=root, check=False).returncode == 0:
@@ -362,7 +362,7 @@ def _merge(cfg: SSSFConfig, adw_id: str, ff_only: bool) -> str:
             f"merging {branch} into {launch} failed, so it was aborted and the checkout is as "
             f"it was:\n{(result.stdout + result.stderr).strip()}\n"
             f"The branch and its worktree ({path}) are kept. To merge by hand: "
-            f"`git merge {branch}`, resolve, commit, then `just discard {adw_id}`.")
+            f"`git merge {branch}`, resolve, commit, then `{just(f'discard {adw_id}')}`.")
     after = git("rev-parse", "--short", "HEAD", cwd=root).stdout.strip()
     how = "fast-forward" if fast_forward else "merge commit"
     left = _remove(root, path, branch, record.get("environment"), force_branch=False)
@@ -385,7 +385,7 @@ def _discard(cfg: SSSFConfig, adw_id: str) -> str:
     if not record:
         raise WorktreeError(f"run {adw_id} did not run in a worktree; there is nothing to discard.")
     if adw_id in live_runs(db):
-        raise WorktreeError(f"run {adw_id} is still going. Stop it with `just kill {adw_id}` first.")
+        raise WorktreeError(f"run {adw_id} is still going. Stop it with `{just(f'kill {adw_id}')}` first.")
     left = _remove(root, Path(record["worktree"]), record["branch"], record.get("environment"),
                    force_branch=True)
     _log(cfg, adw_id, "worktree_discarded", {})
@@ -424,7 +424,7 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
         raise WorktreeError(f"{path} has uncommitted changes. Commit or remove them first.")
     old = git("rev-parse", "--short", "HEAD", cwd=path).stdout.strip()
     if git("merge-base", "--is-ancestor", launch, "HEAD", cwd=path, check=False).returncode == 0:
-        return f"{branch} is already on top of {launch}; nothing to rebase. `just merge {adw_id}` lands it."
+        return f"{branch} is already on top of {launch}; nothing to rebase. `{just(f'merge {adw_id}')}` lands it."
     result = git("rebase", launch, cwd=path, check=False)
     if result.returncode != 0:
         git("rebase", "--abort", cwd=path, check=False)
@@ -434,7 +434,7 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
         raise WorktreeError(
             f"rebasing {branch} onto {launch} hit a conflict, so it was aborted and the branch "
             f"is still at {old}:\n{said}\n"
-            f"To land it, merge it by hand, or `just discard {adw_id}` and run the request again.")
+            f"To land it, merge it by hand, or `{just(f'discard {adw_id}')}` and run the request again.")
     new = git("rev-parse", "--short", "HEAD", cwd=path).stdout.strip()
     # The rebase may bring in a changed lockfile, so set the worktree up again.
     settings = repo_settings.load(root)
@@ -459,7 +459,7 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
             f"(run {checks}), so the branch is back at {old}. Nothing else changed.")
     _log(cfg, adw_id, "worktree_rebased", {**payload, "kept": True})
     return (f"rebased {branch} onto {launch}, {old} to {new}, and the checks passed (run "
-            f"{checks}). `just merge {adw_id}` lands it.")
+            f"{checks}). `{just(f'merge {adw_id}')}` lands it.")
 
 
 def _with_environment(record: dict, call):

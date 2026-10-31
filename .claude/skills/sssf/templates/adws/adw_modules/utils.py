@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import os
+import re
 import secrets
 import subprocess
 from datetime import datetime, timezone
@@ -36,6 +38,26 @@ def operator_env() -> dict[str, str]:
     parts = [p for p in env.get("PATH", "").split(os.pathsep) if p and p != venv_bin]
     env["PATH"] = os.pathsep.join(parts)
     return env
+
+
+# The same test as install.py's loads_module.
+MOD_LINE = re.compile(r"^\s*mod\s+sssf(\s+['\"]sssf\.just['\"])?\s*$", re.MULTILINE)
+
+
+@functools.lru_cache(maxsize=1)
+def _recipe_prefix() -> str:
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    root = Path(top.stdout.strip()) if top.returncode == 0 else Path.cwd()
+    justfile = root / "justfile"
+    loads = justfile.is_file() and MOD_LINE.search(justfile.read_text()) is not None
+    return "just sssf" if loads else "just"
+
+
+def just(recipe: str) -> str:
+    """An SSSF recipe as this repo runs it: `just sssf <recipe>` when the
+    repo's own justfile loads SSSF's recipes as the `sssf` module, else
+    `just <recipe>`. Every message that names a recipe goes through here."""
+    return f"{_recipe_prefix()} {recipe}"
 
 
 def new_id(length: int = 8) -> str:

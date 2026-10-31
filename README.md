@@ -18,7 +18,7 @@ A software factory does one thing: it gives you more leverage on your prompt. Ho
 Everyone can get an agent to write code once. Almost nobody gets the same result twice. This fixes that by moving the control plane out of the prompt and into Python. An ADW script (AI Developer Workflow) owns sequencing, retries, and acceptance. Agents work inside named phases. Typed JSON envelopes carry context across the seams. Every event streams into SQLite while it is still happening. **Agent proposes, code disposes.**
 
 > [!NOTE]
-> **This branch is the skill alone**, which is the thing you install. For a repo with the factory already stamped into it, a demo app it planned, built, tested, reviewed, and documented, and the real traces from those runs, see the **[`example` branch](../../tree/example)**.
+> **This repo is the skill**, which is the thing you install, plus `docs/designs/`, the design records for what this fork added to it.
 
 ---
 
@@ -98,6 +98,8 @@ uv run adws/adw_prompt.py "reply with a one-line summary of this repo" --agent s
 ```
 
 Re-running `install.py` is safe. It skips every file that already exists and reports what it skipped, so a second run doubles as a drift check. To bring a repo up to a newer skill, set `SSSF_SOURCE` in its `.env` and run `just sssf-update`, which refreshes the copy of the skill and runs `install.py --update`. It replaces only the files the repo never changed and lists the rest. `--force` overwrites **all** stamped files including your `sssf.config.yaml`, `quality.py`, and your prompts, so commit first. See `cookbooks/install.md`.
+
+To run the operator session in a sandbox, add `--container` when you install. It also stamps `container/`, a Podman image and a `run.sh` that starts Claude Code inside it with only the repo mounted. It works with Claude Code rosters only. See `cookbooks/install.md`.
 
 To bring SSSF into a new project, start a Claude session in that repo and point it at `cookbooks/onboard.md`. It checks whether SSSF fits, installs it, sets `quality.py` to the commands CI runs, writes `docs/sssf.md`, and makes a first small run.
 
@@ -197,18 +199,21 @@ There are three actors here, and the design keeps them separate on purpose: **th
   <img src="images/03_skill_stamp.svg" alt="The sssf skill directory on the left stamping config, adws, and prompt_engineering into three different target repos" width="780">
 </p>
 
-Everything lives in `.claude/skills/sssf/`. `SKILL.md` carries the hard rules and routes each request to one of nine cookbooks. `references/` holds the deep specs, `scripts/` holds the generators, `templates/` holds exactly what gets stamped.
+Everything lives in `.claude/skills/sssf/`. `SKILL.md` carries the hard rules and routes each request to one of twelve cookbooks. `references/` holds the deep specs, `scripts/` holds the generators, `templates/` holds exactly what gets stamped.
 
 | What lands in your repo | Where it comes from | Tracked |
 |---|---|---|
 | `adws/adw_sssf_config/sssf.config.yaml` | `templates/sssf.config.yaml` | yes, it is your agent roster |
-| `adws/adw_*.py` | `templates/adws/` | yes, twelve starter workflows |
+| `adws/adw_*.py` | `templates/adws/` | yes, thirteen starter workflows, plus `adw_kill` and `adw_worktree` |
 | `adws/adw_modules/` | `templates/adws/adw_modules/` | yes, all low-level logic |
 | `adws/adw_data/prompt_engineering/` | `templates/prompt_engineering/` | yes, **your prompts live here** |
 | `adws/adw_data/harness_engineering/` | `templates/harness_engineering/` | yes, pi extensions |
 | `.env.sample` | `templates/env.sample` | yes |
 | `justfile` | `templates/justfile` | yes, starter recipes to run and watch |
-| `adws/adw_data/sessions/`, `sssf.db` | created at runtime | no, gitignored |
+| `adws/adw_sssf_config/repo.yaml` | `templates/repo.yaml` | yes, the repo's own SSSF rules, such as `merge: ff_only` |
+| `adws/adw_sssf_config/stamp.json` | written by `install.py` | yes, the hash of every stamped file, so `--update` can tell your edits from old copies |
+| `container/` | `templates/container/`, only with `--container` | yes, the operator's Podman sandbox |
+| `adws/adw_data/sessions/`, `sssf.db`, `worktrees/` | created at runtime | no, gitignored |
 
 The prompts are yours the moment they land. Edit them in `adws/adw_data/prompt_engineering/{agent}/`, never back inside the skill.
 
@@ -342,7 +347,7 @@ That one cursor query is the entire transport. Live view and full history are th
 
 Files stay the raw record (`raw_output.jsonl`, `envelope.json`, `agent_map.json`). The db is the queryable mirror. Losing it loses nothing you cannot rebuild.
 
-The skill ships a read-only UI for this db at `.claude/skills/sssf/apps/visualizer/`: Vue and Vite served by Bun, with sessions, a trace waterfall, and per-phase tool-call detail.
+The skill ships a read-only UI for this db at `.claude/skills/sssf/apps/visualizer/`: Vue and Vite served by Bun, with sessions, a trace waterfall, and per-phase tool-call detail. A `--worktree` run also shows its branch and whether it was merged or discarded.
 
 `just obs` builds the UI and serves it, with the API, from one process. It takes the first free port from 4600 up and prints the address, so several repos can each run their own at once. Set `SSSF_OBS_PORT` in `.env` to pin a port. The raw form:
 
@@ -369,10 +374,11 @@ A repo on another machine is not in this registry. Run `just obs` there, and rea
 
 ---
 
-## What is in this branch
+## What is in this repo
 
 ```
-super-simple-software-factory/          # the deployable factory, and nothing else
+super-simple-software-factory/
+├── docs/designs/                       # design records for what this fork added
 └── .claude/skills/sssf/
     ├── SKILL.md                        # hard rules + request routing table
     ├── cookbooks/                      # 12 orchestrator playbooks, loaded lazily
@@ -380,11 +386,13 @@ super-simple-software-factory/          # the deployable factory, and nothing el
     ├── scripts/                        # install.py, make_config.py, make_adw.py
     ├── apps/visualizer/                # the read-only trace UI (Vue + Vite on Bun)
     └── templates/                      # EXACTLY what install.py stamps
-        ├── sssf.config.yaml            # the starter roster
+        ├── sssf.config*.yaml           # the starter rosters: pi, Claude Code, ChatGPT
+        ├── repo.yaml                   # the repo's own SSSF rules
+        ├── container/                  # the Podman sandbox, with --container
         ├── prompt_engineering/{agent}/ # system.md + user.md per agent
         ├── harness_engineering/        # pi extensions
         └── adws/
-            ├── adw_*.py                # the twelve starter workflows
+            ├── adw_*.py                # thirteen starter workflows, plus kill and worktree
             └── adw_modules/            # ALL low-level logic, ADW scripts stay thin
 ```
 
@@ -392,13 +400,15 @@ The skill is also what an agent reads to *operate* the factory. `SKILL.md` is th
 
 ---
 
-## The twelve starter workflows
+## The thirteen starter workflows
 
 Every ADW takes the same shape:
 
 ```bash
-uv run adws/adw_*.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
+uv run adws/adw_*.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree]
 ```
+
+`--worktree` works on the four single-task chains: `adw_build_test`, `adw_plan_build_test`, `adw_plan_build_test_quality`, and `adw_simple_sdlc`. See [A branch per run](#a-branch-per-run).
 
 | ADW | Chain | Reach for it when |
 |---|---|---|
@@ -429,6 +439,18 @@ uv run adws/adw_plan.py "add a /health endpoint"              # prints adw_id a1
 uv run adws/adw_build_test.py "implement the plan" --adw-id a1b2c3d4
 ```
 
+### A branch per run
+
+By default a chain works and commits on the branch you have checked out. With `--worktree`, the run gets its own branch, `sssf/<adw_id>`, cut from your branch's tip, in its own folder under `adws/adw_data/worktrees/`. You can keep working while it runs. Your uncommitted changes are not part of the run, and nothing reaches your branch until you merge it.
+
+```bash
+uv run adws/adw_simple_sdlc.py "add a /health endpoint" --worktree
+just merge <adw_id>      # a successful run only: fast-forward, or a merge commit if your branch moved on
+just discard <adw_id>    # drop the run's branch and folder, whatever state it is in
+```
+
+`just merge` refuses unless the run succeeded, its launch branch is checked out, and the checkout is clean. It never rebases. A conflict aborts the merge, leaves your checkout as it was, keeps the branch, and prints the commands to merge by hand. A repo that keeps a linear history sets `merge: ff_only` in `adws/adw_sssf_config/repo.yaml`, and then a merge that can't fast-forward is refused with nothing changed. One worktree run per repo goes at a time. `--adw-id` resumes a worktree run in its own folder. Neither recipe pushes.
+
 Watch a run with the trace db directly:
 
 ```bash
@@ -437,7 +459,7 @@ sqlite3 adws/adw_data/sssf.db "select seq, name, kind, owner, status from phases
 sqlite3 adws/adw_data/sssf.db "select kind, name, pid, command from processes where adw_id='a1b2c3d4' and ended_at is null;"
 ```
 
-Reads never block a running workflow, the db is WAL. `install.py` stamps a `justfile` wrapping all of the above, so in a fresh repo these are `just sessions`, `just phases <adw_id>`, `just tail <adw_id>`, and `just procs <adw_id>`.
+Reads never block a running workflow, the db is WAL. `install.py` stamps a `justfile` wrapping all of the above, so in a fresh repo these are `just sessions`, `just phases <adw_id>`, `just tail <adw_id>`, and `just procs <adw_id>`. `just kill <adw_id>` stops a run, and `just rosters` lists every roster and the model each agent runs.
 
 ---
 
@@ -448,17 +470,17 @@ Honest edges, because knowing them is cheaper than discovering them.
 | Failure | What actually happens | What to do |
 |---|---|---|
 | The test phase reports green on a fresh install | `quality.py` ships placeholder commands that exit 0. Three ADWs run them as their test phase | Wire your real commands into `quality.py` before trusting `adw_build_test`, `adw_plan_build_test`, or `adw_simple_sdlc`. This is the first thing to customize |
-| CI fails on files you never wrote | A repo-wide `ruff check .`, eslint, or tsc also reads the ~150 SSSF files in `adws/` and `.claude/`. An sdist build can ship them too. The chain passes because `quality.py` names your paths | Exclude `adws/` and `.claude/` from those tools and from the package. Exclude `specs/` and `app_docs/` from formatters and linters too: ruff 0.16 formats Python blocks inside Markdown, so a spec's examples can fail `ruff format --check .`. The install cookbook's post-install checklist lists the setting for each tool |
+| CI fails on files you never wrote | A repo-wide `ruff check .`, eslint, or tsc also reads the ~200 SSSF files in `adws/` and `.claude/`. An sdist build can ship them too. The chain passes because `quality.py` names your paths | Exclude `adws/` and `.claude/` from those tools and from the package. Exclude `specs/` and `app_docs/` from formatters and linters too: ruff 0.16 formats Python blocks inside Markdown, so a spec's examples can fail `ruff format --check .`. The install cookbook's post-install checklist lists the setting for each tool |
 | A bare model pattern | The same model sits under several providers, so `gemini-3.6-flash` matches three catalog entries and `agents.validate()` refuses to spawn | Always write `provider/model-id` |
 | `just` is not installed | The stamped `justfile` is a convenience wrapper, nothing depends on it | Every recipe is a one-line `uv run` or `sqlite3` command. Open the justfile and run the line yourself |
-| A coding agent hangs silently | No events, no tokens, an empty `raw_output.jsonl`. The trace goes quiet rather than red | Query `processes` for what is alive and kill it children-first. A killed run finalizes its own trace to `fail` |
+| A coding agent hangs silently | No events, no tokens, an empty `raw_output.jsonl`. The trace goes quiet rather than red | `just procs <adw_id>` shows what is alive. `just kill <adw_id>` stops the chain first, so it can't retry with a new agent, then its agents. It checks each pid still runs what the trace recorded. A killed run finalizes its own trace to `fail` |
 | The synced triad drifts | Type, `## Report` example, and `output_type=` disagree, so every call burns correction rounds | Grep the type name and fix all three in one edit |
 | Gates pass, output is bad | Gates check what a predicate can check, not plan quality or code taste | Run the `reviewer`, or read it yourself |
 | An agent edits something it should not | Detected and rolled back after the call, and the phase fails | Expected. Widen that agent's `writes` if the change was legitimate |
 | Commit phase has nothing to commit | `commit_all` raises if the cwd is not a git repo or nothing changed | `git init` with one commit first. A no-op build fails the phase rather than committing nothing |
 | `install.py --force` | Overwrites **all** stamped files, config and prompts included | Use `--update` to refresh a repo. Commit before you force |
 
-Also missing on purpose, so you know what to add: this runs on your current branch. For real work you want a branch per run, a sandbox around the agent, and a merge step at the end.
+A run works on your current branch unless you ask for one of its own. For real work, use `--worktree` and merge with `just merge`, and consider `--container` at install for a sandbox around the operator.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 
@@ -477,24 +499,13 @@ Where to start, roughly in the order that pays off fastest:
 | Your real commands | `adws/adw_modules/quality.py` | The shipped blocks are placeholders that exit 0. Until you wire this, your test phase is theater |
 | Your prompts | `adws/adw_data/prompt_engineering/{agent}/` | Where your standards live: what a good plan looks like, what a review has to catch |
 | Your roster | `adws/adw_sssf_config/sssf.config.yaml` | Models, thinking levels, tools, and what each agent is allowed to write |
-| Your chains | `adws/adw_*.py` | Copy the closest workflow and edit the phase list. They are 40 to 180 lines on purpose |
+| Your chains | `adws/adw_*.py` | Copy the closest workflow and edit the phase list. They are 40 to 300 lines on purpose |
 | Your definition of done | `adws/adw_modules/gates.py` | A gate is one function. Whatever "done" means where you work, write it here |
 | Your agent capabilities | `adws/adw_data/harness_engineering/` | Pi extensions, a different set per agent if that is what the job needs |
 
-And what it deliberately does not do. It runs on your current branch. There is no sandbox, no branch per run, no merge step, no cloud, and no human-in-the-loop approval phase. Those are the obvious next things to build. They are left out so the core stays small enough to read in one sitting, which is the only reason you would trust it enough to change it.
+And what it deliberately does not do. A branch per run, the merge step, and the sandbox are opt-in: `--worktree`, `just merge`, and `--container`. There are no parallel worktree runs, no cloud, and no human-in-the-loop approval phase. Those are the obvious next things to build. They are left out so the core stays small enough to read in one sitting, which is the only reason you would trust it enough to change it.
 
 So take it. Fork it, strip the parts you do not need, rename the agents, throw out half the workflows, and roll what is left into the factory your product actually needs. The specific chains in here matter far less than the shape: code owns the loop, agents own the phases, and every run leaves a trace you can go read.
-
----
-
-## See it in a real repo
-
-The [`example` branch](../../tree/example) is this same skill with the factory already stamped in: a populated `adws/`, a `justfile`, a demo app the factory planned, built, tested, reviewed, and documented, and the specs, docs, and traces those runs produced.
-
-```bash
-git clone <this-repo> sssf && cd sssf
-git checkout example
-```
 
 ---
 

@@ -1,8 +1,7 @@
 # SSSF starter recipes. Stamped by install.py, then yours to edit.
 #
 # Deliberately small. These are the handful you need on day one: run something,
-# watch it, and open the trace. Add your own as your chains grow, and see the
-# example branch for the fuller set (orchestrator agents, rosters, ipi).
+# watch it, and open the trace. Add your own as your chains grow.
 
 # `.env` reaches every ADW through this, so keys work without exporting them.
 set dotenv-load
@@ -67,6 +66,25 @@ simple-sdlc *ARGS:
 # just tickets .scratch/summaries/   (see cookbooks/tickets.md)
 tickets *ARGS:
     uv run adws/adw_tickets.py --config {{config}} "$@"
+
+# The roster is chosen per run: `--config <path>` on any ADW, or SSSF_CONFIG for
+# these recipes. This is how you find the path to pass.
+# every roster on disk, and the model each agent runs: just rosters
+rosters:
+    #!/usr/bin/env bash
+    for f in adws/adw_sssf_config/sssf*.yaml; do
+      printf '%s\n' "$f"
+      awk '
+        /^agents:/ { in_agents = 1 }
+        /^  model:/ && !in_agents { default_model = $2 }
+        /^  - name:/ {
+          if (name) printf "    %-18s %s\n", name, (model ? model : default_model " (inherited)")
+          name = $3; model = ""
+        }
+        /^    model:/ { model = $2 }
+        END { if (name) printf "    %-18s %s\n", name, (model ? model : default_model " (inherited)") }
+      ' "$f"
+    done
 
 # ── land a worktree run ─────────────────────────────────────────────────────
 # A chain started with --worktree works on branch sssf/<adw_id>, in its own

@@ -29,6 +29,7 @@ import type {
   LiveSpend,
   MachineDay,
   HealthResponse,
+  PiLimitHit,
   ProjectsResponse,
   RosterRow,
   SessionSummary,
@@ -219,12 +220,17 @@ const server = listen((port) => Bun.serve({
       const since = new Date(now - 7 * 24 * 3_600_000).toISOString();
       const sessions = new Set<string>();
       const piCalls: PiCallAt[] = [];
+      let limitHit: PiLimitHit | null = null;
       for (const p of projects.everyProject()) {
         const db = projects.db(p);
         for (const id of db?.agentSessionIds() ?? []) sessions.add(id);
         for (const c of db?.piCalls(since) ?? []) piCalls.push({ ...c, at: Date.parse(c.at), project: p.name });
+        const hit = db?.piLimitHit(since);
+        if (hit && (!limitHit || hit.at > limitHit.at)) limitHit = { ...hit, project: p.name };
       }
-      return json(account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls) satisfies AccountUsage);
+      const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls);
+      usage.pi.limit_hit = limitHit;
+      return json(usage satisfies AccountUsage);
     }),
 
     "/api/projects/:project/health": withDb((db) =>

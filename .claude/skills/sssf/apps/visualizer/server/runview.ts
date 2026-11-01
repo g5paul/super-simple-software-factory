@@ -70,8 +70,10 @@ export function stopReason(events: RunEvent[], phases: Phase[], status: SessionS
   for (const kind of STOP_EVENTS) {
     const e = latest(events, kind);
     if (!e) continue;
-    const p = payload<{ error?: string; reason?: string }>(e);
-    return { kind, message: p?.error ?? p?.reason ?? kind, phase_id: e.phase_id || null };
+    const p = payload<{ error?: string; reason?: string; provider?: string }>(e);
+    const stop: StopReason = { kind, message: p?.error ?? p?.reason ?? kind, phase_id: e.phase_id || null };
+    if (p?.provider) stop.provider = p.provider;
+    return stop;
   }
   const failed = phases.find((p) => p.status === "fail");
   if (!failed) return null;

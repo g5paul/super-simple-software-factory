@@ -160,7 +160,6 @@ Settled in an eighth grilling session on 2026-11-01. `max_daily_cost` holds one 
 
 Known, and not built. None of them blocks a run.
 
-- **A pi run at the ChatGPT plan's limit.** Pi's ChatGPT route sends no usage windows, checked on real responses ([pi-usage-limits.md](../research/pi-usage-limits.md)), so nothing can stop a run before the limit. At the limit the call fails with HTTP 429 `subscription_sharing_usage_limit_exceeded`. Since 2026-11-01 any pi call whose last turn ended in an error fails with pi's own message, so this one says what happened; before that, an error turn with no text reached the JSON parser, which sent corrections into the same error and then blamed the JSON. A named usage stop is left until a real 429 shows whether it's needed; a rolling dollar cap per window for pi is a weaker option.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
 
 ## Log
@@ -219,3 +218,4 @@ Known, and not built. None of them blocks a run.
 | 2026-11-01 | sssf-sandbox | machine case 2: mc2stop (`adw_plan_build`) with the cap at $1.70, just above the machine's total | the planner ran, $0.081; stopped before the builder at $1.70, `run_caps` recorded $1.70 |
 | 2026-11-01 | sssf-sandbox | machine case 3: mc3off (`adw_prompt`) with no `limits.yaml` | success, $0.008, no stop, `run_caps` recorded the cap as off |
 | 2026-11-01 | hub | machine case 4: `/api/machine/day` from a server on the temporary registry, against `budget._machine_over` | both $1.71 with the same shares and clear time; screenshots red at $1.70, amber at $2.00, green at $5.00, and the broken-file message |
+| 2026-11-01 | hub | the open item "a pi run at the ChatGPT plan's limit" | designed and built in [pi-usage-stop.md](pi-usage-stop.md): the run stops by name at the 429, with nothing to read before it |

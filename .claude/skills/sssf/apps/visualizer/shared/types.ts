@@ -310,6 +310,8 @@ export interface StopReason {
   message: string;
   /** The phase it stopped in, to jump to. */
   phase_id: string | null;
+  /** A rate_limit_stop's provider: "openai" for a ChatGPT plan, absent for Claude. */
+  provider?: string | null;
 }
 
 /**
@@ -514,6 +516,13 @@ export interface PiSpendWindow {
   by_model: SpendRow[];
 }
 
+/** The latest run in the last 7 days that stopped at the ChatGPT plan's usage limit. */
+export interface PiLimitHit {
+  at: string;
+  project: string;
+  adw_id: string;
+}
+
 /** GET /api/account */
 export interface AccountUsage {
   sample: LimitSample | null;
@@ -521,7 +530,7 @@ export interface AccountUsage {
   week: SpendWindow;
   transcripts: string;
   /** SSSF's own Pi agents, from every registered project's trace db. */
-  pi: { window: PiSpendWindow; week: PiSpendWindow };
+  pi: { window: PiSpendWindow; week: PiSpendWindow; limit_hit?: PiLimitHit | null };
 }
 
 /** The trial a run belongs to, as an attempt or as its panel (trials.md decision 24). */

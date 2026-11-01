@@ -193,6 +193,14 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         except budget.CallBudgetStop as stop:
             raise budget.record_call_stop(run, agent.name, phase.phase_id,
                                           agent.max_call_cost, stop) from None
+        except agent_pi.UsageLimitStop as stop:
+            # Named like Claude's usage stop, so the trace and the dashboard
+            # read both the same way; `provider` tells them apart.
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rate_limit_stop",
+                                         payload={"agent": agent.name, "provider": "openai",
+                                                  "error": str(stop)}))
+            raise
         run.add_usage(result.tokens, result.cost)
         spent.merge(result.usage)
         latest = result

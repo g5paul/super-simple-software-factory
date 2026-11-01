@@ -100,9 +100,8 @@ def _turn(stop, text="", error=None, cost=0.0):
 
 
 def test_an_error_turn_fails_the_call_with_pis_message(tmp_path, monkeypatch):
-    request = _fake_pi(tmp_path, monkeypatch, _turn("error", error=(
-        "429 subscription_sharing_usage_limit_exceeded: usage limit reached")))
-    with pytest.raises(RuntimeError, match="subscription_sharing_usage_limit_exceeded"):
+    request = _fake_pi(tmp_path, monkeypatch, _turn("error", error="400 invalid_request_error: bad tool"))
+    with pytest.raises(RuntimeError, match="400 invalid_request_error: bad tool"):
         agent_pi.run(request)
 
 
@@ -119,3 +118,43 @@ def test_a_turn_that_recovers_after_an_error_succeeds(tmp_path, monkeypatch):
     result = agent_pi.run(request)
     assert result.text == '{"ok": true}'
     assert result.cost == 0.01
+
+
+# At the ChatGPT plan's limit, OpenAI's token-sharing route answers 429 with
+# subscription_sharing_usage_limit_exceeded, and pi never retries it. The call
+# stops by name, so the run can say the plan is out rather than "an error".
+# Pi writes the message two ways: with the status, or as a mid-stream
+# response.failed with none. Both end with a link to the usage page.
+
+@pytest.mark.parametrize("error", [
+    'OpenAI API error (429): {"error":{"code":"subscription_sharing_usage_limit_exceeded",'
+    '"message":"Usage limit reached"}}\nCheck your ChatGPT usage: https://chatgpt.com/settings/usage',
+    "subscription_sharing_usage_limit_exceeded: Usage limit reached\n"
+    "Check your ChatGPT usage: https://chatgpt.com/settings/usage",
+])
+def test_the_plan_limit_stops_by_name(tmp_path, monkeypatch, error):
+    request = _fake_pi(tmp_path, monkeypatch, _turn("toolUse", text="reading"), _turn("error", error=error))
+    request.adw_id = "a1b2c3d4"
+    with pytest.raises(agent_pi.UsageLimitStop) as stop:
+        agent_pi.run(request)
+    message = str(stop.value)
+    assert "usage limit" in message and agent_pi.USAGE_PAGE in message
+    assert "--adw-id a1b2c3d4" in message
+    assert "reset time" in message                  # OpenAI gives none, so SSSF guesses none
+
+
+def test_usage_that_could_not_be_checked_is_an_ordinary_error(tmp_path, monkeypatch):
+    # The 503 means OpenAI couldn't check usage; pi retries it itself. If it
+    # still fails, the run must not claim the plan is out.
+    request = _fake_pi(tmp_path, monkeypatch, _turn("error", error=(
+        "OpenAI API error (503): subscription_sharing_usage_unavailable")))
+    with pytest.raises(RuntimeError, match="subscription_sharing_usage_unavailable") as stop:
+        agent_pi.run(request)
+    assert not isinstance(stop.value, agent_pi.UsageLimitStop)
+
+
+def test_a_turn_that_recovers_after_the_limit_is_not_stopped(tmp_path, monkeypatch):
+    request = _fake_pi(tmp_path, monkeypatch,
+                       _turn("error", error="subscription_sharing_usage_limit_exceeded"),
+                       _turn("stop", text='{"ok": true}'))
+    assert agent_pi.run(request).text == '{"ok": true}'

@@ -132,3 +132,11 @@ test("a rebase is reported, the latest attempt wins, and a run never rebased has
   expect(worktree([start, conflict])?.rebased).toEqual({ onto: "main", old: "abc1234", conflict: true, kept: false });
   expect(worktree([start, conflict, kept])?.rebased?.kept).toBe(true);
 });
+
+test("a ChatGPT plan's usage stop carries its provider; Claude's does not", () => {
+  const phases = [phase("build", "fail", "UsageLimitStop: the ChatGPT plan hit its usage limit")];
+  const pi = [ev("error", "rate_limit_stop", { provider: "openai", error: "The ChatGPT plan behind pi's sign-in hit its usage limit" }, phases[0].phase_id)];
+  expect(stopReason(pi, phases, "fail")).toMatchObject({ kind: "rate_limit_stop", provider: "openai" });
+  const claude = [ev("error", "rate_limit_stop", { error: "Claude's 5-hour window is at 85%" }, phases[0].phase_id)];
+  expect(stopReason(claude, phases, "fail")?.provider).toBeUndefined();
+});

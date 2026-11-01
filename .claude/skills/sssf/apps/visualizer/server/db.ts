@@ -169,6 +169,18 @@ export class SssfDb {
     ).all(since) as PiCall[];
   }
 
+  /** The latest stop at the ChatGPT plan's usage limit since `since`, if any. */
+  piLimitHit(since: string): { at: string; adw_id: string } | null {
+    return this.db
+      .query<{ at: string; adw_id: string }, [string]>(
+        `SELECT started_at AS at, adw_id FROM events
+          WHERE name = 'rate_limit_stop' AND json_extract(payload_json, '$.provider') = 'openai'
+            AND started_at >= ?
+          ORDER BY started_at DESC LIMIT 1`,
+      )
+      .get(since) ?? null;
+  }
+
   close(): void {
     this.writer?.close();
     this.db.close();

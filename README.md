@@ -126,7 +126,7 @@ SSSF can run its agents on a Claude subscription through Claude Code, or on a Ch
 
 **ChatGPT, through Pi.** Sign Pi into ChatGPT once: run `pi`, then `/login`, and pick `openai`. `pi auth check --provider openai --json` should report `"authType": "oauth"`. Install with `--chatgpt`, which stamps a Pi roster with the ChatGPT models in the table below. Set `SSSF_PI_AUTH=subscription` in `.env`.
 
-- SSSF can't see ChatGPT's usage windows. Pi's ChatGPT sign-in calls OpenAI's public API through token sharing, which sends none with its responses; only the Codex backend does. So the panel shows spend only, and `rate_limit_stop` doesn't cover a Pi run. Check your plan's limits in ChatGPT or Codex. See [`docs/research/pi-usage-limits.md`](docs/research/pi-usage-limits.md).
+- SSSF can't see ChatGPT's usage windows. Pi's ChatGPT sign-in calls OpenAI's public API through token sharing, which sends none with its responses; only the Codex backend does. So the panel shows spend only, and `rate_limit_stop` can't stop a Pi run before the limit. At the limit, OpenAI refuses the call, and the run stops there by name, links the plan's usage page, and says how to resume. Check your plan's limits in ChatGPT or Codex. See [`docs/research/pi-usage-limits.md`](docs/research/pi-usage-limits.md).
 - There is no per-call cap on Pi. `max_run_cost`, checked before every send, and `max_live_cost` and `max_daily_cost` in `repo.yaml` are its cost limits.
 
 | | Claude via Claude Code | ChatGPT via Pi |
@@ -367,7 +367,7 @@ Above the projects, a panel shows the Claude account they all share. It has two 
 
 - **The usage limits.** These are how full the 5-hour and 7-day windows are, and when each resets. Claude Code reports them on every SSSF agent call, and SSSF keeps the newest reading in `rate_limits.json` beside the registry. Interactive sessions don't report them, so the panel says how old the reading is. `/usage` in any Claude Code session gives the current figure.
 - **Where the spend went.** This is the spend in the current 5-hour window, by kind (SSSF agents or interactive sessions), by project, and by model. The server reads it from Claude Code's transcripts in `~/.claude/projects` and estimates the cost from token counts at list price. The subscription pays that cost, but it shows what fills the windows.
-- **Pi agents.** When Pi agents have run in the last 7 days, the panel adds their spend over the last 5 hours and 7 days, by project and model. It reads each registered repo's trace database and uses the list-price cost Pi reports. A ChatGPT sign-in pays that cost. Pi's providers report no usage limits to SSSF, so the panel shows no windows for them and `rate_limit_stop` doesn't cover them. Check a ChatGPT plan's limits in ChatGPT or Codex.
+- **Pi agents.** When Pi agents have run in the last 7 days, the panel adds their spend over the last 5 hours and 7 days, by project and model. It reads each registered repo's trace database and uses the list-price cost Pi reports. A ChatGPT sign-in pays that cost. Pi's providers report no usage limits to SSSF, so the panel shows no windows for them and `rate_limit_stop` can't stop them early. When a run hits the ChatGPT plan's limit, it stops, and the panel shows the latest one. Check a ChatGPT plan's limits in ChatGPT or Codex.
 
 Before each Claude Code agent starts, SSSF checks the same reading. If either window is at or over `defaults.rate_limit_stop` (default 0.8), the run stops, with the time the window resets. That beats a run that dies halfway through a phase. See `references/config.md`.
 
@@ -512,7 +512,6 @@ A run works on your current branch unless you ask for one of its own. For real w
 
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list.
 
-- A pi run can't stop before the ChatGPT plan's limit, because the route reports no windows. At the limit the call fails with pi's own message, which names `subscription_sharing_usage_limit_exceeded` and links to the plan's usage page; SSSF doesn't treat it as a separate usage stop.
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.
 

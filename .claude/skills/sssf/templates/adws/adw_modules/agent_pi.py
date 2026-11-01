@@ -16,10 +16,22 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
+from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
 from .utils import now_iso, operator_env
 
 PI_PATH = os.environ.get("PI_PATH", "pi")
+
+# OpenAI's code for a ChatGPT plan that is out of usage, on the token-sharing
+# route pi's `openai` sign-in uses (HTTP 429). Pi never retries it. The route
+# reports no usage windows and no reset time, so this is the only signal.
+USAGE_LIMIT = "subscription_sharing_usage_limit_exceeded"
+USAGE_PAGE = "https://chatgpt.com/settings/usage"
+
+
+class UsageLimitStop(RateLimitStop):
+    """The ChatGPT plan behind pi's sign-in refused a call: it is out of usage.
+    A RateLimitStop, so the run ends on its message, not a traceback."""
 # Keys for the providers Pi can sign into with a subscription (ChatGPT,
 # Claude). With SSSF_PI_AUTH=subscription they are kept from Pi, so a lapsed
 # sign-in fails the call instead of falling back to billing the API.
@@ -324,6 +336,11 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     result.returncode = process.wait()
     if on_exit:
         on_exit(process.pid)
+    if last_stop == "error" and USAGE_LIMIT in last_error:
+        raise UsageLimitStop(
+            f"The ChatGPT plan behind pi's sign-in hit its usage limit ({USAGE_LIMIT}). "
+            f"OpenAI gives no reset time; check {USAGE_PAGE}, then resume with "
+            f"--adw-id {request.adw_id} once it has usage again.")
     if last_stop == "error":
         # Raised, not returned: an error turn's text, if any, came before the
         # error, and parsing it would send corrections into the same failure.

@@ -25,7 +25,7 @@ SCRIPT = """
 import sys
 from types import SimpleNamespace
 sys.path.insert(0, {adws!r})
-from adw_modules import changes, permissions, session
+from adw_modules import agent_pi, changes, permissions, session
 
 run = SimpleNamespace(console=SimpleNamespace(advise=lambda m: print("ADVISE " + m)))
 session._report_stops_plainly(run)
@@ -50,6 +50,13 @@ def test_a_change_set_that_cannot_be_taken_is_a_stop():
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
     assert "ADVISE ChangeCaptureError: nothing changed since main" in result.stdout
+
+
+def test_the_chatgpt_plan_limit_is_a_stop():
+    result = end_with('agent_pi.UsageLimitStop("The ChatGPT plan behind pi\'s sign-in hit its usage limit")')
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "ADVISE UsageLimitStop: The ChatGPT plan behind pi's sign-in hit its usage limit" in result.stdout
 
 
 @pytest.mark.parametrize("error", ["ValueError('a bug')", "RuntimeError('a bug')"])

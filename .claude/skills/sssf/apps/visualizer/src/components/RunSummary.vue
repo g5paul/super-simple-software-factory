@@ -45,6 +45,13 @@ const STOP_LABELS: Record<StopReason['kind'], string> = {
   phase_failed: 'a phase failed',
 }
 
+// Claude's stop comes before the limit; a ChatGPT plan's only at it (pi-usage-stop.md).
+const stopLabel = computed(() =>
+  props.stop?.kind === 'rate_limit_stop' && props.stop.provider === 'openai'
+    ? 'the ChatGPT plan hit its usage limit'
+    : props.stop ? STOP_LABELS[props.stop.kind] : '',
+)
+
 const STATUS_LABELS: Record<TicketStatus, string> = {
   done_before: 'done earlier',
   queued: 'queued',
@@ -83,7 +90,7 @@ function open(phaseId: string | null) {
     </div>
 
     <div v-if="stop" class="stop" :class="{ link: stop.phase_id }" @click="open(stop.phase_id)">
-      <span class="stop-head">Stopped: {{ STOP_LABELS[stop.kind] }}</span>
+      <span class="stop-head">Stopped: {{ stopLabel }}</span>
       <pre class="stop-message">{{ stop.message }}</pre>
     </div>
 

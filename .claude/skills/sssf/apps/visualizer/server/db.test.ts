@@ -53,3 +53,19 @@ test("Pi calls carry the model their agent started with, and Claude Code calls a
   ]);
   sssf.close();
 });
+
+test("the latest ChatGPT plan-limit stop is found, and Claude's usage stops are not", () => {
+  const path = join(dir, "limit.db");
+  const db = new Database(path);
+  db.exec("CREATE TABLE events (adw_id TEXT, type TEXT, name TEXT, payload_json TEXT, started_at TEXT)");
+  const ev = db.query("INSERT INTO events VALUES (?, 'error', 'rate_limit_stop', ?, ?)");
+  ev.run("old1", JSON.stringify({ provider: "openai" }), "2026-10-01T10:00:00Z");
+  ev.run("p1", JSON.stringify({ provider: "openai" }), "2026-10-29T10:00:00Z");
+  ev.run("p2", JSON.stringify({ provider: "openai" }), "2026-10-30T10:00:00Z");
+  ev.run("c1", JSON.stringify({ error: "Claude's 5-hour window is at 85%" }), "2026-10-31T10:00:00Z");
+  db.close();
+  const sssf = new SssfDb(path);
+  expect(sssf.piLimitHit("2026-10-20T00:00:00Z")).toEqual({ at: "2026-10-30T10:00:00Z", adw_id: "p2" });
+  expect(sssf.piLimitHit("2026-10-31T00:00:00Z")).toBeNull();
+  sssf.close();
+});

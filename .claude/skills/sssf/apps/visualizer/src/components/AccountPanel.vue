@@ -129,9 +129,9 @@ function share(row: SpendRow, total: number): string {
     </div>
 
     <div v-if="usage?.pi.limit_hit" class="pi-limit">
-      The ChatGPT plan hit its usage limit at {{ fmtDate(usage.pi.limit_hit.at) }}, in run
-      <a :href="`#/${encodeURIComponent(usage.pi.limit_hit.project)}/${encodeURIComponent(usage.pi.limit_hit.adw_id)}`">{{ usage.pi.limit_hit.adw_id }}</a>
-      ({{ usage.pi.limit_hit.project }}). OpenAI gives no reset time:
+      The ChatGPT plan was out of usage at {{ fmtDate(usage.pi.limit_hit.at) }} (run
+      <a :href="`#/${encodeURIComponent(usage.pi.limit_hit.project)}/${encodeURIComponent(usage.pi.limit_hit.adw_id)}`">{{ usage.pi.limit_hit.adw_id }}</a>,
+      {{ usage.pi.limit_hit.project }}). OpenAI gives no reset time, so it may have usage again:
       <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener">check its usage</a>.
     </div>
 
@@ -164,7 +164,7 @@ function share(row: SpendRow, total: number): string {
       <div class="faint small">
         Cost is Pi's list-price figure. A subscription sign-in, such as ChatGPT, pays it. Pi's providers
         report no usage limits to SSSF, so check a ChatGPT plan's limits in ChatGPT or Codex. A run
-        that reaches the plan's limit stops there, and the latest one shows here.
+        that reaches the plan's limit stops there, and shows here for 5 hours.
       </div>
     </div>
   </section>

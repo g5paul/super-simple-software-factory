@@ -69,3 +69,18 @@ test("the latest ChatGPT plan-limit stop is found, and Claude's usage stops are 
   expect(sssf.piLimitHit("2026-10-31T00:00:00Z")).toBeNull();
   sssf.close();
 });
+
+test("an archived run's plan-limit stop is left out", () => {
+  const path = join(dir, "archived.db");
+  const db = new Database(path);
+  db.exec("CREATE TABLE events (adw_id TEXT, type TEXT, name TEXT, payload_json TEXT, started_at TEXT)");
+  db.exec("CREATE TABLE sessions (adw_id TEXT PRIMARY KEY, archived INTEGER DEFAULT 0)");
+  const ev = db.query("INSERT INTO events VALUES (?, 'error', 'rate_limit_stop', ?, ?)");
+  ev.run("real", JSON.stringify({ provider: "openai" }), "2026-10-30T10:00:00Z");
+  ev.run("proof", JSON.stringify({ provider: "openai" }), "2026-10-30T11:00:00Z");
+  db.exec("INSERT INTO sessions VALUES ('real', 0), ('proof', 1)");
+  db.close();
+  const sssf = new SssfDb(path);
+  expect(sssf.piLimitHit("2026-10-20T00:00:00Z")).toEqual({ at: "2026-10-30T10:00:00Z", adw_id: "real" });
+  sssf.close();
+});

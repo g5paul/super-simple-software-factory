@@ -516,7 +516,7 @@ export interface PiSpendWindow {
   by_model: SpendRow[];
 }
 
-/** The latest run in the last 7 days that stopped at the ChatGPT plan's usage limit. */
+/** The latest run in the last 5 hours that stopped at the ChatGPT plan's usage limit, archived runs aside. */
 export interface PiLimitHit {
   at: string;
   project: string;

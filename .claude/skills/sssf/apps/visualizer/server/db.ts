@@ -169,14 +169,21 @@ export class SssfDb {
     ).all(since) as PiCall[];
   }
 
-  /** The latest stop at the ChatGPT plan's usage limit since `since`, if any. */
+  /**
+   * The latest stop at the ChatGPT plan's usage limit since `since`, if any.
+   * An archived run is left out: a proof run with a stand-in pi records the
+   * same event, and archiving it keeps it off the account panel.
+   */
   piLimitHit(since: string): { at: string; adw_id: string } | null {
+    const archived = this.hasColumn("sessions", "archived")
+      ? "AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.adw_id = e.adw_id AND s.archived = 1)"
+      : "";
     return this.db
       .query<{ at: string; adw_id: string }, [string]>(
-        `SELECT started_at AS at, adw_id FROM events
-          WHERE name = 'rate_limit_stop' AND json_extract(payload_json, '$.provider') = 'openai'
-            AND started_at >= ?
-          ORDER BY started_at DESC LIMIT 1`,
+        `SELECT e.started_at AS at, e.adw_id FROM events e
+          WHERE e.name = 'rate_limit_stop' AND json_extract(e.payload_json, '$.provider') = 'openai'
+            AND e.started_at >= ? ${archived}
+          ORDER BY e.started_at DESC LIMIT 1`,
       )
       .get(since) ?? null;
   }

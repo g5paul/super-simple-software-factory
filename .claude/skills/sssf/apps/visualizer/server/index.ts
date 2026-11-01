@@ -225,7 +225,8 @@ const server = listen((port) => Bun.serve({
         const db = projects.db(p);
         for (const id of db?.agentSessionIds() ?? []) sessions.add(id);
         for (const c of db?.piCalls(since) ?? []) piCalls.push({ ...c, at: Date.parse(c.at), project: p.name });
-        const hit = db?.piLimitHit(since);
+        // Only the plan's shortest window: an older hit may well have reset (pi-usage-stop.md decision 6).
+        const hit = db?.piLimitHit(new Date(now - 5 * 3_600_000).toISOString());
         if (hit && (!limitHit || hit.at > limitHit.at)) limitHit = { ...hit, project: p.name };
       }
       const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls);

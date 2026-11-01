@@ -56,3 +56,30 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 - **Sandbox branches: done.** sssf-sandbox is on its trunk, `master`, with no other branches.
 - **Parallel runs in the container: done.** Built to [parallel-worktree-runs.md](parallel-worktree-runs.md). Each worktree run in the container gets its own project environment, removed on merge or discard, and `run.sh` gives the container a fixed hostname, so the trace tells its processes from the host's. Proven in sssf-sandbox (pr3conso and pr3title together, then pr4contr beside a host run). Each environment's editable install points at its own worktree, checked in this image with a scratch package.
 - **The sandbox seam: open.** Waits for a second sandbox, such as sandcastle, to sit beside this one.
+
+### What a second sandbox means
+
+The seam is [branch-per-run](branch-per-run.md) decision 5: the code that runs a session in a sandbox stays apart from the branch and merge code, behind the contract "run this operator session, or this command, in this folder, with these mounts, and report how it ended." No code exists for it. Built around one implementation, the interface would guess at what the second needs.
+
+Sandboxes come in two kinds, as sandcastle's providers show (`~/github/sandcastle/src/sandboxes`):
+
+- **Bind-mount** (Docker, Podman): the repo folder is shared with the host. This container is one. Decision 4 mounts the repo and `~/.config/sssf` at their host paths, so the trace, run folders, worktrees, and registry are the host's own files. The dashboard, `max_live_cost`, `max_daily_cost`, the launch lock, and `just merge` all work for container runs with no extra wiring. A second bind-mount sandbox fits as it stands.
+- **Isolated** (Vercel, Daytona, E2B): the sandbox is a remote VM. Code is copied in and results pulled out. A run there can't write the host's trace, so it needs a way to keep the trace and the caps current, and a way to bring its commits back to `sssf/<adw_id>` before `just merge`. That, not the interface, is the work.
+
+Nothing asks for a second sandbox yet. The needs that would are running unattended while this machine is off or busy, or more parallel runs than one machine holds, both pointing at an isolated provider, or a stronger boundary than rootless Podman for untrusted code, which could stay local. The first question to settle then: does the trace stay on the host, or travel with the run?
+
+### disler's E2B skill
+
+disler, who wrote SSSF, also wrote agent-sandbox-skill, read from the fork at `~/github/agent-sandbox-skill` (ac460ee). It's an isolated sandbox on [E2B](https://e2b.dev/), built for a different job:
+
+- **The agent stays on the host.** Claude Code, Gemini CLI, or Codex drive a remote E2B VM through a Python CLI, `sbx`: `exec` streams a command's output, `files` reads, writes, uploads, and downloads, and `sandbox` creates, pauses, extends, and kills. Only the commands and files are remote.
+- **Greenfield apps, not a repo's changes.** Its workflow, `plan-build-host-test`, plans locally, builds a Vue, FastAPI, and SQLite app inside a pre-built template, exposes it on a public URL, and browser-tests it. An existing repo comes in by `git clone` inside the VM; work comes back by `download-dir` into `temp/<workflow_id>/`, leaving `.git` out. There is no branch, commit, or merge back.
+- **Prompts own the sequence.** Slash-command prompts chain the steps, and the agent keeps the sandbox ID in its context. There is no trace, cost cap, or gate: the opposite of SSSF's rule that code owns sequencing, retries, and acceptance.
+- **Its own costs.** An `E2B_API_KEY` in `.env`, and $0.13 to $0.44 an hour per VM by template size, for up to its default 12-hour timeout, on top of model spend.
+
+What it suggests for SSSF, if an isolated sandbox is ever needed: keep the ADW on the host and send only agents and checks to the VM. The trace, the caps, the launch lock, and the dashboard would then stay as they are, and the hard part shrinks to moving the run's branch in and its commits out, for example as a git bundle. Two costs would remain:
+
+- **Claude Code inside the VM.** Agents that edit files with their own tools need Claude Code there, and its token on a third party's machine. Agents left on the host, editing through `sbx`, would lose those tools and the tree check around each agent.
+- **Spend the caps can't see.** The VM's hourly cost is outside every cap, and the trace doesn't count it.
+
+Worth reusing: `sbx exec`'s line-by-line streaming, its pause and extend calls, and `build_template.py`, which builds an image per stack, as `container/Containerfile` does per repo. None of this changes the seam's status: it waits for a need.

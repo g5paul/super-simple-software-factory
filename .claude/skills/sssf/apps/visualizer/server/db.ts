@@ -514,6 +514,28 @@ export class SssfDb {
       .all(since);
   }
 
+  /** worktree.py's live_spend rows: each open adw process, and what its run's calls cost since it started. */
+  liveRows(): { adw_id: string; pid: number | null; host: string | null; status: string | null; cost: number }[] {
+    try {
+      return this.liveQuery();
+    } catch {
+      return [];   // a trace from before processes rows had a host: no run reads as live
+    }
+  }
+
+  private liveQuery() {
+    return this.db
+      .query<{ adw_id: string; pid: number | null; host: string | null; status: string | null; cost: number }, []>(
+        `SELECT p.adw_id, p.pid, p.host, s.status,
+                coalesce((SELECT sum(json_extract(e.payload_json, '$.cost')) FROM events e
+                           WHERE e.adw_id = p.adw_id AND e.type = 'agent_end'
+                             AND e.started_at >= p.started_at), 0) AS cost
+           FROM processes p LEFT JOIN sessions s ON s.adw_id = p.adw_id
+          WHERE p.kind = 'adw' AND p.ended_at IS NULL`,
+      )
+      .all();
+  }
+
   sessionCount(): number {
     const row = this.db
       .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions")

@@ -6,6 +6,7 @@ import { fmtDate, ts } from '../lib/format'
 import { projectHref } from '../lib/router'
 import AccountPanel from './AccountPanel.vue'
 import DayGauge from './DayGauge.vue'
+import LiveGauge from './LiveGauge.vue'
 
 const projects = shallowRef<ProjectSummary[]>([])
 const apiError = ref<string | null>(null)
@@ -76,6 +77,7 @@ const ordered = computed(() =>
         </div>
         <div v-else class="counts dim">no runs yet</div>
         <DayGauge :project="p.name" />
+        <LiveGauge :project="p.name" />
       </a>
     </div>
     <div v-else-if="loaded" class="empty-state">

@@ -16,15 +16,19 @@ export interface DayCall {
   cost: number;
 }
 
-/** repo.yaml's max_daily_cost, read fresh, as the checks read it. Missing, unreadable, or not a positive number: no cap. */
-export function readDailyCap(root: string): number | null {
+/** A cap from repo.yaml, read fresh, as the checks read it. Missing, unreadable, or not a positive number: no cap. */
+export function readRepoCap(root: string, key: "max_daily_cost" | "max_live_cost"): number | null {
   try {
     const data = Bun.YAML.parse(readFileSync(join(root, REPO_YAML), "utf8")) as Record<string, unknown> | null;
-    const cap = data?.max_daily_cost;
+    const cap = data?.[key];
     return typeof cap === "number" && cap > 0 ? cap : null;
   } catch {
     return null;
   }
+}
+
+export function readDailyCap(root: string): number | null {
+  return readRepoCap(root, "max_daily_cost");
 }
 
 /** Calls oldest first, every one inside the window. */

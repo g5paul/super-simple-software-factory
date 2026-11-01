@@ -17,12 +17,14 @@ import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
 import { Account, type PiCallAt } from "./account.ts";
 import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
+import { liveSpend, readLiveCap } from "./live.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import type {
   AccountUsage,
   AgentPrompts,
   ApiError,
   DaySpend,
+  LiveSpend,
   HealthResponse,
   ProjectsResponse,
   SessionSummary,
@@ -240,6 +242,15 @@ const server = listen((port) => Bun.serve({
       const since = new Date(now - DAY_MS).toISOString().replace("Z", "+00:00");
       const calls = projects.db(project)?.dayCalls(since) ?? [];
       return json(daySpend(calls, readDailyCap(project.root), now) satisfies DaySpend);
+    }),
+
+    // What the live runs spend together against repo.yaml's max_live_cost.
+    "/api/projects/:project/live": safely((req) => {
+      const name = param(req, "project");
+      const project = projects.find(name);
+      if (!project) return notFound(`no project ${name}`);
+      const rows = projects.db(project)?.liveRows() ?? [];
+      return json(liveSpend(rows, readLiveCap(project.root)) satisfies LiveSpend);
     }),
 
     "/api/projects/:project/sessions": withDb(

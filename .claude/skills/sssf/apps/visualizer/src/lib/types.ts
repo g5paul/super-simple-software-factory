@@ -7,6 +7,7 @@ export type {
   SessionDetail,
   RunCaps,
   DaySpend,
+  LiveSpend,
   RunWorktree,
   RunLanded,
   RunRebased,

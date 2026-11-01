@@ -5,6 +5,7 @@ import { fetchSessions } from '../lib/api'
 import { ts } from '../lib/format'
 import SessionCard from './SessionCard.vue'
 import DayGauge from './DayGauge.vue'
+import LiveGauge from './LiveGauge.vue'
 import { useRoute } from '../lib/router'
 
 const route = useRoute()
@@ -57,7 +58,10 @@ const ordered = computed(() =>
   <div class="sessions">
     <div v-if="apiError" class="error-bar">api unreachable — retrying {{ apiError }}</div>
 
-    <DayGauge v-if="route.project" :key="route.project" class="day-head" :project="route.project" />
+    <div v-if="route.project" :key="route.project" class="day-head">
+      <DayGauge :project="route.project" />
+      <LiveGauge :project="route.project" links />
+    </div>
     <div v-if="ordered.length" class="list-head dim">{{ ordered.length }} runs</div>
 
     <div v-if="ordered.length" class="cards">

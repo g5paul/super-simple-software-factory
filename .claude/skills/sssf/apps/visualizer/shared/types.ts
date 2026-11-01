@@ -413,6 +413,15 @@ export interface ProjectSummary {
   last_started_at: string | null;
 }
 
+/** GET /api/projects/:project/live: what the live runs spend together against max_live_cost. */
+export interface LiveSpend {
+  spent: number;
+  /** repo.yaml's max_live_cost, null when it's off. */
+  cap: number | null;
+  /** Each live run's current attempt, largest first. */
+  runs: { adw_id: string; cost: number }[];
+}
+
 /** GET /api/projects/:project/day: the last 24 hours' spend against max_daily_cost. */
 export interface DaySpend {
   spent: number;

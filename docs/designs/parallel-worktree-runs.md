@@ -129,12 +129,23 @@ Settled in a sixth grilling session on 2026-10-31. Decision 56 showed `max_daily
 64. **Its own endpoint.** `/api/projects/:project/day` returns the spend, the cap, and the clear time. Each page polls it every 10 seconds, so the runs list's half-second poll doesn't scan 24 hours of events.
 65. **Proof, at $0.** bun tests for the window, the clear time, and a missing or broken `repo.yaml`; in sssf-sandbox with a cap set, the endpoint's total and clear time against the Python check's message; and Chromium screenshots of a card and a runs list header, under the cap and over it.
 
+### A gauge of what live runs spend together
+
+Settled in a seventh grilling session on 2026-11-01. The dashboard drew `max_daily_cost` against the last 24 hours, but `max_live_cost` showed only in `run_caps` and on a stop.
+
+66. **The check's number.** What `check_live` sees: for each live run, the cost of the calls that ended since its `adw` process started, so a resumed run counts its current attempt only. The server tests each PID with `process.kill(pid, 0)`, since it runs on the ADWs' machine; a row from another host falls back to its session reading `running`. Session status alone would count a run killed with `kill -9` forever. A call in flight counts once it ends, and a tooltip says so.
+67. **Where, and when.** On each project card and atop its runs list, under the 24-hour line. Only when `max_live_cost` is set or a run is live: an idle repo with no cap gets no line.
+68. **What it says.** With a cap, a bar and "$X of $C across N live runs"; without one, "$X across N live runs, no live cap". Under it, each run as the stop message lists them, "adw_id $cost", largest first, each linking to its run. At or over the cap, "new runs and sends stop until a run finishes". There is no clear time to give.
+69. **Its own endpoint and component.** `/api/projects/:project/live` returns the cap, the total, and each run's id and cost. `LiveGauge.vue` polls it every 10 seconds. The server reads the cap from `repo.yaml` on each request, as decision 60 does.
+70. **The same colours.** Plain under 80% of the cap, amber from 80%, red at or over it.
+71. **Proof.** bun tests on a temporary trace holding a live run, a run whose PID is dead, and a resumed run whose earlier attempt must not count, all at $0. In sssf-sandbox, one short run under a low cap, with the endpoint checked against Python's `live_spend` while it runs, for a few cents. Chromium screenshots of a card and a runs list, with a cap and without.
+72. **One repo.** A cap across every repo stays open. The account panel doesn't change.
+
 ## Open
 
 Known, and not built. None of them blocks a run.
 
 - **One cap across every repo.** `max_daily_cost` holds one repo's trace (decision 49). Two repos running unattended on one machine each spend up to their own.
-- **A gauge of what live runs spend together.** The dashboard shows `max_daily_cost` against the last 24 hours (decisions 58 to 65), but `max_live_cost` only on a run's caps and its stop. It waits for someone to ask.
 - **A pi run at the ChatGPT plan's limit.** Pi's ChatGPT route sends no usage windows, checked on real responses ([pi-usage-limits.md](../research/pi-usage-limits.md)), so nothing can stop a run before the limit. At the limit the call fails with HTTP 429 `subscription_sharing_usage_limit_exceeded`. Since 2026-11-01 any pi call whose last turn ended in an error fails with pi's own message, so this one says what happened; before that, an error turn with no text reached the JSON parser, which sent corrections into the same error and then blamed the JSON. A named usage stop is left until a real 429 shows whether it's needed; a rolling dollar cap per window for pi is a weaker option.
 - **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.

@@ -207,7 +207,7 @@ Everything lives in `.claude/skills/sssf/`. `SKILL.md` carries the hard rules an
 | What lands in your repo | Where it comes from | Tracked |
 |---|---|---|
 | `adws/adw_sssf_config/sssf.config.yaml` | `templates/sssf.config.yaml` | yes, it is your agent roster |
-| `adws/adw_*.py` | `templates/adws/` | yes, thirteen starter workflows, plus `adw_kill` and `adw_worktree` |
+| `adws/adw_*.py` | `templates/adws/` | yes, thirteen starter workflows, plus `adw_kill`, `adw_worktree`, and `adw_trial` |
 | `adws/adw_modules/` | `templates/adws/adw_modules/` | yes, all low-level logic |
 | `adws/adw_data/prompt_engineering/` | `templates/prompt_engineering/` | yes, **your prompts live here** |
 | `adws/adw_data/harness_engineering/` | `templates/harness_engineering/` | yes, pi extensions |
@@ -397,7 +397,7 @@ super-simple-software-factory/
         ├── prompt_engineering/{agent}/ # system.md + user.md per agent
         ├── harness_engineering/        # pi extensions
         └── adws/
-            ├── adw_*.py                # thirteen starter workflows, plus kill and worktree
+            ├── adw_*.py                # thirteen starter workflows, plus kill, worktree, and trial
             └── adw_modules/            # ALL low-level logic, ADW scripts stay thin
 ```
 

@@ -32,6 +32,8 @@ USAGE_PAGE = "https://chatgpt.com/settings/usage"
 class UsageLimitStop(RateLimitStop):
     """The ChatGPT plan behind pi's sign-in refused a call: it is out of usage.
     A RateLimitStop, so the run ends on its message, not a traceback."""
+
+
 # Keys for the providers Pi can sign into with a subscription (ChatGPT,
 # Claude). With SSSF_PI_AUTH=subscription they are kept from Pi, so a lapsed
 # sign-in fails the call instead of falling back to billing the API.

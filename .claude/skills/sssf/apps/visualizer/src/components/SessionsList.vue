@@ -4,6 +4,10 @@ import type { SessionSummary } from '../lib/types'
 import { fetchSessions } from '../lib/api'
 import { ts } from '../lib/format'
 import SessionCard from './SessionCard.vue'
+import DayGauge from './DayGauge.vue'
+import { useRoute } from '../lib/router'
+
+const route = useRoute()
 
 const sessions = shallowRef<SessionSummary[]>([])
 const apiError = ref<string | null>(null)
@@ -53,6 +57,7 @@ const ordered = computed(() =>
   <div class="sessions">
     <div v-if="apiError" class="error-bar">api unreachable — retrying {{ apiError }}</div>
 
+    <DayGauge v-if="route.project" :key="route.project" class="day-head" :project="route.project" />
     <div v-if="ordered.length" class="list-head dim">{{ ordered.length }} runs</div>
 
     <div v-if="ordered.length" class="cards">
@@ -73,6 +78,11 @@ const ordered = computed(() =>
 .sessions {
   display: flex;
   flex-direction: column;
+}
+
+.day-head {
+  max-width: 520px;
+  padding: 16px 24px 0;
 }
 
 .list-head {

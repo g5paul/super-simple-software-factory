@@ -413,6 +413,16 @@ export interface ProjectSummary {
   last_started_at: string | null;
 }
 
+/** GET /api/projects/:project/day: the last 24 hours' spend against max_daily_cost. */
+export interface DaySpend {
+  spent: number;
+  /** repo.yaml's max_daily_cost, null when it's off. */
+  cap: number | null;
+  /** When enough spend ages out to go under the cap, if nothing else runs; null under it. */
+  clears_at: string | null;
+  since: string;
+}
+
 /** GET /api/projects: all=true for `just obs-all`, false for one repo's `just obs`. */
 export interface ProjectsResponse {
   all: boolean;

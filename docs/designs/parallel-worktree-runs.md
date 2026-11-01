@@ -1,6 +1,6 @@
 # Design: parallel worktree runs
 
-Status: done. Settled in two grilling sessions on 2026-10-30, built, proven in sssf-sandbox (all seven cases of decision 12, the three setup cases of decision 22, the three spend-cap cases of decision 48, and the three daily-cap cases of decision 57), proven on a real worktree run in pi-agent-observability (70f9e62e), and rolled out to yt-summarizer and pi-agent-observability. What is still open is under "Open", below the decisions. Where the text and a decision disagree, the decision wins.
+Status: done. Settled in two grilling sessions on 2026-10-30, built, proven in sssf-sandbox (all seven cases of decision 12, the three setup cases of decision 22, the three spend-cap cases of decision 48, the three daily-cap cases of decision 57, and the gauge's checks of decision 65), proven on a real worktree run in pi-agent-observability (70f9e62e), and rolled out to yt-summarizer and pi-agent-observability. What is still open is under "Open", below the decisions. Where the text and a decision disagree, the decision wins.
 
 [Branch per run](branch-per-run.md) gave each run its own branch and folder, but only one at a time: its decision 12 refused a second worktree run while one was alive, because in the container every run shared one project environment, and that was untested. This design lifts that limit, so a repo can have more than one `--worktree` run going at once.
 
@@ -181,3 +181,6 @@ Known, and not built. None of them blocks a run.
 | 2026-10-31 | sssf-sandbox | daily case 2: dc2stop (`adw_simple_sdlc`, `--worktree`) with the cap $0.05 over the last 24 hours, $7.61 | the plan call cost $0.29, and the build send stopped with `daily_budget_stop`: $7.85 against $7.61, clearing at 15:21 UTC. `run_caps` recorded 7.61. Discarded |
 | 2026-10-31 | sssf-sandbox | daily case 3: dc3off (`adw_prompt`) with the setting off, the last 24 hours at $7.85 | success, $0.004, no `daily_budget_stop`, `run_caps` recorded the cap as off. The sandbox is clean at a2950ba, with the cap off |
 | 2026-10-31 | hub | grilling session: a gauge of the last 24 hours, decisions 58 to 65 | settled |
+| 2026-11-01 | hub | built decisions 58 to 64 | 34 server tests pass, 6 new: the window, the clear time, and a missing, commented-out, or broken `repo.yaml` |
+| 2026-11-01 | sssf-sandbox | gauge case 2: the endpoint against `budget._daily_over`, at caps $5.00 and $1.50 | both $1.66; under $5.00 no clear time, over $1.50 both 02:20 UTC. The endpoint read each edit to `repo.yaml` without a restart. $0 |
+| 2026-11-01 | sssf-sandbox | gauge case 3: Chromium screenshots of the card and the runs list, from a server on a registry holding only the sandbox | green at $5.00, amber at $2.00 (83%), red with "runs stop until 2026-11-01 02:20 UTC" at $1.50, and "no daily cap" with the setting off. Sandbox clean at cb5c479, cap off |

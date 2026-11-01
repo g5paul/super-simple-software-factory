@@ -504,6 +504,16 @@ export class SssfDb {
     };
   }
 
+  /** Every call that ended at or after `since`, oldest first: budget.py's spend_since. */
+  dayCalls(since: string): { at: string; cost: number }[] {
+    return this.db
+      .query<{ at: string; cost: number }, [string]>(
+        `SELECT started_at AS at, coalesce(json_extract(payload_json, '$.cost'), 0) AS cost
+           FROM events WHERE type = 'agent_end' AND started_at >= ? ORDER BY started_at`,
+      )
+      .all(since);
+  }
+
   sessionCount(): number {
     const row = this.db
       .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions")

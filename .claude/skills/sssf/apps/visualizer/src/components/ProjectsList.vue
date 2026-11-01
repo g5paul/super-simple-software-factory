@@ -5,6 +5,7 @@ import { fetchProjects } from '../lib/api'
 import { fmtDate, ts } from '../lib/format'
 import { projectHref } from '../lib/router'
 import AccountPanel from './AccountPanel.vue'
+import DayGauge from './DayGauge.vue'
 
 const projects = shallowRef<ProjectSummary[]>([])
 const apiError = ref<string | null>(null)
@@ -74,6 +75,7 @@ const ordered = computed(() =>
           <span class="dim">last {{ fmtDate(p.last_started_at) }}</span>
         </div>
         <div v-else class="counts dim">no runs yet</div>
+        <DayGauge :project="p.name" />
       </a>
     </div>
     <div v-else-if="loaded" class="empty-state">

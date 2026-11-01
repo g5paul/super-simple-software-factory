@@ -370,7 +370,7 @@ Above the projects, a panel shows the Claude account they all share. It has two 
 
 Before each Claude Code agent starts, SSSF checks the same reading. If either window is at or over `defaults.rate_limit_stop` (default 0.8), the run stops, with the time the window resets. That beats a run that dies halfway through a phase. See `references/config.md`.
 
-Two cost caps stop a run that's spending too much, which matters most when nobody is watching it. `defaults.max_run_cost` (default $5) is checked before every send. Each agent's `max_call_cost` goes to `claude -p --max-budget-usd`, so a runaway call ends itself. The starter roster sets each one at about twice the most that agent has cost so far. Two more caps are the repo's own, in `adws/adw_sssf_config/repo.yaml`, and both are off unless set. `max_live_cost` caps what every live run spends together. `max_daily_cost` caps what the repo's runs spent in the last 24 hours, rolling, finished ones included, and its stop says when enough spend ages out. Both are checked before every send and at launch, so a run stops, or a new one doesn't start, while the repo is at either. No cap retries, and none discards work: if the tree holds uncommitted changes, the stop message prints how to look at them, keep them, or drop them.
+Two cost caps stop a run that's spending too much, which matters most when nobody is watching it. `defaults.max_run_cost` (default $5) is checked before every send. Each agent's `max_call_cost` goes to `claude -p --max-budget-usd`, so a runaway call ends itself. The starter roster sets each one at about twice the most that agent has cost so far. Two more caps are the repo's own, in `adws/adw_sssf_config/repo.yaml`, and both are off unless set. `max_live_cost` caps what every live run spends together. `max_daily_cost` caps what the repo's runs spent in the last 24 hours, rolling, finished ones included, and its stop says when enough spend ages out. The dashboard shows the last 24 hours against it on each repo's card and atop its runs list, amber from 80% and red at the cap. Both are checked before every send and at launch, so a run stops, or a new one doesn't start, while the repo is at either. No cap retries, and none discards work: if the tree holds uncommitted changes, the stop message prints how to look at them, keep them, or drop them.
 
 A repo on another machine is not in this registry. Run `just obs` there, and reach it through an SSH tunnel: `ssh -L 4600:localhost:4600 host`.
 
@@ -495,7 +495,7 @@ A run works on your current branch unless you ask for one of its own. For real w
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list.
 
 - `max_daily_cost` holds one repo; nothing caps what every repo on the machine spends together.
-- The dashboard shows `max_daily_cost` on a run's caps and its stop, not how close the repo is.
+- The dashboard has no gauge of `max_live_cost`, only the run's caps and its stop.
 - pi agents have no usage-window guard; `rate_limit_stop` reads what Claude Code reports.
 - One request tried several ways, with the best merged, is left room for but not built.
 - A seam for a second sandbox beside the Podman container waits for one to exist.

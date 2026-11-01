@@ -16,11 +16,13 @@ import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
 import { Account, type PiCallAt } from "./account.ts";
+import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import type {
   AccountUsage,
   AgentPrompts,
   ApiError,
+  DaySpend,
   HealthResponse,
   ProjectsResponse,
   SessionSummary,
@@ -226,6 +228,19 @@ const server = listen((port) => Bun.serve({
         sessions: db.sessionCount(),
       } satisfies HealthResponse),
     ),
+
+    // The last 24 hours against repo.yaml's max_daily_cost. A repo with no
+    // trace yet has spent nothing, and its cap still shows.
+    "/api/projects/:project/day": safely((req) => {
+      const name = param(req, "project");
+      const project = projects.find(name);
+      if (!project) return notFound(`no project ${name}`);
+      const now = Date.now();
+      // The trace writes "+00:00", so the bound does too, for a string compare.
+      const since = new Date(now - DAY_MS).toISOString().replace("Z", "+00:00");
+      const calls = projects.db(project)?.dayCalls(since) ?? [];
+      return json(daySpend(calls, readDailyCap(project.root), now) satisfies DaySpend);
+    }),
 
     "/api/projects/:project/sessions": withDb(
       (db, req) => json(db.sessions(intQuery(req, "limit", 200))),

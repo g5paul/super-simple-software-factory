@@ -1,5 +1,6 @@
 import type {
   AccountUsage,
+  DaySpend,
   Envelope,
   EventRow,
   EventsPage,
@@ -89,6 +90,11 @@ export function fetchEnvelopes(adwId: string): Promise<Envelope[]> {
 
 export function fetchGates(adwId: string): Promise<GateResult[]> {
   return getJson(`${base()}/sessions/${encodeURIComponent(adwId)}/gates`) as Promise<GateResult[]>
+}
+
+/** The last 24 hours against max_daily_cost, for any project: the projects page asks for each card's. */
+export function fetchDay(project: string): Promise<DaySpend> {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/day`) as Promise<DaySpend>
 }
 
 export function fetchProjects(): Promise<ProjectsResponse> {

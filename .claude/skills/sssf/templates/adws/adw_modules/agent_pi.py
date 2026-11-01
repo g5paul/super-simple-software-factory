@@ -278,6 +278,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     # EOF. That failure is silent and total: no request goes out, no bytes come
     # back, and the ADW blocks on a read loop with nothing to read. Observed as
     # a run that sat idle at 0% CPU with an empty raw_output.jsonl.
+    # How the last assistant turn ended. Pi retries some errors itself, so only
+    # the last turn says whether the call failed.
+    last_stop, last_error = None, ""
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=request.cwd,
@@ -302,6 +305,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     text = _text_of(message)
                     if text:
                         result.text = text   # last assistant message wins
+                    last_stop = message.get("stopReason")
+                    last_error = message.get("errorMessage") or ""
                     usage = message.get("usage", {}) or {}
                     turn = _context_tokens(usage)
                     result.tokens += turn
@@ -319,6 +324,11 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     result.returncode = process.wait()
     if on_exit:
         on_exit(process.pid)
+    if last_stop == "error":
+        # Raised, not returned: an error turn's text, if any, came before the
+        # error, and parsing it would send corrections into the same failure.
+        raise RuntimeError(f"pi ended with an error: "
+                           f"{(last_error or stderr.strip() or 'no message')[-800:]}")
     if result.returncode != 0 and not result.text:
         raise RuntimeError(f"pi exited {result.returncode}: {stderr.strip()[-800:]}")
     return result

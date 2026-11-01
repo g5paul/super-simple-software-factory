@@ -496,7 +496,7 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 
 - `max_daily_cost` holds one repo; nothing caps what every repo on the machine spends together.
 - The dashboard has no gauge of `max_live_cost`, only the run's caps and its stop.
-- A pi run that hits the ChatGPT plan's limit fails on a 429 like any error; nothing names it a usage stop. The route reports no windows to stop before it.
+- A pi run can't stop before the ChatGPT plan's limit, because the route reports no windows. At the limit the call fails with pi's own message, which names `subscription_sharing_usage_limit_exceeded` and links to the plan's usage page; SSSF doesn't treat it as a separate usage stop.
 - One request tried several ways, with the best merged, is left room for but not built.
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.

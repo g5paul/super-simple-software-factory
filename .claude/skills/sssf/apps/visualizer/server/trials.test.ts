@@ -73,4 +73,24 @@ describe("runTrial", () => {
     expect(runTrial([ev("trial_panel", { trial: "t1" })])).toEqual({ trial: "t1", role: "panel", roster: null });
     expect(runTrial([ev("run_caps", {})])).toBeNull();
   });
+
+  test("an attempt carries what its roster runs on", () => {
+    const ev = { type: "log", name: "trial", phase_id: "", payload_json: JSON.stringify({ trial: "t1", roster: "main", coding_agent: "Claude Code" }) };
+    expect(runTrial([ev])?.coding_agent).toBe("Claude Code");
+  });
+});
+
+describe("roster labels", () => {
+  test("a leaderboard row takes its coding agent from an attempt that recorded one", () => {
+    const old = attempt("a1", "main", 1, true);
+    const recent = { ...attempt("a2", "main", 1, true), coding_agent: "Claude Code" };
+    const [only] = leaderboard([card("t1", [old]), card("t2", [recent])], new Set(), () => "sha-main");
+    expect(only?.coding_agent).toBe("Claude Code");
+  });
+
+  test("an unscored trial's attempts carry it from their tags", () => {
+    const tagged = row("a", "main", "running", 0.2);
+    tagged.payload_json = JSON.stringify({ ...JSON.parse(tagged.payload_json), coding_agent: "Claude Code" });
+    expect(trialView("t1", [tagged], null, null).attempts[0]?.coding_agent).toBe("Claude Code");
+  });
 });

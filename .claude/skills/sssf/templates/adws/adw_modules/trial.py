@@ -85,6 +85,23 @@ def provider(agent) -> str:
     return agent_pi.resolve_model(agent.model)[0]
 
 
+CODING_AGENTS = {"claude_code": "Claude Code", "pi": "pi"}
+
+
+def coding_agent(cfg) -> str:
+    """What the roster's agents run on, for its label: "Claude Code", "pi", or
+    both joined when a roster mixes them."""
+    return " + ".join(CODING_AGENTS.get(name, name)
+                      for name in sorted({agent.coding_agent for agent in cfg.agents}))
+
+
+def roster_label(attempt: dict) -> str:
+    """`main (Claude Code)`: the roster's name and what it runs on. A trial
+    from before the coding agent was recorded shows the name alone."""
+    agent = attempt.get("coding_agent")
+    return f"{attempt['roster']} ({agent})" if agent else attempt["roster"]
+
+
 def family(agent) -> str:
     """Who made the model: what a panel reviewer could be partial to, and
     whose plan a run's usage counts against."""
@@ -232,7 +249,7 @@ def combine(rows: list[dict], families: list[str], verdicts: list[dict],
         suggested, why = None, "the panel did not rule on every attempt that ran clean, so there is no suggestion"
     elif passed:
         best = min(passed, key=lambda c: c["cost"])
-        suggested, why = best["adw_id"], f"{best['adw_id']} ({best['roster']}), the cheapest attempt to pass every gate"
+        suggested, why = best["adw_id"], f"{best['adw_id']}, {roster_label(best)}, the cheapest attempt to pass every gate"
     else:
         suggested, why = None, "no attempt passed every gate"
     return {"attempts": cards, "suggested": suggested, "why": why}
@@ -291,7 +308,7 @@ def render(card: dict) -> str:
         diff = f"+{a['added']} -{a['removed']}" if "added" in a else "-"
         lines.append([
             a["adw_id"] + (" <" if a["adw_id"] == card["suggested"] else ""),
-            a["roster"], "live" if a["live"] else (a["status"] or "?"),
+            roster_label(a), "live" if a["live"] else (a["status"] or "?"),
             {True: "pass", False: "fail", None: "-"}[a["checks"]],
             a["review"] or "-", "-" if a["rank"] is None else str(a["rank"]),
             "-" if a["rank_others"] is None else str(a["rank_others"]),
@@ -406,7 +423,7 @@ def start(request: str, names: list[str], out=sys.stdout) -> str:
     for index, name in enumerate(names):
         adw_id = new_id(8)
         tag = {"trial": trial, "index": index, "roster": name, "roster_file": roster_file(name),
-               "roster_sha256": sha256(root / roster_file(name)),
+               "roster_sha256": sha256(root / roster_file(name)), "coding_agent": coding_agent(cfgs[name]),
                "family": family(agents.resolve(cfgs[name], "reviewer")), "base": base}
         log = root / cfg.defaults.data_dir / "sessions" / adw_id / "trial.log"
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -419,7 +436,7 @@ def start(request: str, names: list[str], out=sys.stdout) -> str:
                 cwd=root, env=env, stdin=subprocess.DEVNULL, stdout=handle,
                 stderr=subprocess.STDOUT, start_new_session=True)
         launched.append(({**tag, "adw_id": adw_id}, proc, log))
-        print(f"  {adw_id}  {name}  (output: {log.relative_to(root)})", file=out)
+        print(f"  {adw_id}  {roster_label(tag)}  (output: {log.relative_to(root)})", file=out)
 
     refused = _wait_for_starts(db, launched)
     if refused:
@@ -433,7 +450,7 @@ def start(request: str, names: list[str], out=sys.stdout) -> str:
     for attempt, proc, _ in launched:
         proc.wait()
         row = next((r for r in attempts(db, trial) if r["adw_id"] == attempt["adw_id"]), {})
-        print(f"  {attempt['adw_id']}  {attempt['roster']}: {row.get('status')}, "
+        print(f"  {attempt['adw_id']}  {roster_label(attempt)}: {row.get('status')}, "
               f"{_money(row.get('cost', 0))}", file=out)
     review(trial, out=out)
     return trial

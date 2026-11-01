@@ -41,7 +41,7 @@ export function trialView(trial: string, rows: AttemptRow[], card: Scorecard | n
     const tag = JSON.parse(r.payload_json) as Partial<TrialAttemptCard> & { index?: number };
     return {
       adw_id: r.adw_id, roster: tag.roster ?? "?", roster_file: tag.roster_file ?? "",
-      roster_sha256: tag.roster_sha256 ?? "", family: tag.family ?? "",
+      roster_sha256: tag.roster_sha256 ?? "", coding_agent: tag.coding_agent, family: tag.family ?? "",
       status: r.status, cost: r.cost, tokens: r.tokens, seconds: seconds(r.started_at, r.ended_at),
       checks: null, live: r.status === "running", review: null, rulings: [],
       rank: null, rank_others: null, passed: false,
@@ -83,6 +83,7 @@ export function leaderboard(cards: Scorecard[], winners: Set<string>, current: (
         rows.set(key, entry);
       }
       entry.trials.add(card.trial);
+      if (a.coding_agent) entry.row.coding_agent = a.coding_agent;
       entry.row.attempts += 1;
       if (winners.has(a.adw_id)) entry.row.wins += 1;
       if (a.passed) {
@@ -111,8 +112,8 @@ export function rosterSha(root: string, rosterFile: string): string | null {
 export function runTrial(events: RunEvent[]): RunTrial | null {
   for (const e of events) {
     if (e.name === "trial") {
-      const p = payload<{ trial?: string; roster?: string }>(e);
-      if (p?.trial) return { trial: p.trial, role: "attempt", roster: p.roster ?? null };
+      const p = payload<{ trial?: string; roster?: string; coding_agent?: string }>(e);
+      if (p?.trial) return { trial: p.trial, role: "attempt", roster: p.roster ?? null, coding_agent: p.coding_agent };
     }
     if (e.name === "trial_panel") {
       const p = payload<{ trial?: string }>(e);

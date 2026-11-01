@@ -68,11 +68,11 @@ A read-only survey of the skill before the decisions:
 27. **Only when the engineer asks.** The skill gets a trial cookbook. The operator runs a trial only when the engineer asks for one by name, such as "try this with main and chatgpt". It never turns an ordinary request into a trial. After a trial, it reports the scorecard and waits for the engineer's pick.
 28. **Rollout is opt-in.** An update brings the trial code, the cookbook, and the dashboard page, but no roster files. The update note says how to add one, and that three attempts need `max_worktree_runs` raised to 3.
 29. **Proof in sssf-sandbox.** A real trial of `main` (Claude Code) against `chatgpt`, on a small request: the panel, the scorecard checked against each run's trace, `just trial-merge`, and the leaderboard. Before that, tests cover the refusals: too few slots, and a roster that isn't signed in. About $1 to $2 of Claude estimate, plus some ChatGPT plan usage.
+30. **Each roster shows with what its agents run on**, as `main (Claude Code)` and `chatgpt (pi)`, or `Claude Code + pi` for a roster that mixes them. `just trial` records the coding agent in each attempt's tag at launch, and the scorecard, the run summary, the trial page, and the leaderboard show it. The panel never sees it, since it judges blind. A trial from before this shows the bare name. Added 2026-11-01 at the engineer's request, so a bare `main` no longer hides what it runs.
 
 ## Open
 
 - A judge that picks the winner on its own, once enough scorecards show whether its picks match the engineer's.
-- Name each roster with its coding agent: `main (Claude Code)` and `chatgpt (pi)`, not a bare `main`, so the scorecard, the dashboard's trial page and the leaderboard say what ran. The engineer asked for it on 2026-11-01, during the second trial.
 
 ## Log
 
@@ -83,3 +83,4 @@ A read-only survey of the skill before the decisions:
 | 2026-11-01 | sssf-sandbox | trial c258e6b9: add `textkit/word_count.py`, `main` (Claude Code) against `chatgpt` (Pi on GPT) | both attempts succeeded and passed. Panel b33eaf13, one Claude and one GPT reviewer, each drew its own order; both ranked the GPT attempt first, so rank and rank* agree. `main` 1fd1afe2 $0.57 in 2m21s; `chatgpt` c96c5204 $0.12 in 3m57s, suggested as the cheapest to pass. Panel $0.21, trial $0.90. Scorecard checked against each session's cost, timestamps, and phases |
 | 2026-11-01 | sssf-sandbox | `just trial-merge c258e6b9 c96c5204` | fast-forwarded master to a2d8088 and discarded 1fd1afe2. 133 tests pass. The leaderboard shows one row per roster, with hashes that match the files on disk and 1 win for `chatgpt` |
 | 2026-11-01 | hub | the first trial's log held only the launch line until the end | Python buffered stdout to the file. `adw_trial.py` now line-buffers it |
+| 2026-11-01 | hub | decision 30: roster labels | 299 Python tests and 56 server tests pass; the panel's input is checked to carry neither label |

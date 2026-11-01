@@ -2,6 +2,7 @@
 import { onMounted, shallowRef } from 'vue'
 import type { RosterRow } from '../lib/types'
 import { fetchRosters } from '../lib/api'
+import { rosterLabel } from '../lib/format'
 
 // Which roster does this repo's work best (trials.md decision 25): one row per
 // roster file version, from every trial whose panel ran. Shown once there is one.
@@ -34,7 +35,7 @@ const TIP = 'From every trial whose panel ran. Medians are over the attempts tha
       <tbody>
         <tr v-for="r in rows" :key="`${r.roster}-${r.sha256}`" :class="{ old: !r.current }">
           <td>
-            {{ r.roster }} <code class="dim">{{ r.sha256.slice(0, 7) }}</code>
+            {{ rosterLabel(r.roster, r.coding_agent) }} <code class="dim">{{ r.sha256.slice(0, 7) }}</code>
             <span v-if="r.current" class="current">current</span>
           </td>
           <td>{{ r.trials }}</td>

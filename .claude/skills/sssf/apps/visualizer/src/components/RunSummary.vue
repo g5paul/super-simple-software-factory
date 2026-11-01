@@ -8,7 +8,7 @@
 import { computed } from 'vue'
 import type { RunCaps, RunTrial, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
 import { trialHref } from '../lib/router'
-import { fmtCost } from '../lib/format'
+import { fmtCost, rosterLabel } from '../lib/format'
 
 const props = defineProps<{
   cost: number | null
@@ -69,7 +69,7 @@ function open(phaseId: string | null) {
 <template>
   <div v-if="worktree || cap || stop || tickets || trial" class="run-summary">
     <div v-if="trial" class="branch">
-      <span v-if="trial.role === 'attempt'">attempt with roster <code>{{ trial.roster }}</code> in</span>
+      <span v-if="trial.role === 'attempt'">attempt with roster <code>{{ rosterLabel(trial.roster, trial.coding_agent) }}</code> in</span>
       <span v-else>the panel of</span>
       <a :href="trialHref(trial.trial)">trial {{ trial.trial }}</a>
     </div>

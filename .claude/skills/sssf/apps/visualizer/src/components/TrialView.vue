@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import type { TrialAttemptCard, TrialView } from '../lib/types'
 import { fetchTrial } from '../lib/api'
 import { hrefFor } from '../lib/router'
+import { rosterLabel } from '../lib/format'
 
 // One trial's attempts side by side (trials.md decision 24): the gates, cost,
 // time, diff, and the panel's ranks, with the suggestion trial.py recorded.
@@ -75,7 +76,7 @@ const oneFamily = computed(() => (view.value?.families.length ?? 0) < 2)
             :class="{ suggested: a.adw_id === view.suggested, merged: a.adw_id === view.merged }"
           >
             <td><a :href="hrefFor(a.adw_id)">{{ a.adw_id }}</a></td>
-            <td>{{ a.roster }}</td>
+            <td>{{ rosterLabel(a.roster, a.coding_agent) }}</td>
             <td :class="a.status">{{ a.live ? 'live' : a.status ?? '?' }}</td>
             <td :class="checks(a.checks)">{{ checks(a.checks) }}</td>
             <td :class="a.review ?? ''">{{ a.review ?? '-' }}</td>

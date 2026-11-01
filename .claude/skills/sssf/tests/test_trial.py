@@ -74,6 +74,7 @@ def attempt(trial_id: str, adw_id: str, name: str, *, cost: float = 0.5, ok: boo
     fam = "claude" if name == "main" else "openai"
     tag = {"trial": trial_id, "index": index, "roster": name, "roster_file": trial.roster_file(name),
            "roster_sha256": trial.sha256(root / trial.roster_file(name)), "family": fam,
+           "coding_agent": "Claude Code" if name == "main" else "pi",
            "base": git("rev-parse", "HEAD", cwd=root)}
     cfg = SSSFConfig()
     place = worktree.enter(cfg, adw_id, True)
@@ -193,6 +194,17 @@ def test_the_panel_gate_wants_a_verdict_on_every_label_and_a_full_ranking():
 
 # ── before anything starts ───────────────────────────────────────────────────
 
+def test_a_roster_is_labelled_with_what_its_agents_run_on(repo):
+    main = agents.load_config(str(trial.roster_path(repo, "main")))
+    assert trial.coding_agent(main) == "Claude Code"
+    assert trial.coding_agent(agents.load_config(str(trial.roster_path(repo, "chatgpt")))) == "pi"
+    main.agents[0].coding_agent = "pi"
+    assert trial.coding_agent(main) == "Claude Code + pi"
+    assert trial.roster_label({"roster": "main", "coding_agent": "Claude Code"}) == "main (Claude Code)"
+    # A trial from before the coding agent was recorded.
+    assert trial.roster_label({"roster": "main"}) == "main"
+
+
 def test_a_trial_needs_two_attempts(repo):
     with pytest.raises(trial.TrialError, match="at least two"):
         trial.check(repo, ["main"])
@@ -305,6 +317,7 @@ def test_the_panel_reviews_blind_and_the_scorecard_suggests_the_cheapest_pass(re
         # Only the two clean attempts, by label, with nothing that names a roster.
         assert sorted(a.label for a in call.previous.attempts) == ["A", "B"]
         assert "chatgpt" not in shown and "main" not in shown
+        assert "Claude Code" not in shown and "(pi)" not in shown
         assert call.prompt == "make app.txt say two"
     (_, sizes), = events("trial_diffs")
     assert sizes["sizes"] == {"aaaa0001": {"added": 1, "removed": 1, "files": 1},
@@ -316,7 +329,8 @@ def test_the_panel_reviews_blind_and_the_scorecard_suggests_the_cheapest_pass(re
     assert by["cccc0001"]["review"] is None
     assert card["total_cost"] == pytest.approx(1.3)
     text = "".join(out)
-    assert "suggested: bbbb0001 (chatgpt), the cheapest attempt to pass every gate" in text
+    assert "suggested: bbbb0001, chatgpt (pi), the cheapest attempt to pass every gate" in text
+    assert "aaaa0001    main (Claude Code)" in text
 
 
 def test_a_failed_panel_still_records_the_scorecard_with_no_suggestion(repo, monkeypatch):

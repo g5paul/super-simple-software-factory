@@ -90,3 +90,8 @@ export function prettyJson(raw: string | null | undefined): string {
     return raw
   }
 }
+
+/** `main (Claude Code)`: a roster's name and what its agents run on. */
+export function rosterLabel(roster: string | null, codingAgent?: string): string {
+  return codingAgent ? `${roster ?? '?'} (${codingAgent})` : roster ?? '?'
+}

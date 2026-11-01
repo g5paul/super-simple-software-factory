@@ -539,6 +539,8 @@ export interface RunTrial {
   role: "attempt" | "panel";
   /** The attempt's roster; null for the panel. */
   roster: string | null;
+  /** What the roster's agents run on, e.g. "Claude Code"; absent in a trial from before it was recorded. */
+  coding_agent?: string;
 }
 
 /** One panel reviewer's ruling on one attempt, as trial.py's combine() records it. */
@@ -556,6 +558,8 @@ export interface TrialAttemptCard {
   roster: string;
   roster_file: string;
   roster_sha256: string;
+  /** What the roster's agents run on, e.g. "Claude Code"; absent in a trial from before it was recorded. */
+  coding_agent?: string;
   family: string;
   status: SessionStatus | null;
   cost: number;
@@ -599,6 +603,8 @@ export interface TrialView {
 /** GET /api/projects/:project/rosters: one row per roster name and file hash, from scored trials. */
 export interface RosterRow {
   roster: string;
+  /** From the latest attempt that recorded it. */
+  coding_agent?: string;
   sha256: string;
   /** The roster file on disk has this hash. */
   current: boolean;

@@ -25,7 +25,7 @@ A read-only survey of the skill, before the decisions:
 
 ### Goal and shape
 
-1. **Independent tasks at once.** Each run takes a different request. One task tried several ways, with the best one merged, is left room for, not built.
+1. **Independent tasks at once.** Each run takes a different request. One task tried several ways, with the best one merged, is [trials](trials.md), its own design.
 2. **Separate launches.** Each run is its own `uv run adws/adw_<chain>.py ... --worktree`, with its own adw_id, merged on its own with `just merge`. There is no batch ADW. The trace, the dashboard, `just kill`, and `just merge` keep working per adw_id.
 3. **A cap per repo.** `max_worktree_runs` in `adws/adw_sssf_config/repo.yaml`, default 2. A launch over the cap refuses, naming the runs alive. 1 is today's behaviour. This supersedes [branch-per-run decision 12](branch-per-run.md).
 4. **Only when the engineer asks.** If a request arrives while a run is going, the operator says so and asks whether to start it beside the other one or wait. It never starts a second run on its own judgement.
@@ -161,7 +161,6 @@ Settled in an eighth grilling session on 2026-11-01. `max_daily_cost` holds one 
 Known, and not built. None of them blocks a run.
 
 - **A pi run at the ChatGPT plan's limit.** Pi's ChatGPT route sends no usage windows, checked on real responses ([pi-usage-limits.md](../research/pi-usage-limits.md)), so nothing can stop a run before the limit. At the limit the call fails with HTTP 429 `subscription_sharing_usage_limit_exceeded`. Since 2026-11-01 any pi call whose last turn ended in an error fails with pi's own message, so this one says what happened; before that, an error turn with no text reached the JSON parser, which sent corrections into the same error and then blamed the JSON. A named usage stop is left until a real 429 shows whether it's needed; a rolling dollar cap per window for pi is a weaker option.
-- **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
 
 ## Log

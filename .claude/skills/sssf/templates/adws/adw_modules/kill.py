@@ -37,6 +37,10 @@ from .utils import just
 
 BINARIES = {"claude_code": Path(CLAUDE_PATH).name, "pi": Path(PI_PATH).name}
 CLOCK_SLACK_SECONDS = 5     # the row is written just after the spawn, not before
+# On WSL, `ps` sometimes gives a process a few milliseconds old an age of
+# 441,077,234 days: its start reads as just after "now", and the negative age
+# wraps. Any age past this is that wrap, so the process has only just started.
+WRAPPED_AGE_SECONDS = 100 * 365 * 86400
 WAIT_SECONDS = 10
 
 
@@ -66,7 +70,10 @@ def _live(pid: int) -> tuple[int, str] | None:
     fields = done.stdout.split(None, 2)
     if done.returncode != 0 or len(fields) < 2 or fields[0].startswith("Z"):
         return None
-    return _seconds(fields[1]), fields[2].strip() if len(fields) > 2 else ""
+    age = _seconds(fields[1])
+    if age > WRAPPED_AGE_SECONDS:
+        age = 0
+    return age, fields[2].strip() if len(fields) > 2 else ""
 
 
 def _expected(kind: str, command: str) -> str:

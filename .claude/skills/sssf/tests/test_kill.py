@@ -78,6 +78,14 @@ def test_a_process_younger_than_its_row_is_left_alone(tmp_path, trace):
         chain.kill()
 
 
+def test_a_wrapped_age_reads_as_just_started(monkeypatch):
+    """WSL's ps sometimes gives a new process an age of 441 million days. Read
+    as old, it would let a reused pid pass for the recorded process."""
+    done = subprocess.CompletedProcess([], 0, stdout="S 441077234-00:18:40 python3 adw_fake.py\n")
+    monkeypatch.setattr(kill.subprocess, "run", lambda *a, **k: done)
+    assert kill._live(1234) == (0, "python3 adw_fake.py")
+
+
 def test_a_dead_run_is_closed_without_signalling_anything(tmp_path, trace):
     db, tracer = trace
     gone = spawn(tmp_path, "adw_fake.py")

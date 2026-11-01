@@ -77,6 +77,11 @@ STAMP = Path("adws/adw_sssf_config/stamp.json")
 DB = "adws/adw_data/sssf.db"
 
 
+# What a tool leaves in the skill's own folders while someone works on it. A
+# ruff check in templates/ once stamped its cache into a repo as SSSF files.
+TOOL_CACHES = {"__pycache__", ".ruff_cache", ".pytest_cache", ".mypy_cache"}
+
+
 def targets(root: Path, roster: Path, container: bool = False,
             added: list[tuple[Path, str]] = ()) -> list[tuple[Path, Path]]:
     """Every (template, destination) pair the factory is made of."""
@@ -85,7 +90,7 @@ def targets(root: Path, roster: Path, container: bool = False,
     def add(src: Path, dest: Path) -> None:
         if src.is_dir():
             for child in sorted(src.iterdir()):
-                if child.name != "__pycache__":
+                if child.name not in TOOL_CACHES:
                     add(child, dest / child.name)
         else:
             pairs.append((src, dest))

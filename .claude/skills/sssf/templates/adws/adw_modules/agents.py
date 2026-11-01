@@ -16,7 +16,7 @@ from typing import Optional
 
 import yaml
 
-from . import account, agent_cc, agent_pi, budget, permissions, prompts
+from . import account, agent_cc, agent_pi, budget, permissions, prompts, repo_settings
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -134,7 +134,8 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     agent_dir.mkdir(parents=True, exist_ok=True)
 
     variables = prompt_variables(run, phase, call)
-    system_text = prompts.render(agent.prompt_engineering.system, variables)
+    system_text = repo_settings.with_agent_rules(
+        prompts.render(agent.prompt_engineering.system, variables), Path.cwd())
     user_text = prompts.render(agent.prompt_engineering.user, variables)
     prompts.save(agent_dir / "prompts", "system.md", system_text)
     prompts.save(agent_dir / "prompts", "user.md", user_text)

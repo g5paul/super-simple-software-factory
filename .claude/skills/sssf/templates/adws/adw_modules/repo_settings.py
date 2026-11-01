@@ -31,6 +31,8 @@ class RepoSettings(BaseModel):
     max_daily_cost: Optional[float] = Field(None, gt=0)
     worktree_setup: list[str] = Field(default_factory=list)
     worktree_setup_timeout: int = Field(600, ge=1)
+    # Rules every agent gets at the end of its system prompt, whatever its role.
+    agent_rules: list[str] = Field(default_factory=list)
 
 
 def load(root: Path) -> RepoSettings:
@@ -46,6 +48,17 @@ def merge_ff_only(root: Path) -> bool:
     if override:
         return override != "0"
     return load(root).merge == "ff_only"
+
+
+def with_agent_rules(system_text: str, root: Path) -> str:
+    """An agent's system prompt with this repo's agent_rules after it. The
+    rules sit in repo.yaml, not in each prompt file, so a repo can state one
+    without customizing every prompt and reviewing each on every update."""
+    rules = load(root).agent_rules
+    if not rules:
+        return system_text
+    return (system_text.rstrip() + "\n\n## This repo's rules\n\n"
+            + "\n".join(f"- {rule}" for rule in rules) + "\n")
 
 
 def max_worktree_runs(root: Path) -> int:

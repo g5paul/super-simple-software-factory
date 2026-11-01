@@ -56,7 +56,7 @@ class Agent:
         self.where = "src/t01.py:1"                       # where its finding points
 
     def run(self, req, on_event=None, on_spawn=None, on_exit=None) -> AgentResult:
-        name = req.system_prompt.strip()
+        name = req.system_prompt.strip().splitlines()[0]
         self.calls.append((name, req.session_id, req.prompt))
         return AgentResult(text=json.dumps(getattr(self, name)(req.prompt)), cost=0.1, tokens=10,
                            usage=UsageBreakdown(total_cost=0.1, total_tokens=10))
@@ -157,6 +157,19 @@ def test_the_builder_gets_its_ticket_the_spec_and_the_scouts_notes(repo):
     prompt = repo.of("ticket_builder")[1][2]
     assert "issues/03-c.md" in prompt and "spec.md" in prompt and "scout_findings.md" in prompt
     assert "01: A" in prompt                       # what is already committed
+
+
+def test_every_agent_gets_the_repos_agent_rules(repo):
+    rules = Path("adws/adw_sssf_config/repo.yaml")
+    rules.parent.mkdir(parents=True)
+    rules.write_text("agent_rules:\n  - Never run `just fusion`.\n")
+    git("add", "-A")
+    git("commit", "-qm", "rules")
+    run()
+    saved = sorted(Path("adws/adw_data/sessions").glob("*/*/prompts/system.md"))
+    assert {p.parent.parent.name for p in saved} >= {"scout", "ticket_builder", "spec_reviewer"}
+    for path in saved:
+        assert path.read_text().endswith("## This repo's rules\n\n- Never run `just fusion`.\n")
 
 
 def test_the_standards_reviewer_never_sees_the_spec(repo):

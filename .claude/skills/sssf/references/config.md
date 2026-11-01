@@ -226,6 +226,17 @@ This fails quietly. The extension still loads, the run still succeeds, and the t
 
 Rule: **every entry in `harness_engineering` that registers a tool must have that tool name added to the agent's `tools` list.** Adding an extension is therefore a two-line change, never one. The alternative is dropping the `tools` key *and* leaving `defaults.tools` unset so the agent resolves to `None` (all tools) — but with a roster-wide `defaults.tools` in place, that escape hatch is closed; naming the tool is the only path.
 
+## Rules for every agent — `agent_rules`
+
+`agent_rules` in `adws/adw_sssf_config/repo.yaml`, not in the roster, lists rules every agent gets, whatever its role or roster. SSSF appends them to each agent's system prompt under `## This repo's rules`, so the saved `prompts/system.md` shows what the agent read. Use it for what a repo needs from every agent, such as a command none may run:
+
+```yaml
+agent_rules:
+  - Never run the `fh-*` or stack recipes in the justfile, or `pi` itself. They bill API keys from .env, outside SSSF's caps. Test with `bun test`.
+```
+
+A rule asks; nothing enforces it. What an agent may change is enforced by `writes` and `protected_files`. Putting the rule here instead of in each prompt file keeps the prompts unchanged, so updates don't flag every one for review.
+
 ## Harness engineering
 
 `harness_engineering` entries are pi extension **file paths**, passed through as `pi -e <path>`, one flag per entry, scoped to that agent only. This is where per-agent harness changes live — e.g. an output-tightening extension for an agent that keeps wrapping its envelope in prose. The starter roster ships with none. Claude Code cannot load pi extensions, so validation rejects the field on a `claude_code` agent.

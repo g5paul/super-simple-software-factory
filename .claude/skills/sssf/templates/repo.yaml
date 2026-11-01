@@ -33,3 +33,10 @@ max_worktree_runs: 2
 worktree_setup: []
 # Seconds each setup command may take before the run stops.
 worktree_setup_timeout: 600
+# Rules every agent gets at the end of its system prompt, whatever its role.
+# For what this repo needs from every agent, such as a command none may run.
+# A rule here asks; it is not enforced. What an agent may change is enforced
+# by `writes` and `protected_files` in the roster.
+#   agent_rules:
+#     - Never run `just deploy`: it spends real money outside SSSF's caps.
+agent_rules: []

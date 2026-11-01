@@ -2,6 +2,7 @@ import type {
   AccountUsage,
   DaySpend,
   LiveSpend,
+  MachineDay,
   Envelope,
   EventRow,
   EventsPage,
@@ -101,6 +102,11 @@ export function fetchDay(project: string): Promise<DaySpend> {
 /** What the live runs spend together against max_live_cost, for any project. */
 export function fetchLive(project: string): Promise<LiveSpend> {
   return getJson(`/api/projects/${encodeURIComponent(project)}/live`) as Promise<LiveSpend>
+}
+
+/** Every registered repo's last 24 hours against the machine's max_daily_cost in limits.yaml. */
+export function fetchMachineDay(): Promise<MachineDay> {
+  return getJson('/api/machine/day') as Promise<MachineDay>
 }
 
 export function fetchProjects(): Promise<ProjectsResponse> {

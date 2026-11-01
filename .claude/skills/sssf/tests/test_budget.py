@@ -23,6 +23,7 @@ Run from the skill root:
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -38,6 +39,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agent_cc, agents, budget, session
+from adw_modules.tracer import Tracer
 from adw_modules.data_types import (AgentCall, AgentConfig, AgentResult, ConfigDefaults,
                                     GenericOutput, ObservabilityConfig, PhaseParams, SSSFConfig)
 
@@ -198,7 +200,8 @@ def test_none_turns_the_run_cap_off(factory):
 def test_a_run_records_its_caps_so_the_dashboard_can_draw_them(factory):
     run = factory([result(0.1)], max_run_cost=3.0)
     assert events(run, "run_caps")[-1] == {"max_run_cost": 3.0, "rate_limit_stop": 0.8, "max_live_cost": None,
-                                           "max_daily_cost": None}
+                                           "max_daily_cost": None,
+                                           "machine_daily_cost": None}
 
 
 # ── max_live_cost: what live runs spend together (parallel-worktree-runs 39 to 48) ──
@@ -359,3 +362,92 @@ def test_a_run_records_max_daily_cost_for_the_dashboard(factory):
     daily_cap(20.0)
     run = factory([])
     assert events(run, "run_caps")[-1]["max_daily_cost"] == 20.0
+
+
+# ── max_daily_cost in limits.yaml: every repo on the machine (parallel-worktree-runs 73 to 82) ──
+
+def machine_cap(registry: Path, cap: float) -> None:
+    (registry.parent / "limits.yaml").write_text(f"max_daily_cost: {cap}\n")
+
+
+def other_repo(registry: Path, tmp_path: Path, name: str, cost: float, hours: float = 1) -> Path:
+    """A registered repo whose trace holds one call that ended `hours` ago."""
+    root = tmp_path.parent / f"{tmp_path.name}-{name}"
+    db = root / "adws" / "adw_data" / "sssf.db"
+    db.parent.mkdir(parents=True)
+    Tracer(str(db), os.devnull).conn.close()
+    at = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="milliseconds")
+    with sqlite3.connect(db) as conn:
+        conn.execute("insert into events (event_id, adw_id, phase_id, type, name, payload_json, "
+                     "started_at) values (?, 'other111', '', 'agent_end', 'builder', ?, ?)",
+                     (f"evt_{name}", json.dumps({"cost": cost}), at))
+    register(registry, name, root)
+    return root
+
+
+def register(registry: Path, name: str, root: Path) -> None:
+    data = json.loads(registry.read_text()) if registry.exists() else {"projects": {}}
+    data["projects"][name] = {"root": str(root)}
+    registry.write_text(json.dumps(data))
+
+
+def test_every_registered_repos_day_stops_a_run(factory, private_registry, tmp_path):
+    run = factory([result(0.1)])
+    machine_cap(private_registry, 2.0)
+    other_repo(private_registry, tmp_path, "yt", 1.5)
+    spent_ago("done1111", 0.6, hours=2)
+    with pytest.raises(budget.MachineBudgetStop,
+                       match=r"runs on this machine have spent \$2.10 in the last 24 hours "
+                             r"\(yt \$1.50, .* \$0.60\).*max_daily_cost \$2.00 in .*limits.yaml"):
+        build(run)
+    assert factory.calls == []
+    assert events(run, "machine_budget_stop")[0]["cap"] == 2.0
+
+
+def test_the_launching_repo_counts_though_the_registry_lacks_it(factory, private_registry):
+    run = factory([result(0.1)])
+    machine_cap(private_registry, 1.0)
+    spent_ago("done1111", 1.0, hours=2)
+    with pytest.raises(budget.MachineBudgetStop):
+        build(run)
+
+
+def test_a_registered_repo_that_cant_be_read_counts_nothing(factory, private_registry, tmp_path):
+    run = factory([result(0.1)])
+    machine_cap(private_registry, 1.0)
+    register(private_registry, "gone", tmp_path.parent / "no-such-repo")
+    broken = tmp_path.parent / f"{tmp_path.name}-broken"
+    (broken / "adws" / "adw_data").mkdir(parents=True)
+    (broken / "adws" / "adw_data" / "sssf.db").write_text("not a database")
+    register(private_registry, "broken", broken)
+    build(run)
+    assert not (tmp_path.parent / "no-such-repo").exists()
+
+
+def test_the_machine_cap_is_off_without_limits_yaml(factory, private_registry, tmp_path):
+    run = factory([result(0.1)])
+    other_repo(private_registry, tmp_path, "yt", 100.0)
+    build(run)
+
+
+def test_a_launch_over_the_machines_day_is_refused(factory, private_registry, tmp_path):
+    run = factory([])
+    machine_cap(private_registry, 1.0)
+    other_repo(private_registry, tmp_path, "yt", 1.0)
+    with pytest.raises(SystemExit, match=r"MachineBudgetStop: .*drops under at .* UTC"):
+        session.ensure(run.cfg, None, use_worktree=True)
+    assert not Path("adws/adw_data/worktrees").exists()
+
+
+def test_a_run_records_the_machine_cap_for_the_dashboard(factory, private_registry):
+    machine_cap(private_registry, 30.0)
+    run = factory([])
+    assert events(run, "run_caps")[-1]["machine_daily_cost"] == 30.0
+
+
+def test_a_broken_limits_yaml_stops_runs_instead_of_turning_the_cap_off(factory, private_registry):
+    run = factory([result(0.1)])
+    (private_registry.parent / "limits.yaml").write_text("max_daily_cost: lots\n")
+    with pytest.raises(budget.MachineBudgetStop, match=r"limits.yaml can't be read .*positive number"):
+        build(run)
+    assert factory.calls == []

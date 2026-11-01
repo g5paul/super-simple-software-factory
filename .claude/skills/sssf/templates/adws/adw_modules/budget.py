@@ -16,15 +16,24 @@ max_run_cost. `max_daily_cost` caps what the repo's runs spent in the last 24
 hours, finished ones too. `check_live` and `check_daily` run beside
 `check_run`, and `check_launch` checks both before a run starts.
 
+One more is the machine's, in ~/.config/sssf/limits.yaml beside the project
+registry: its `max_daily_cost` caps what every registered repo's runs spent in
+the last 24 hours together. `check_machine` runs after `check_daily`.
+
 A stop records why in the trace. If the tree holds uncommitted work, the
 message says how to look at it, keep it, or drop it; nothing is discarded.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from . import git_helper, repo_settings, worktree
 from .data_types import AgentResult, EventRecord
@@ -44,6 +53,10 @@ class LiveBudgetStop(BudgetStop):
 
 class DailyBudgetStop(BudgetStop):
     """The repo's runs have spent repo.yaml's max_daily_cost in the last 24 hours."""
+
+
+class MachineBudgetStop(BudgetStop):
+    """Every repo's runs on this machine have spent limits.yaml's max_daily_cost in the last 24 hours."""
 
 
 DAY = timedelta(hours=24)
@@ -192,9 +205,123 @@ def check_daily(run, agent_name: str, phase_id: str) -> None:
     raise DailyBudgetStop(message)
 
 
+def _config_dir() -> Path:
+    """The registry's folder, as install.py and account.py find it, so $SSSF_REGISTRY moves it."""
+    if os.environ.get("SSSF_REGISTRY"):
+        return Path(os.environ["SSSF_REGISTRY"]).parent
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "sssf"
+
+
+def limits_path() -> Path:
+    return _config_dir() / "limits.yaml"
+
+
+def machine_daily_cost() -> Optional[float]:
+    """limits.yaml's max_daily_cost; None when the file is missing or doesn't set it.
+    A file that can't be read stops runs rather than turning the cap off unseen."""
+    path = limits_path()
+    if not path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+        cap = data.get("max_daily_cost") if isinstance(data, dict) else "not a mapping"
+        if cap is not None and (isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap <= 0):
+            raise ValueError(f"max_daily_cost must be a positive number, not {cap!r}")
+    except (OSError, yaml.YAMLError, ValueError) as error:
+        raise MachineBudgetStop(f"{path} can't be read ({error}). Fix it, or remove it "
+                                f"to turn the machine's daily cap off.") from None
+    return None if cap is None else float(cap)
+
+
+def _machine_repos(cfg, root: Path) -> list[tuple[str, str]]:
+    """(name, trace) for every registered repo, and this one even if unregistered."""
+    try:
+        projects = json.loads((_config_dir() / "projects.json").read_text()).get("projects", {})
+    except (OSError, ValueError, AttributeError):
+        projects = {}
+    here = root.resolve()
+    own = here.name
+    repos = []
+    for name, entry in projects.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("root"), str):
+            continue
+        repo = Path(entry["root"])
+        if repo.resolve() == here:
+            own = name
+            continue
+        db = Path(entry.get("db") or "adws/adw_data/sssf.db")
+        repos.append((name, str(db if db.is_absolute() else repo / db)))
+    return [(own, _db(cfg, root)), *repos]
+
+
+def _spend_read_only(db: str, since: str) -> list[tuple[str, float]]:
+    """worktree.spend_since without creating or migrating another repo's trace.
+    A trace that is missing or won't open has spent nothing."""
+    if not Path(db).is_file():
+        return []
+    try:
+        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+            return [(at, float(cost or 0)) for at, cost in conn.execute(
+                "select started_at, json_extract(payload_json, '$.cost') from events "
+                "where type = 'agent_end' and started_at >= ? order by started_at", (since,))]
+    except sqlite3.Error:
+        return []
+
+
+def _machine_over(cfg, run=None) -> Optional[tuple[str, float, float]]:
+    """Why every repo's last 24 hours are at the machine's cap, their total, and the cap; None under it or off."""
+    cap = machine_daily_cost()
+    if cap is None:
+        return None
+    root = _root()
+    now = datetime.now(timezone.utc)
+    since = (now - DAY).isoformat(timespec="milliseconds")
+    calls: list[tuple[datetime, float]] = []
+    shares: dict[str, float] = {}
+    for i, (name, db) in enumerate(_machine_repos(cfg, root)):
+        repo_calls = [(datetime.fromisoformat(at), cost) for at, cost in _spend_read_only(db, since)]
+        if i == 0 and run is not None:
+            # This repo's own run: what the trace doesn't hold yet counts as spent now.
+            traced = worktree.live_spend(db).get(run.adw_id, 0.0)
+            if run.cost > traced:
+                repo_calls.append((now, run.cost - traced))
+        calls += repo_calls
+        shares[name] = shares.get(name, 0.0) + sum(cost for _, cost in repo_calls)
+    total = sum(shares.values())
+    if total < cap:
+        return None
+    left = total
+    for at, cost in sorted(calls, key=lambda call: call[0]):    # oldest first
+        left -= cost
+        if left < cap:
+            clears = at + DAY
+            break
+    each = ", ".join(f"{name} ${cost:.2f}" for name, cost in
+                     sorted(shares.items(), key=lambda item: -item[1]))
+    return (f"the runs on this machine have spent ${total:.2f} in the last 24 hours ({each}), "
+            f"at or over max_daily_cost ${cap:.2f} in {limits_path()}. It drops under at "
+            f"{clears:%Y-%m-%d %H:%M} UTC if nothing else runs"), total, cap
+
+
+def check_machine(run, agent_name: str, phase_id: str) -> None:
+    """Raise MachineBudgetStop when every registered repo's runs together have
+    spent limits.yaml's max_daily_cost in the last 24 hours."""
+    over = _machine_over(run.cfg, run)
+    if not over:
+        return
+    why, total, cap = over
+    message = (f"{why}. Stopped before {agent_name}'s next call. Raise max_daily_cost in "
+               f"{limits_path()}, or resume once it drops under." + uncommitted_help(run))
+    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase_id, type="error",
+                                 name="machine_budget_stop",
+                                 payload={"agent": agent_name, "spent": total, "cap": cap,
+                                          "error": message}))
+    raise MachineBudgetStop(message)
+
+
 def check_launch(cfg) -> None:
     """Refuse a new run while the live runs are at max_live_cost, or the last
-    24 hours at max_daily_cost."""
+    24 hours at the repo's or the machine's max_daily_cost."""
     over = _live_over(cfg)
     if over:
         raise LiveBudgetStop(f"{over[0]}, so this run did not start. Let a run finish, or raise "
@@ -203,6 +330,10 @@ def check_launch(cfg) -> None:
     if over:
         raise DailyBudgetStop(f"{over[0]}. This run did not start. Launch it then, or raise "
                               f"max_daily_cost in adws/adw_sssf_config/repo.yaml.")
+    over = _machine_over(cfg)
+    if over:
+        raise MachineBudgetStop(f"{over[0]}. This run did not start. Launch it then, or raise "
+                                f"max_daily_cost in {limits_path()}.")
 
 
 def record_call_stop(run, agent_name: str, phase_id: str, cap: Optional[float],

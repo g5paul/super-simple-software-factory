@@ -165,6 +165,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         budget.check_run(run, agent.name, phase.phase_id)
         budget.check_live(run, agent.name, phase.phase_id)
         budget.check_daily(run, agent.name, phase.phase_id)
+        budget.check_machine(run, agent.name, phase.phase_id)
         request = AgentRequest(
             prompt=prompt_text,
             system_prompt=system_text,

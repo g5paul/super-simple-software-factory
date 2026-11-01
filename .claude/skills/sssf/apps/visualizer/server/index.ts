@@ -18,6 +18,7 @@ import { SssfDb, resolveDbPath } from "./db.ts";
 import { Account, type PiCallAt } from "./account.ts";
 import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
 import { liveSpend, readLiveCap } from "./live.ts";
+import { machineDay, readMachineCap } from "./machine.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import type {
   AccountUsage,
@@ -25,6 +26,7 @@ import type {
   ApiError,
   DaySpend,
   LiveSpend,
+  MachineDay,
   HealthResponse,
   ProjectsResponse,
   SessionSummary,
@@ -242,6 +244,15 @@ const server = listen((port) => Bun.serve({
       const since = new Date(now - DAY_MS).toISOString().replace("Z", "+00:00");
       const calls = projects.db(project)?.dayCalls(since) ?? [];
       return json(daySpend(calls, readDailyCap(project.root), now) satisfies DaySpend);
+    }),
+
+    // Every registered repo's last 24 hours against limits.yaml's max_daily_cost.
+    "/api/machine/day": safely(() => {
+      const now = Date.now();
+      const since = new Date(now - DAY_MS).toISOString().replace("Z", "+00:00");
+      const repos = projects.everyProject().map((p) => ({ name: p.name, calls: projects.db(p)?.dayCalls(since) ?? [] }));
+      const { cap, error } = readMachineCap();
+      return json(machineDay(repos, cap, error, now) satisfies MachineDay);
     }),
 
     // What the live runs spend together against repo.yaml's max_live_cost.

@@ -8,6 +8,7 @@ export type {
   RunCaps,
   DaySpend,
   LiveSpend,
+  MachineDay,
   RunWorktree,
   RunLanded,
   RunRebased,

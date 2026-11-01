@@ -4,6 +4,7 @@ import type { AccountUsage, LimitWindow, SpendRow } from '../lib/types'
 import { fetchAccount } from '../lib/api'
 import { fmtCost, fmtDate, fmtTokens } from '../lib/format'
 import { modelName } from '../lib/models'
+import MachineGauge from './MachineGauge.vue'
 
 const usage = shallowRef<AccountUsage | null>(null)
 const error = ref<string | null>(null)
@@ -86,6 +87,8 @@ function share(row: SpendRow, total: number): string {
       </div>
       <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
     </div>
+
+    <MachineGauge />
 
     <div v-if="usage" class="spend">
       <div class="spend-head">

@@ -252,6 +252,8 @@ export interface RunCaps {
   max_live_cost?: number | null;
   /** repo.yaml's cap on what the repo spent in the last 24 hours. Absent on runs from before it existed. */
   max_daily_cost?: number | null;
+  /** limits.yaml's cap on what every repo on the machine spent in the last 24 hours. */
+  machine_daily_cost?: number | null;
 }
 
 /** Where a `--worktree` run worked, from the `worktree` event its start logged. */
@@ -303,7 +305,7 @@ export interface RunLanded {
 
 /** Why a failed run stopped, from its own stop event or its first failed phase. */
 export interface StopReason {
-  kind: "call_budget_stop" | "budget_stop" | "live_budget_stop" | "daily_budget_stop" | "rate_limit_stop" | "not_accepted" | "phase_failed";
+  kind: "call_budget_stop" | "budget_stop" | "live_budget_stop" | "daily_budget_stop" | "machine_budget_stop" | "rate_limit_stop" | "not_accepted" | "phase_failed";
   /** The full message the run printed, git advice included. */
   message: string;
   /** The phase it stopped in, to jump to. */
@@ -420,6 +422,15 @@ export interface LiveSpend {
   cap: number | null;
   /** Each live run's current attempt, largest first. */
   runs: { adw_id: string; cost: number }[];
+}
+
+/** GET /api/machine/day: every registered repo's last 24 hours against limits.yaml's max_daily_cost. */
+export interface MachineDay extends DaySpend {
+  /** Each repo's share, largest first. */
+  repos: { name: string; spent: number }[];
+  /** Why limits.yaml can't be read; runs stop until it's fixed. */
+  error: string | null;
+  path: string;
 }
 
 /** GET /api/projects/:project/day: the last 24 hours' spend against max_daily_cost. */

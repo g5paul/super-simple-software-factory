@@ -89,7 +89,8 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
             budget.check_launch(cfg)
             place = worktree.enter(cfg, adw_id, use_worktree)
             tracer, run = _start(cfg, adw_id, place)
-    except (worktree.WorktreeError, budget.LiveBudgetStop, budget.DailyBudgetStop) as error:
+    except (worktree.WorktreeError, budget.LiveBudgetStop, budget.DailyBudgetStop,
+            budget.MachineBudgetStop) as error:
         raise SystemExit(f"{type(error).__name__}: {error}") from None
     # The caps this run is held to, so the dashboard can draw spend against
     # them. A joined run records them again; the latest row wins.
@@ -97,7 +98,8 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
                              payload={"max_run_cost": cfg.defaults.max_run_cost,
                                       "rate_limit_stop": cfg.defaults.rate_limit_stop,
                                       "max_live_cost": budget.max_live_cost(),
-                                      "max_daily_cost": budget.max_daily_cost()}))
+                                      "max_daily_cost": budget.max_daily_cost(),
+                                      "machine_daily_cost": budget.machine_daily_cost()}))
     _finalize_when_killed(run)
     _report_stops_plainly(run)
     run.console.session_started(adw_id, run.engineer)

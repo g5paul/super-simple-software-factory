@@ -72,6 +72,7 @@ A read-only survey of the skill before the decisions:
 ## Open
 
 - A judge that picks the winner on its own, once enough scorecards show whether its picks match the engineer's.
+- Name each roster with its coding agent: `main (Claude Code)` and `chatgpt (pi)`, not a bare `main`, so the scorecard, the dashboard's trial page and the leaderboard say what ran. The engineer asked for it on 2026-11-01, during the second trial.
 
 ## Log
 

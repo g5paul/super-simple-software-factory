@@ -4,7 +4,20 @@ Researched 2026-11-01. Can SSSF read a ChatGPT plan's usage windows for Pi agent
 
 ## Short answer
 
-Not today, and maybe not soon on the route SSSF uses. A cheap way to find out exists, though.
+No, not on the route SSSF uses. The experiment below checked real responses: they carry no usage windows.
+
+## Experiment, 2026-11-01
+
+Two calls in sssf-sandbox (pu1probe, $0.0085, and pu2probe, $0.0043), each one scout on `openai/gpt-6.1-terra` through Pi's `openai` provider (`api: openai-responses`), launched with `SSSF_PI_AUTH=subscription`. A Pi extension logged every response's header names, the values of any header whose name looked like a limit, and every raw stream event's type, with the field names of `response.metadata` and `response.completed`.
+
+- **Headers.** 4 responses, all HTTP 200. The only `x-codex-*` header was `x-codex-turn-state`, an opaque per-turn token. No `x-codex-primary-*`, `x-codex-secondary-*`, credits, or `x-ratelimit-*` headers.
+- **Stream events.** 309 events, all `response.*`: deltas, `created`, `in_progress`, `completed`, and `response.metadata`. No `codex.rate_limits` event.
+- **`response.metadata`** holds only moderation metadata (`openai_chatgpt_moderation_metadata`).
+- **`response.completed`** holds token usage per output item, a service tier, and model settings, but nothing about plan limits.
+
+So the README's claim holds for SSSF's route, for a different reason than it gave: the Codex backend reports windows, but the token-sharing route Pi's `openai` login uses doesn't. The probe and its roster were removed afterwards, and the logs deleted.
+
+## What the research found before the experiment
 
 The research question assumed Pi calls the Codex backend (`chatgpt.com/backend-api/codex`). SSSF's ChatGPT roster doesn't. In Pi 1.4.0, `/login` then `openai` is OpenAI's new "Sign in with ChatGPT" token sharing. Pi sends that token straight to the public `https://api.openai.com/v1/responses` endpoint, the same one API keys use. The Codex-style login is a separate provider, `openai-codex`, which Pi now labels "legacy".
 

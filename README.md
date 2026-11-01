@@ -126,8 +126,8 @@ SSSF can run its agents on a Claude subscription through Claude Code, or on a Ch
 
 **ChatGPT, through Pi.** Sign Pi into ChatGPT once: run `pi`, then `/login`, and pick `openai`. `pi auth check --provider openai --json` should report `"authType": "oauth"`. Install with `--chatgpt`, which stamps a Pi roster with the ChatGPT models in the table below. Set `SSSF_PI_AUTH=subscription` in `.env`.
 
-- SSSF can't see ChatGPT's usage windows. ChatGPT doesn't send them with model responses, so the panel shows spend only, and `rate_limit_stop` doesn't cover a Pi run. Check your plan's limits in ChatGPT or Codex.
-- There is no per-call cap on Pi. `max_run_cost`, checked before every send, is the only cost limit.
+- SSSF can't see ChatGPT's usage windows. Pi's ChatGPT sign-in calls OpenAI's public API through token sharing, which sends none with its responses; only the Codex backend does. So the panel shows spend only, and `rate_limit_stop` doesn't cover a Pi run. Check your plan's limits in ChatGPT or Codex. See [`docs/research/pi-usage-limits.md`](docs/research/pi-usage-limits.md).
+- There is no per-call cap on Pi. `max_run_cost`, checked before every send, and `max_live_cost` and `max_daily_cost` in `repo.yaml` are its cost limits.
 
 | | Claude via Claude Code | ChatGPT via Pi |
 |---|---|---|
@@ -496,7 +496,7 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 
 - `max_daily_cost` holds one repo; nothing caps what every repo on the machine spends together.
 - The dashboard has no gauge of `max_live_cost`, only the run's caps and its stop.
-- pi agents have no usage-window guard; `rate_limit_stop` reads what Claude Code reports.
+- A pi run that hits the ChatGPT plan's limit fails on a 429 like any error; nothing names it a usage stop. The route reports no windows to stop before it.
 - One request tried several ways, with the best merged, is left room for but not built.
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.

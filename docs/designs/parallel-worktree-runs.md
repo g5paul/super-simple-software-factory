@@ -116,12 +116,25 @@ Settled in a fifth grilling session on 2026-10-31. `max_live_cost` stops runs th
 56. **On the dashboard.** `run_caps` records `max_daily_cost`, and the stop has its own label. A gauge of the last 24 hours goes on the open list.
 57. **Proof.** In sssf-sandbox: a launch refused because the trace's last 24 hours are already at the cap, naming when it clears, at $0; a `simple_sdlc` run with the cap just above the last 24 hours, stopped before its second call; and a run with the setting off, as today. About $0.50. Then a rollout on the engineer's word, in which the repos set nothing.
 
+### A gauge of the last 24 hours
+
+Settled in a sixth grilling session on 2026-10-31. Decision 56 showed `max_daily_cost` only in `run_caps` and on a stop, so the first sign of the cap was a run stopping.
+
+58. **Where.** One gauge component, on each repo's card on the projects page and at the top of its runs list, the page `just obs` opens.
+59. **What it shows.** The last 24 hours' spend, always. With a cap, a bar: "$X of $C in the last 24 hours". Without one, "no daily cap". At or over the cap, the UTC time it drops under.
+60. **The cap from repo.yaml.** The server reads `max_daily_cost` from the repo's own `adws/adw_sssf_config/repo.yaml` on each request, the value the checks read; `run_caps` is stale until the next run. A missing or unreadable file reads as no cap.
+61. **The check's number.** The sum of `agent_end` costs that ended in the last 24 hours, and the same clear-time walk. The server can't see a live run's in-process count, so a call in flight isn't counted until it ends; a tooltip says so.
+62. **Daily only.** A gauge of `max_live_cost` goes on the open list.
+63. **The account panel's colors.** Plain under 80% of the cap, amber from 80%, red at or over it, when runs stop.
+64. **Its own endpoint.** `/api/projects/:project/day` returns the spend, the cap, and the clear time. Each page polls it every 10 seconds, so the runs list's half-second poll doesn't scan 24 hours of events.
+65. **Proof, at $0.** bun tests for the window, the clear time, and a missing or broken `repo.yaml`; in sssf-sandbox with a cap set, the endpoint's total and clear time against the Python check's message; and Chromium screenshots of a card and a runs list header, under the cap and over it.
+
 ## Open
 
 Known, and not built. None of them blocks a run.
 
 - **One cap across every repo.** `max_daily_cost` holds one repo's trace (decision 49). Two repos running unattended on one machine each spend up to their own.
-- **A 24-hour gauge.** The dashboard shows `max_daily_cost` only in `run_caps` and on a stop (decision 56), not how close the repo is.
+- **A gauge of what live runs spend together.** The dashboard shows `max_daily_cost` against the last 24 hours (decisions 58 to 65), but `max_live_cost` only on a run's caps and its stop. It waits for someone to ask.
 - **pi agents have no usage-window guard.** `rate_limit_stop` reads what Claude Code reports. A pi roster, such as the ChatGPT one, has `max_run_cost` and `max_live_cost` only.
 - **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
@@ -167,3 +180,4 @@ Known, and not built. None of them blocks a run.
 | 2026-10-31 | sssf-sandbox `master` | daily case 1: dc1refus launched with `max_daily_cost` $7.00, the last 24 hours at $7.56 from the earlier proofs | refused with `DailyBudgetStop` before any worktree or session, clearing at 15:41 UTC. Recomputed by hand from the trace: the same total and time. $0 |
 | 2026-10-31 | sssf-sandbox | daily case 2: dc2stop (`adw_simple_sdlc`, `--worktree`) with the cap $0.05 over the last 24 hours, $7.61 | the plan call cost $0.29, and the build send stopped with `daily_budget_stop`: $7.85 against $7.61, clearing at 15:21 UTC. `run_caps` recorded 7.61. Discarded |
 | 2026-10-31 | sssf-sandbox | daily case 3: dc3off (`adw_prompt`) with the setting off, the last 24 hours at $7.85 | success, $0.004, no `daily_budget_stop`, `run_caps` recorded the cap as off. The sandbox is clean at a2950ba, with the cap off |
+| 2026-10-31 | hub | grilling session: a gauge of the last 24 hours, decisions 58 to 65 | settled |

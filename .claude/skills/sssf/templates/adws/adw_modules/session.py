@@ -7,6 +7,7 @@ minted and printed so the next ADW can pick it up.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import sys
@@ -100,6 +101,12 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
                                       "max_live_cost": budget.max_live_cost(),
                                       "max_daily_cost": budget.max_daily_cost(),
                                       "machine_daily_cost": budget.machine_daily_cost()}))
+    # An attempt of a trial says which trial and roster it is, once, at its
+    # start. `just trial` passes the tag in; see trial.py.
+    tag = os.environ.get("SSSF_TRIAL")
+    if tag and not (place and place["resumed"]):
+        tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="trial",
+                                 payload=json.loads(tag)))
     _finalize_when_killed(run)
     _report_stops_plainly(run)
     run.console.session_started(adw_id, run.engineer)

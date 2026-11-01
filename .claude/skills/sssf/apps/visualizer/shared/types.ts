@@ -347,6 +347,8 @@ export interface SessionDetail {
   tickets: TicketRun | null;
   /** null unless the run worked on its own branch (`--worktree`). */
   worktree: RunWorktree | null;
+  /** null unless the run is an attempt of a trial, or its panel. */
+  trial: RunTrial | null;
   /** Derived from agent_end payloads, so historical runs have it too. */
   usage: SessionUsage;
   /** Ordered by seq. */
@@ -520,4 +522,82 @@ export interface AccountUsage {
   transcripts: string;
   /** SSSF's own Pi agents, from every registered project's trace db. */
   pi: { window: PiSpendWindow; week: PiSpendWindow };
+}
+
+/** The trial a run belongs to, as an attempt or as its panel (trials.md decision 24). */
+export interface RunTrial {
+  trial: string;
+  role: "attempt" | "panel";
+  /** The attempt's roster; null for the panel. */
+  roster: string | null;
+}
+
+/** One panel reviewer's ruling on one attempt, as trial.py's combine() records it. */
+export interface TrialRuling {
+  family: string;
+  label: string;
+  approved: boolean;
+  blocking: string[];
+  unmet: string[];
+}
+
+/** One attempt's row of a trial's scorecard. */
+export interface TrialAttemptCard {
+  adw_id: string;
+  roster: string;
+  roster_file: string;
+  roster_sha256: string;
+  family: string;
+  status: SessionStatus | null;
+  cost: number;
+  tokens: number;
+  seconds: number | null;
+  /** The last full quality.py check; null before it ran. */
+  checks: boolean | null;
+  live: boolean;
+  /** Lines and files from the trial's base to the branch, once the panel measured them. */
+  added?: number;
+  removed?: number;
+  files?: number;
+  /** null when the run itself failed, so the panel never saw it. */
+  review: "pass" | "block" | "unknown" | null;
+  rulings: TrialRuling[];
+  /** Average place across the panel, 1 is best; rank_others leaves out its own family's vote. */
+  rank: number | null;
+  rank_others: number | null;
+  passed: boolean;
+}
+
+/** GET /api/projects/:project/trials/:trial */
+export interface TrialView {
+  trial: string;
+  request: string;
+  base: string;
+  families: string[];
+  panel: string | null;
+  panel_status: SessionStatus | null;
+  panel_cost: number;
+  total_cost: number;
+  suggested: string | null;
+  why: string;
+  merged: string | null;
+  running: boolean;
+  attempts: TrialAttemptCard[];
+  /** false until a panel has recorded a scorecard; the rows are then the runs as they are. */
+  scored: boolean;
+}
+
+/** GET /api/projects/:project/rosters: one row per roster name and file hash, from scored trials. */
+export interface RosterRow {
+  roster: string;
+  sha256: string;
+  /** The roster file on disk has this hash. */
+  current: boolean;
+  trials: number;
+  attempts: number;
+  passed: number;
+  wins: number;
+  /** Over the attempts that passed every gate. */
+  median_cost: number | null;
+  median_seconds: number | null;
 }

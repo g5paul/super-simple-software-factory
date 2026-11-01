@@ -125,6 +125,35 @@ class ReviewOutput(EnvelopeBase):
     blocking: list[str] = Field(default_factory=list)   # what must change before approval
 
 
+class TrialAttempt(BaseModel):
+    """One attempt as a trial's panel sees it: a label and a diff, nothing that names its roster."""
+
+    label: str
+    diff_path: str
+
+
+class TrialAttempts(EnvelopeBase):
+    """What a panel reviewer is handed: every attempt at the request, in its own order."""
+
+    attempts: list[TrialAttempt] = Field(default_factory=list)
+
+
+class PanelVerdict(BaseModel):
+    """One panel reviewer's ruling on one attempt."""
+
+    label: str
+    approved: bool = False
+    findings: list[ReviewFinding] = Field(default_factory=list)
+    blocking: list[str] = Field(default_factory=list)
+
+
+class PanelOutput(EnvelopeBase):
+    """A trial panel reviewer's verdict on every attempt, and its ranking of them."""
+
+    verdicts: list[PanelVerdict] = Field(default_factory=list)
+    ranking: list[str] = Field(default_factory=list)    # labels, best first
+
+
 class AxisFinding(BaseModel):
     """One finding on one review axis: standards, or spec."""
 

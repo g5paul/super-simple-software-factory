@@ -23,7 +23,7 @@ const STOP_EVENTS = ["call_budget_stop", "budget_stop", "live_budget_stop", "dai
 /** A ticket phase's name: t03_build, t03_verify_2, t03_fix_1, t03_commit. */
 const TICKET_PHASE = /^t(\d{2,3})_(build|verify_\d+|fix_\d+|commit)$/;
 
-function payload<T>(e: RunEvent): T | null {
+export function payload<T>(e: RunEvent): T | null {
   if (!e.payload_json) return null;
   try {
     return JSON.parse(e.payload_json) as T;

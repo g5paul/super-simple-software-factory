@@ -459,6 +459,21 @@ just rebase <adw_id>     # ff_only repos: onto your branch's tip, then recheck
 
 Two worktree runs can go at once, each its own launch with its own adw_id, merged on its own. `max_worktree_runs` in `repo.yaml` sets how many, 2 by default; set it to 1 if your quality checks bind a fixed port or share a test database. Each run's `max_run_cost` holds for that run alone, so two runs can spend up to twice it, unless `max_live_cost` in `repo.yaml` caps what live runs spend together. A lock keeps two launches from both passing the cap, and two merges from meeting in your checkout. In the container, each run gets its own project environment. A run's folder is a fresh checkout without your untracked dependencies, so `worktree_setup` in `repo.yaml` lists the commands that install them, such as `bun install --frozen-lockfile`; they run as the run's first phase, before any agent. Design: [`docs/designs/parallel-worktree-runs.md`](docs/designs/parallel-worktree-runs.md).
 
+### Race rosters on one request
+
+Which roster does your repo's work best? A trial runs one request under several rosters at once, each as its own worktree run from the same commit, and then a panel compares what they built.
+
+```bash
+just trial "add a /health endpoint" main chatgpt    # main is sssf.config.yaml, chatgpt is sssf.config.chatgpt.yaml
+just trial-show <trial>                             # the scorecard, at any point
+just trial-merge <trial> <adw_id>                   # land your pick, drop the others
+just trial-discard <trial>                          # drop them all
+```
+
+The panel has one reviewer per model family in the trial, so a Claude roster against a ChatGPT roster gets one Claude reviewer and one GPT reviewer. Each sees only the request and the diffs, labelled A and B in a different order for each reviewer. An attempt passes when its run succeeded, its last quality checks passed, and no reviewer blocked it. The suggestion is the cheapest attempt that passed. The scorecard also shows each attempt's rank with and without the vote of its own family's reviewer, so you can see whether a reviewer favors its own kind. You pick; nothing merges on its own.
+
+A trial starts every attempt or none: it needs a free worktree slot for each (raise `max_worktree_runs` for three rosters), the cost caps must allow it, and every roster must be signed in. `uv run .claude/skills/sssf/scripts/install.py --add-roster chatgpt` adds the ChatGPT roster to an installed repo. The dashboard has a page per trial, and the project page keeps a leaderboard: per roster and roster version, how many attempts passed, how many won, and the median cost and time. Design: [`docs/designs/trials.md`](docs/designs/trials.md).
+
 Watch a run with the trace db directly:
 
 ```bash
@@ -498,7 +513,6 @@ A run works on your current branch unless you ask for one of its own. For real w
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list.
 
 - A pi run can't stop before the ChatGPT plan's limit, because the route reports no windows. At the limit the call fails with pi's own message, which names `subscription_sharing_usage_limit_exceeded` and links to the plan's usage page; SSSF doesn't treat it as a separate usage stop.
-- One request tried several ways, with the best merged, is left room for but not built.
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.
 

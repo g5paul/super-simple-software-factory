@@ -55,7 +55,7 @@ A read-only survey of the skill before the decisions:
 
 ### What gets recorded and shown
 
-20. **Each attempt records a `trial` event** at its start: the trial id, the roster name, the roster file's sha256, the base commit, and the request. The hash keeps a roster edited halfway through a series of trials apart from its old self. `just trial` passes it to each attempt in `SSSF_TRIAL`, so no chain changes.
+20. **Each attempt records a `trial` event** at its start: the trial id, the roster name, the roster file's sha256, and the base commit. The request comes from the run's own `sessions.request`, so the tag stays small. The hash keeps a roster edited halfway through a series of trials apart from its old self. `just trial` passes it to each attempt in `SSSF_TRIAL`, so no chain changes.
 21. **The panel run records the scorecard.** A `trial_diffs` event holds each reviewed attempt's diff size, recorded before any panel agent runs, so a failed panel still leaves the sizes. A `trial_scorecard` event holds every attempt's row, the ranks, the verdicts, and the suggestion. Python computes the scorecard once; the dashboard reads it rather than repeating the logic. The winner's run records `trial_merged`.
 22. **What the numbers mean.** Wall time is the run's start to its end. Diff size is lines added plus lines removed from the base to the branch, without `specs/` and the data dir. Findings are the panel's: blocking reasons and unmet requirements, per reviewer. Cost and tokens are the run's own totals. The scorecard's last line is the trial's whole cost, every attempt plus the panel.
 23. **No cap of its own.** Each run is held to `max_run_cost` as usual, and the daily and machine caps cover a trial that grows too large.
@@ -78,3 +78,7 @@ A read-only survey of the skill before the decisions:
 | Date | Where | What | Result |
 |---|---|---|---|
 | 2026-11-01 | hub | grilling session: decisions 1 to 29 | settled |
+| 2026-11-01 | sssf-sandbox | `just trial ... main chatgpt` without `SSSF_PI_AUTH=subscription` in `.env` | refused before any attempt started; 85 sessions before and after, no `sssf/` branch |
+| 2026-11-01 | sssf-sandbox | trial c258e6b9: add `textkit/word_count.py`, `main` (Claude Code) against `chatgpt` (Pi on GPT) | both attempts succeeded and passed. Panel b33eaf13, one Claude and one GPT reviewer, each drew its own order; both ranked the GPT attempt first, so rank and rank* agree. `main` 1fd1afe2 $0.57 in 2m21s; `chatgpt` c96c5204 $0.12 in 3m57s, suggested as the cheapest to pass. Panel $0.21, trial $0.90. Scorecard checked against each session's cost, timestamps, and phases |
+| 2026-11-01 | sssf-sandbox | `just trial-merge c258e6b9 c96c5204` | fast-forwarded master to a2d8088 and discarded 1fd1afe2. 133 tests pass. The leaderboard shows one row per roster, with hashes that match the files on disk and 1 win for `chatgpt` |
+| 2026-11-01 | hub | the first trial's log held only the launch line until the end | Python buffered stdout to the file. `adw_trial.py` now line-buffers it |

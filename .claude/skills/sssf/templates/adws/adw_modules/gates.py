@@ -95,6 +95,41 @@ def verdict_consistent(envelope: EnvelopeBase, run) -> GateReport:
     return report
 
 
+def panel_complete(labels: list[str]):
+    """A gate for a trial panel reviewer: a verdict on every attempt it was
+    shown, each one agreeing with its own findings, and a ranking of them all."""
+
+    def gate(envelope: EnvelopeBase, run) -> GateReport:
+        report = GateReport()
+        verdicts = {v.label: v for v in getattr(envelope, "verdicts", [])}
+        for label in labels:
+            verdict = verdicts.get(label)
+            report.check(f"verdict on {label}", verdict is not None,
+                         "given" if verdict else "no verdict for this attempt")
+            if verdict is None:
+                continue
+            unmet = [f for f in verdict.findings if not f.met]
+            report.check(f"{label}: approved vs blocking and findings",
+                         not (verdict.approved and (verdict.blocking or unmet)),
+                         "agrees" if not verdict.approved or not (verdict.blocking or unmet)
+                         else "approved with blocking items or unmet requirements")
+            report.check(f"{label}: a block names a problem",
+                         verdict.approved or bool(verdict.blocking or unmet),
+                         "agrees" if verdict.approved or verdict.blocking or unmet
+                         else "approved=false but no blocking item or unmet requirement was given")
+        extra = sorted(set(verdicts) - set(labels))
+        report.check("no verdict on an unknown label", not extra,
+                     "none" if not extra else f"unknown: {', '.join(extra)}")
+        ranking = list(getattr(envelope, "ranking", []))
+        report.check("ranking lists every attempt once", sorted(ranking) == sorted(labels),
+                     " > ".join(ranking) if sorted(ranking) == sorted(labels)
+                     else f"got {ranking}, expected each of {labels} once")
+        return report
+
+    gate.__name__ = "panel_complete"
+    return gate
+
+
 def tests_pass(command: str):
     """Gate factory: the given shell command must exit 0."""
     def gate(envelope: EnvelopeBase, run) -> GateReport:

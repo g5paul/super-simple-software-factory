@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRoute, hrefFor, phaseCrumb, projectHref } from './lib/router'
+import { useRoute, hrefFor, phaseCrumb, projectHref, trialHref } from './lib/router'
 import { fetchProjects } from './lib/api'
 import ProjectsList from './components/ProjectsList.vue'
 import SessionsList from './components/SessionsList.vue'
 import SessionTrace from './components/SessionTrace.vue'
+import TrialView from './components/TrialView.vue'
 
 const route = useRoute()
 
@@ -44,7 +45,11 @@ onMounted(async () => {
         </template>
         <template v-if="route.project">
           <span class="sep">›</span>
-          <a :href="hrefFor()" :class="{ current: !route.adwId }">{{ route.project }}</a>
+          <a :href="hrefFor()" :class="{ current: !route.adwId && !route.trialId }">{{ route.project }}</a>
+        </template>
+        <template v-if="route.trialId">
+          <span class="sep">›</span>
+          <a :href="trialHref(route.trialId)" class="current">trial {{ route.trialId }}</a>
         </template>
         <template v-if="route.adwId">
           <span class="sep">›</span>
@@ -61,6 +66,11 @@ onMounted(async () => {
     </header>
     <main>
       <ProjectsList v-if="!route.project && all" />
+      <TrialView
+        v-else-if="route.project && route.trialId"
+        :key="`${route.project}/trial/${route.trialId}`"
+        :trial="route.trialId"
+      />
       <SessionsList v-else-if="route.project && !route.adwId" :key="route.project" />
       <SessionTrace
         v-else-if="route.project && route.adwId"

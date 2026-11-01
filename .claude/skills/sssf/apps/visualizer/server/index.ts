@@ -20,6 +20,7 @@ import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
 import { liveSpend, readLiveCap } from "./live.ts";
 import { machineDay, readMachineCap } from "./machine.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
+import { leaderboard, rosterSha, trialView } from "./trials.ts";
 import type {
   AccountUsage,
   AgentPrompts,
@@ -29,7 +30,9 @@ import type {
   MachineDay,
   HealthResponse,
   ProjectsResponse,
+  RosterRow,
   SessionSummary,
+  TrialView,
 } from "../shared/types.ts";
 
 // SSSF_OBS_PORT (or PORT) pins the port, and a pinned port that is taken is
@@ -262,6 +265,26 @@ const server = listen((port) => Bun.serve({
       if (!project) return notFound(`no project ${name}`);
       const rows = projects.db(project)?.liveRows() ?? [];
       return json(liveSpend(rows, readLiveCap(project.root)) satisfies LiveSpend);
+    }),
+
+    // A trial's attempts side by side, with the panel's scorecard once it ran.
+    "/api/projects/:project/trials/:trial": withDb((db, req) => {
+      const trial = param(req, "trial");
+      const rows = db.trialAttempts(trial);
+      if (!rows.length) return notFound(`no trial ${trial}`);
+      const [card] = db.trialScorecards(trial);
+      return json(trialView(trial, rows, card ?? null, db.trialWinners().get(trial) ?? null) satisfies TrialView);
+    }),
+
+    // Which roster does this repo's work best: every scored trial, per roster file.
+    "/api/projects/:project/rosters": safely((req) => {
+      const name = param(req, "project");
+      const project = projects.find(name);
+      if (!project) return notFound(`no project ${name}`);
+      const db = projects.db(project);
+      if (!db) return json([] satisfies RosterRow[]);
+      const winners = new Set(db.trialWinners().values());
+      return json(leaderboard(db.trialScorecards(), winners, (file) => rosterSha(project.root, file)) satisfies RosterRow[]);
     }),
 
     "/api/projects/:project/sessions": withDb(

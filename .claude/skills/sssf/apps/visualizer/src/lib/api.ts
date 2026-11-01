@@ -10,8 +10,10 @@ import type {
   HealthResponse,
   ProjectsResponse,
   PromptsResponse,
+  RosterRow,
   SessionDetail,
   SessionSummary,
+  TrialView,
 } from './types'
 import { useRoute } from './router'
 
@@ -40,6 +42,7 @@ export async function fetchSession(adwId: string): Promise<SessionDetail> {
     stop: detail.stop ?? null,
     tickets: detail.tickets ?? null,
     worktree: detail.worktree ?? null,
+    trial: detail.trial ?? null,
     usage: detail.usage ?? { read: 0, written: 0 },
     phases: detail.phases ?? [],
     agents: detail.agents ?? [],
@@ -107,6 +110,16 @@ export function fetchLive(project: string): Promise<LiveSpend> {
 /** Every registered repo's last 24 hours against the machine's max_daily_cost in limits.yaml. */
 export function fetchMachineDay(): Promise<MachineDay> {
   return getJson('/api/machine/day') as Promise<MachineDay>
+}
+
+/** A trial's attempts side by side, with the panel's scorecard once it ran. */
+export function fetchTrial(trial: string): Promise<TrialView> {
+  return getJson(`${base()}/trials/${encodeURIComponent(trial)}`) as Promise<TrialView>
+}
+
+/** The project's roster leaderboard, from every scored trial. */
+export function fetchRosters(project: string): Promise<RosterRow[]> {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/rosters`) as Promise<RosterRow[]>
 }
 
 export function fetchProjects(): Promise<ProjectsResponse> {

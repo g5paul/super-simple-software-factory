@@ -100,6 +100,31 @@ rebase ADW_ID:
 discard ADW_ID:
     uv run adws/adw_worktree.py discard {{ADW_ID}} --config {{config}}
 
+# ── race rosters ────────────────────────────────────────────────────────────
+# A trial runs one request under several rosters, each as its own worktree
+# run of simple-sdlc, then a panel reviews them blind. You pick the winner.
+# `main` is sssf.config.yaml; <name> is sssf.config.<name>.yaml. See cookbooks/trial.md.
+
+# race one request across rosters: just trial "add a /health endpoint" main chatgpt
+trial *ARGS:
+    uv run adws/adw_trial.py start "$@"
+
+# a trial's scorecard, at any point: just trial-show <trial>
+trial-show TRIAL:
+    uv run adws/adw_trial.py show {{TRIAL}}
+
+# run a trial's panel again, if `just trial` died or its panel failed: just trial-review <trial>
+trial-review TRIAL:
+    uv run adws/adw_trial.py review {{TRIAL}}
+
+# land your pick and drop the other attempts: just trial-merge <trial> <adw_id>
+trial-merge TRIAL ADW_ID *ARGS:
+    uv run adws/adw_trial.py merge {{TRIAL}} {{ADW_ID}} {{ARGS}}
+
+# drop every attempt of a trial: just trial-discard <trial>
+trial-discard TRIAL:
+    uv run adws/adw_trial.py discard {{TRIAL}}
+
 # ── watch it ────────────────────────────────────────────────────────────────
 # Reads never block a running workflow, the db is WAL. Poll as hard as you like.
 

@@ -6,7 +6,8 @@
  * run recorded what it needs, so an old run shows nothing here.
  */
 import { computed } from 'vue'
-import type { RunCaps, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
+import type { RunCaps, RunTrial, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
+import { trialHref } from '../lib/router'
 import { fmtCost } from '../lib/format'
 
 const props = defineProps<{
@@ -15,6 +16,7 @@ const props = defineProps<{
   stop: StopReason | null
   tickets: TicketRun | null
   worktree: RunWorktree | null
+  trial?: RunTrial | null
 }>()
 const emit = defineEmits<{ select: [phaseId: string] }>()
 
@@ -58,7 +60,12 @@ function open(phaseId: string | null) {
 </script>
 
 <template>
-  <div v-if="worktree || cap || stop || tickets" class="run-summary">
+  <div v-if="worktree || cap || stop || tickets || trial" class="run-summary">
+    <div v-if="trial" class="branch">
+      <span v-if="trial.role === 'attempt'">attempt with roster <code>{{ trial.roster }}</code> in</span>
+      <span v-else>the panel of</span>
+      <a :href="trialHref(trial.trial)">trial {{ trial.trial }}</a>
+    </div>
     <div v-if="worktree" class="branch" :title="worktree.worktree">
       <span>on <code>{{ worktree.branch }}</code></span>
       <span class="dim">from {{ worktree.launch_branch }} at <code>{{ worktree.base }}</code></span>
@@ -134,6 +141,11 @@ function open(phaseId: string | null) {
 }
 .rebase.put_back {
   color: var(--dim);
+}
+
+.branch a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .branch code {

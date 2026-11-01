@@ -7,13 +7,15 @@
 Usage:
     uv run <skill>/scripts/install.py [--force] [--coding-agent pi|claude_code] [--chatgpt] [--container]
     uv run <skill>/scripts/install.py --update [--take PATH ...] [--keep PATH ...]
+    uv run <skill>/scripts/install.py --add-roster chatgpt|claude_code|pi
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
 (the starter agents), adws/adw_sssf_config/sssf.config.yaml and repo.yaml, .env.sample,
 .gitignore entries. --container adds container/, to run the operator
 session in a Podman container (Claude Code rosters only); run it again with
 --container in an installed repo to add it later.
-Existing files are skipped unless --force.
+Existing files are skipped unless --force. --add-roster stamps a second
+roster beside the repo's own, as sssf.config.<name>.yaml, for `just trial`.
 
 Every stamped file's hash goes into adws/adw_sssf_config/stamp.json.
 --update uses it to bring the repo up to this skill's version: a file that
@@ -47,6 +49,9 @@ ROSTERS = {
 }
 # --chatgpt: still Pi, with every model on the ChatGPT subscription sign-in.
 CHATGPT_ROSTER = TEMPLATES / "sssf.config.chatgpt.yaml"
+# --add-roster: a second roster beside the repo's own, for `just trial`.
+STARTERS = {**ROSTERS, "chatgpt": CHATGPT_ROSTER}
+ADDED_ROSTER = re.compile(r"^adws/adw_sssf_config/sssf\.config\.([A-Za-z0-9_-]+)\.yaml$")
 
 GITIGNORE_HEADER = "# sssf runtime"
 GITIGNORE_ENTRIES = [
@@ -72,7 +77,8 @@ STAMP = Path("adws/adw_sssf_config/stamp.json")
 DB = "adws/adw_data/sssf.db"
 
 
-def targets(root: Path, roster: Path, container: bool = False) -> list[tuple[Path, Path]]:
+def targets(root: Path, roster: Path, container: bool = False,
+            added: list[tuple[Path, str]] = ()) -> list[tuple[Path, Path]]:
     """Every (template, destination) pair the factory is made of."""
     pairs: list[tuple[Path, Path]] = []
 
@@ -88,6 +94,8 @@ def targets(root: Path, roster: Path, container: bool = False) -> list[tuple[Pat
     add(TEMPLATES / "prompt_engineering", root / "adws" / "adw_data" / "prompt_engineering")
     add(TEMPLATES / "harness_engineering", root / "adws" / "adw_data" / "harness_engineering")
     add(roster, root / "adws" / "adw_sssf_config" / "sssf.config.yaml")
+    for src, rel in added:
+        add(src, root / rel)
     add(TEMPLATES / "repo.yaml", root / "adws" / "adw_sssf_config" / "repo.yaml")
     add(TEMPLATES / "env.sample", root / ".env.sample")
     # The recipes are part of the operating experience, and several cookbooks
@@ -99,6 +107,38 @@ def targets(root: Path, roster: Path, container: bool = False) -> list[tuple[Pat
     if container:
         add(TEMPLATES / "container", root / "container")
     return pairs
+
+
+def added_rosters(record: dict) -> list[tuple[Path, str]]:
+    """The rosters --add-roster stamped, kept current like any stamped file."""
+    return [(TEMPLATES / entry["source"], rel) for rel, entry in sorted(record["files"].items())
+            if ADDED_ROSTER.match(rel)]
+
+
+def add_roster(root: Path, name: str) -> int:
+    """Stamp a starter roster as sssf.config.<name>.yaml, beside the repo's own."""
+    if not (root / STAMP).is_file():
+        print(f"no SSSF install in {root}: run install.py first", file=sys.stderr)
+        return 1
+    rel = f"adws/adw_sssf_config/sssf.config.{name}.yaml"
+    dest = root / rel
+    if dest.exists():
+        print(f"{rel} is already here; --update keeps it current", file=sys.stderr)
+        return 1
+    record = load_stamp(root)
+    src = STARTERS[name]
+    copy(src, dest)
+    record["files"][rel] = {"source": src.relative_to(TEMPLATES).as_posix(), "sha256": sha256(src)}
+    save_stamp(root, record)
+    print(f"added roster {name}: {rel}")
+    if name == "chatgpt":
+        print("  sign Pi into ChatGPT: pi, then /login, pick openai; and set "
+              "SSSF_PI_AUTH=subscription in .env")
+    elif name == "claude_code":
+        print("  claude auth status   # must be logged in")
+    print(f"  race it against the repo's own: just trial \"<request>\" main {name}")
+    print("  a third attempt needs max_worktree_runs: 3 in adws/adw_sssf_config/repo.yaml")
+    return 0
 
 
 def has_container(record: dict) -> bool:
@@ -255,7 +295,8 @@ def register(root: Path) -> None:
 def install(root: Path, roster: Path, force: bool, container: bool = False) -> int:
     record = load_stamp(root)
     stamped, skipped = [], []
-    for src, dest in targets(root, roster, container or has_container(record)):
+    for src, dest in targets(root, roster, container or has_container(record),
+                             added_rosters(record)):
         rel = dest.relative_to(root).as_posix()
         entry = {"source": src.relative_to(TEMPLATES).as_posix(), "sha256": sha256(src)}
         if dest.exists() and not force:
@@ -305,7 +346,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     else:
         roster = default_roster
 
-    pairs = targets(root, roster, has_container(record))
+    pairs = targets(root, roster, has_container(record), added_rosters(record))
     if loads_module(root) and files.get("justfile", {}).get("source") == "justfile":
         # The repo's own justfile, recorded as kept before sssf.just was
         # tracked. SSSF's recipes are in sssf.just now, so it has no claim on it.
@@ -429,6 +470,9 @@ def main() -> int:
                         help="which starter roster to stamp (default: pi)")
     parser.add_argument("--chatgpt", action="store_true",
                         help="stamp the Pi roster for a ChatGPT subscription sign-in")
+    parser.add_argument("--add-roster", choices=sorted(STARTERS), metavar="NAME",
+                        help="stamp a starter roster as sssf.config.<NAME>.yaml beside the "
+                             f"repo's own, for `just trial`: {', '.join(sorted(STARTERS))}")
     parser.add_argument("--container", action="store_true",
                         help="also stamp container/, to run the operator session in a "
                              "Podman container (Claude Code rosters only)")
@@ -440,6 +484,10 @@ def main() -> int:
     roster = CHATGPT_ROSTER if args.chatgpt else ROSTERS[args.coding_agent]
 
     root = Path.cwd().resolve()
+    if args.add_roster:
+        if args.update or args.force or args.container:
+            parser.error("--add-roster runs on its own")
+        return add_roster(root, args.add_roster)
     if args.update:
         return update(root, roster,
                       {Path(p).as_posix() for p in args.take},

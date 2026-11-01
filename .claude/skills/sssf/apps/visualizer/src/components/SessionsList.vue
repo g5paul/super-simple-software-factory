@@ -6,6 +6,7 @@ import { ts } from '../lib/format'
 import SessionCard from './SessionCard.vue'
 import DayGauge from './DayGauge.vue'
 import LiveGauge from './LiveGauge.vue'
+import RosterBoard from './RosterBoard.vue'
 import { useRoute } from '../lib/router'
 
 const route = useRoute()
@@ -61,6 +62,7 @@ const ordered = computed(() =>
     <div v-if="route.project" :key="route.project" class="day-head">
       <DayGauge :project="route.project" />
       <LiveGauge :project="route.project" links />
+      <RosterBoard :project="route.project" />
     </div>
     <div v-if="ordered.length" class="list-head dim">{{ ordered.length }} runs</div>
 

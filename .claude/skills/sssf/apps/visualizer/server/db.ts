@@ -15,6 +15,7 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { caps, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
+import { runTrial, type AttemptRow } from "./trials.ts";
 import type {
   AgentSession,
   PiCall,
@@ -29,6 +30,7 @@ import type {
   SessionDetail,
   SessionSummary,
   SessionUsage,
+  TrialView,
 } from "../shared/types.ts";
 
 const DEFAULT_DB_RELATIVE = "adws/adw_data/sssf.db";
@@ -366,6 +368,7 @@ export class SssfDb {
       stop: stopReason(events, phases, session.status),
       tickets: ticketRun(events, phases),
       worktree: worktree(events),
+      trial: runTrial(events),
       usage: this.usage(adwId),
       phases,
       agents: this.agentSessions(adwId),
@@ -397,7 +400,7 @@ export class SssfDb {
       .query<RunEvent, [string]>(
         `SELECT type, name, phase_id, payload_json FROM events
           WHERE adw_id = ? AND (type IN ('agent_end', 'error')
-                                OR name IN ('run_caps', 'tickets', ${WORKTREE_EVENTS}))
+                                OR name IN ('run_caps', 'tickets', 'trial', 'trial_panel', ${WORKTREE_EVENTS}))
           ORDER BY rowid`,
       )
       .all(adwId);
@@ -534,6 +537,43 @@ export class SssfDb {
           WHERE p.kind = 'adw' AND p.ended_at IS NULL`,
       )
       .all();
+  }
+
+  /** A trial's attempts, each tag joined to its run (trial.py's attempts). */
+  trialAttempts(trial: string): AttemptRow[] {
+    return this.db
+      .query<AttemptRow, [string]>(
+        `SELECT e.adw_id, e.payload_json, s.status, coalesce(s.total_cost, 0) AS cost,
+                coalesce(s.total_tokens, 0) AS tokens, s.started_at, s.ended_at, s.request
+           FROM events e LEFT JOIN sessions s ON s.adw_id = e.adw_id
+          WHERE e.name = 'trial' AND json_extract(e.payload_json, '$.trial') = ?
+          ORDER BY coalesce(json_extract(e.payload_json, '$.index'), 0)`,
+      )
+      .all(trial);
+  }
+
+  /** The latest scorecard each trial's panel recorded, or for one trial. */
+  trialScorecards(trial?: string): Omit<TrialView, "scored">[] {
+    const rows = this.db
+      .query<{ payload_json: string }, []>(
+        `SELECT payload_json FROM events WHERE rowid IN (
+           SELECT max(rowid) FROM events WHERE name = 'trial_scorecard'
+            GROUP BY json_extract(payload_json, '$.trial'))`,
+      )
+      .all();
+    const cards = rows.map((r) => JSON.parse(r.payload_json) as Omit<TrialView, "scored">);
+    return trial ? cards.filter((c) => c.trial === trial) : cards;
+  }
+
+  /** Each trial's landed attempt: trial id to adw_id. */
+  trialWinners(): Map<string, string> {
+    const rows = this.db
+      .query<{ adw_id: string; trial: string }, []>(
+        `SELECT adw_id, json_extract(payload_json, '$.trial') AS trial FROM events
+          WHERE name = 'trial_merged'`,
+      )
+      .all();
+    return new Map(rows.map((r) => [r.trial, r.adw_id]));
   }
 
   sessionCount(): number {

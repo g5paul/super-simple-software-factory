@@ -141,11 +141,25 @@ Settled in a seventh grilling session on 2026-11-01. The dashboard drew `max_dai
 71. **Proof.** bun tests on a temporary trace holding a live run, a run whose PID is dead, and a resumed run whose earlier attempt must not count, all at $0. In sssf-sandbox, one short run under a low cap, with the endpoint checked against Python's `live_spend` while it runs, for a few cents. Chromium screenshots of a card and a runs list, with a cap and without.
 72. **One repo.** A cap across every repo stays open. The account panel doesn't change.
 
+### One cap across every repo
+
+Settled in an eighth grilling session on 2026-11-01. `max_daily_cost` holds one repo's trace (decision 49), so two repos running unattended on one machine could each spend up to their own.
+
+73. **Daily only.** One cap on what every repo's runs spent in the last 24 hours. No machine-wide live cap: each repo's `max_live_cost`, `max_run_cost`, and `max_worktree_runs` already bound what runs at once.
+74. **`~/.config/sssf/limits.yaml`, as `max_daily_cost`.** Beside the registry, in the folder `$SSSF_REGISTRY` moves, as `rate_limits.json` is. Container runs see it through the `~/.config/sssf` mount. Not in any repo: one repo shouldn't cap the others. A missing file is no cap.
+75. **The registry's repos, and the run's own.** Each one's trace, read for the last 24 hours. The launching repo counts even if the registry lacks it.
+76. **Checked where the repo's daily cap is.** Before every send and at launch, after `check_daily`, with the same walk and clear time, and the same count of the run's own spend the trace doesn't hold yet.
+77. **No machine launch lock.** Two repos launching at once can both pass; each stops at its next send. The overshoot is one call per run, as with every daily cap.
+78. **Its own stop.** `MachineBudgetStop`, a `BudgetStop`, and a `machine_budget_stop` event with its own dashboard label. The message gives the total, each repo's share, the cap and the file it's in, and the UTC time it drops under. `run_caps` records it as `machine_daily_cost`.
+79. **On the account panel.** "$X of $C across every repo in the last 24 hours", a bar, the same colours, and the clear time at the cap. Only when the file sets a cap.
+80. **Set by hand.** Onboarding a repo doesn't ask, and `install.py` doesn't write the file. The README says how; the install checklist's daily-spend step and the update note say so in a line.
+81. **A repo that can't be read counts $0.** A moved or deleted repo, or a trace that won't open, doesn't block every launch on the machine. The message lists the repos it read.
+82. **Proof.** Under a temporary `$SSSF_REGISTRY` for sandbox runs only, so the real repos are never capped: a launch refused at the machine's real total, at $0; a cheap two-agent run stopped before its builder; a run with no file, as today; and the account panel's line against the Python message, with screenshots. About $0.25.
+
 ## Open
 
 Known, and not built. None of them blocks a run.
 
-- **One cap across every repo.** `max_daily_cost` holds one repo's trace (decision 49). Two repos running unattended on one machine each spend up to their own.
 - **A pi run at the ChatGPT plan's limit.** Pi's ChatGPT route sends no usage windows, checked on real responses ([pi-usage-limits.md](../research/pi-usage-limits.md)), so nothing can stop a run before the limit. At the limit the call fails with HTTP 429 `subscription_sharing_usage_limit_exceeded`. Since 2026-11-01 any pi call whose last turn ended in an error fails with pi's own message, so this one says what happened; before that, an error turn with no text reached the JSON parser, which sent corrections into the same error and then blamed the JSON. A named usage stop is left until a real 429 shows whether it's needed; a rolling dollar cap per window for pi is a weaker option.
 - **One task, several attempts.** Decision 1 leaves room for running one request several ways and merging the best. Nothing builds it.
 - **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.

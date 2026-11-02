@@ -5,7 +5,7 @@
 """ADW Build Test — implement, then verify; failures flow back into the builder.
 
 Usage:
-    uv run adws/adw_build_test.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel]
+    uv run adws/adw_build_test.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel|e2b]
 
 Phases: engineer(request) -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
 
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
     parser.add_argument("--worktree", action="store_true",
                         help="work on branch sssf/<adw_id> in its own worktree; `just merge <adw_id>` lands it")
-    parser.add_argument("--sandbox", choices=["vercel"], default=None,
+    parser.add_argument("--sandbox", choices=["vercel", "e2b"], default=None,
                         help="do the run's work in a remote VM; implies --worktree")
     args = parser.parse_args()
     sys.exit(main(utils.resolve_prompt(args.prompt), args.config, args.adw_id, args.worktree,

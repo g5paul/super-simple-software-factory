@@ -160,7 +160,7 @@ Settled in an eighth grilling session on 2026-11-01. `max_daily_cost` holds one 
 
 Known, and not built. None of them blocks a run.
 
-- **Setup is all or nothing.** Every worktree run runs all of `worktree_setup`, even when it touches one package. In pi-agent-observability the four installs take about a second from bun's cache, so this costs nothing there yet.
+- **Setup is all or nothing: decided, not built.** Every worktree run runs all of `worktree_setup`, even when it touches one package. Running less needs the run's scope before its first agent, and nothing knows it then: the planner decides it later, and the builder needs its packages installed while it works. Today it costs about a second, in pi-agent-observability's four bun installs. Reopen this if a repo's setup grows slow. Then the engineer naming the packages at launch is the simplest fix.
 
 ## Log
 

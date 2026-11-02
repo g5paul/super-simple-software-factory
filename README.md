@@ -515,7 +515,6 @@ A run works on your current branch unless you ask for one of its own. For real w
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list. Open items in the repos running SSSF are in [`docs/projects.md`](docs/projects.md).
 
 - A seam for a second sandbox beside the Podman container waits for one to exist.
-- Every worktree run runs all of `worktree_setup`, even when it touches one package.
 - `on_match: refuse` refuses a forbidden command on pi agents and lets the run go on, but Claude Code agents still stop. They run with `--safe-mode`, which turns off every hook, `--settings` ones included, and without it they would load the engineer's own plugins, skills and agents.
 - `adws/adw_modules/prices.json` holds Claude's list prices, read from claude.com/pricing on 2026-11-01. A run and the account panel warn about a model it doesn't list, but nothing checks a listed price against the page, so a price change needs a hand edit.
 

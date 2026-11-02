@@ -514,6 +514,7 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.
+- `agent_rules` in `repo.yaml` asks; nothing enforces it. A check on each agent's tool calls, like `writes` on its file changes, could stop a run that breaks a rule such as `git push`, or a recipe that bills API keys. It would see the call only after it ran, so it would stop the run, not undo the call.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

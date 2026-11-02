@@ -106,20 +106,21 @@ A repo can have more than one worktree run going, up to its `max_worktree_runs`.
 - Each run's `max_run_cost` holds for that run alone, so two runs can spend up to twice it between them. The usage check before each agent's first call doesn't see the other run's calls either, so two runs can pass `rate_limit_stop` together and go a little over it.
 - In the container, each worktree run gets its own project environment, built on its first `uv run`, so its first check is slower. Merge and discard remove it.
 
-### In a remote VM: `--sandbox vercel`
+### In a remote VM: `--sandbox vercel` or `--sandbox e2b`
 
-Use it only when the engineer asks for it. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, not yet for tickets or trials. The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
+Use it only when the engineer asks for it, with the provider they name. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, not yet for tickets or trials. The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
 
 ```bash
-uv run adws/<chain>.py "<prompt>" --sandbox vercel
+uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or --sandbox e2b
 ```
 
-- It implies `--worktree`, so merge, discard, rebase and `max_worktree_runs` work as for any worktree run. The chain stays on this machine, and its agents, checks, git and `worktree_setup` run in a Vercel VM made for the run and deleted at its end.
+- It implies `--worktree`, so merge, discard, rebase and `max_worktree_runs` work as for any worktree run. The chain stays on this machine, and its agents, checks, git and `worktree_setup` run in a VM made for the run and deleted at its end.
 - Commits come back to `sssf/<adw_id>` after each commit. If the run stops, uncommitted work in the VM is saved to `adws/adw_data/sessions/<adw_id>/sandbox-uncommitted.patch`, not applied. Ask the engineer before applying it.
 - The roster must be Claude Code only. A pi agent stops the run before anything is made.
-- It needs `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` in `.env`, and the engineer's own Claude token in `~/.config/sssf-sandbox/token.env`. Never read either file's values; check them by key name. `ANTHROPIC_API_KEY` must not be set.
-- If Vercel won't make the VM, for example past the Hobby allowance, the run stops in its `sandbox` phase with Vercel's message. Report that message. Don't rerun without `--sandbox`.
-- Report the VM name and VM seconds from the `sandbox_end` event with the run's other results.
+- Both need the engineer's own Claude token in `~/.config/sssf-sandbox/token.env`, and `ANTHROPIC_API_KEY` must not be set. Vercel needs `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` in `.env`; E2B needs `E2B_API_KEY`. Never read these files' values; check them by key name.
+- E2B makes the VM from SSSF's `sssf` template, which the engineer builds once per E2B team with `uv run <skill>/scripts/e2b_template.py` from a repo whose `.env` has the key. If E2B says the template doesn't exist, tell the engineer that; don't build it yourself.
+- If the provider won't make the VM, for example past Vercel's Hobby allowance or E2B's credit, the run stops in its `sandbox` phase with the provider's message. Report that message. Don't rerun without `--sandbox`, and don't switch providers unless the engineer says to.
+- Report the VM name and VM seconds from the `sandbox_end` event with the run's other results, and on E2B its `vm_cost_usd` estimate too.
 
 ## Observe
 

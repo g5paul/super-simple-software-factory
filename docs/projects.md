@@ -4,10 +4,10 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 | Repo | SSSF branch | Skill | Agent rules |
 |---|---|---|---|
-| yt-summarizer | `sssf-run` (`main` follows it, one update behind) | 45433be | No push. Enforced by a `forbid` rule, and by an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
-| pi-agent-observability | `main` | 45433be | Leave the obs server alone. A plain string: it asks, nothing enforces it |
-| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 45433be | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack |
-| sssf-sandbox | `master` | e468fa1 | The hub's own test bed. None |
+| yt-summarizer | `sssf-run` (`main` follows it, one update behind) | 64e18e2 | No push. Enforced by a `forbid` rule, and by an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
+| pi-agent-observability | `main` | 64e18e2 | Leave the obs server alone. A plain string: it asks, nothing enforces it |
+| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 64e18e2 | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack |
+| sssf-sandbox | `master` | 2f92827 | The hub's own test bed. None |
 
 ## Open items
 

@@ -1,6 +1,6 @@
 # Design: remote sandboxes
 
-Status: building. Settled in one grilling session on 2026-11-02. Steps 1 and 2 of decision 17 are built: the seam, and Vercel, which passed all six proof cases. E2B is next. Where the text and a decision disagree, the decision wins; "As built" below records where the build differs from a decision.
+Status: building. Settled in one grilling session on 2026-11-02. All three steps of decision 17 are built: the seam, then Vercel and E2B, which each passed all six proof cases. Where the text and a decision disagree, the decision wins; "As built" below records where the build differs from a decision.
 
 A run with `--sandbox vercel` or `--sandbox e2b` does its work in a remote VM. The ADW stays on the host and keeps the trace, the caps, the launch lock and the dashboard. Every process the run starts in its tree, agents, checks and git, goes through one runner, which sends it to the VM. Commits come back to the run's branch on the host, and the engineer merges as usual.
 
@@ -84,6 +84,19 @@ What step 2 settled that the decisions left open, or changed:
 - **A VM's snapshots go with it.** Each stop saves an automatic snapshot of about 800MB, which Vercel keeps after the VM is deleted unless asked. `destroy(delete_orphan_snapshots=True)` deletes them, at the end of a run and in the sweep.
 - **Not built yet:** the dashboard's sandbox view (decision 15) and repo.yaml's `sandbox:` default (decision 4). The trace already holds what the view needs, in the `sandbox`, `sandbox_commits`, `sandbox_refresh` and `sandbox_end` events.
 
+## As built: E2B
+
+Step 3 kept everything above and settled this:
+
+- **The two providers share one runner.** `sandbox_remote` holds the work: the clone, the handoff folder, commits back, the patch, refreshes and the token. A provider module makes, refreshes and deletes the VM. `sandbox_e2b` puts E2B's SDK behind the calls Vercel's SDK has, so the runner doesn't know which provider it has, and the same tests run against fakes of both.
+- **The template.** `scripts/e2b_template.py` builds `sssf` from E2B's base image, which has 2 vCPUs, 512MB and Node 20. It adds Node 24, which pi needs, plus uv, bun, `claude` and `pi`, and sets 2 vCPUs and 4GB, Vercel's size. It is built once per E2B team, and again to take newer tools. Node 20's npm is removed before Node 24 is unpacked, or npm fails.
+- **Commands are shell strings.** E2B runs a command line, not an argv, so the adapter quotes it. A command that needs root runs as E2B's root user, not through `sudo`. Input goes in as a file in the VM. Output arrives in chunks, which the adapter splits into lines.
+- **A refresh is a pause and a resume.** Both keep the files and the processes and take well under a second. A `claude -p` call paused mid-request finished normally after the resume.
+- **The VM's timeout is its session.** E2B kills a VM at its timeout, so a VM whose host died is gone within the session anyway. The sweep still deletes VMs left by dead runs.
+- **VM cost is estimated.** `sandbox_end` carries the VM's vCPUs, memory and `vm_cost_usd`, from E2B's published per-second rates. The trace records it; no cap counts it, per decision 13.
+- **An early exit stops the agent.** On a stop or a kill, the Claude Code runner waited for the agent to exit. On the host the kill stops the agent too, but in a VM nothing did, so the first E2B kill took 32 seconds. The runner now stops the agent's tree first. Vercel runs went through the same wait.
+- **Past the credit, E2B blocks.** Its billing page says a team with no payment method has every project blocked shortly after the credit runs out, so nothing is charged. Paused sandboxes aren't billed and are kept with no limit; SSSF deletes them anyway.
+
 ## Open
 
 - **A ChatGPT roster in the VM.** It needs pi's OAuth sign-in in the VM, and a decision on how it gets there.
@@ -91,7 +104,7 @@ What step 2 settled that the decisions left open, or changed:
 - **VM cost in the caps.** Waits for real numbers, per decision 13.
 - **Rebase checks off the host.** Per decision 11.
 - **Vercel's Hobby limits beyond the allowance.** Resuming is rate-limited to 40 vCPUs a minute, and snapshot storage is capped; past the cap, Vercel refuses every new VM until the month resets or snapshots are deleted. Both were hit in the proof, by a bug since fixed. How far a day of real runs is from either is not known.
-- **Not yet known:** whether a `claude -p` call survives an E2B pause mid-request, which exception Vercel's SDK raises when a session ends mid-stream, and what E2B does past the $100 credit.
+- **Not yet known:** which exception Vercel's SDK raises when a session ends mid-stream.
 
 ## Log
 
@@ -106,3 +119,9 @@ What step 2 settled that the decisions left open, or changed:
 | 2026-11-02 | sssf-sandbox | cases 3 and 4: run f5d93c18 stopped by `just kill` 12 seconds into the build; its launch swept a stray VM tagged to a dead run | plan commit on the host branch, builder's 4 files saved as a patch, VM deleted, stray deleted |
 | 2026-11-02 | sssf-sandbox | cases 2 and 5, first try: two runs at once with 4-minute sessions (c30b1572, f8168e97) | refreshed 48 and 41 times, one failed on Vercel's 429 for resumes; then every VM was refused for snapshot storage, 90 snapshots and 72GB. Fixed in 4ce90f3 and 6a8b676 |
 | 2026-11-02 | sssf-sandbox | cases 2 and 5, after the fixes: 08474800 and f59f718b at once, 4-minute sessions | both 12 of 12 phases; 1 refresh; no VMs or snapshots left. The second merge conflicted in CHANGELOG and README, as two parallel runs can, and was discarded |
+| 2026-11-02 | hub | step 3: `sandbox_remote` takes the shared work, `sandbox_e2b` and `--sandbox e2b`, and `scripts/e2b_template.py`; the sandbox tests run on fakes of both SDKs | 373 tests passed; template `sssf` built, with Node 24.11.1, uv 0.13.6, bun 1.4.4, claude 2.1.316 and pi 1.5.0 |
+| 2026-11-02 | sssf-sandbox | E2B probes: a `claude -p` call with the token, and one paused mid-request for 5 seconds | $0.0014, "ok"; the paused call finished with no error |
+| 2026-11-02 | sssf-sandbox | E2B case 1 and case 6: simple SDLC run a58dfe5c, setup marker and token check in `worktree_setup`; `just merge` landed it | 12 of 12 phases, 3 commits back with the same SHAs, 97.8 VM seconds, $0.0045 VM estimate, $0.40 |
+| 2026-11-02 | sssf-sandbox | E2B cases 3 and 4, first try: run 8f57e634 killed during review, after sweeping a stray VM tagged deadbeef | stray deleted, plan commit on the host branch, the builder's README and CHANGELOG edits saved as a patch, VM deleted; but the chain took 32 seconds to exit, waiting for the reviewer. Fixed in 2f92827 |
+| 2026-11-02 | sssf-sandbox | E2B cases 3 and 4, after the fix: run fae86b4b killed 4 seconds into the build, after sweeping a new stray | `just kill` returned in 0.8 seconds and listed the builder; plan commit on the host branch, VM deleted 0.2 seconds after the kill, stray deleted, no VMs left. The builder had written nothing, so no patch |
+| 2026-11-02 | sssf-sandbox | E2B cases 2 and 5: 79b3f7e5 and bda89502 at once, 4-minute sessions | both passed, 15 of 15 and 12 of 12 phases; 79b3f7e5 refreshed once; no VMs left. The second merge conflicted in CHANGELOG and README and was discarded |

@@ -512,7 +512,7 @@ A run works on your current branch unless you ask for one of its own. For real w
 
 ### Still open
 
-Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list.
+Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list. Open items in the repos running SSSF are in [`docs/projects.md`](docs/projects.md).
 
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.

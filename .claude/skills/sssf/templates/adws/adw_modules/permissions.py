@@ -32,9 +32,9 @@ Two keys drive it, both in sssf.config.yaml:
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 
+from . import sandbox
 from .data_types import AgentConfig, SSSFConfig
 
 
@@ -43,7 +43,7 @@ class PermissionBreach(RuntimeError):
 
 
 def _git(args: list[str], cwd) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    result = sandbox.current().run(["git", *args], cwd=cwd)
     return result.stdout if result.returncode == 0 else ""
 
 
@@ -162,12 +162,11 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
             if path not in after else "left as-is (was already modified)"
     if after.get(path) == "untracked":
         try:
-            (Path(run.repo_root) / path).unlink()
+            sandbox.current().remove(Path(run.repo_root) / path)
             return "deleted"
         except OSError as error:
             return f"could not delete ({error})"
-    result = subprocess.run(["git", "checkout", "--", path],
-                            cwd=run.repo_root, capture_output=True, text=True)
+    result = sandbox.current().run(["git", "checkout", "--", path], cwd=run.repo_root)
     return "rolled back" if result.returncode == 0 else "could not roll back"
 
 

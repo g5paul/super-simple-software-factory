@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from . import sandbox
 
 
 # What `just sssf-update` writes. It is SSSF's work, not the project's, so a
@@ -17,7 +18,7 @@ def _outside(exclude) -> list[str]:
 
 
 def _git(*args: str) -> str:
-    result = subprocess.run(["git", *args], capture_output=True, text=True)
+    result = sandbox.current().run(["git", *args])
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result.stdout.strip()
@@ -33,8 +34,7 @@ def create_branch(name: str) -> str:
 
 
 def is_repo() -> bool:
-    result = subprocess.run(["git", "rev-parse", "--git-dir"],
-                            capture_output=True, text=True)
+    result = sandbox.current().run(["git", "rev-parse", "--git-dir"])
     return result.returncode == 0
 
 
@@ -93,13 +93,11 @@ def work_in_progress(exclude: str = "") -> list[str]:
 
 
 def tracked(path: str) -> bool:
-    return subprocess.run(["git", "ls-files", "--error-unmatch", path],
-                          capture_output=True).returncode == 0
+    return sandbox.current().run(["git", "ls-files", "--error-unmatch", path]).returncode == 0
 
 
 def ignored(path: str) -> bool:
-    return subprocess.run(["git", "check-ignore", "-q", path],
-                          capture_output=True).returncode == 0
+    return sandbox.current().run(["git", "check-ignore", "-q", path]).returncode == 0
 
 
 def changed_files() -> list[str]:
@@ -111,8 +109,7 @@ def changed_files() -> list[str]:
 
 def ref_exists(ref: str) -> bool:
     """True when `ref` resolves to a commit. Never raises — this is a question."""
-    result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-                            capture_output=True, text=True)
+    result = sandbox.current().run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
     return result.returncode == 0
 
 

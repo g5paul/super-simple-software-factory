@@ -271,16 +271,18 @@ class SetupFailed(RuntimeError):
     """A worktree_setup command failed, so the run stops before any agent."""
 
 
-def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path) -> str:
+def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path, box=None) -> str:
     """Run repo.yaml's worktree_setup in a worktree. Returns "" when every
     command passed, or why the first that failed did, with its output's tail.
-    Each command's output goes to `log_dir/NN.log`."""
+    Each command's output goes to `log_dir/NN.log`. `box` is the run's sandbox;
+    a rebase, which runs after the run has ended, sets up on this machine."""
+    from . import sandbox
     from .utils import operator_env
+    box = box or sandbox.LOCAL
     log_dir.mkdir(parents=True, exist_ok=True)
     for n, command in enumerate(commands, 1):
         try:
-            done = subprocess.run(["sh", "-c", command], cwd=cwd, env=operator_env(),
-                                  capture_output=True, text=True, timeout=timeout)
+            done = box.run(["sh", "-c", command], cwd=cwd, env=operator_env(), timeout=timeout)
             code, out = done.returncode, done.stdout + done.stderr
         except subprocess.TimeoutExpired as error:
             # Its output comes back as bytes even with text=True.
@@ -298,6 +300,7 @@ def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path) -> st
 
 def set_up(run) -> None:
     """The setup phase: repo.yaml's worktree_setup, before the run's first agent."""
+    from . import sandbox
     from .data_types import PhaseParams
     settings = repo_settings.load(main_checkout())
     if not settings.worktree_setup:
@@ -305,7 +308,7 @@ def set_up(run) -> None:
     with run.phase(PhaseParams(name="setup", kind="code", owner="worktree",
                                description="Run repo.yaml's worktree_setup in the new worktree")) as ph:
         why = run_setup(settings.worktree_setup, Path.cwd(), settings.worktree_setup_timeout,
-                        run.context_handoff_dir / "setup")
+                        run.context_handoff_dir / "setup", sandbox.current())
         ph.log(commands=len(settings.worktree_setup), passed=not why)
         if why:
             raise SetupFailed(f"worktree_setup failed, so no agent started. {why}\n"

@@ -1,6 +1,6 @@
 # Design: remote sandboxes
 
-Status: designed, not built. Settled in one grilling session on 2026-11-02. Where the text and a decision disagree, the decision wins.
+Status: building. Settled in one grilling session on 2026-11-02. Step 1 of decision 17, the seam with only the local sandbox, is built. Where the text and a decision disagree, the decision wins.
 
 A run with `--sandbox vercel` or `--sandbox e2b` does its work in a remote VM. The ADW stays on the host and keeps the trace, the caps, the launch lock and the dashboard. Every process the run starts in its tree, agents, checks and git, goes through one runner, which sends it to the VM. Commits come back to the run's branch on the host, and the engineer merges as usual.
 
@@ -29,7 +29,7 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 
 1. **For parallel runs and a stronger boundary, with the host on.** The host is up for the whole run. A run that outlives this machine is not a goal.
 2. **A sandbox run is a worktree run.** `--sandbox <provider>` implies `--worktree`, and counts toward `max_worktree_runs`. Its commits land on `sssf/<adw_id>`, and `just merge`, `just discard` and the dashboard's branch view work as they do today.
-3. **The ADW stays on the host, and every process it starts in the tree goes through one runner.** The runner is local by default, or a VM. The trace, the caps, the launch lock and the dashboard stay on the host. The VM holds the run's tree and does all its work: agents, checks and git. This runner is the seam.
+3. **The ADW stays on the host, and every process it starts in the tree goes through one runner.** The runner is local by default, or a VM. The trace, the caps, the launch lock and the dashboard stay on the host. The VM holds the run's tree and does all its work: agents, checks and git. This runner is the seam. It covers the host's own reads of files in the tree too, such as the gates checking that an agent's declared artifacts exist and parse.
 4. **`--sandbox` sits beside `--container`.** `--container` puts the operator session in Podman; `--sandbox` sends one run's work to a VM. They combine. repo.yaml's `sandbox: vercel|e2b|null`, `null` by default, sets a repo's default, and the flag overrides it.
 
 ### The VM
@@ -84,3 +84,4 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 | Date | Repo | What | Result |
 |---|---|---|---|
 | 2026-11-02 | hub | grilling session, this design | settled |
+| 2026-11-02 | hub | step 1: `adw_modules/sandbox.py`, with `Local` only. Agents, quality checks, plan checks, gates, git, the tree check and a run's worktree setup go through `sandbox.current()`; a test fails if an in-tree module starts a process around it. `tickets` reads and rewrites its own files directly, and moves to the seam when tickets get `--sandbox` | 347 tests passed |

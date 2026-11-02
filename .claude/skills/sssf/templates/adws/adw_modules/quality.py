@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from . import sandbox
 from .data_types import (EventRecord, QualityCheckResult, QualityCheckSpec, QualityResult,
                          VerifyOutput)
 from .utils import now_iso, operator_env
@@ -72,14 +73,8 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
     stdout = ""
     stderr = ""
     try:
-        completed = subprocess.run(
-            spec.argv,
-            cwd=run.repo_root,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=spec.timeout_seconds,
-        )
+        completed = sandbox.current().run(spec.argv, cwd=run.repo_root, env=env,
+                                          timeout=spec.timeout_seconds)
         returncode = completed.returncode
         stdout = completed.stdout
         stderr = completed.stderr

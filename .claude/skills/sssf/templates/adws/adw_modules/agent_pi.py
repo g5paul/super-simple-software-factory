@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import rules
+from . import rules, sandbox
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
 from .utils import mark_agent, now_iso, operator_env
@@ -300,20 +300,19 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
 
     result = AgentResult(session_id=request.session_id,
                       context_window=context_window(provider, model_id))
-    # stdin is DEVNULL, deliberately. The prompt travels in argv, so the child
-    # never needs stdin — but inheriting the parent's means pi sees a non-TTY
-    # and can sit forever waiting for piped input that will never arrive or
-    # EOF. That failure is silent and total: no request goes out, no bytes come
-    # back, and the ADW blocks on a read loop with nothing to read. Observed as
-    # a run that sat idle at 0% CPU with an empty raw_output.jsonl.
+    # sandbox.start gives the child a DEVNULL stdin, deliberately. The prompt
+    # travels in argv, so the child never needs stdin — but inheriting the
+    # parent's means pi sees a non-TTY and can sit forever waiting for piped
+    # input that will never arrive or EOF. That failure is silent and total: no
+    # request goes out, no bytes come back, and the ADW blocks on a read loop
+    # with nothing to read. Observed as a run that sat idle at 0% CPU with an
+    # empty raw_output.jsonl.
     # How the last assistant turn ended. Pi retries some errors itself, so only
     # the last turn says whether the call failed.
     last_stop, last_error = None, ""
-    process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, bufsize=1, cwd=request.cwd,
-                               env=_with_refusals(child_env(request.agent_name, request.adw_id),
-                                                  request.refuse_rules))
+    process = sandbox.current().start(cmd, cwd=request.cwd,
+                                      env=_with_refusals(child_env(request.agent_name, request.adw_id),
+                                                         request.refuse_rules))
     if on_spawn:
         on_spawn(process.pid)
     with raw_path.open("a") as raw:
@@ -352,7 +351,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                 except Exception as error:
                     # A forbidden command (rules.RuleBreach), or a tracer
                     # failure: either way the agent must not run on unwatched.
-                    rules.stop_tree(process.pid)
+                    process.stop_tree()
                     if isinstance(error, rules.RuleBreach):
                         error.partial = result       # pi priced every turn so far
                     process.wait()

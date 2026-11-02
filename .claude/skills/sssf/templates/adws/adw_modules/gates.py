@@ -11,16 +11,16 @@ Gates check what is mechanically checkable; plan quality is a reviewer's job.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
+from . import sandbox
 from .data_types import EnvelopeBase, GateReport
 
 TAIL_CHARS = 1000        # command output kept as evidence on a failure
 
 
 def _size(path: Path) -> str:
-    n = path.stat().st_size
+    n = sandbox.current().size(path)
     return f"{n}B" if n < 1024 else f"{n / 1024:.1f}KB"
 
 
@@ -28,8 +28,8 @@ def artifacts_exist(envelope: EnvelopeBase, run) -> GateReport:
     report = GateReport()
     for a in envelope.artifacts:
         p = Path(a)
-        report.check(a, p.exists(),
-                     f"exists, {_size(p)}" if p.exists() else "declared artifact does not exist")
+        found = sandbox.current().exists(p)
+        report.check(a, found, f"exists, {_size(p)}" if found else "declared artifact does not exist")
     return report
 
 
@@ -37,9 +37,9 @@ def files_non_empty(envelope: EnvelopeBase, run) -> GateReport:
     report = GateReport()
     for a in envelope.artifacts:
         p = Path(a)
-        if not (p.exists() and p.is_file()):
+        if not sandbox.current().is_file(p):
             continue                       # existence is artifacts_exist's job
-        empty = p.stat().st_size == 0
+        empty = sandbox.current().size(p) == 0
         report.check(a, not empty, "declared artifact is empty" if empty else _size(p))
     return report
 
@@ -48,10 +48,10 @@ def json_parses(envelope: EnvelopeBase, run) -> GateReport:
     report = GateReport()
     for a in envelope.artifacts:
         p = Path(a)
-        if p.suffix != ".json" or not p.exists():
+        if p.suffix != ".json" or not sandbox.current().exists(p):
             continue
         try:
-            parsed = json.loads(p.read_text())
+            parsed = json.loads(sandbox.current().read_text(p))
             report.check(a, True, f"parses, {type(parsed).__name__}")
         except json.JSONDecodeError as e:
             report.check(a, False, f"declared JSON artifact does not parse: {e}")
@@ -63,8 +63,8 @@ def diff_matches_claims(envelope: EnvelopeBase, run) -> GateReport:
     report = GateReport()
     for f in getattr(envelope, "changed_files", []):
         p = Path(f)
-        report.check(f, p.exists(),
-                     f"exists, {_size(p)}" if p.exists() else "claimed changed file does not exist")
+        found = sandbox.current().exists(p)
+        report.check(f, found, f"exists, {_size(p)}" if found else "claimed changed file does not exist")
     return report
 
 
@@ -133,7 +133,7 @@ def panel_complete(labels: list[str]):
 def tests_pass(command: str):
     """Gate factory: the given shell command must exit 0."""
     def gate(envelope: EnvelopeBase, run) -> GateReport:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        result = sandbox.current().run(command, shell=True)
         ok = result.returncode == 0
         note = f"exit {result.returncode}"
         if not ok:

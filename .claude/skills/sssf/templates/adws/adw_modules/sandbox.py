@@ -1,0 +1,116 @@
+"""Where a run's tree lives: every process and file read SSSF does in it.
+
+A run's agents, quality checks, plan checks, gates, git, and worktree setup
+go through `current()`. The only sandbox today is `Local`: the tree is a
+checkout on this machine, and each call is a subprocess here. A remote
+sandbox (docs/designs/remote-sandboxes.md in the SSSF repo) keeps these calls
+and runs them in a VM, so nothing above this module changes when one exists.
+
+Work on the host doesn't come through here: making and merging worktrees,
+checking sign-ins, launching trials, and killing runs.
+
+The contract follows subprocess, so callers keep their error handling: `run`
+returns a CompletedProcess and raises TimeoutExpired or OSError as
+subprocess.run does, and `start` returns a Process whose stdout yields lines.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import IO, Iterable, Optional, Protocol, Union
+
+Command = Union[list[str], str]
+
+
+class Process(Protocol):
+    pid: int
+    stdout: Iterable[str]
+    stderr: Optional[IO[str]]
+
+    def wait(self) -> int: ...
+    def kill(self) -> None: ...
+    def stop_tree(self) -> None:
+        """Kill the process and everything it started."""
+
+
+class Sandbox(Protocol):
+    name: str
+
+    def run(self, command: Command, *, cwd=None, env=None, timeout=None,
+            shell: bool = False, text: bool = True) -> subprocess.CompletedProcess: ...
+    def start(self, command: list[str], *, cwd=None, env=None) -> Process: ...
+    def exists(self, path) -> bool: ...
+    def is_file(self, path) -> bool: ...
+    def size(self, path) -> int: ...
+    def read_text(self, path) -> str: ...
+    def remove(self, path) -> None: ...
+
+
+class LocalProcess:
+    """A subprocess.Popen on this machine, with SSSF's tree stop."""
+
+    def __init__(self, popen: subprocess.Popen):
+        self._popen = popen
+        self.pid = popen.pid
+        self.stdout = popen.stdout
+        self.stderr = popen.stderr
+
+    def wait(self) -> int:
+        return self._popen.wait()
+
+    def kill(self) -> None:
+        self._popen.kill()
+
+    def stop_tree(self) -> None:
+        from . import rules
+        rules.stop_tree(self.pid)
+
+
+class Local:
+    """The tree is a checkout on this machine. A relative path or a missing
+    cwd means this process's working directory, as with subprocess."""
+
+    name = "local"
+
+    def run(self, command: Command, *, cwd=None, env=None, timeout=None,
+            shell: bool = False, text: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(command, cwd=cwd, env=env, timeout=timeout, shell=shell,
+                              capture_output=True, text=text)
+
+    def start(self, command: list[str], *, cwd=None, env=None) -> LocalProcess:
+        # stdin is DEVNULL: an agent's prompt travels in argv, and an inherited
+        # non-TTY stdin can leave the child waiting forever (see agent_pi).
+        return LocalProcess(subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                             text=True, bufsize=1, cwd=cwd, env=env))
+
+    def exists(self, path) -> bool:
+        return Path(path).exists()
+
+    def is_file(self, path) -> bool:
+        return Path(path).is_file()
+
+    def size(self, path) -> int:
+        return Path(path).stat().st_size
+
+    def read_text(self, path) -> str:
+        return Path(path).read_text()
+
+    def remove(self, path) -> None:
+        Path(path).unlink()
+
+
+LOCAL = Local()
+_current: Sandbox = LOCAL
+
+
+def current() -> Sandbox:
+    """The sandbox this process's run works in. One run per process, so one
+    sandbox: `Local` unless a run has chosen another with `use`."""
+    return _current
+
+
+def use(sandbox: Sandbox) -> None:
+    global _current
+    _current = sandbox

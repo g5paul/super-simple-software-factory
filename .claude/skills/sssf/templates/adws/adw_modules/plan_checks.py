@@ -16,7 +16,7 @@ from __future__ import annotations
 import subprocess
 import time
 
-from . import quality
+from . import quality, sandbox
 from .data_types import EventRecord, PlanOutput, QualityCheckResult, QualityResult
 from .utils import now_iso, operator_env
 
@@ -36,8 +36,8 @@ def _run(run, index: int, command: str) -> QualityCheckResult:
     try:
         # A plan writes its checks as shell lines (`bun scripts/x.ts`,
         # `cd web && npm test`), so they run through a shell.
-        done = subprocess.run(["bash", "-c", command], cwd=run.repo_root, env=operator_env(),
-                              capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+        done = sandbox.current().run(["bash", "-c", command], cwd=run.repo_root,
+                                     env=operator_env(), timeout=TIMEOUT_SECONDS)
         returncode, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as error:
         returncode = 124

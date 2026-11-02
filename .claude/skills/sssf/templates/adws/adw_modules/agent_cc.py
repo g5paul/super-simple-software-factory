@@ -27,7 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import account, budget, prices, rules
+from . import account, budget, prices, rules, sandbox
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import mark_agent, operator_env
@@ -236,12 +236,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     turns: dict[str, dict] = {}     # message id -> the message, for a call killed mid-turn
     output: dict[str, int] = {}     # message id -> its output tokens so far, from message_delta
     streaming: dict = {}            # parent_tool_use_id -> the message id now streaming
-    # stdin is DEVNULL for the same reason as agent_pi: the prompt is in argv,
-    # and an inherited non-TTY stdin can leave the child waiting forever.
-    process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, bufsize=1, cwd=request.cwd,
-                               env=child_env(request.agent_name, request.adw_id))
+    # sandbox.start gives the child a DEVNULL stdin, for the reason agent_pi gives.
+    process = sandbox.current().start(cmd, cwd=request.cwd,
+                                      env=child_env(request.agent_name, request.adw_id))
     if on_spawn:
         on_spawn(process.pid)
     try:
@@ -297,7 +294,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     account.record(event["rate_limit_info"], source=request.cwd)
                     if (AUTH == "subscription" and request.stop_on_usage_credits
                             and account.on_credits(event["rate_limit_info"])):
-                        rules.stop_tree(process.pid)
+                        process.stop_tree()
                         stop = account.RateLimitStop(account.CREDITS)
                         stop.partial = _partial(turns, output)
                         raise stop
@@ -309,7 +306,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     except Exception as error:
                         # A forbidden command (rules.RuleBreach), or a tracer
                         # failure: either way the agent must not run on unwatched.
-                        rules.stop_tree(process.pid)
+                        process.stop_tree()
                         if isinstance(error, rules.RuleBreach):
                             error.partial = _partial(turns, output)
                         raise

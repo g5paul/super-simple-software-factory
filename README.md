@@ -103,6 +103,8 @@ Re-running `install.py` is safe. It skips every file that already exists and rep
 
 To run the operator session in a sandbox, add `--container` when you install. It also stamps `container/`, a Podman image and a `run.sh` that starts Claude Code inside it with only the repo mounted. It works with Claude Code rosters only. See `cookbooks/install.md`.
 
+To send one run's work to a remote VM instead, add `--sandbox vercel` to a chain. The chain stays on your machine with the trace and the caps; its agents, checks and git run in a Vercel Sandbox VM, and commits come back to the run's branch. It implies `--worktree`, runs Claude Code rosters only, and needs a Vercel token in `.env` and a `claude setup-token` token in `~/.config/sssf-sandbox/token.env`. See `cookbooks/run_adw.md` and [`docs/designs/remote-sandboxes.md`](docs/designs/remote-sandboxes.md).
+
 To bring SSSF into a new project, start a Claude session in that repo and point it at `cookbooks/onboard.md`. It checks whether SSSF fits, installs it, sets `quality.py` to the commands CI runs, writes `docs/sssf.md`, and makes a first small run.
 
 Green on the smoke test means the whole path works: config validated, session minted, the agent ran, envelope parsed, events landed in `adws/adw_data/sssf.db`. Fix it there before composing anything larger, because every multi-agent chain rides this exact path.
@@ -517,7 +519,7 @@ A run works on your current branch unless you ask for one of its own. For real w
 
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list. Open items in the repos running SSSF are in [`docs/projects.md`](docs/projects.md).
 
-- Remote sandboxes on Vercel and E2B, beside the Podman container, are designed in [`docs/designs/remote-sandboxes.md`](docs/designs/remote-sandboxes.md) and wait to be built.
+- Remote sandboxes: `--sandbox vercel` is built and passed its proof in sssf-sandbox. E2B, the dashboard's sandbox view, repo.yaml's `sandbox:` default, and `--sandbox` for tickets and trials wait. See [`docs/designs/remote-sandboxes.md`](docs/designs/remote-sandboxes.md).
 - `on_match: refuse` refuses a forbidden command on pi agents and lets the run go on, but Claude Code agents still stop. They run with `--safe-mode`, which turns off every hook, `--settings` ones included, and without it they would load the engineer's own plugins, skills and agents.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.

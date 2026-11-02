@@ -1,6 +1,6 @@
 # Design: remote sandboxes
 
-Status: building. Settled in one grilling session on 2026-11-02. Step 1 of decision 17, the seam with only the local sandbox, is built. Where the text and a decision disagree, the decision wins.
+Status: building. Settled in one grilling session on 2026-11-02. Steps 1 and 2 of decision 17 are built: the seam, and Vercel, which passed all six proof cases. E2B is next. Where the text and a decision disagree, the decision wins; "As built" below records where the build differs from a decision.
 
 A run with `--sandbox vercel` or `--sandbox e2b` does its work in a remote VM. The ADW stays on the host and keeps the trace, the caps, the launch lock and the dashboard. Every process the run starts in its tree, agents, checks and git, goes through one runner, which sends it to the VM. Commits come back to the run's branch on the host, and the engineer merges as usual.
 
@@ -71,12 +71,26 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 18. **Rollout, on the engineer's word.** No project repo gets `--sandbox` until both providers pass, then one repo at a time, the way `--worktree` rolled out. A repo that is work for an employer stays off Vercel's free tier, which is for personal, non-commercial use. Nothing runs unattended on E2B until its behavior past the credit is known.
 19. **The engineer makes the accounts and keys.** `VERCEL_TOKEN` and `E2B_API_KEY` go in sssf-sandbox's `.env`, and the Claude token in its own file, per decision 14. All are checked by key name only. The first two are sandbox keys, not model keys. No `ANTHROPIC_API_KEY` may be set where a sandbox run starts, since it would win over the token.
 
+## As built: Vercel
+
+What step 2 settled that the decisions left open, or changed:
+
+- **The VM mirrors the host's paths.** The clone sits at the host worktree's absolute path and the handoff folder at its host path, made with `sudo` and owned by the VM's user. Every path the run passes means the same file on both sides, so nothing translates paths.
+- **Commits come back as a git bundle, not `format-patch`.** The host worktree never changes on its own, so the host branch fast-forwards to the VM's commits with the same SHAs. Decision 6 said `format-patch` and `git am`; a bundle keeps the two branches identical.
+- **Agents get the token in `start`, checks get none in `run`.** Each VM command gets only `SSSF_` and `OBS_` variables from the host. The run stops before making a VM if `ANTHROPIC_API_KEY` is set.
+- **An agent's pid in the trace is a negative stand-in.** A VM's pids mean nothing on the host, and `just kill` skips those rows. Stopping the chain deletes the VM, which stops the agent. Each agent runs under `setsid`, so its own tree stop is one `pkill -s` in the VM.
+- **The SDK isn't in the chains' headers.** `--sandbox vercel` starts the chain again once under `uv run --with vercel-sandbox==0.10.0`, so a run without it never fetches the SDK.
+- **A refresh is a stop.** The VM is persistent, and the next call resumes it with its files in a new session. No command asks for more than half a session, or a short session would stop the VM before every command.
+- **A VM's snapshots go with it.** Each stop saves an automatic snapshot of about 800MB, which Vercel keeps after the VM is deleted unless asked. `destroy(delete_orphan_snapshots=True)` deletes them, at the end of a run and in the sweep.
+- **Not built yet:** the dashboard's sandbox view (decision 15) and repo.yaml's `sandbox:` default (decision 4). The trace already holds what the view needs, in the `sandbox`, `sandbox_commits`, `sandbox_refresh` and `sandbox_end` events.
+
 ## Open
 
 - **A ChatGPT roster in the VM.** It needs pi's OAuth sign-in in the VM, and a decision on how it gets there.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in.
 - **VM cost in the caps.** Waits for real numbers, per decision 13.
 - **Rebase checks off the host.** Per decision 11.
+- **Vercel's Hobby limits beyond the allowance.** Resuming is rate-limited to 40 vCPUs a minute, and snapshot storage is capped; past the cap, Vercel refuses every new VM until the month resets or snapshots are deleted. Both were hit in the proof, by a bug since fixed. How far a day of real runs is from either is not known.
 - **Not yet known:** whether a `claude -p` call survives an E2B pause mid-request, which exception Vercel's SDK raises when a session ends mid-stream, and what E2B does past the $100 credit.
 
 ## Log
@@ -86,3 +100,9 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 | 2026-11-02 | hub | grilling session, this design | settled |
 | 2026-11-02 | hub | step 1: `adw_modules/sandbox.py`, with `Local` only. Agents, quality checks, plan checks, gates, git, the tree check and a run's worktree setup go through `sandbox.current()`; a test fails if an in-tree module starts a process around it. `tickets` reads and rewrites its own files directly, and moves to the seam when tickets get `--sandbox` | 347 tests passed |
 | 2026-11-02 | sssf-sandbox | step 1 live: a Claude Code agent (cb4d4b4f), a pi agent on ChatGPT (cd741b20), the quality chain (94a64b50), and a worktree `adw_simple_sdlc` run (cafae9cb) | all success; cafae9cb passed 14 of 14 phases, with setup, two rounds of quality checks and three commits, $0.59, then discarded |
+| 2026-11-02 | hub | step 2: `adw_modules/sandbox_vercel.py` and `--sandbox vercel` on four chains, tested against a fake VM | 357 tests passed |
+| 2026-11-02 | sssf-sandbox | step 2, case 1: simple SDLC run 29a10c73 in VM red-capable-sturgeon, with the setup marker the tests need; `just merge` landed it | 15 of 15 phases, 3 commits back with the same SHAs, 149 VM seconds, $0.54 |
+| 2026-11-02 | sssf-sandbox | case 6: a setup command printed its environment's names and failed if the token was among them | passed; only the VM's own variables and `SSSF_` ones |
+| 2026-11-02 | sssf-sandbox | cases 3 and 4: run f5d93c18 stopped by `just kill` 12 seconds into the build; its launch swept a stray VM tagged to a dead run | plan commit on the host branch, builder's 4 files saved as a patch, VM deleted, stray deleted |
+| 2026-11-02 | sssf-sandbox | cases 2 and 5, first try: two runs at once with 4-minute sessions (c30b1572, f8168e97) | refreshed 48 and 41 times, one failed on Vercel's 429 for resumes; then every VM was refused for snapshot storage, 90 snapshots and 72GB. Fixed in 4ce90f3 and 6a8b676 |
+| 2026-11-02 | sssf-sandbox | cases 2 and 5, after the fixes: 08474800 and f59f718b at once, 4-minute sessions | both 12 of 12 phases; 1 refresh; no VMs or snapshots left. The second merge conflicted in CHANGELOG and README, as two parallel runs can, and was discarded |

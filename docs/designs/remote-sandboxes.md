@@ -85,3 +85,4 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 |---|---|---|---|
 | 2026-11-02 | hub | grilling session, this design | settled |
 | 2026-11-02 | hub | step 1: `adw_modules/sandbox.py`, with `Local` only. Agents, quality checks, plan checks, gates, git, the tree check and a run's worktree setup go through `sandbox.current()`; a test fails if an in-tree module starts a process around it. `tickets` reads and rewrites its own files directly, and moves to the seam when tickets get `--sandbox` | 347 tests passed |
+| 2026-11-02 | sssf-sandbox | step 1 live: a Claude Code agent (cb4d4b4f), a pi agent on ChatGPT (cd741b20), the quality chain (94a64b50), and a worktree `adw_simple_sdlc` run (cafae9cb) | all success; cafae9cb passed 14 of 14 phases, with setup, two rounds of quality checks and three commits, $0.59, then discarded |

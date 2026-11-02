@@ -38,7 +38,7 @@ TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"
 KEYS = ("VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID")
 PASSED = ("SSSF_", "OBS_")          # the only host variables a VM command gets
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
-COMMAND_SECONDS = 10 * 60           # what a command with no timeout may need
+COMMAND_SECONDS = 60                # what a command with no timeout may need: git, a read
 MARGIN_SECONDS = 30
 
 
@@ -239,7 +239,7 @@ class Vercel:
         argv = list(command)
         if Path(argv[0]).is_absolute():
             argv[0] = Path(argv[0]).name        # the host's install path means nothing in the VM
-        self._refresh(min(AGENT_SECONDS, self.limit - 2 * MARGIN_SECONDS))
+        self._refresh(AGENT_SECONDS)
         self.handoff_in()
         self.processes += 1
         sid_file = f"/tmp/sssf-{uuid.uuid4().hex}.sid"
@@ -301,7 +301,13 @@ class Vercel:
 
     def _refresh(self, need: float) -> None:
         """Stop the VM when `need` seconds won't fit in this session. The next
-        call resumes it in a new session, with its files."""
+        call resumes it in a new session, with its files.
+
+        No command may ask for more than half a session, so a fresh one always
+        has room for it. Otherwise a short session would stop the VM before
+        every command, and Vercel limits how fast VMs resume (40 vCPUs a
+        minute on Hobby)."""
+        need = min(need, self.limit / 2)
         if time.monotonic() - self._session + need <= self.limit - MARGIN_SECONDS:
             return
         self._call(self.sandbox.stop)

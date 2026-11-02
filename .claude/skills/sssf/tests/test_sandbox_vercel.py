@@ -175,11 +175,23 @@ def test_close_saves_uncommitted_work_as_a_patch_and_deletes_the_vm(box):
 
 
 def test_a_command_that_would_not_fit_in_the_session_gets_a_fresh_one(box):
-    box.limit = 120
+    box.limit = 240
     box.run(["true"], timeout=10)
     assert box.fake.stops == 0
-    box.run(["true"], timeout=100)
+    box._session -= 100                 # 100s into the session, 110s of it left
+    box.run(["true"], timeout=200)      # asks for half the session, 120s
     assert box.fake.stops == 1 and box.refreshes == 1
+
+
+def test_a_short_session_does_not_refresh_before_every_command(box):
+    box.limit = 240
+    box._session -= 100     # git fits in what is left; an agent, at half a session, doesn't
+    for _ in range(5):
+        box.run(["git", "status"])
+    process = box.start(["true"])
+    list(process.stdout)
+    process.wait()
+    assert box.refreshes == 1
 
 
 def test_files_are_read_in_the_vm_not_on_the_host(box):

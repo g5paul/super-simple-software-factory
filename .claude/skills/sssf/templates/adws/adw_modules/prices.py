@@ -21,6 +21,16 @@ def table() -> dict:
     return json.loads((Path(__file__).with_name("prices.json")).read_text())["models"]
 
 
+def listed(model: str) -> bool:
+    return model.split("/")[-1] in table()
+
+
+def unlisted_warning(model: str) -> str:
+    return (f"{model} isn't in adws/adw_modules/prices.json, so a call of it that SSSF "
+            "kills adds its tokens and no cost, and the dashboard can't estimate it. "
+            "Add its list price from https://claude.com/pricing to the skill's prices.json.")
+
+
 def cost(model: str, usage: dict) -> Optional[float]:
     """One request's list price from its Anthropic `usage` block, or None for
     a model the table doesn't list. `model` may carry a provider prefix."""

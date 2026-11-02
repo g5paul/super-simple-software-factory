@@ -50,6 +50,10 @@ function age(s: number): string {
   return `${Math.round(s / 86_400)}d ago`
 }
 
+// The week's list holds the window's; a model in neither has a price.
+const unlisted = computed(() =>
+  [...new Set([...(usage.value?.window.unpriced_models ?? []), ...(usage.value?.week.unpriced_models ?? [])])].toSorted())
+
 const windows = computed(() => {
   const s = usage.value?.sample
   // Plans below Ultra have a 5-hour window; with no sample yet, show both.
@@ -123,9 +127,11 @@ function share(row: SpendRow, total: number): string {
       <div class="faint small">
         Cost is estimated from transcript token counts at list price. The subscription pays it; it shows
         what fills the windows.
-        <template v-if="usage.window.unpriced_models.length">
-          No estimate for {{ usage.window.unpriced_models.join(', ') }}.
-        </template>
+      </div>
+      <div v-if="unlisted.length" class="unlisted">
+        No list price for {{ unlisted.join(', ') }}, so its calls are left out of these estimates.
+        Add it to the skill's <code>adws/adw_modules/prices.json</code> from
+        <a href="https://claude.com/pricing" target="_blank" rel="noopener">claude.com/pricing</a>.
       </div>
     </div>
 
@@ -240,6 +246,16 @@ function share(row: SpendRow, total: number): string {
 .mid .fill { background: var(--amber); }
 .high .fill { background: var(--red); }
 .high .pct { color: var(--red); }
+
+.unlisted {
+  margin-top: 8px;
+  color: var(--amber);
+}
+
+.unlisted a {
+  color: inherit;
+  text-decoration: underline;
+}
 
 .pi-limit {
   margin-top: 12px;

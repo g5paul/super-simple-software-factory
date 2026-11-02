@@ -14,7 +14,13 @@ import pytest
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import prices
+from types import SimpleNamespace
+
+from adw_modules import agent_cc, agents, prices
+
+from test_agent_cc import fake, request  # noqa: F401  (fixture and helper)
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 MILLION = 1_000_000
 
@@ -41,3 +47,24 @@ def test_a_long_haiku_prompt_costs_five_times_as_much():
 def test_a_provider_prefix_is_ignored_and_an_unknown_model_is_unpriced():
     assert prices.cost("anthropic/claude-haiku-5-5", {"output_tokens": MILLION}) == pytest.approx(0.5)
     assert prices.cost("claude-mystery-9", {"input_tokens": MILLION}) is None
+
+
+def test_listed_reads_the_table():
+    assert prices.listed("claude-opus-5-5") and prices.listed("anthropic/claude-fable-5-1")
+    assert not prices.listed("claude-mystery-9")
+
+
+def test_a_claude_call_names_the_models_that_answered(tmp_path, fake):
+    fake(FIXTURES / "cc_turn1.jsonl")
+    assert agent_cc.run(request(tmp_path)).models == ["claude-haiku-5-5"]
+
+
+def test_an_unlisted_model_is_warned_about_once_per_run():
+    said, events = [], []
+    run = SimpleNamespace(adw_id="r1", console=SimpleNamespace(advise=said.append),
+                          tracer=SimpleNamespace(event=events.append))
+    phase = SimpleNamespace(phase_id="r1_01")
+    for _ in range(2):
+        agents.warn_unlisted(run, phase, "builder", ["claude-haiku-5-5", "claude-mystery-9"])
+    assert len(said) == 1 and "claude-mystery-9" in said[0] and "prices.json" in said[0]
+    assert [(e.name, e.payload["model"]) for e in events] == [("unlisted_model", "claude-mystery-9")]

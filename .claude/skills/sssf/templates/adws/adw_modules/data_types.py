@@ -565,3 +565,4 @@ class AgentResult(BaseModel):
     # False when the harness never reported a price, as for a Claude call
     # killed before its final result: `cost` is then SSSF's list-price estimate.
     cost_reported: bool = True
+    models: list[str] = []          # every model that answered, subagents' included

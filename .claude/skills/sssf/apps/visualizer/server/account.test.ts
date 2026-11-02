@@ -94,6 +94,15 @@ describe("Account", () => {
     expect(usage.sample?.seven_day?.utilization).toBe(0.07);
   });
 
+  test("a model the price table doesn't list is named, in the window and the week", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt", model: "claude-mystery-9" })
+      + call({ id: "2", at: "2026-10-29T15:10:00Z", session: "s", cwd: "/repos/yt" }));
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.window.unpriced_models).toEqual(["claude-mystery-9"]);
+    expect(usage.week.unpriced_models).toEqual(["claude-mystery-9"]);
+  });
+
   test("no sample file still reports spend", () => {
     writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"), call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" }));
     const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);

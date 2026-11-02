@@ -16,7 +16,7 @@ from typing import Optional
 
 import yaml
 
-from . import account, agent_cc, agent_pi, budget, permissions, prompts, repo_settings, rules
+from . import account, agent_cc, agent_pi, budget, permissions, prices, prompts, repo_settings, rules
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -109,6 +109,23 @@ def prompt_variables(run, phase: Phase, call: AgentCall) -> dict[str, str]:
         "protected_files": "\n".join(f"- `{p}`" for p in run.cfg.defaults.protected_files)
                            or "(none)",
     }
+
+
+_unlisted_warned: set[tuple[str, str]] = set()
+
+
+def warn_unlisted(run, phase: Phase, agent_name: str, models: list[str]) -> None:
+    """Once per run and model: a Claude model the price table doesn't list. The
+    call itself reported its cost; the warning is for the next one SSSF kills."""
+    for model in models:
+        if prices.listed(model) or (run.adw_id, model) in _unlisted_warned:
+            continue
+        _unlisted_warned.add((run.adw_id, model))
+        run.console.advise(prices.unlisted_warning(model))
+        run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                     type="log", name="unlisted_model",
+                                     payload={"agent": agent_name, "model": model,
+                                              "message": prices.unlisted_warning(model)}))
 
 
 def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
@@ -234,6 +251,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             raise
         run.add_usage(result.tokens, result.cost)
         spent.merge(result.usage)
+        warn_unlisted(run, phase, agent.name, result.models)
         latest = result
         return result
 

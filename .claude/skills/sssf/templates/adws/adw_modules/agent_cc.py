@@ -328,6 +328,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     result.tokens = result.usage.total_tokens
     result.cost = result.usage.total_cost
     models = final.get("modelUsage") or {}
+    result.models = sorted(models)
     entry = models.get(model_id(request.model)) or max(
         models.values(), key=lambda m: m.get("contextWindow") or 0, default={})
     result.context_window = int(entry.get("contextWindow") or 0)

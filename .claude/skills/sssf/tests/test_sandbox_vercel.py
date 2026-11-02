@@ -65,8 +65,8 @@ class FakeVM:
     def stop(self):
         self.stops += 1
 
-    def destroy(self):
-        self.destroyed = True
+    def destroy(self, delete_orphan_snapshots=False):
+        self.destroyed = delete_orphan_snapshots
 
 
 @pytest.fixture

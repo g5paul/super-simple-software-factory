@@ -101,7 +101,7 @@ def sweep(project: str, live: set[str]) -> list[str]:
     for box in query_sandboxes():
         tags = box.tags or {}
         if tags.get("sssf") == project and tags.get("adw_id") not in live:
-            box.destroy()
+            box.destroy(delete_orphan_snapshots=True)
             gone.append(f"{box.name} ({tags.get('adw_id')})")
     return gone
 
@@ -205,7 +205,10 @@ class Vercel:
             self._log("sandbox_error", {"vm": self.vm, "error": str(error)[-500:]})
         seconds = round(time.monotonic() - self._created, 1)
         try:
-            self.sandbox.destroy()
+            # Each stop saved a snapshot of the VM, which Vercel keeps unless
+            # asked. Hobby caps snapshot storage, and at about 800MB each, a
+            # few dozen refreshes used it up and blocked every new VM.
+            self.sandbox.destroy(delete_orphan_snapshots=True)
             deleted = True
         except Exception as error:
             deleted = False

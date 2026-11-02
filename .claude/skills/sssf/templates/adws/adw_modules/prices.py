@@ -3,7 +3,7 @@
 Claude Code prices a call only in its final result event. A call SSSF kills
 mid-turn, for a rule breach or for usage credits, never sends one, so SSSF
 prices its tokens here. prices.json holds the table; the dashboard's account
-panel reads the same file.
+panel reads the same file. scripts/check_prices.py compares it with the page.
 """
 
 from __future__ import annotations

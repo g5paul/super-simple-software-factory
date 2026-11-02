@@ -516,7 +516,6 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - `on_match: refuse` refuses a forbidden command on pi agents and lets the run go on, but Claude Code agents still stop. They run with `--safe-mode`, which turns off every hook, `--settings` ones included, and without it they would load the engineer's own plugins, skills and agents.
-- `adws/adw_modules/prices.json` holds Claude's list prices, read from claude.com/pricing on 2026-11-01. A run and the account panel warn about a model it doesn't list, but nothing checks a listed price against the page, so a price change needs a hand edit.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

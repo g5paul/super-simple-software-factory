@@ -308,7 +308,7 @@ def test_a_hand_run_without_a_source_keeps_saying_the_recorded_skill(repo, monke
     STAMP.write_text(json.dumps(record))
     monkeypatch.setenv("SSSF_SOURCE", str(repo / "nowhere"))
     out = install("--update").stdout
-    assert "skill: abc1234 (unchanged" in out
+    assert "skill: abc1234 (as recorded" in out
     assert stamp()["skill"] == "abc1234"
 
 

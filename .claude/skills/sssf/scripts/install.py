@@ -412,7 +412,7 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     elif record.get("skill"):
         # Run by hand from the repo's copy, e.g. for --keep: there is no skill
         # source to read, and the recorded version still stands.
-        print(f"  skill: {record['skill']} (unchanged; no skill git source in this run)")
+        print(f"  skill: {record['skill']} (as recorded; this run read the repo's own copy)")
     else:
         print("  skill: unknown (no git source)")
     print(f"  updated: {len(updated)}")

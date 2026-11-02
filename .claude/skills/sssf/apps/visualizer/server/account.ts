@@ -13,7 +13,7 @@
  *   token counts, SSSF agents' calls included. A call is SSSF's when its
  *   session id is in a registered repo's agent_sessions table.
  *
- * Transcripts only report tokens, so cost is an estimate (see RATES). Files
+ * Transcripts only report tokens, so cost is an estimate at list price (see PRICES). Files
  * are read incrementally: each poll reads only what was appended.
  */
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
@@ -21,19 +21,15 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AccountUsage, LimitSample, LimitWindow, PiSpendWindow, SpendRow, SpendWindow } from "../shared/types.ts";
 import { registryPath } from "./projects.ts";
+import prices from "../../../templates/adws/adw_modules/prices.json";
 
 /**
- * Dollars per million input tokens at list price. The other token kinds are
- * priced off it with WEIGHTS. Fitted to the costUSD Claude Code itself reports
- * in SSSF result events (Oct 2026): Haiku matched exactly; Opus and Sonnet
- * stayed within 8% across runs. A model not listed gets no estimate.
+ * Dollars per million tokens at list price, from claude.com/pricing. The same
+ * file prices a Claude call SSSF killed mid-turn (adw_modules/prices.py), so
+ * the two never disagree. A model not listed gets no estimate.
  */
-const RATES: Record<string, number> = {
-  "claude-opus-5-5": 3.7,
-  "claude-sonnet-5-5": 1.85,
-  "claude-haiku-5-5": 0.1,
-};
-const WEIGHTS = { input: 1, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2, output: 5 };
+interface Rates { input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number }
+const PRICES = prices.models as Record<string, Rates & { long_prompt?: Rates & { over: number } }>;
 
 const HOUR = 3_600_000;
 const WINDOW_MS = { five_hour: 5 * HOUR, seven_day: 7 * 24 * HOUR };
@@ -60,12 +56,14 @@ interface FileState {
   calls: Call[];
 }
 
+/** One request's list price. Haiku charges more when the prompt, cache included, is long. */
 export function estimateCost(model: string, t: Tokens): number | null {
-  const rate = RATES[model];
-  if (rate === undefined) return null;
-  const units = t.input * WEIGHTS.input + t.cacheRead * WEIGHTS.cacheRead
-    + t.cacheWrite5m * WEIGHTS.cacheWrite5m + t.cacheWrite1h * WEIGHTS.cacheWrite1h + t.output * WEIGHTS.output;
-  return (units / 1e6) * rate;
+  const listed = PRICES[model];
+  if (!listed) return null;
+  const prompt = t.input + t.cacheRead + t.cacheWrite5m + t.cacheWrite1h;
+  const r = listed.long_prompt && prompt > listed.long_prompt.over ? listed.long_prompt : listed;
+  return (t.input * r.input + t.output * r.output + t.cacheRead * r.cache_read
+    + t.cacheWrite5m * r.cache_write_5m + t.cacheWrite1h * r.cache_write_1h) / 1e6;
 }
 
 export function ratesFilePath(): string {
@@ -140,6 +138,8 @@ function readSample(path: string, now: number): LimitSample | null {
     overage_status: info.overageStatus ?? null,
     five_hour: live(windows.five_hour),
     seven_day: live(windows.seven_day),
+    // A verified Ultra account has no 5-hour window at all, unlike one that has reset.
+    has_five_hour: "five_hour" in windows,
   };
 }
 
@@ -251,7 +251,7 @@ export class Account {
       const end = live ? Date.parse(live.resets_at) : now;
       const start = end - WINDOW_MS[kind];
       const inside = calls.filter((c) => c.at >= start && c.at <= Math.min(end, now));
-      const unpriced = [...new Set(inside.map((c) => c.model).filter((m) => RATES[m] === undefined))];
+      const unpriced = [...new Set(inside.map((c) => c.model).filter((m) => PRICES[m] === undefined))];
       return {
         basis: live ? kind : "rolling",
         start: new Date(start).toISOString(),

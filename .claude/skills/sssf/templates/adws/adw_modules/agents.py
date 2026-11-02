@@ -161,6 +161,13 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     spent = UsageBreakdown()
     interface = _interface(agent)
 
+    def count_partial(stop) -> None:
+        """A call killed mid-turn sent no final usage. What its turns reported,
+        priced by the interface, still counts."""
+        if stop.partial:
+            run.add_usage(stop.partial.tokens, stop.partial.cost)
+            spent.merge(stop.partial.usage)
+
     def send(prompt_text: str) -> AgentResult:
         nonlocal latest
         # Before every send, not once per agent: retries spend too.
@@ -183,6 +190,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             extensions=agent.harness_engineering,
             cwd=str(run.repo_root),
             max_cost=agent.max_call_cost,
+            stop_on_usage_credits=run.cfg.defaults.rate_limit_stop is not None,
         )
         try:
             result = interface.run(
@@ -197,11 +205,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             raise budget.record_call_stop(run, agent.name, phase.phase_id,
                                           agent.max_call_cost, stop) from None
         except rules.RuleBreach as breach:
-            # The agent was killed mid-call, so no final usage came. What its
-            # turns reported so far still counts.
-            if breach.partial:
-                run.add_usage(breach.partial.tokens, breach.partial.cost)
-                spent.merge(breach.partial.usage)
+            count_partial(breach)
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="error", name="rule_breach",
                                          payload={"agent": agent.name, "error": str(breach),
@@ -209,6 +213,16 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                                   "command": breach.command,
                                                   "spent": breach.partial.cost if breach.partial else 0.0,
                                                   "cost_reported": bool(breach.partial and breach.partial.cost_reported)}))
+            raise
+        except account.RateLimitStop as stop:
+            # Killed mid-call when the plan moved onto usage credits.
+            count_partial(stop)
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rate_limit_stop",
+                                         payload={"agent": agent.name, "error": str(stop),
+                                                  "usage_credits": True,
+                                                  "spent": stop.partial.cost if stop.partial else 0.0,
+                                                  "sample": account.latest()}))
             raise
         except agent_pi.UsageLimitStop as stop:
             # Named like Claude's usage stop, so the trace and the dashboard

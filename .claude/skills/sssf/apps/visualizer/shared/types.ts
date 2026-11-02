@@ -473,6 +473,8 @@ export interface LimitSample {
   /** null once that window has reset: the sample no longer says how full it is. */
   five_hour: LimitWindow | null;
   seven_day: LimitWindow | null;
+  /** False when Claude reported no 5-hour window: a plan without one, such as Ultra. */
+  has_five_hour: boolean;
 }
 
 export interface SpendRow {

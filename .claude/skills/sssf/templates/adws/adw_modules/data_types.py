@@ -475,6 +475,7 @@ class AgentRequest(BaseModel):
     extensions: list[str] = Field(default_factory=list)
     cwd: str = "."                  # set from run.repo_root — the codebase root agents work in
     max_cost: Optional[float] = None  # claude: --max-budget-usd for this call
+    stop_on_usage_credits: bool = True  # claude: kill the call once the plan moves onto credits
 
 
 class UsageBreakdown(BaseModel):
@@ -562,5 +563,5 @@ class AgentResult(BaseModel):
     context_tokens: int = 0
     context_window: int = 0         # 0 when the registry declares no ceiling
     # False when the harness never reported a price, as for a Claude call
-    # killed before its final result: the tokens count, the cost is unknown.
+    # killed before its final result: `cost` is then SSSF's list-price estimate.
     cost_reported: bool = True

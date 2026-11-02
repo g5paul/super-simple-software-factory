@@ -120,7 +120,7 @@ def request(tmp_path: Path) -> AgentRequest:
 
 
 def test_a_forbidden_command_kills_a_claude_agent_and_what_it_started(tmp_path, monkeypatch):
-    event = {"type": "assistant", "message": {"id": "msg_1", "content": [
+    event = {"type": "assistant", "message": {"id": "msg_1", "model": "claude-opus-5-5", "content": [
         {"type": "tool_use", "name": "Bash", "input": {"command": "git push"}}],
         "usage": {"input_tokens": 100, "output_tokens": 20}}}
     monkeypatch.setattr(agent_cc, "CLAUDE_PATH", str(stand_in(tmp_path, monkeypatch, event)))
@@ -129,10 +129,12 @@ def test_a_forbidden_command_kills_a_claude_agent_and_what_it_started(tmp_path, 
     with pytest.raises(rules.RuleBreach, match="builder ran `git push`.*may have run") as stop:
         agent_cc.run(request(tmp_path), on_event=enforce(), on_exit=exits.append)
     assert time.monotonic() - start < 20 and exits
-    # Claude prices a call only in its final result, which a killed call never sends.
+    # Claude prices a call only in its final result, which a killed call never
+    # sends, so SSSF prices its tokens at list price: Opus at $4 in, $20 out.
     partial = stop.value.partial
     assert partial.usage.input_tokens == 100 and partial.usage.output_tokens == 20
-    assert partial.cost == 0.0 and partial.cost_reported is False
+    assert partial.cost == pytest.approx(100 * 4e-6 + 20 * 20e-6)
+    assert partial.cost_reported is False
     child = int((tmp_path / "child.pid").read_text())
     for _ in range(50):
         if not alive(child):

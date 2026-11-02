@@ -27,7 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import account, budget, rules
+from . import account, budget, prices, rules
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import mark_agent, operator_env
@@ -202,11 +202,15 @@ def _usage(usage: dict, cost: float) -> UsageBreakdown:
 
 def _partial(turns: dict[str, dict]) -> AgentResult:
     """What a killed call used, from its messages' usage. Claude prices a call
-    only in its final result, so the tokens count and the cost stays unknown."""
+    only in its final result, which a killed call never sends, so SSSF prices
+    the tokens at list price (prices.py). A model the table doesn't list adds
+    its tokens and no cost."""
     usage = UsageBreakdown()
-    for turn in turns.values():
-        usage.merge(_usage(turn, 0.0))
-    return AgentResult(tokens=usage.total_tokens, usage=usage, cost_reported=False)
+    for message in turns.values():
+        priced = prices.cost(str(message.get("model") or ""), message["usage"])
+        usage.merge(_usage(message["usage"], priced or 0.0))
+    return AgentResult(tokens=usage.total_tokens, cost=usage.total_cost, usage=usage,
+                       cost_reported=False)
 
 
 def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None,
@@ -224,7 +228,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
 
     result = AgentResult(session_id=request.session_id)
     final: dict = {}
-    turns: dict[str, dict] = {}     # message id -> its usage, for a call killed mid-turn
+    turns: dict[str, dict] = {}     # message id -> the message, for a call killed mid-turn
     # stdin is DEVNULL for the same reason as agent_pi: the prompt is in argv,
     # and an inherited non-TTY stdin can leave the child waiting forever.
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
@@ -264,7 +268,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     # result event that totals them.
                     message = event.get("message") or {}
                     if message.get("id") and message.get("usage"):
-                        turns[message["id"]] = message["usage"]
+                        turns[message["id"]] = message
                 if etype == "assistant" and not event.get("parent_tool_use_id"):
                     # One API message streams as one event per content block,
                     # each repeating the same usage: read occupancy, never sum it.
@@ -273,6 +277,12 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         result.context_tokens = turn
                 elif etype == "rate_limit_event" and event.get("rate_limit_info"):
                     account.record(event["rate_limit_info"], source=request.cwd)
+                    if (AUTH == "subscription" and request.stop_on_usage_credits
+                            and account.on_credits(event["rate_limit_info"])):
+                        rules.stop_tree(process.pid)
+                        stop = account.RateLimitStop(account.CREDITS)
+                        stop.partial = _partial(turns)
+                        raise stop
                 elif etype == "result":
                     final = event
                 if on_event:

@@ -52,8 +52,9 @@ function age(s: number): string {
 
 const windows = computed(() => {
   const s = usage.value?.sample
+  // Plans below Ultra have a 5-hour window; with no sample yet, show both.
   return [
-    { label: '5-hour', w: s?.five_hour ?? null },
+    ...(s && !s.has_five_hour ? [] : [{ label: '5-hour', w: s?.five_hour ?? null }]),
     { label: '7-day', w: s?.seven_day ?? null },
   ]
 })

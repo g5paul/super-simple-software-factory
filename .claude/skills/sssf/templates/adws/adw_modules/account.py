@@ -2,6 +2,7 @@
 
 A subscription login has a 5-hour and a 7-day usage window, shared by every
 Claude Code session on the account: interactive ones and SSSF agents alike.
+A verified Ultra account has no 5-hour window, and reports only the 7-day one.
 Claude Code reports how full each window is in a `rate_limit_event` on every
 `claude -p` send. agent_cc hands each report to `record`, which keeps the
 newest one in `rate_limits.json` beside the project registry, so every repo on
@@ -26,7 +27,20 @@ WINDOWS = {"five_hour": "5-hour", "seven_day": "7-day"}
 
 
 class RateLimitStop(RuntimeError):
-    pass
+    partial = None                  # what a call killed mid-turn had spent, set by agent_cc
+
+
+# Usage credits let a Pro, Max or Ultra plan run past its limit at API rates,
+# billed as real money. Claude Code switches to them on its own once the
+# account has them on, and says so with isUsingOverage.
+CREDITS = ("Claude moved this account onto usage credits: its plan's limit is used up, and "
+           "further calls bill at API rates. SSSF stopped rather than spend real money. "
+           "Rerun when the limit resets, or set defaults.rate_limit_stop to null in "
+           "sssf.config.yaml to let runs spend credits.")
+
+
+def on_credits(info: dict) -> bool:
+    return bool(info.get("isUsingOverage"))
 
 
 def path() -> Path:
@@ -76,6 +90,8 @@ def check(stop_at: Optional[float], now: Optional[float] = None) -> None:
     if info.get("status") == "rejected" and reset > now:
         raise RateLimitStop(f"Claude rejected this account's last request (usage limit); "
                             f"it resets at {_clock(reset)}. Rerun then.")
+    if on_credits(info) and reset > now:
+        raise RateLimitStop(f"{CREDITS} The limit resets at {_clock(reset)}.")
     for key, label in WINDOWS.items():
         window = (info.get("unifiedWindows") or {}).get(key) or {}
         used, reset = window.get("utilization"), int(window.get("resetsAt") or 0)

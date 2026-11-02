@@ -81,6 +81,17 @@ describe("Account", () => {
     expect(usage.window.basis).toBe("rolling");
     expect(usage.window.calls).toBe(1);
     expect(usage.sample?.five_hour).toBeNull();
+    expect(usage.sample?.has_five_hour).toBe(true);      // reset, but the plan has one
+  });
+
+  test("an account with no 5-hour window says so, as Ultra's does", () => {
+    writeFileSync(ratesFile, JSON.stringify({
+      recorded_at: "2026-10-29T15:50:00Z", source: "/repos/yt",
+      info: { status: "allowed", unifiedWindows: { seven_day: { utilization: 0.07, resetsAt: RESET_7D } } },
+    }));
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.sample?.has_five_hour).toBe(false);
+    expect(usage.sample?.seven_day?.utilization).toBe(0.07);
   });
 
   test("no sample file still reports spend", () => {
@@ -111,13 +122,19 @@ describe("Account", () => {
 });
 
 describe("estimateCost", () => {
-  test("weights cache reads at a tenth of input and output at five times", () => {
-    const usage = { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
-    const out = { ...usage, input: 0, output: 200_000 };
-    const reads = { ...usage, input: 0, cacheRead: 10_000_000 };
-    const one = estimateCost("claude-opus-5-5", usage)!;
-    expect(estimateCost("claude-opus-5-5", out)).toBeCloseTo(one);
-    expect(estimateCost("claude-opus-5-5", reads)).toBeCloseTo(one);
+  const none = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
+
+  test("prices each token kind at claude.com/pricing's list price", () => {
+    expect(estimateCost("claude-opus-5-5", { ...none, input: 1_000_000 })).toBeCloseTo(4);
+    expect(estimateCost("claude-opus-5-5", { ...none, output: 1_000_000 })).toBeCloseTo(20);
+    expect(estimateCost("claude-opus-5-5", { ...none, cacheRead: 1_000_000 })).toBeCloseTo(0.2);
+    expect(estimateCost("claude-sonnet-5-5", { ...none, cacheWrite5m: 1_000_000 })).toBeCloseTo(2.5);
+    expect(estimateCost("claude-fable-5-1", { ...none, output: 1_000_000 })).toBeCloseTo(50);
+  });
+
+  test("a long Haiku prompt costs five times as much", () => {
+    expect(estimateCost("claude-haiku-5-5", { ...none, input: 100_000 })).toBeCloseTo(0.01);
+    expect(estimateCost("claude-haiku-5-5", { ...none, input: 200_000 })).toBeCloseTo(0.1);
   });
 
   test("an unknown model has no estimate", () => {

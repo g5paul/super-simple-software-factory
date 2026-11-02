@@ -92,6 +92,45 @@ def test_a_rejected_status_stops_at_any_threshold(private_registry):
         account.check(1.0, now=NOW)
 
 
+def test_an_account_on_usage_credits_stops(private_registry):
+    # Past the plan's limit, credits bill at API rates: real money.
+    account.record({**info(0.5), "isUsingOverage": True}, at="2026-10-29T16:00:00Z")
+    with pytest.raises(account.RateLimitStop, match="usage credits"):
+        account.check(1.0, now=NOW)
+    account.check(1.0, now=NOW + 7200)      # the limit has reset since
+
+
+def test_a_plan_without_a_five_hour_window_reads_its_week(private_registry):
+    # A verified Ultra account reports only the 7-day window.
+    ultra = info(0.0, seven_day=0.9)
+    del ultra["unifiedWindows"]["five_hour"]
+    account.record(ultra, at="2026-10-29T16:00:00Z")
+    with pytest.raises(account.RateLimitStop, match="7-day window is at 90%"):
+        account.check(0.8, now=NOW)
+
+
+def _onto_credits(tmp_path) -> Path:
+    """A turn whose rate_limit_event, after the first message, says the plan moved onto credits."""
+    turn = tmp_path / "turn.jsonl"
+    event = {"type": "rate_limit_event", "rate_limit_info": {**info(1.0), "isUsingOverage": True},
+             "uuid": "x", "session_id": "s"}
+    lines = (FIXTURES / "cc_turn1.jsonl").read_text().splitlines()
+    turn.write_text("\n".join([*lines[:-1], json.dumps(event), lines[-1]]) + "\n")
+    return turn
+
+
+def test_a_claude_call_stops_when_the_plan_moves_onto_credits(tmp_path, fake, private_registry):
+    fake(_onto_credits(tmp_path))
+    with pytest.raises(account.RateLimitStop, match="usage credits") as stop:
+        agent_cc.run(request(tmp_path))
+    assert stop.value.partial is not None and stop.value.partial.cost_reported is False
+
+
+def test_a_run_that_allows_credits_keeps_going(tmp_path, fake, private_registry):
+    fake(_onto_credits(tmp_path))
+    agent_cc.run(request(tmp_path, stop_on_usage_credits=False))
+
+
 def test_none_turns_the_guard_off(private_registry):
     account.record(info(1.0, status="rejected"), at="2026-10-29T16:00:00Z")
     account.check(None, now=NOW)

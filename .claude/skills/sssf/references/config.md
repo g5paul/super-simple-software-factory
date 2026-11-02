@@ -236,14 +236,14 @@ A rule is a plain string, which only asks, or a mapping with `forbid`, which is 
 agent_rules:
   - Keep commit subjects under 72 characters.
   - rule: Never run `git push`. Commit locally only.
-    forbid: ['\bgit\b.*\bpush\b']
+    forbid: ['\bgit\b(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+push\b']
   - rule: Never run the fh-* or stack recipes, or `pi` itself. They bill API keys from .env.
     forbid: ['\bjust\s+(fh-|fusion|plan\d)', '(^|[;&|]\s*)pi\b']
 ```
 
 Each `forbid` entry is a Python regex, searched in the command of every shell call an agent makes: Claude Code's `Bash`, a subagent's included, and pi's `bash`. The check reads the stream when the call is announced. On a match, SSSF kills the agent and every process under it, records a `rule_breach` event with the agent, rule, pattern and command, and stops the run with `RuleBreach`. The dashboard shows "Stopped: an agent ran a command this repo forbids". The harness may have started the command before the kill, so the message says to check what it did. A pattern that isn't a valid regex fails the settings, and with them the run.
 
-It reads shell commands only. A command another tool runs, such as a pi extension's own tool, isn't checked. A pattern matches text, so `echo "git push"` breaks the rule above too: keep patterns narrow. What an agent may change is enforced by `writes` and `protected_files`.
+It reads shell commands only. A command another tool runs, such as a pi extension's own tool, isn't checked. A pattern matches text, so a loose one catches ordinary commands: `\bgit\b.*\bpush\b` also stops `git stash push` and `git log --grep push`. The push pattern above allows only git's own options between `git` and `push`. Test a pattern with `re.search` against the commands agents really run before you add it. What an agent may change is enforced by `writes` and `protected_files`.
 
 ## Harness engineering
 

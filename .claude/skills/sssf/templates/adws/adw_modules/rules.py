@@ -7,7 +7,7 @@ command an agent runs.
     agent_rules:
       - Keep commit subjects under 72 characters.
       - rule: Never run `git push`. Commit locally only.
-        forbid: ['\\bgit\\b.*\\bpush\\b']
+        forbid: ['\\bgit\\b(\\s+-[cC]\\s+\\S+|\\s+--?[\\w-]+(=\\S+)?)*\\s+push\\b']
 
 The check reads the stream as each call is announced, before its result
 arrives. On a match, SSSF kills the agent and every process under it, so the

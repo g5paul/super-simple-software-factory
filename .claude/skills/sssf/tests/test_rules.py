@@ -25,7 +25,7 @@ sys.path.insert(0, str(SKILL / "templates" / "adws"))
 from adw_modules import agent_cc, agent_pi, repo_settings, rules
 from adw_modules.data_types import AgentRequest
 
-PUSH = rules.AgentRule(rule="Never run `git push`.", forbid=[r"\bgit\b.*\bpush\b"])
+PUSH = rules.AgentRule(rule="Never run `git push`.", forbid=[r"\bgit\b(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+push\b"])
 
 
 def settings(tmp_path: Path, body: str) -> Path:
@@ -65,8 +65,15 @@ def test_shell_commands_are_read_from_either_harness():
 
 def test_only_a_rule_with_forbid_is_enforced():
     assert rules.breach(["Never run `git push`."], "git push") is None
-    assert rules.breach([PUSH], "cd app && git -C . push origin main") == (PUSH, r"\bgit\b.*\bpush\b")
-    assert rules.breach([PUSH], "git status") is None
+    assert rules.breach([PUSH], "cd app && git -C . push origin main") == (PUSH, PUSH.forbid[0])
+
+
+def test_the_documented_push_pattern_spares_local_git_work():
+    for command in ("git push", "git -c a=b push --force", "git --no-pager push", "cd x && git push"):
+        assert rules.breach([PUSH], command), command
+    for command in ("git status", "git stash push -m wip", "git log --grep push",
+                    "git commit -m 'no push here'"):
+        assert rules.breach([PUSH], command) is None, command
 
 
 AGENT = """import json, os, subprocess, sys, time
@@ -148,6 +155,6 @@ def test_a_forbidden_command_kills_a_pi_agent_and_what_it_started(tmp_path, monk
 
 
 def test_the_breach_message_names_the_agent_rule_and_command():
-    error = rules.RuleBreach("builder", PUSH, r"\bgit\b.*\bpush\b", "git push origin main")
+    error = rules.RuleBreach("builder", PUSH, PUSH.forbid[0], "git push origin main")
     assert (error.agent, error.rule, error.command) == ("builder", "Never run `git push`.", "git push origin main")
     assert json.dumps(str(error))

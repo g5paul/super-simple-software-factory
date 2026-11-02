@@ -290,8 +290,14 @@ def test_a_forbidden_command_stops_the_run_and_lands_in_the_trace(repo, monkeypa
 
     def pushes(req, on_event=None, on_spawn=None, on_exit=None):
         if req.system_prompt.startswith("ticket_builder") and on_event:
-            on_event({"type": "assistant", "message": {"content": [
-                {"type": "tool_use", "name": "Bash", "input": {"command": "git push origin main"}}]}})
+            try:
+                on_event({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "git push origin main"}}]}})
+            except Exception as error:
+                # As the interface does: what the killed call spent rides the stop.
+                error.partial = AgentResult(tokens=500, cost=0.25,
+                                            usage=UsageBreakdown(total_tokens=500, total_cost=0.25))
+                raise
         return honest(req, on_event, on_spawn, on_exit)
     monkeypatch.setattr(repo, "run", pushes)
     assert run() == 1
@@ -301,6 +307,12 @@ def test_a_forbidden_command_stops_the_run_and_lands_in_the_trace(repo, monkeypa
             "SELECT payload_json FROM events WHERE name = 'rule_breach'").fetchone()[0])
     assert payload["agent"] == "ticket_builder" and payload["command"] == "git push origin main"
     assert payload["rule"] == "Never run `git push`."
+    # The stopped phase's spend reaches the trace the caps and the dashboard read.
+    with sqlite3.connect("adws/adw_data/sssf.db") as conn:
+        stopped = [json.loads(p) for (p,) in conn.execute(
+            "SELECT payload_json FROM events WHERE type = 'agent_end' AND name = 'ticket_builder'")]
+    assert stopped[-1]["stopped"] is True and stopped[-1]["cost"] == pytest.approx(0.25)
+    assert payload["spent"] == pytest.approx(0.25)
 
 
 def test_the_reviewers_never_see_an_sssf_update(repo, monkeypatch):

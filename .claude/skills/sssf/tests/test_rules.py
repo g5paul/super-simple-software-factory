@@ -120,14 +120,19 @@ def request(tmp_path: Path) -> AgentRequest:
 
 
 def test_a_forbidden_command_kills_a_claude_agent_and_what_it_started(tmp_path, monkeypatch):
-    event = {"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "name": "Bash", "input": {"command": "git push"}}]}}
+    event = {"type": "assistant", "message": {"id": "msg_1", "content": [
+        {"type": "tool_use", "name": "Bash", "input": {"command": "git push"}}],
+        "usage": {"input_tokens": 100, "output_tokens": 20}}}
     monkeypatch.setattr(agent_cc, "CLAUDE_PATH", str(stand_in(tmp_path, monkeypatch, event)))
     exits = []
     start = time.monotonic()
-    with pytest.raises(rules.RuleBreach, match="builder ran `git push`.*may have run"):
+    with pytest.raises(rules.RuleBreach, match="builder ran `git push`.*may have run") as stop:
         agent_cc.run(request(tmp_path), on_event=enforce(), on_exit=exits.append)
     assert time.monotonic() - start < 20 and exits
+    # Claude prices a call only in its final result, which a killed call never sends.
+    partial = stop.value.partial
+    assert partial.usage.input_tokens == 100 and partial.usage.output_tokens == 20
+    assert partial.cost == 0.0 and partial.cost_reported is False
     child = int((tmp_path / "child.pid").read_text())
     for _ in range(50):
         if not alive(child):
@@ -138,14 +143,16 @@ def test_a_forbidden_command_kills_a_claude_agent_and_what_it_started(tmp_path, 
 
 def test_a_forbidden_command_kills_a_pi_agent_and_what_it_started(tmp_path, monkeypatch):
     event = {"type": "message_end", "message": {"role": "assistant", "content": [
-        {"type": "toolCall", "name": "bash", "arguments": {"command": "git push"}}]}}
+        {"type": "toolCall", "name": "bash", "arguments": {"command": "git push"}}],
+        "usage": {"input": 100, "output": 20, "cost": {"total": 0.004}}}}
     monkeypatch.setattr(agent_pi, "PI_PATH", str(stand_in(tmp_path, monkeypatch, event)))
     monkeypatch.setattr(agent_pi, "resolve_model", lambda model: ("openai", "gpt"))
     monkeypatch.setattr(agent_pi, "context_window", lambda provider, model_id: 0)
     exits = []
-    with pytest.raises(rules.RuleBreach):
+    with pytest.raises(rules.RuleBreach) as stop:
         agent_pi.run(request(tmp_path), on_event=enforce(), on_exit=exits.append)
     assert exits
+    assert stop.value.partial.cost == pytest.approx(0.004)    # pi prices every turn
     child = int((tmp_path / "child.pid").read_text())
     for _ in range(50):
         if not alive(child):

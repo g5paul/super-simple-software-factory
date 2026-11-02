@@ -336,10 +336,12 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
             if on_event:
                 try:
                     on_event(event)
-                except Exception:
+                except Exception as error:
                     # A forbidden command (rules.RuleBreach), or a tracer
                     # failure: either way the agent must not run on unwatched.
                     rules.stop_tree(process.pid)
+                    if isinstance(error, rules.RuleBreach):
+                        error.partial = result       # pi priced every turn so far
                     process.wait()
                     if on_exit:
                         on_exit(process.pid)

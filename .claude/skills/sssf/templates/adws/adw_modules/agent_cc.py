@@ -200,6 +200,15 @@ def _usage(usage: dict, cost: float) -> UsageBreakdown:
     )
 
 
+def _partial(turns: dict[str, dict]) -> AgentResult:
+    """What a killed call used, from its messages' usage. Claude prices a call
+    only in its final result, so the tokens count and the cost stays unknown."""
+    usage = UsageBreakdown()
+    for turn in turns.values():
+        usage.merge(_usage(turn, 0.0))
+    return AgentResult(tokens=usage.total_tokens, usage=usage, cost_reported=False)
+
+
 def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None,
         on_spawn: Optional[Callable[[int], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None) -> AgentResult:
@@ -215,6 +224,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
 
     result = AgentResult(session_id=request.session_id)
     final: dict = {}
+    turns: dict[str, dict] = {}     # message id -> its usage, for a call killed mid-turn
     # stdin is DEVNULL for the same reason as agent_pi: the prompt is in argv,
     # and an inherited non-TTY stdin can leave the child waiting forever.
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
@@ -249,7 +259,13 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         # The session exists from here on, so a send that dies
                         # mid-turn is still resumed next time, never re-created.
                         ledger.write_text(json.dumps({"cost": 0.0}))
-                elif etype == "assistant" and not event.get("parent_tool_use_id"):
+                if etype == "assistant":
+                    # Per message, subagents' too: a killed call never sends the
+                    # result event that totals them.
+                    message = event.get("message") or {}
+                    if message.get("id") and message.get("usage"):
+                        turns[message["id"]] = message["usage"]
+                if etype == "assistant" and not event.get("parent_tool_use_id"):
                     # One API message streams as one event per content block,
                     # each repeating the same usage: read occupancy, never sum it.
                     turn = _context_tokens(event.get("message", {}).get("usage") or {})
@@ -262,10 +278,12 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                 if on_event:
                     try:
                         on_event(event)
-                    except Exception:
+                    except Exception as error:
                         # A forbidden command (rules.RuleBreach), or a tracer
                         # failure: either way the agent must not run on unwatched.
                         rules.stop_tree(process.pid)
+                        if isinstance(error, rules.RuleBreach):
+                            error.partial = _partial(turns)
                         raise
     finally:
         stderr = process.stderr.read() if process.stderr else ""

@@ -36,6 +36,7 @@ class RuleBreach(RuntimeError):
 
     def __init__(self, agent: str, rule: "AgentRule", pattern: str, command: str):
         self.agent, self.rule, self.pattern, self.command = agent, rule.rule, pattern, command
+        self.partial = None         # the AgentResult so far, set by the interface that killed it
         super().__init__(
             f"{agent} ran `{command[:300]}`, which this repo's rule forbids: {rule.rule} "
             f"(matched {pattern!r}). SSSF killed the agent and everything it started, but "

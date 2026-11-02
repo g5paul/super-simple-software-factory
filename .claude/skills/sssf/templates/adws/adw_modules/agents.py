@@ -193,14 +193,22 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                     f"{agent.coding_agent} {agent.name} {agent.model}"),
                 on_exit=lambda pid: run.tracer.process_end(run.adw_id, pid))
         except budget.CallBudgetStop as stop:
+            spent.merge(stop.result.usage)
             raise budget.record_call_stop(run, agent.name, phase.phase_id,
                                           agent.max_call_cost, stop) from None
         except rules.RuleBreach as breach:
+            # The agent was killed mid-call, so no final usage came. What its
+            # turns reported so far still counts.
+            if breach.partial:
+                run.add_usage(breach.partial.tokens, breach.partial.cost)
+                spent.merge(breach.partial.usage)
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="error", name="rule_breach",
                                          payload={"agent": agent.name, "error": str(breach),
                                                   "rule": breach.rule, "pattern": breach.pattern,
-                                                  "command": breach.command}))
+                                                  "command": breach.command,
+                                                  "spent": breach.partial.cost if breach.partial else 0.0,
+                                                  "cost_reported": bool(breach.partial and breach.partial.cost_reported)}))
             raise
         except agent_pi.UsageLimitStop as stop:
             # Named like Claude's usage stop, so the trace and the dashboard
@@ -215,71 +223,83 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         latest = result
         return result
 
-    # What the tree looked like before this agent got its hands on it. Every
-    # send in this phase — first prompt, JSON retries, gate corrections — is
-    # measured against this one baseline.
-    tree_before = permissions.snapshot(run)
+    try:
+        # What the tree looked like before this agent got its hands on it. Every
+        # send in this phase — first prompt, JSON retries, gate corrections — is
+        # measured against this one baseline.
+        tree_before = permissions.snapshot(run)
 
-    result = send(user_text)
-    envelope, attempt = _parse_with_retries(run, phase, call, result, send)
-
-    # claim gates — violations flow back into the SAME session as corrections
-    for gate_attempt in range(1, max(1, phase.params.retries + 1) + 1):
-        violations = []
-        for gate in call.gates:
-            report = _as_report(gate(envelope, run))
-            found = report.violations
-            run.tracer.gate_row(phase, gate.__name__, report, gate_attempt)
-            run.tracer.event(EventRecord(
-                adw_id=run.adw_id, phase_id=phase.phase_id,
-                type="gate_fail" if found else "gate_pass", name=gate.__name__,
-                payload={"attempt": gate_attempt, "violations": found,
-                         "checks": [c.model_dump() for c in report.checks]}))
-            run.console.gate_result(gate.__name__, report)
-            violations.extend(found)
-        if not violations:
-            break
-        if gate_attempt > phase.params.retries:
-            raise GateFailure(f"{agent.name} failed gates after {gate_attempt} attempt(s):\n- "
-                              + "\n- ".join(violations))
-        phase.attempt = gate_attempt
-        run.console.retry(agent.name, gate_attempt, phase.params.retries,
-                          f"{len(violations)} gate violation(s)")
-        correction = ("Your previous response failed validation:\n- "
-                      + "\n- ".join(violations)
-                      + "\n\nFix these problems, then re-emit ONLY your Report JSON.")
-        result = send(correction)
+        result = send(user_text)
         envelope, attempt = _parse_with_retries(run, phase, call, result, send)
 
-    # Permission is checked after every send is done, and before the envelope is
-    # accepted: an agent does not get to report success on a phase in which it
-    # wrote somewhere it was not allowed to.
-    try:
-        touched = permissions.enforce(run, phase, agent, tree_before)
-    except permissions.PermissionBreach as breach:
-        run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                     type="error", name="permission_breach",
-                                     payload={"agent": agent.name, "error": str(breach),
-                                              "writes": agent.writes,
-                                              "protected_files": run.cfg.defaults.protected_files}))
-        raise
-    if touched:
-        run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                     type="log", name="paths_touched",
-                                     payload={"agent": agent.name, "paths": touched}))
+        # claim gates — violations flow back into the SAME session as corrections
+        for gate_attempt in range(1, max(1, phase.params.retries + 1) + 1):
+            violations = []
+            for gate in call.gates:
+                report = _as_report(gate(envelope, run))
+                found = report.violations
+                run.tracer.gate_row(phase, gate.__name__, report, gate_attempt)
+                run.tracer.event(EventRecord(
+                    adw_id=run.adw_id, phase_id=phase.phase_id,
+                    type="gate_fail" if found else "gate_pass", name=gate.__name__,
+                    payload={"attempt": gate_attempt, "violations": found,
+                             "checks": [c.model_dump() for c in report.checks]}))
+                run.console.gate_result(gate.__name__, report)
+                violations.extend(found)
+            if not violations:
+                break
+            if gate_attempt > phase.params.retries:
+                raise GateFailure(f"{agent.name} failed gates after {gate_attempt} attempt(s):\n- "
+                                  + "\n- ".join(violations))
+            phase.attempt = gate_attempt
+            run.console.retry(agent.name, gate_attempt, phase.params.retries,
+                              f"{len(violations)} gate violation(s)")
+            correction = ("Your previous response failed validation:\n- "
+                          + "\n- ".join(violations)
+                          + "\n\nFix these problems, then re-emit ONLY your Report JSON.")
+            result = send(correction)
+            envelope, attempt = _parse_with_retries(run, phase, call, result, send)
 
-    _persist_envelope(run, phase, agent.name, call, envelope, attempt, valid=True)
-    run.console.envelope_summary(envelope)
-    context = latest or result
-    run.tracer.agent_session_row(run.adw_id, agent, session_id,
-                                 context_tokens=context.context_tokens,
-                                 context_window=context.context_window)
-    run.save_agent_map(session_key, {"session_id": session_id, "model": agent.model,
-                                    "coding_agent": agent.coding_agent})
-    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                 type="handoff", name=agent.name,
-                                 payload={"artifacts": envelope.artifacts,
-                                          "summary": envelope.summary}))
+        # Permission is checked after every send is done, and before the envelope is
+        # accepted: an agent does not get to report success on a phase in which it
+        # wrote somewhere it was not allowed to.
+        try:
+            touched = permissions.enforce(run, phase, agent, tree_before)
+        except permissions.PermissionBreach as breach:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="permission_breach",
+                                         payload={"agent": agent.name, "error": str(breach),
+                                                  "writes": agent.writes,
+                                                  "protected_files": run.cfg.defaults.protected_files}))
+            raise
+        if touched:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="paths_touched",
+                                         payload={"agent": agent.name, "paths": touched}))
+
+        _persist_envelope(run, phase, agent.name, call, envelope, attempt, valid=True)
+        run.console.envelope_summary(envelope)
+        context = latest or result
+        run.tracer.agent_session_row(run.adw_id, agent, session_id,
+                                     context_tokens=context.context_tokens,
+                                     context_window=context.context_window)
+        run.save_agent_map(session_key, {"session_id": session_id, "model": agent.model,
+                                        "coding_agent": agent.coding_agent})
+        run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                     type="handoff", name=agent.name,
+                                     payload={"artifacts": envelope.artifacts,
+                                              "summary": envelope.summary}))
+    except BaseException:
+        # A failed phase spent too. The caps and the dashboard total agent_end
+        # events, so without one here its spend would vanish from both.
+        if spent.total_tokens or spent.total_cost:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="agent_end", name=agent.name,
+                                         tokens=spent.total_tokens,
+                                         payload={"cost": spent.total_cost,
+                                                  "usage": spent.model_dump(),
+                                                  "stopped": True}))
+        raise
     run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                  type="agent_end", name=agent.name,
                                  # Phase totals, not the last send's: a retried

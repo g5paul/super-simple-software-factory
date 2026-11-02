@@ -561,3 +561,6 @@ class AgentResult(BaseModel):
     # visualizer's context bar measures against `context_window`.
     context_tokens: int = 0
     context_window: int = 0         # 0 when the registry declares no ceiling
+    # False when the harness never reported a price, as for a Claude call
+    # killed before its final result: the tokens count, the cost is unknown.
+    cost_reported: bool = True

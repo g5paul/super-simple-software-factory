@@ -53,7 +53,7 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 ### Spend, sign-in and the dashboard
 
 13. **VM time is tracked, not capped.** The trace records each run's VM seconds and, on E2B, its estimated VM cost from runtime and size. Neither counts toward `max_run_cost` or the other caps until real numbers show whether they should.
-14. **The sign-in is a `claude setup-token` token,** kept by the engineer in the repo's `.env` as `CLAUDE_CODE_OAUTH_TOKEN` and passed per command, per decision 8. Never the live `~/.claude/.credentials.json`, and never an API key. The first proof runs the Claude Code roster only. A ChatGPT roster in the VM, which needs pi's sign-in, waits.
+14. **The sign-in is a `claude setup-token` token,** its own, not the container's, so either can be cancelled alone. The engineer keeps it in `~/.config/sssf-sandbox/token.env` (mode 600) as `CLAUDE_CODE_OAUTH_TOKEN`, outside every repo: the ADW loads a repo's `.env` into its own environment, which would hand the token to every host agent and check. The remote runner reads the file and passes the token per command, per decision 8. Never the live `~/.claude/.credentials.json`, and never an API key. The first proof runs the Claude Code roster only. A ChatGPT roster in the VM, which needs pi's sign-in, waits.
 15. **The dashboard shows the sandbox.** A sandbox run's page shows its provider, VM ID, VM seconds and, on E2B, its estimated VM cost. The process list tags each process with its VM.
 
 ### Proof, build order and rollout
@@ -69,7 +69,7 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
     Tickets and trials get `--sandbox` once both providers pass all six.
 17. **Build order.** First the runner seam with only the local runner: every in-tree process goes through it, nothing behaves differently, every test passes, and the projects take it as an ordinary update. Then Vercel, which needs no template and blocks rather than bills past its allowance. Then E2B, once the engineer has checked what it does past the credit.
 18. **Rollout, on the engineer's word.** No project repo gets `--sandbox` until both providers pass, then one repo at a time, the way `--worktree` rolled out. A repo that is work for an employer stays off Vercel's free tier, which is for personal, non-commercial use. Nothing runs unattended on E2B until its behavior past the credit is known.
-19. **The engineer makes the accounts and keys.** `VERCEL_TOKEN`, `E2B_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` go in sssf-sandbox's `.env`, checked by key name only. The first two are sandbox keys, not model keys.
+19. **The engineer makes the accounts and keys.** `VERCEL_TOKEN` and `E2B_API_KEY` go in sssf-sandbox's `.env`, and the Claude token in its own file, per decision 14. All are checked by key name only. The first two are sandbox keys, not model keys. No `ANTHROPIC_API_KEY` may be set where a sandbox run starts, since it would win over the token.
 
 ## Open
 

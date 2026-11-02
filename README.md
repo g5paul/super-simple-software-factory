@@ -518,6 +518,7 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.
 - A `forbid` match kills the agent, so it never learns why. A softer mode would refuse the call before it runs and return the rule as the tool result, and the run would go on. Claude Code agents run with `--safe-mode`, which ignores the project's hooks, so SSSF would pass its own pre-tool hook. Pi would need an extension.
 - A Claude call killed by a `forbid` rule counts its tokens but not its dollars: Claude Code prices a call only in its final result, which a killed call never sends. The `rule_breach` event says `cost_reported: false`. Pricing the tokens would need a price table per model in SSSF, which goes stale.
+- Claude's plans and pricing have changed ([announcement](https://x.com/claudeai/status/2116220869479428500), [pricing](https://claude.com/pricing)). Not read yet. Check what it changes for Claude Code agents on a subscription: the usage windows `rate_limit_stop` reads, what `total_cost_usd` means on a plan, and the price table the killed-call cost would need.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

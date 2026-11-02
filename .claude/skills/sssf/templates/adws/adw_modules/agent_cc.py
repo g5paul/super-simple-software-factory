@@ -310,6 +310,12 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         if isinstance(error, rules.RuleBreach):
                             error.partial = _partial(turns, output)
                         raise
+    except BaseException:
+        # Leaving mid-call, by a stop or by `just kill`: the agent must not
+        # run on. On the host the kill reaches it too, but in a sandbox VM
+        # nothing else does, and the wait below would last until it finished.
+        process.stop_tree()
+        raise
     finally:
         stderr = process.stderr.read() if process.stderr else ""
         result.returncode = process.wait()

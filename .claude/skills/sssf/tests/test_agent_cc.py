@@ -318,3 +318,26 @@ def test_a_login_is_checked_once(auth, monkeypatch, tmp_path):
 def test_not_logged_in_is_a_stop():
     from adw_modules import session
     assert agent_cc.NotLoggedIn in session.STOPS
+
+
+def test_a_stop_mid_call_stops_the_agent_before_waiting_for_it(tmp_path, fake, monkeypatch):
+    # In a sandbox VM, `just kill` can't reach the agent, so the runner must,
+    # or the chain waits for the agent to finish before it can exit.
+    from adw_modules import sandbox
+    fake(FIXTURES / "cc_turn1.jsonl")
+    stopped = []
+
+    class Stopping(sandbox.Local):
+        def start(self, command, **kwargs):
+            process = super().start(command, **kwargs)
+            process.stop_tree = lambda: stopped.append(True)
+            return process
+
+    monkeypatch.setattr(sandbox, "_current", Stopping())
+
+    def killed(event):
+        raise SystemExit(143)
+
+    with pytest.raises(SystemExit):
+        agent_cc.run(request(tmp_path), on_event=killed)
+    assert stopped == [True]

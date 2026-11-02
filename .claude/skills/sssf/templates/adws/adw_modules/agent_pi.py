@@ -233,6 +233,16 @@ class ToolCallTracker:
         }
 
 
+# SSSF's own extension for agent_rules marked `on_match: refuse` (rules.py).
+REFUSE_EXTENSION = Path(__file__).with_name("sssf_rules.ts")
+
+
+def _with_refusals(env: dict[str, str], refuse_rules: list[dict]) -> dict[str, str]:
+    if refuse_rules:
+        env["SSSF_REFUSE_RULES"] = json.dumps(refuse_rules)
+    return env
+
+
 def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
     """The operator's environment, less the subscription providers' keys when
     SSSF_PI_AUTH=subscription. Read per call, since .env loads after import.
@@ -281,6 +291,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         cmd += ["--tools", ",".join(request.tools)]
     for extension in request.extensions:
         cmd += ["-e", extension]
+    if request.refuse_rules:
+        cmd += ["-e", str(REFUSE_EXTENSION)]
     cmd.append(request.prompt)
 
     raw_path = Path(request.raw_output_path)
@@ -300,7 +312,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=request.cwd,
-                               env=child_env(request.agent_name, request.adw_id))
+                               env=_with_refusals(child_env(request.agent_name, request.adw_id),
+                                                  request.refuse_rules))
     if on_spawn:
         on_spawn(process.pid)
     with raw_path.open("a") as raw:

@@ -37,9 +37,14 @@ worktree_setup_timeout: 600
 # A plain string only asks. A rule with `forbid` is also enforced: its regexes
 # are searched in every shell command an agent runs, and a match kills the
 # agent and stops the run. The command may have started first, so forbid what
-# must not happen, and still say it in the rule.
+# must not happen, and still say it in the rule. `on_match: refuse` refuses
+# the command on a pi agent before it runs and lets the run go on; Claude Code
+# agents still stop.
 #   agent_rules:
 #     - Keep commit subjects under 72 characters.
 #     - rule: Never run `just deploy`. It spends real money outside SSSF's caps.
 #       forbid: ['\bjust\s+deploy\b']
+#     - rule: Never run `git push`. Commit locally only.
+#       forbid: ['\bgit\b(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+push\b']
+#       on_match: refuse
 agent_rules: []

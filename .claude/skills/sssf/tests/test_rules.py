@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -22,7 +25,7 @@ from pydantic import ValidationError
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agent_cc, agent_pi, repo_settings, rules
+from adw_modules import agent_cc, agent_pi, agents, repo_settings, rules
 from adw_modules.data_types import AgentRequest
 
 PUSH = rules.AgentRule(rule="Never run `git push`.", forbid=[r"\bgit\b(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+push\b"])
@@ -167,3 +170,114 @@ def test_the_breach_message_names_the_agent_rule_and_command():
     error = rules.RuleBreach("builder", PUSH, PUSH.forbid[0], "git push origin main")
     assert (error.agent, error.rule, error.command) == ("builder", "Never run `git push`.", "git push origin main")
     assert json.dumps(str(error))
+
+
+# ── on_match: refuse ─────────────────────────────────────────────────────────
+
+REFUSE = PUSH.model_copy(update={"on_match": "refuse"})
+
+
+def forwarder(can_refuse=True, rule=REFUSE):
+    events, said = [], []
+    run = SimpleNamespace(adw_id="r1", tracer=SimpleNamespace(event=events.append),
+                          console=SimpleNamespace(advise=said.append))
+    interface = SimpleNamespace(ToolCallTracker=lambda: SimpleNamespace(observe=lambda e: []))
+    forward = agents._event_forwarder(run, SimpleNamespace(phase_id="r1_01"), "builder",
+                                      interface, [rule], can_refuse=can_refuse)
+    return forward, events, said
+
+
+def announce(call_id, command="git push"):
+    return {"type": "tool_execution_start", "toolCallId": call_id, "toolName": "bash",
+            "args": {"command": command}}
+
+
+def finish(call_id, text):
+    return {"type": "tool_execution_end", "toolCallId": call_id, "toolName": "bash",
+            "result": {"content": [{"type": "text", "text": text}]}, "isError": True}
+
+
+def test_a_refused_command_is_logged_and_the_run_goes_on():
+    forward, events, said = forwarder()
+    forward(announce("c1"))
+    forward(finish("c1", f"{rules.REFUSED}, by this repo's rule: Never run `git push`."))
+    assert [(e.name, e.payload["command"], e.payload["refusals"]) for e in events] == [
+        ("rule_refused", "git push", 1)]
+    assert said and "git push" in said[0]
+
+
+def test_a_refuse_match_whose_result_is_not_the_refusal_ran_and_stops_the_run():
+    forward, _, _ = forwarder()
+    forward(announce("c1"))
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(finish("c1", "Everything up-to-date"))
+
+
+def test_the_third_refusal_stops_the_run_and_says_nothing_ran():
+    forward, _, _ = forwarder()
+    for n in range(1, rules.MAX_REFUSALS):
+        forward(announce(f"c{n}"))
+        forward(finish(f"c{n}", rules.REFUSED))
+    forward(announce("last"))
+    with pytest.raises(rules.RuleBreach, match="Nothing refused ran") as stop:
+        forward(finish("last", rules.REFUSED))
+    assert stop.value.refusals == rules.MAX_REFUSALS
+
+
+def test_a_harness_that_cannot_refuse_stops_at_the_announcement():
+    # Claude Code runs with --safe-mode, so no hook can refuse for it.
+    forward, _, _ = forwarder(can_refuse=False)
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(announce("c1"))
+
+
+def test_results_are_read_from_either_harness():
+    pi_message = {"type": "message_end", "message": {"role": "toolResult", "toolCallId": "c1",
+                                                     "content": [{"type": "text", "text": "no"}]}}
+    claude = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "ok"}]}]}}
+    assert rules.results(pi_message) == [("c1", "no")]
+    assert rules.results(claude) == [("t1", "ok")]
+    assert rules.results(finish("c2", "x")) == [("c2", "x")]
+
+
+def test_pi_loads_the_refusing_extension_only_for_refuse_rules(tmp_path, monkeypatch):
+    seen = tmp_path / "seen"
+    script = tmp_path / "pi"
+    script.write_text(f'#!/bin/sh\necho "$@" > {seen}\nprintf "%s\\n" "${{SSSF_REFUSE_RULES:-none}}" >> {seen}\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    monkeypatch.setattr(agent_pi, "resolve_model", lambda model: ("openai", "gpt"))
+    monkeypatch.setattr(agent_pi, "context_window", lambda provider, model_id: 0)
+    for refuse, expect in ((rules.refusing([REFUSE, PUSH, "plain"]), True), ([], False)):
+        req = request(tmp_path).model_copy(update={"refuse_rules": refuse})
+        try:
+            agent_pi.run(req)
+        except RuntimeError:
+            pass                    # the stand-in prints no turn
+        argv, env = seen.read_text().splitlines()
+        assert (str(agent_pi.REFUSE_EXTENSION) in argv) is expect
+        assert (json.loads(env) == [{"rule": REFUSE.rule, "forbid": REFUSE.forbid}]) if expect else env == "none"
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun to load the pi extension")
+def test_the_pi_extension_blocks_a_matching_bash_call_with_the_rule(tmp_path):
+    check = tmp_path / "check.ts"
+    check.write_text(f'''
+import ext from {json.dumps(str(agent_pi.REFUSE_EXTENSION))};
+let handler: any;
+ext({{ on: (name: string, h: any) => {{ if (name === "tool_call") handler = h; }} }} as any);
+const out = [
+  handler({{ toolName: "bash", input: {{ command: "git -C . push origin main" }} }}),
+  handler({{ toolName: "bash", input: {{ command: "git stash push -m wip" }} }}),
+  handler({{ toolName: "read", input: {{ path: "git push" }} }}),
+];
+console.log(JSON.stringify(out));
+''')
+    env = {**os.environ, "SSSF_REFUSE_RULES": json.dumps(rules.refusing([REFUSE]))}
+    done = subprocess.run(["bun", str(check)], capture_output=True, text=True, env=env, cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    blocked, spared, other = json.loads(done.stdout)
+    assert blocked["block"] is True and blocked["reason"].startswith(rules.REFUSED)
+    assert REFUSE.rule in blocked["reason"]
+    assert spared is None and other is None

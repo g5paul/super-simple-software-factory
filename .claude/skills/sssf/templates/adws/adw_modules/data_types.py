@@ -476,6 +476,7 @@ class AgentRequest(BaseModel):
     cwd: str = "."                  # set from run.repo_root — the codebase root agents work in
     max_cost: Optional[float] = None  # claude: --max-budget-usd for this call
     stop_on_usage_credits: bool = True  # claude: kill the call once the plan moves onto credits
+    refuse_rules: list[dict] = Field(default_factory=list)  # pi: rules sssf_rules.ts refuses
 
 
 class UsageBreakdown(BaseModel):

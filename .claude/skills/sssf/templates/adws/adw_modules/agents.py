@@ -208,11 +208,13 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             cwd=str(run.repo_root),
             max_cost=agent.max_call_cost,
             stop_on_usage_credits=run.cfg.defaults.rate_limit_stop is not None,
+            refuse_rules=rules.refusing(enforced) if agent.coding_agent == "pi" else [],
         )
         try:
             result = interface.run(
                 request,
-                on_event=_event_forwarder(run, phase, agent.name, interface, enforced),
+                on_event=_event_forwarder(run, phase, agent.name, interface, enforced,
+                                          can_refuse=agent.coding_agent == "pi"),
                 on_spawn=lambda pid: run.tracer.process_start(
                     run.adw_id, "agent", agent.name, pid,
                     f"{agent.coding_agent} {agent.name} {agent.model}"),
@@ -228,6 +230,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                          payload={"agent": agent.name, "error": str(breach),
                                                   "rule": breach.rule, "pattern": breach.pattern,
                                                   "command": breach.command,
+                                                  "refusals": breach.refusals,
                                                   "spent": breach.partial.cost if breach.partial else 0.0,
                                                   "cost_reported": bool(breach.partial and breach.partial.cost_reported)}))
             raise
@@ -366,17 +369,42 @@ def _agent_session_id(run, agent: AgentConfig, key: str) -> str:
     return f"sssf-{run.adw_id}-{agent.name}-{new_id(4)}"
 
 
-def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: list = ()):
+def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: list = (),
+                     can_refuse: bool = False):
     """One tool_call event per real tool call, with its exact args and result.
     Raises RuleBreach the moment a call breaks a forbid rule; the interface
-    then kills the agent before the call can finish."""
+    then kills the agent before the call can finish.
+
+    A refuse rule, where the harness can refuse (can_refuse: pi with
+    sssf_rules.ts), waits for the call's result instead. SSSF's refusal there
+    means nothing ran, and the run goes on; any other result means it ran."""
     tracker = interface.ToolCallTracker()
+    pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
+    refusals = 0
 
     def forward(event: dict) -> None:
-        for command in rules.commands(event):
+        nonlocal refusals
+        for call_id, command in rules.calls(event):
             found = rules.breach(list(enforced), command)
-            if found:
+            if found and can_refuse and found[0].on_match == "refuse":
+                pending.setdefault(call_id, (*found, command))
+            elif found:
                 raise rules.RuleBreach(agent_name, *found, command)
+        for call_id, text in rules.results(event):
+            if call_id not in pending:
+                continue
+            rule, pattern, command = pending.pop(call_id)
+            if not text.startswith(rules.REFUSED):
+                raise rules.RuleBreach(agent_name, rule, pattern, command)
+            refusals += 1
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="rule_refused",
+                                         payload={"agent": agent_name, "rule": rule.rule,
+                                                  "pattern": pattern, "command": command,
+                                                  "refusals": refusals}))
+            run.console.advise(f"refused {agent_name}: `{command[:200]}` ({rule.rule})")
+            if refusals >= rules.MAX_REFUSALS:
+                raise rules.RuleBreach(agent_name, rule, pattern, command, refusals=refusals)
         # The call's span rides the columns; duration_ms stays in the payload as
         # the interface's own number.
         for record in tracker.observe(event):

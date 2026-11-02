@@ -15,6 +15,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def mark_agent(env: dict[str, str], agent_name: str, adw_id: str) -> dict[str, str]:
+    """Tell an agent's processes they belong to an SSSF agent: SSSF_ADW_ID is
+    the run, SSSF_AGENT the roster name. A repo's own script can then refuse
+    a command before it starts, which an agent_rules `forbid` can't promise:
+        [ -z "${SSSF_ADW_ID:-}" ] || { echo "Refusing: ..."; exit 1; }
+    It's a courtesy, not a lock. An agent can unset it, so keep `forbid` too.
+    """
+    if adw_id:
+        env["SSSF_ADW_ID"] = adw_id
+    if agent_name:
+        env["SSSF_AGENT"] = agent_name
+    return env
+
+
 def operator_env() -> dict[str, str]:
     """The engineer's own environment, as their shell would hand it over.
 

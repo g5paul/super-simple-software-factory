@@ -58,6 +58,11 @@ def test_each_run_gets_its_own_pool_and_tags(monkeypatch):
     assert env["OBS_TAG"] == "sssf,adw-d6af5329"
 
 
+def test_the_agent_knows_it_is_an_sssf_agent():
+    env = agent_pi.child_env("scout", "d6af5329")
+    assert (env["SSSF_ADW_ID"], env["SSSF_AGENT"]) == ("d6af5329", "scout")
+
+
 def test_the_operators_pool_and_tags_are_kept(monkeypatch):
     monkeypatch.setenv("OBS_POOL", "sssf-pi-gpt")
     monkeypatch.setenv("OBS_TAG", "nightly, sssf")

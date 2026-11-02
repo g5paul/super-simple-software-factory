@@ -30,7 +30,7 @@ from typing import Callable, Optional
 from . import account, budget, rules
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
-from .utils import operator_env
+from .utils import mark_agent, operator_env
 
 CLAUDE_PATH = os.environ.get("CLAUDE_CODE_PATH", "claude")
 # subscription: strip API keys from the child so the operator's login pays,
@@ -109,8 +109,8 @@ def check_login() -> None:
     _logged_in = True
 
 
-def child_env() -> dict[str, str]:
-    env = operator_env()
+def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
+    env = mark_agent(operator_env(), agent_name, adw_id)
     if AUTH == "subscription":
         for var in API_KEY_VARS:
             env.pop(var, None)
@@ -220,7 +220,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=request.cwd,
-                               env=child_env())
+                               env=child_env(request.agent_name, request.adw_id))
     if on_spawn:
         on_spawn(process.pid)
     try:

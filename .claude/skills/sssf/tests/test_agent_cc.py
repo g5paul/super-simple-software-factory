@@ -29,7 +29,8 @@ FAKE_CLAUDE = """#!/usr/bin/env python3
 import json, os, sys
 with open(os.environ["FAKE_CC_LOG"], "a") as log:
     log.write(json.dumps({"argv": sys.argv[1:],
-                          "has_api_key": "ANTHROPIC_API_KEY" in os.environ}) + "\\n")
+                          "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
+                          "marks": [os.environ.get(k) for k in ("SSSF_ADW_ID", "SSSF_AGENT")]}) + "\\n")
 sys.stdout.write(open(os.environ["FAKE_CC_FIXTURE"]).read())
 sys.exit(int(os.environ.get("FAKE_CC_EXIT", "0")))
 """
@@ -123,6 +124,13 @@ def test_subscription_auth_strips_the_api_key(tmp_path, fake):
     fake(FIXTURES / "cc_turn1.jsonl")
     agent_cc.run(request(tmp_path))
     assert fake.log()[0]["has_api_key"] is False
+
+
+def test_the_agent_knows_it_is_an_sssf_agent(tmp_path, fake):
+    # So a repo's own script can refuse a command before it starts.
+    fake(FIXTURES / "cc_turn1.jsonl")
+    agent_cc.run(request(tmp_path, agent_name="builder", adw_id="d6af5329"))
+    assert fake.log()[0]["marks"] == ["d6af5329", "builder"]
 
 
 def test_api_key_auth_keeps_it(tmp_path, fake, monkeypatch):

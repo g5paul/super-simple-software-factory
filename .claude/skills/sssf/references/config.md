@@ -243,6 +243,16 @@ agent_rules:
 
 Each `forbid` entry is a Python regex, searched in the command of every shell call an agent makes: Claude Code's `Bash`, a subagent's included, and pi's `bash`. The check reads the stream when the call is announced. On a match, SSSF kills the agent and every process under it, records a `rule_breach` event with the agent, rule, pattern and command, and stops the run with `RuleBreach`. The dashboard shows "Stopped: an agent ran a command this repo forbids". The harness may have started the command before the kill, so the message says to check what it did. A pattern that isn't a valid regex fails the settings, and with them the run.
 
+A repo's own scripts can refuse a command before it starts, which `forbid` can't promise. Every agent's environment, Claude Code or pi, carries `SSSF_ADW_ID`, the run's id, and `SSSF_AGENT`, its roster name, and so does every command it runs. A recipe that must never run under an agent can check first:
+
+```just
+fh-stack:
+    @[ -z "${SSSF_ADW_ID:-}" ] || { echo "Refusing: SSSF agents must not start pi. It bills .env's API keys."; exit 1; }
+    pi --stack ...
+```
+
+The agent reads the refusal and carries on, and the run isn't stopped. An agent can unset the variable, so keep the `forbid` rule as the backstop.
+
 It reads shell commands only. A command another tool runs, such as a pi extension's own tool, isn't checked. A pattern matches text, so a loose one catches ordinary commands: `\bgit\b.*\bpush\b` also stops `git stash push` and `git log --grep push`. The push pattern above allows only git's own options between `git` and `push`. Test a pattern with `re.search` against the commands agents really run before you add it. What an agent may change is enforced by `writes` and `protected_files`.
 
 ## Harness engineering

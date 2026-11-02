@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from . import rules
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
-from .utils import now_iso, operator_env
+from .utils import mark_agent, now_iso, operator_env
 
 PI_PATH = os.environ.get("PI_PATH", "pi")
 
@@ -242,8 +242,9 @@ def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
     OBS_POOL puts each run in its own pool, sssf-<adw_id>, so the usage panel
     totals one run per row; an operator's own OBS_POOL wins. OBS_TAG gains
     "sssf" and "adw-<adw_id>", added to the operator's tags, not replacing them.
+    SSSF_ADW_ID and SSSF_AGENT mark the agent for the repo's scripts (mark_agent).
     """
-    env = operator_env()
+    env = mark_agent(operator_env(), agent_name, adw_id)
     if agent_name:
         env["OBS_NAME"] = agent_name
     if adw_id:

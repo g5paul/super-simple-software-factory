@@ -184,8 +184,9 @@ def load_stamp(root: Path) -> dict:
 
 
 def skill_version(root: Path) -> str | None:
-    """The skill commit this install or update came from, "+dirty" when its
-    tree has changes. Without it, a docs-only update leaves stamp.json as it
+    """The last commit that changed the skill this install or update came
+    from, "+dirty" when its tree has changes. A later commit outside the skill
+    folder, a hub doc, would name a skill the repo didn't get anything from. Without it, a docs-only update leaves stamp.json as it
     was, and only a commit message says which skill the repo is on.
 
     The source is SSSF_SOURCE when set, else the skill this script lives in.
@@ -201,7 +202,7 @@ def skill_version(root: Path) -> str | None:
                                 capture_output=True, text=True, check=False)
         return result.stdout.strip() if result.returncode == 0 else ""
 
-    sha = git("rev-parse", "--short", "HEAD")
+    sha = git("log", "-1", "--format=%h", "--", ".")
     if not sha:
         return None
     return sha + ("+dirty" if git("status", "--porcelain", "--", ".") else "")

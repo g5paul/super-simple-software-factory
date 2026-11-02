@@ -207,7 +207,7 @@ sssf-update:
     # running `just obs` keeps working.
     rsync -a --delete --exclude apps/visualizer/node_modules --exclude apps/visualizer/dist "$src/" "$dest/"
     find "$dest" -name __pycache__ -prune -exec rm -rf {} +
-    rev=$(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    rev=$(git -C "$src" log -1 --format=%h -- . 2>/dev/null || echo unknown)
     if [ -n "$(git -C "$src" status --porcelain -- . 2>/dev/null)" ]; then rev="$rev+uncommitted"; fi
     echo "skill copy refreshed from $src (skill $rev)"
     uv run "$dest/scripts/install.py" --update

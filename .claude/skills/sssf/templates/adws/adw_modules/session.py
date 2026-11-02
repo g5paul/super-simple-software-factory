@@ -7,14 +7,15 @@ minted and printed so the next ADW can pick it up.
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import signal
 import sys
 from pathlib import Path
 
-from . import account, agent_cc, agents, budget, changes, permissions, rules, worktree
-from .data_types import EventRecord, SSSFConfig
+from . import account, agent_cc, agents, budget, changes, permissions, rules, sandbox, worktree
+from .data_types import EventRecord, PhaseParams, SSSFConfig
 from .runner import Run
 from .tracer import Tracer
 from .utils import engineer_name, just, new_id
@@ -43,7 +44,7 @@ def _finalize_when_killed(run: Run) -> None:
 # keeps its traceback.
 STOPS = (agents.GateFailure, permissions.PermissionBreach,
          budget.BudgetStop, account.RateLimitStop, changes.ChangeCaptureError,
-         agent_cc.NotLoggedIn, worktree.SetupFailed, rules.RuleBreach)
+         agent_cc.NotLoggedIn, worktree.SetupFailed, rules.RuleBreach, sandbox.SandboxFailed)
 
 
 def _report_stops_plainly(run: Run) -> None:
@@ -78,17 +79,25 @@ def _start(cfg: SSSFConfig, adw_id: str, place: dict | None) -> tuple[Tracer, Ru
     return tracer, run
 
 
-def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False) -> Run:
+def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False,
+           sandbox_name: str | None = None) -> Run:
     """Join or create the session. With `use_worktree`, or when this adw_id
     already has a worktree, the process moves into the run's worktree first
-    (see worktree.py), so everything after this works there."""
+    (see worktree.py), so everything after this works there. With
+    `sandbox_name`, the run's work goes to a VM (see sandbox.py); that implies
+    a worktree."""
     adw_id = adw_id or new_id(8)
+    if sandbox_name:
+        use_worktree = True
+        sandbox.prepare(sandbox_name, cfg)
     try:
         # Held until this run's process and worktree rows are written, so two
         # launches at once can't both count the other runs before either counts.
         with worktree.launching():
             budget.check_launch(cfg)
             place = worktree.enter(cfg, adw_id, use_worktree)
+            if place and sandbox_name and not place["resumed"]:
+                place["sandbox"] = sandbox_name
             tracer, run = _start(cfg, adw_id, place)
     except (worktree.WorktreeError, budget.LiveBudgetStop, budget.DailyBudgetStop,
             budget.MachineBudgetStop) as error:
@@ -117,6 +126,30 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
                          f"`{just(f'merge {adw_id}')}` lands it")
         if place.get("launch_dirty") and not place["resumed"]:
             run.console.note("the launch checkout has uncommitted changes; they are not part of this run")
-        if not place["resumed"]:
+        # A run that asked for a sandbox keeps it on a resume, with a new VM
+        # made from the host branch and set up again (design decision 12).
+        provider = place.get("sandbox")
+        if provider:
+            _open_sandbox(run, place, provider, sandbox_name)
+        if not place["resumed"] or provider:
             worktree.set_up(run)
     return run
+
+
+def _open_sandbox(run: Run, place: dict, provider: str, asked: str | None) -> None:
+    if asked and asked != provider:
+        raise SystemExit(f"run {run.adw_id} ran in a {provider} sandbox, so it resumes in one, "
+                         f"not in {asked}")
+    if not asked:
+        sandbox.prepare(provider, run.cfg)   # a resume without the flag
+    with run.phase(PhaseParams(name="sandbox", kind="code", owner="sandbox",
+                               description=f"Make the run's {provider} VM and clone its branch in")) as ph:
+        box, swept = sandbox.open_remote(provider, run, place["branch"],
+                                         worktree.main_checkout().name,
+                                         set(worktree.live_runs(run.cfg.observability.db)))
+        # Registered before the VM exists, so a failed setup still deletes it.
+        atexit.register(box.close)
+        box.open()
+        sandbox.use(box)
+        ph.log(provider=provider, vm=box.vm, swept=swept)
+    run.console.note(f"working in {provider} VM {box.vm}; commits come back to {place['branch']}")

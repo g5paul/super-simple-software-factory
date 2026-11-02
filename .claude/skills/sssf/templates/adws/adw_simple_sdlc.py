@@ -5,7 +5,7 @@
 """ADW Simple SDLC — plan, build, test, review, document, committing as it goes.
 
 Usage:
-    uv run adws/adw_simple_sdlc.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree]
+    uv run adws/adw_simple_sdlc.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel]
 
 Phases: engineer(request) -> planner -> git(commit_plan)
         -> builder -> code(verify) [-> builder(fix) -> code(verify) ... bounded]
@@ -63,10 +63,10 @@ DOCUMENT_NOTES = ("Read diff_path in full before writing. Document only what the
 
 
 def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None,
-         worktree: bool = False) -> int:
+         worktree: bool = False, sandbox_name: str | None = None) -> int:
     cfg = agents.load_config(config)
     agents.validate(cfg, REQUIRED_AGENTS)
-    run = session.ensure(cfg, adw_id, use_worktree=worktree)
+    run = session.ensure(cfg, adw_id, use_worktree=worktree, sandbox_name=sandbox_name)
     baseline = git_helper.rev("HEAD")     # pinned before this run commits anything
 
     def commit(ph, envelope) -> None:
@@ -189,5 +189,8 @@ if __name__ == "__main__":
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
     parser.add_argument("--worktree", action="store_true",
                         help="work on branch sssf/<adw_id> in its own worktree; `just merge <adw_id>` lands it")
+    parser.add_argument("--sandbox", choices=["vercel"], default=None,
+                        help="do the run's work in a remote VM; implies --worktree")
     args = parser.parse_args()
-    sys.exit(main(utils.resolve_prompt(args.prompt), args.config, args.adw_id, args.worktree))
+    sys.exit(main(utils.resolve_prompt(args.prompt), args.config, args.adw_id, args.worktree,
+                  args.sandbox))

@@ -114,3 +114,37 @@ def current() -> Sandbox:
 def use(sandbox: Sandbox) -> None:
     global _current
     _current = sandbox
+
+
+# --- remote sandboxes -------------------------------------------------------
+
+PROVIDERS = ("vercel",)
+
+
+class SandboxFailed(RuntimeError):
+    """A remote VM could not be made, set up, or reached, so the run stops."""
+
+
+def prepare(provider: str, cfg) -> None:
+    """Check a remote run can start, before anything is created: the provider
+    is known, the roster can run there, and its SDK imports (see sandbox_vercel)."""
+    if provider not in PROVIDERS:
+        raise SystemExit(f"--sandbox {provider}: SSSF knows {', '.join(PROVIDERS)}")
+    pi = [a.name for a in cfg.agents if a.coding_agent == "pi"]
+    if pi:
+        raise SystemExit(f"--sandbox runs Claude Code agents only for now, and {', '.join(pi)} "
+                         "run on pi. A ChatGPT roster in the VM is still open in "
+                         "docs/designs/remote-sandboxes.md.")
+    from . import sandbox_vercel
+    sandbox_vercel.require_sdk()
+
+
+def open_remote(provider: str, run, branch: str, project: str, live: set[str]):
+    """The run's remote sandbox, not yet opened, after deleting this project's
+    VMs left by runs that aren't live. Returns it and what was deleted."""
+    from . import sandbox_vercel
+    try:
+        swept = sandbox_vercel.sweep(project, live)
+    except Exception as error:
+        raise SandboxFailed(f"could not list the project's {provider} VMs: {error}") from None
+    return sandbox_vercel.Vercel(run, branch, project), swept

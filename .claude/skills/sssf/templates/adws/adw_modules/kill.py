@@ -127,6 +127,11 @@ def kill(db: str, adw_id: str) -> list[str]:
     signalled: list[tuple[str, int]] = []
     for kind, name, pid, command, started_at, _ in rows:
         label = f"{kind} {name} {pid}".replace("  ", " ")
+        if pid < 0:
+            # A stand-in for a process in the run's VM (sandbox_vercel), never a
+            # host pid. The chain deletes its VM as it stops.
+            report[pid] = f"{label}: in the run's sandbox VM, deleted as the run stops"
+            continue
         live = _live(pid)
         if live is None:
             report[pid] = f"{label}: already gone"

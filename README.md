@@ -19,6 +19,8 @@ Everyone can get an agent to write code once. Almost nobody gets the same result
 
 > [!NOTE]
 > **This repo is the skill**, which is the thing you install, plus `docs/designs/`, the design records for what this fork added to it.
+>
+> This is a fork of [disler's SSSF](https://github.com/disler/super-simple-software-factory). [`docs/fork.md`](docs/fork.md) says what it adds, and where each change was designed.
 
 ---
 
@@ -385,6 +387,7 @@ A repo on another machine is not in this registry. Run `just obs` there, and rea
 
 ```
 super-simple-software-factory/
+├── docs/fork.md                        # what this fork adds to upstream
 ├── docs/designs/                       # design records for what this fork added
 └── .claude/skills/sssf/
     ├── SKILL.md                        # hard rules + request routing table

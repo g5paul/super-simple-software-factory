@@ -516,6 +516,7 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.
+- A `forbid` match kills the agent, so it never learns why. A softer mode would refuse the call before it runs and return the rule as the tool result, and the run would go on. Claude Code agents run with `--safe-mode`, which ignores the project's hooks, so SSSF would pass its own pre-tool hook. Pi would need an extension.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

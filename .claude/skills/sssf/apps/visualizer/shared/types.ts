@@ -305,7 +305,7 @@ export interface RunLanded {
 
 /** Why a failed run stopped, from its own stop event or its first failed phase. */
 export interface StopReason {
-  kind: "call_budget_stop" | "budget_stop" | "live_budget_stop" | "daily_budget_stop" | "machine_budget_stop" | "rate_limit_stop" | "not_accepted" | "phase_failed";
+  kind: "call_budget_stop" | "budget_stop" | "live_budget_stop" | "daily_budget_stop" | "machine_budget_stop" | "rate_limit_stop" | "rule_breach" | "not_accepted" | "phase_failed";
   /** The full message the run printed, git advice included. */
   message: string;
   /** The phase it stopped in, to jump to. */

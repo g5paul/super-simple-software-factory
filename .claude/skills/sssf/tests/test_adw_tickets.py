@@ -279,6 +279,30 @@ def test_a_permission_breach_stops_cleanly(repo, monkeypatch, capsys):
     assert "stopped: ticket_builder is barred" in capsys.readouterr().out
 
 
+def test_a_forbidden_command_stops_the_run_and_lands_in_the_trace(repo, monkeypatch, capsys):
+    import sqlite3
+    rules = Path("adws/adw_sssf_config/repo.yaml")
+    rules.parent.mkdir(parents=True)
+    rules.write_text("agent_rules:\n  - rule: Never run `git push`.\n    forbid: ['\\bgit\\b.*\\bpush\\b']\n")
+    git("add", "-A")
+    git("commit", "-qm", "rules")
+    honest = repo.run
+
+    def pushes(req, on_event=None, on_spawn=None, on_exit=None):
+        if req.system_prompt.startswith("ticket_builder") and on_event:
+            on_event({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Bash", "input": {"command": "git push origin main"}}]}})
+        return honest(req, on_event, on_spawn, on_exit)
+    monkeypatch.setattr(repo, "run", pushes)
+    assert run() == 1
+    assert "ticket_builder ran `git push origin main`" in capsys.readouterr().out
+    with sqlite3.connect("adws/adw_data/sssf.db") as conn:
+        payload = json.loads(conn.execute(
+            "SELECT payload_json FROM events WHERE name = 'rule_breach'").fetchone()[0])
+    assert payload["agent"] == "ticket_builder" and payload["command"] == "git push origin main"
+    assert payload["rule"] == "Never run `git push`."
+
+
 def test_the_reviewers_never_see_an_sssf_update(repo, monkeypatch):
     # Updating SSSF on the feature branch is routine between runs, and not the
     # feature's work: a reviewer that sees it calls it scope creep.

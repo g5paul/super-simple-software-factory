@@ -16,7 +16,7 @@ from typing import Optional
 
 import yaml
 
-from . import account, agent_cc, agent_pi, budget, permissions, prompts, repo_settings
+from . import account, agent_cc, agent_pi, budget, permissions, prompts, repo_settings, rules
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -136,6 +136,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     variables = prompt_variables(run, phase, call)
     system_text = repo_settings.with_agent_rules(
         prompts.render(agent.prompt_engineering.system, variables), Path.cwd())
+    enforced = repo_settings.load(Path.cwd()).agent_rules
     user_text = prompts.render(agent.prompt_engineering.user, variables)
     prompts.save(agent_dir / "prompts", "system.md", system_text)
     prompts.save(agent_dir / "prompts", "user.md", user_text)
@@ -186,7 +187,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         try:
             result = interface.run(
                 request,
-                on_event=_event_forwarder(run, phase, agent.name, interface),
+                on_event=_event_forwarder(run, phase, agent.name, interface, enforced),
                 on_spawn=lambda pid: run.tracer.process_start(
                     run.adw_id, "agent", agent.name, pid,
                     f"{agent.coding_agent} {agent.name} {agent.model}"),
@@ -194,6 +195,13 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         except budget.CallBudgetStop as stop:
             raise budget.record_call_stop(run, agent.name, phase.phase_id,
                                           agent.max_call_cost, stop) from None
+        except rules.RuleBreach as breach:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rule_breach",
+                                         payload={"agent": agent.name, "error": str(breach),
+                                                  "rule": breach.rule, "pattern": breach.pattern,
+                                                  "command": breach.command}))
+            raise
         except agent_pi.UsageLimitStop as stop:
             # Named like Claude's usage stop, so the trace and the dashboard
             # read both the same way; `provider` tells them apart.
@@ -306,11 +314,17 @@ def _agent_session_id(run, agent: AgentConfig, key: str) -> str:
     return f"sssf-{run.adw_id}-{agent.name}-{new_id(4)}"
 
 
-def _event_forwarder(run, phase: Phase, agent_name: str, interface):
-    """One tool_call event per real tool call, with its exact args and result."""
+def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: list = ()):
+    """One tool_call event per real tool call, with its exact args and result.
+    Raises RuleBreach the moment a call breaks a forbid rule; the interface
+    then kills the agent before the call can finish."""
     tracker = interface.ToolCallTracker()
 
     def forward(event: dict) -> None:
+        for command in rules.commands(event):
+            found = rules.breach(list(enforced), command)
+            if found:
+                raise rules.RuleBreach(agent_name, *found, command)
         # The call's span rides the columns; duration_ms stays in the payload as
         # the interface's own number.
         for record in tracker.observe(event):

@@ -72,6 +72,12 @@ test("the live runs' shared cap is a stop reason of its own", () => {
   expect(stopReason(events, phases, "fail")?.kind).toBe("live_budget_stop");
 });
 
+test("a forbidden command is a stop reason of its own", () => {
+  const phases = [phase("build", "fail", "RuleBreach: builder ran `git push`")];
+  const events = [ev("error", "rule_breach", { error: "builder ran `git push`, which this repo's rule forbids" }, phases[0].phase_id)];
+  expect(stopReason(events, phases, "fail")).toMatchObject({ kind: "rule_breach", message: "builder ran `git push`, which this repo's rule forbids" });
+});
+
 test("the repo's daily cap is a stop reason of its own", () => {
   const phases = [phase("build", "fail", "DailyBudgetStop: this repo's runs have spent $20.10")];
   const events = [ev("error", "daily_budget_stop", { error: "this repo's runs have spent $20.10 in the last 24 hours" }, phases[0].phase_id)];

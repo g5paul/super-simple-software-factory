@@ -27,7 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import account, budget
+from . import account, budget, rules
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import operator_env
@@ -260,7 +260,13 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                 elif etype == "result":
                     final = event
                 if on_event:
-                    on_event(event)
+                    try:
+                        on_event(event)
+                    except Exception:
+                        # A forbidden command (rules.RuleBreach), or a tracer
+                        # failure: either way the agent must not run on unwatched.
+                        rules.stop_tree(process.pid)
+                        raise
     finally:
         stderr = process.stderr.read() if process.stderr else ""
         result.returncode = process.wait()

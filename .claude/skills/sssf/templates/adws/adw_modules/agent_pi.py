@@ -16,6 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import rules
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
 from .utils import now_iso, operator_env
@@ -332,7 +333,16 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         result.context_tokens = turn
                     result.cost += (usage.get("cost", {}) or {}).get("total", 0.0) or 0.0
             if on_event:
-                on_event(event)
+                try:
+                    on_event(event)
+                except Exception:
+                    # A forbidden command (rules.RuleBreach), or a tracer
+                    # failure: either way the agent must not run on unwatched.
+                    rules.stop_tree(process.pid)
+                    process.wait()
+                    if on_exit:
+                        on_exit(process.pid)
+                    raise
 
     stderr = process.stderr.read() if process.stderr else ""
     result.returncode = process.wait()

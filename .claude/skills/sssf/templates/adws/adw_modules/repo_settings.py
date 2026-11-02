@@ -18,6 +18,8 @@ from typing import Literal, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from .rules import AgentRule, text
+
 PATH = "adws/adw_sssf_config/repo.yaml"
 
 
@@ -32,7 +34,8 @@ class RepoSettings(BaseModel):
     worktree_setup: list[str] = Field(default_factory=list)
     worktree_setup_timeout: int = Field(600, ge=1)
     # Rules every agent gets at the end of its system prompt, whatever its role.
-    agent_rules: list[str] = Field(default_factory=list)
+    # A string only asks; an AgentRule with `forbid` also stops the run (rules.py).
+    agent_rules: list[str | AgentRule] = Field(default_factory=list)
 
 
 def load(root: Path) -> RepoSettings:
@@ -58,7 +61,7 @@ def with_agent_rules(system_text: str, root: Path) -> str:
     if not rules:
         return system_text
     return (system_text.rstrip() + "\n\n## This repo's rules\n\n"
-            + "\n".join(f"- {rule}" for rule in rules) + "\n")
+            + "\n".join(f"- {text(rule)}" for rule in rules) + "\n")
 
 
 def max_worktree_runs(root: Path) -> int:

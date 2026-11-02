@@ -228,14 +228,22 @@ Rule: **every entry in `harness_engineering` that registers a tool must have tha
 
 ## Rules for every agent — `agent_rules`
 
-`agent_rules` in `adws/adw_sssf_config/repo.yaml`, not in the roster, lists rules every agent gets, whatever its role or roster. SSSF appends them to each agent's system prompt under `## This repo's rules`, so the saved `prompts/system.md` shows what the agent read. Use it for what a repo needs from every agent, such as a command none may run:
+`agent_rules` in `adws/adw_sssf_config/repo.yaml`, not in the roster, lists rules every agent gets, whatever its role or roster. SSSF appends them to each agent's system prompt under `## This repo's rules`, so the saved `prompts/system.md` shows what the agent read. Putting a rule here instead of in each prompt file keeps the prompts unchanged, so updates don't flag every one for review.
+
+A rule is a plain string, which only asks, or a mapping with `forbid`, which is also enforced:
 
 ```yaml
 agent_rules:
-  - Never run the `fh-*` or stack recipes in the justfile, or `pi` itself. They bill API keys from .env, outside SSSF's caps. Test with `bun test`.
+  - Keep commit subjects under 72 characters.
+  - rule: Never run `git push`. Commit locally only.
+    forbid: ['\bgit\b.*\bpush\b']
+  - rule: Never run the fh-* or stack recipes, or `pi` itself. They bill API keys from .env.
+    forbid: ['\bjust\s+(fh-|fusion|plan\d)', '(^|[;&|]\s*)pi\b']
 ```
 
-A rule asks; nothing enforces it. What an agent may change is enforced by `writes` and `protected_files`. Putting the rule here instead of in each prompt file keeps the prompts unchanged, so updates don't flag every one for review.
+Each `forbid` entry is a Python regex, searched in the command of every shell call an agent makes: Claude Code's `Bash`, a subagent's included, and pi's `bash`. The check reads the stream when the call is announced. On a match, SSSF kills the agent and every process under it, records a `rule_breach` event with the agent, rule, pattern and command, and stops the run with `RuleBreach`. The dashboard shows "Stopped: an agent ran a command this repo forbids". The harness may have started the command before the kill, so the message says to check what it did. A pattern that isn't a valid regex fails the settings, and with them the run.
+
+It reads shell commands only. A command another tool runs, such as a pi extension's own tool, isn't checked. A pattern matches text, so `echo "git push"` breaks the rule above too: keep patterns narrow. What an agent may change is enforced by `writes` and `protected_files`.
 
 ## Harness engineering
 

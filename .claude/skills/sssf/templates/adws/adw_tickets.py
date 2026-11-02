@@ -58,7 +58,7 @@ import sys
 from pathlib import Path
 
 from adw_modules import (account, agents, budget, changes, gates, git_helper, permissions, quality,
-                         session, tickets, worktree)
+                         rules, session, tickets, worktree)
 from adw_modules.data_types import (AgentCall, AxisReviewOutput, BuildOutput, ChangeCapture,
                                     DocumentOutput, EventRecord, GenericOutput, PhaseParams,
                                     ScoutOutput)
@@ -90,7 +90,8 @@ def main(folder: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         return code
     except Exception as error:
         stopped(run, folder, error)
-        if isinstance(error, (budget.BudgetStop, account.RateLimitStop, permissions.PermissionBreach)):
+        if isinstance(error, (budget.BudgetStop, account.RateLimitStop, permissions.PermissionBreach,
+                              rules.RuleBreach)):
             return 1                       # a stop, not a crash: the message says it all
         raise
 

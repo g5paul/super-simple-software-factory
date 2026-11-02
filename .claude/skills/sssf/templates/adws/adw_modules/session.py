@@ -13,7 +13,7 @@ import signal
 import sys
 from pathlib import Path
 
-from . import account, agent_cc, agents, budget, changes, permissions, worktree
+from . import account, agent_cc, agents, budget, changes, permissions, rules, worktree
 from .data_types import EventRecord, SSSFConfig
 from .runner import Run
 from .tracer import Tracer
@@ -43,7 +43,7 @@ def _finalize_when_killed(run: Run) -> None:
 # keeps its traceback.
 STOPS = (agents.GateFailure, permissions.PermissionBreach,
          budget.BudgetStop, account.RateLimitStop, changes.ChangeCaptureError,
-         agent_cc.NotLoggedIn, worktree.SetupFailed)
+         agent_cc.NotLoggedIn, worktree.SetupFailed, rules.RuleBreach)
 
 
 def _report_stops_plainly(run: Run) -> None:

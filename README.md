@@ -260,6 +260,8 @@ Every agent gets its own model, thinking level, prompts, tools, and harness. Tha
 
 **`tools` is a capability list. `writes` is the boundary.** They are not the same thing, and the difference matters: `bash` runs anything, including `git checkout`, and `write` reaches any path. So "this agent changes nothing" is enforced in code, after every call, by comparing the repo before and after. Unauthorized changes are rolled back and the phase fails. A read-only agent is read-only with respect to your repo, never unable to write its own report.
 
+Some commands do their harm outside the repo, such as `git push` or a recipe that bills an API key. `agent_rules` in `adws/adw_sssf_config/repo.yaml` lists rules every agent gets, whatever its role. A rule with `forbid` regexes is also enforced: SSSF reads each shell command as the agent announces it, and a match kills the agent and everything it started, and stops the run. The command may have started first, so the stop says to check what it did. See `references/config.md`.
+
 Config defines who an agent **is**. The ADW call site defines how it is **used**. That split is what lets one agent serve many different calls. **ADW scripts never name a model, they name an agent.**
 
 ---
@@ -514,7 +516,6 @@ Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/d
 
 - A seam for a second sandbox beside the Podman container waits for one to exist.
 - Every worktree run runs all of `worktree_setup`, even when it touches one package.
-- `agent_rules` in `repo.yaml` asks; nothing enforces it. A check on each agent's tool calls, like `writes` on its file changes, could stop a run that breaks a rule such as `git push`, or a recipe that bills API keys. It would see the call only after it ran, so it would stop the run, not undo the call.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

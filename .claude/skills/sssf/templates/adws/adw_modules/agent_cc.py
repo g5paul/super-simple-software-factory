@@ -161,6 +161,9 @@ def _command(request: AgentRequest, resume: bool) -> list[str]:
     cmd = [
         CLAUDE_PATH, "-p", request.prompt,
         "--output-format", "stream-json", "--verbose",
+        # For each message's final output count, in message_delta: the usage
+        # on an assistant event is a snapshot from the message's start.
+        "--include-partial-messages",
         "--model", model_id(request.model),
         "--effort", EFFORT.get(request.thinking, "medium"),
         "--resume" if resume else "--session-id", request.session_id,
@@ -200,15 +203,17 @@ def _usage(usage: dict, cost: float) -> UsageBreakdown:
     )
 
 
-def _partial(turns: dict[str, dict]) -> AgentResult:
+def _partial(turns: dict[str, dict], output: dict[str, int]) -> AgentResult:
     """What a killed call used, from its messages' usage. Claude prices a call
     only in its final result, which a killed call never sends, so SSSF prices
     the tokens at list price (prices.py). A model the table doesn't list adds
     its tokens and no cost."""
     usage = UsageBreakdown()
-    for message in turns.values():
-        priced = prices.cost(str(message.get("model") or ""), message["usage"])
-        usage.merge(_usage(message["usage"], priced or 0.0))
+    for message_id, message in turns.items():
+        tokens = dict(message["usage"])
+        tokens["output_tokens"] = max(tokens.get("output_tokens") or 0, output.get(message_id, 0))
+        priced = prices.cost(str(message.get("model") or ""), tokens)
+        usage.merge(_usage(tokens, priced or 0.0))
     return AgentResult(tokens=usage.total_tokens, cost=usage.total_cost, usage=usage,
                        cost_reported=False)
 
@@ -229,6 +234,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     result = AgentResult(session_id=request.session_id)
     final: dict = {}
     turns: dict[str, dict] = {}     # message id -> the message, for a call killed mid-turn
+    output: dict[str, int] = {}     # message id -> its output tokens so far, from message_delta
+    streaming: dict = {}            # parent_tool_use_id -> the message id now streaming
     # stdin is DEVNULL for the same reason as agent_pi: the prompt is in argv,
     # and an inherited non-TTY stdin can leave the child waiting forever.
     process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
@@ -241,14 +248,25 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         with raw_path.open("a") as raw:
             assert process.stdout is not None
             for line in process.stdout:
+                try:
+                    event = json.loads(line) if line.strip() else None
+                except json.JSONDecodeError:
+                    event = None
+                if isinstance(event, dict) and event.get("type") == "stream_event":
+                    # Partial messages: only their usage is read. The rest is
+                    # the text token by token, kept out of the raw log.
+                    inner = event.get("event") or {}
+                    stream = event.get("parent_tool_use_id")
+                    if inner.get("type") == "message_start":
+                        streaming[stream] = (inner.get("message") or {}).get("id")
+                    elif inner.get("type") == "message_delta" and streaming.get(stream):
+                        output[streaming[stream]] = (inner.get("usage") or {}).get("output_tokens") or 0
+                        raw.write(line)
+                        raw.flush()
+                    continue
                 raw.write(line)
                 raw.flush()
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
+                if not isinstance(event, dict):
                     continue
                 etype = event.get("type")
                 if etype == "system" and event.get("subtype") == "init":
@@ -281,7 +299,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                             and account.on_credits(event["rate_limit_info"])):
                         rules.stop_tree(process.pid)
                         stop = account.RateLimitStop(account.CREDITS)
-                        stop.partial = _partial(turns)
+                        stop.partial = _partial(turns, output)
                         raise stop
                 elif etype == "result":
                     final = event
@@ -293,7 +311,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         # failure: either way the agent must not run on unwatched.
                         rules.stop_tree(process.pid)
                         if isinstance(error, rules.RuleBreach):
-                            error.partial = _partial(turns)
+                            error.partial = _partial(turns, output)
                         raise
     finally:
         stderr = process.stderr.read() if process.stderr else ""

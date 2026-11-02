@@ -36,7 +36,7 @@ defaults:
     - GLOSSARY.md
     - GLOSSARY-MAP.md
     - docs/adr/
-  rate_limit_stop: 0.8                 # stop before an agent starts once the account's 5-hour or 7-day usage window is this full; null = off
+  rate_limit_stop: 0.8                 # stop before an agent starts once a usage window (5-hour, where the plan has one, or 7-day) is this full, and stop any call once the account moves onto usage credits; null = off for both
   max_run_cost: 5.00                   # stop before any send once the run has spent this many estimated dollars; null = off
   data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 

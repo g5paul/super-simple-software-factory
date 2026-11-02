@@ -126,6 +126,25 @@ def test_a_claude_call_stops_when_the_plan_moves_onto_credits(tmp_path, fake, pr
     assert stop.value.partial is not None and stop.value.partial.cost_reported is False
 
 
+def test_a_killed_call_counts_each_message_s_final_output(tmp_path, fake, private_registry):
+    # The usage on an assistant event is a snapshot from the message's start;
+    # the final output count comes in message_delta, under the id message_start gave.
+    first = "msg_011CgVs8dzwQtNptLCYXjskM"
+    partial = [{"type": "stream_event", "parent_tool_use_id": None, "event": e} for e in (
+        {"type": "message_start", "message": {"id": first, "usage": {"output_tokens": 1}}},
+        {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}},
+        {"type": "message_delta", "usage": {"output_tokens": 4000}})]
+    turn = _onto_credits(tmp_path)
+    lines = turn.read_text().splitlines()
+    turn.write_text("\n".join([lines[0], *map(json.dumps, partial), *lines[1:]]) + "\n")
+    fake(turn)
+    with pytest.raises(account.RateLimitStop) as stop:
+        agent_cc.run(request(tmp_path))
+    assert stop.value.partial.usage.output_tokens == 4000 + 8
+    raw = (tmp_path / "raw_output.jsonl").read_text()
+    assert "message_delta" in raw and "text_delta" not in raw
+
+
 def test_a_run_that_allows_credits_keeps_going(tmp_path, fake, private_registry):
     fake(_onto_credits(tmp_path))
     agent_cc.run(request(tmp_path, stop_on_usage_credits=False))

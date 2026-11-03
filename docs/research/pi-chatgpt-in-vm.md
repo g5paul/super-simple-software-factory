@@ -16,7 +16,7 @@ My recommendation:
 2. Later, with the domain allowlist the design already plans, move the token out of the VM entirely with Vercel's credentials brokering. The VM then holds a placeholder, and Vercel's firewall swaps in the real token for requests to `api.openai.com`.
 3. Don't copy `auth.json`, and don't run a login inside the VM.
 
-Unconfirmed, and worth one live check each before building: that pi in a fresh VM finds the roster's model from an env-var token, that the pi SDK's `ModelRuntime.getAuth` can refresh the host login from a script, and what OpenAI's consumer terms say today (their page refused automated fetches). The live check on 2026-11-03 settled the first two; see "Live check" at the end. The terms are still unread.
+Unconfirmed, and worth one live check each before building: that pi in a fresh VM finds the roster's model from an env-var token, that the pi SDK's `ModelRuntime.getAuth` can refresh the host login from a script, and what OpenAI's consumer terms say today (their page refused automated fetches). The live check on 2026-11-03 settled the first two; see "Live check" at the end. The engineer read the terms the same day: see "Terms, as the engineer read them".
 
 ## 1. Where the credentials live
 
@@ -143,3 +143,7 @@ Run from the hub in two E2B VMs made from SSSF's `sssf` template, with sssf-sand
 - **Versions differ.** The template's pi is 1.5.0 and the host's is 1.4.0, because the template installs the latest at build time. A build should pin the template's pi or note the version it ran.
 
 So option 2 works as described, and the token handout is one command on the host.
+
+## Terms, as the engineer read them, 2026-11-03
+
+The engineer checked OpenAI's published terms and help pages, using a chatbot's search as a pointer and reading the quoted sentences in context. Their summary: the exact combination isn't addressed in the documents reviewed, and no quoted provision specifically prohibits it. The combination is pi, a VM the engineer creates and deletes, unattended runs, and a short-lived access token as the only credential passed. On that reading the engineer approved building option 2.

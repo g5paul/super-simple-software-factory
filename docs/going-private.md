@@ -8,6 +8,22 @@ Status: undecided. As of 2026-11-02 pushes are on hold while the engineer decide
 - 150 commits are public there, up to 48cc657, pushed on 2026-11-02. Everything since, starting with 880303a, is local only.
 - The project repos aren't involved: they commit locally and take skill updates from this checkout, not from GitHub.
 
+## What stops a push meanwhile
+
+Since 2026-11-03 the engineer's user settings, `~/.claude/settings.json`, deny these in every Claude Code session on this machine, whatever the permission mode:
+
+```json
+"permissions": {
+  "deny": [
+    "Bash(git push *)", "Bash(git * push *)",
+    "Bash(gh pr create *)", "Bash(gh pr merge *)", "Bash(gh repo create *)",
+    "Bash(gh release create *)", "Bash(gh api *)"
+  ]
+}
+```
+
+A session that tries one is refused; `git push --help` was refused when they went in. The engineer stays logged in to `gh`, which is also git's credential helper for github.com, and pushes by running the command themselves (`! git push ...` in a session, or a terminal). The rules match commands as written, so they stop pushes nobody asked for, not a session set on getting around them, such as one that pushes from inside a script. They are not checked under SSSF agents' `--safe-mode`; each repo's `agent_rules` cover those. Remove the block when the hold lifts, or keep it so every push stays a person's.
+
 ## What can't be undone
 
 - **A fork of a public repo can't be made private.** GitHub locks its visibility while it's in the parent's fork network.

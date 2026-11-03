@@ -17,7 +17,9 @@ Claude Code wraps the agent's command in its own shell line, which ends
 `&& eval '<command>' < /dev/null && pwd -P ...`. The patterns are searched in
 that command. A line in another shape is searched whole, and so is each
 `eval '...'` argument in it, unquoted, so a pattern anchored to the start of
-a command still finds one. Keep this docstring free of backslashes: a
+a command still finds one. Text a heredoc only feeds to a file, such as a plan written with cat, is
+not run, so it is dropped before the search (executed below). A heredoc fed
+to a shell or an interpreter is kept, since it runs. Keep this docstring free of backslashes: a
 warning on stderr would come before the refusal and hide it. A change in Claude
 Code's wrapping can still make a pattern miss, and SSSF's stream check stays
 the backstop either way.
@@ -35,6 +37,48 @@ REFUSED = "SSSF refused this command"     # rules.REFUSED; the stream check look
 EXIT = 126
 EVAL = re.compile(r"&& eval (.*) < /dev/null && pwd -P", re.S)
 ANY_EVAL = re.compile(r"\beval\s+('(?:[^']|'\\'')*')")   # one single-quoted eval argument
+
+
+# A heredoc operator, not a here-string: <<WORD, <<-WORD, <<'WORD', <<"WORD".
+HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_.-]*)\2")
+# Commands that run what a heredoc feeds them, so its body is searched.
+RUNS_STDIN = {"sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "xargs",
+              "python", "python3", "node", "bun", "deno", "perl", "ruby", "php", "osascript"}
+WRAPPERS = {"env", "sudo", "nohup", "command", "exec", "time", "nice", "timeout", "uv", "npx",
+            "bunx", "run"}
+
+
+def _feeds_a_runner(before: str) -> bool:
+    """Whether the command a heredoc belongs to runs its input, judged by the
+    command word in front of the operator. Unknown means yes."""
+    words = re.split(r"[;&|(){}]", before)[-1].split()
+    words = [w for w in words if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w)
+             and not re.match(r"^-|^[0-9]+[smhd]?$", w)]
+    while words and words[0].rsplit("/", 1)[-1] in WRAPPERS:
+        words = words[1:]
+    return not words or words[0].rsplit("/", 1)[-1] in RUNS_STDIN
+
+
+def executed(command: str) -> str:
+    """The command without the bodies of heredocs that only feed a file or a
+    non-runner, such as `cat > plan.md <<EOF`. Those lines are text, not
+    commands: a plan that says "never run X" must not count as running X."""
+    out: list[str] = []
+    pending: list[tuple[str, bool, bool]] = []   # (word, strips tabs, keep body)
+    for line in command.split("\n"):
+        if pending:
+            word, tabs, keep = pending[0]
+            if (line.lstrip("\t") if tabs else line) == word:
+                pending.pop(0)
+                out.append(line)
+            elif keep:
+                out.append(line)
+            continue
+        out.append(line)
+        for found in HEREDOC.finditer(line):
+            pending.append((found.group(3), found.group(1) == "-",
+                            _feeds_a_runner(line[:found.start()])))
+    return "\n".join(out)
 
 
 def _unquote(word: str) -> str | None:
@@ -56,7 +100,7 @@ def commands(line: str) -> list[str]:
 
 
 def refusal(line: str, rules: list[dict]) -> str | None:
-    texts = commands(line)
+    texts = [executed(text) for text in commands(line)]
     for rule in rules:
         for pattern in rule.get("forbid") or []:
             try:

@@ -38,6 +38,13 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 - Worktree runs go in parallel, up to `max_worktree_runs`. Each new worktree runs repo.yaml's `worktree_setup` before its first agent. Design: [parallel-worktree-runs.md](designs/parallel-worktree-runs.md).
 - `--container` runs the operator session in a Podman container. Design: [container-operator.md](designs/container-operator.md).
 
+### Runs in a remote VM
+
+- `--sandbox vercel` or `--sandbox e2b` runs a worktree run's agents, checks and git in a VM made for the run and deleted at its end, on a free Hobby tier. Commits come back to the host branch after each commit, and uncommitted work is saved as a patch. `just tickets` and `just trial` take it too, and repo.yaml's `sandbox:` sets a repo's default. Design: [remote-sandboxes.md](designs/remote-sandboxes.md).
+- Claude Code agents sign in with a `claude setup-token` token. Pi agents on `openai/` models get a short-lived access token from the host's ChatGPT sign-in before each call, so the login never leaves the machine. Research: [pi-chatgpt-in-vm.md](research/pi-chatgpt-in-vm.md).
+- Before any agent starts, the VM's git, uv, `claude`, Node and `pi` versions are read. A missing or too-old tool fails the run with each one named, and nothing runs in that VM.
+- The dashboard shows each run's VM and what runs have used of each provider's allowance, as does `just sandbox-usage`.
+
 ### Two new workflows
 
 - `adw_tickets` builds a specced feature one ticket at a time, each with a fresh builder working test first, and reviews each ticket against the repo's standards and the spec. With `--worktree`, the whole ticket run gets its own branch. Design: [ticket-sdlc.md](designs/ticket-sdlc.md).
@@ -48,6 +55,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 - `adws/adw_sssf_config/repo.yaml`, committed in each repo, holds its merge style, worktree setup, spend caps and `agent_rules`.
 - Every agent gets the rules in its prompt. A rule with a `forbid` pattern is enforced: a matching command stops the run, and with `on_match: refuse` it is refused before it runs and the run goes on, on Claude Code and pi agents alike.
 - Every agent's environment carries `SSSF_ADW_ID`, so a repo's own scripts and hooks can tell an SSSF agent from the engineer.
+- A tracked `pre-push` hook, `.githooks/pre-push`, scans what a push would send with gitleaks and refuses on a find. Each clone turns it on with `git config core.hooksPath .githooks`. See [going-private.md](going-private.md), "What stops a leak".
 
 ### Running SSSF across several repos
 
@@ -65,3 +73,4 @@ A code change is committed under the first build's message, not the last repair'
 | Date | Last commit | What |
 |---|---|---|
 | 2026-11-02 | 901e7f4 | First write, covering the fork from de31374 |
+| 2026-11-03 | 247ebda | Remote VMs, the ChatGPT roster in them, the VM tool check, and the pre-push secret scan |

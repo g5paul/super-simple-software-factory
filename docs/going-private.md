@@ -1,16 +1,14 @@
 # Going private
 
-Status: undecided. As of 2026-11-02 pushes are on hold while the engineer decides whether to move this repo to a private one. Commits stay local on `main` until then.
-
-On 2026-11-03, after the leak scans below and with the pre-push scan in place, the engineer said SSSF can be public. So the project repos keep SSSF on the branch they push, and none needs fusion-harness's split for SSSF's sake. The hold itself stays until the engineer lifts it.
+Status: decided, staying public. On 2026-11-02 the engineer put pushes on hold to weigh moving this repo to a private one. On 2026-11-03, after the leak scans below and with the pre-push scan in place, they decided SSSF can be public and lifted the hold. So the project repos keep SSSF on the branch they push, and none needs fusion-harness's split for SSSF's sake. The rest of this page stays as the record, and as the steps if that ever changes.
 
 ## Where things stand
 
 - `origin` is g5paul/super-simple-software-factory, a public fork of disler/super-simple-software-factory. On 2026-11-02 it had no forks and no stars.
-- 150 commits are public there, up to 48cc657, pushed on 2026-11-02. Everything since, starting with 880303a, is local only.
+- 150 commits are public there, up to 48cc657, pushed on 2026-11-02. The commits made during the hold, starting with 880303a, were local when it lifted: 63 on 2026-11-03. They go up with the engineer's next push of `main`.
 - The project repos aren't involved: they commit locally and take skill updates from this checkout, not from GitHub.
 
-## What stops a push meanwhile
+## What stops a push nobody asked for
 
 Since 2026-11-03 the engineer's user settings, `~/.claude/settings.json`, deny these in every Claude Code session on this machine, whatever the permission mode:
 
@@ -24,7 +22,7 @@ Since 2026-11-03 the engineer's user settings, `~/.claude/settings.json`, deny t
 }
 ```
 
-A session that tries one is refused; `git push --help` was refused when they went in. The engineer stays logged in to `gh`, which is also git's credential helper for github.com, and pushes by running the command themselves (`! git push ...` in a session, or a terminal). The rules match commands as written, so they stop pushes nobody asked for, not a session set on getting around them, such as one that pushes from inside a script. They are not checked under SSSF agents' `--safe-mode`; each repo's `agent_rules` cover those. Remove the block when the hold lifts, or keep it so every push stays a person's.
+A session that tries one is refused; `git push --help` was refused when they went in. The engineer stays logged in to `gh`, which is also git's credential helper for github.com, and pushes by running the command themselves (`! git push ...` in a session, or a terminal). The rules match commands as written, so they stop pushes nobody asked for, not a session set on getting around them, such as one that pushes from inside a script. They are not checked under SSSF agents' `--safe-mode`; each repo's `agent_rules` cover those. The hold lifted on 2026-11-03 and the engineer kept the rules, so every push stays a person's.
 
 ## What a push would publish
 
@@ -61,10 +59,10 @@ Since 2026-11-03 the hub has a `pre-push` hook, `.githooks/pre-push`, which runs
 3. **Make it `origin`.** Rename the old `origin` (for example to `public`), rename `private` to `origin`, and keep `upstream` pointing at disler for fetches.
 4. **Retire the public fork.** Archive it to freeze it as read-only, or delete it to remove its page and branches. Deleting doesn't remove the network copies above.
 5. **Only if something sensitive was pushed:** scan the public history first (`.env` values, tokens, internal names or paths), then ask GitHub Support to purge it from the fork network.
-6. **Update the local rules.** `CLAUDE.local.md`'s pushing section names the fork as `origin`; point it at the new repo and lift the hold.
+6. **Update the local rules.** `CLAUDE.local.md`'s pushing section names the fork as `origin`; point it at the new repo.
 
 Steps 1, 4 and 5 act on the engineer's GitHub account, so each is confirmed with the engineer before it runs, or done by the engineer in GitHub's settings.
 
-## If staying public
+## Pushing, now that it's public
 
-Lift the hold in `CLAUDE.local.md`, then push `main` as before. The local commits since 48cc657 go up together.
+The engineer pushes, since the deny rules stop a session doing it: `git push origin main`, in a terminal or as `! git push origin main` in a session. The pre-push hook scans what's going up first and refuses on a find. GitHub refuses a push carrying the engineer's Gmail address. The project repos push the same way, each from its own clone, and their old Gmail-authored commits need rewriting first ("What a push would publish").

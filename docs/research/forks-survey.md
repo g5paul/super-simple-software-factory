@@ -19,7 +19,7 @@ Many forks, few active, none doing the whole of this one. 272 forks, 45 with com
 - Disler's `main` is one commit, de31374, from 2026-08-04. It hasn't moved, so no fork is behind it.
 - 50 forks have pushed since they were made. Four of those have no commits of their own, so 45 do, besides this one.
 - 222 forks were never updated after forking.
-- This fork's public `main` is 48cc657, 150 commits ahead. Everything since is local (`docs/going-private.md`).
+- This fork's public `main` was 48cc657, 150 commits ahead, when surveyed. The commits since were local then, during the push hold (`docs/going-private.md`).
 
 ## Active forks
 

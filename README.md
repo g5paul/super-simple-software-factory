@@ -68,6 +68,8 @@ Copy `.claude/skills/sssf/` into the target repo and type `/sssf install` inside
 
 For the first two, see [Run on a subscription](#run-on-a-subscription).
 
+In a clone of this repo, `git config core.hooksPath .githooks` turns on its pre-push hook, which scans each push for secrets with [gitleaks](https://github.com/gitleaks/gitleaks) and refuses on a find. See [`docs/going-private.md`](docs/going-private.md), "What stops a leak".
+
 [`bun`](https://bun.sh) only if you want the visualizer.
 
 ```bash
@@ -391,6 +393,8 @@ A repo on another machine is not in this registry. Run `just obs` there, and rea
 super-simple-software-factory/
 ├── docs/fork.md                        # what this fork adds to upstream
 ├── docs/designs/                       # design records for what this fork added
+├── docs/research/                      # findings behind the designs, and the fork survey
+├── .githooks/pre-push                  # the secret scan before every push
 └── .claude/skills/sssf/
     ├── SKILL.md                        # hard rules + request routing table
     ├── cookbooks/                      # 12 orchestrator playbooks, loaded lazily

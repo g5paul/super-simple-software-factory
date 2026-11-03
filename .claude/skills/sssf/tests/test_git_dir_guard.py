@@ -443,3 +443,91 @@ def test_a_hooks_path_at_the_root_refuses_the_run(repo, hooks_path):
     git(repo, "config", "core.hooksPath", hooks_path)
     with pytest.raises(permissions.PermissionBreach, match="filesystem root"):
         permissions.guard_git_dir(SimpleNamespace(repo_root=repo))
+
+
+# ── seventh bypass-reviewer pass: a link on the way, pointed elsewhere ──────
+
+def test_a_retargeted_config_dir_link_is_put_back(repo, home, tmp_path):
+    dot = tmp_path / "dotfiles"
+    (dot / "git").mkdir(parents=True)
+    (dot / "git" / "config").write_text("")
+    (home / ".config").symlink_to(dot)
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evil"
+    (evil / "git").mkdir(parents=True)
+    (evil / "git" / "config").write_text("[core]\n\tfsmonitor = touch PWNED\n")
+    (home / ".config").unlink()
+    (home / ".config").symlink_to(evil)
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert os.readlink(home / ".config") == str(dot)
+    assert "PWNED" not in git(repo, "config", "--list")
+
+
+def test_a_retargeted_home_link_is_seen(repo, tmp_path, monkeypatch):
+    real = tmp_path / "realhome"
+    real.mkdir()
+    (real / ".gitconfig").write_text("[user]\n\tname = t\n")
+    link = tmp_path / "linkhome"
+    link.symlink_to(real)
+    monkeypatch.setenv("HOME", str(link))
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evilhome"
+    evil.mkdir()
+    (evil / ".gitconfig").write_text("[core]\n\thooksPath = /evil\n")
+    link.unlink()
+    link.symlink_to(evil)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)
+    assert os.readlink(link) == str(real)
+
+
+def test_a_retargeted_dot_git_link_is_seen(tmp_path):
+    store = tmp_path / "store.git"
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "-qb", "main", "--separate-git-dir", str(store))
+    (root / ".git").unlink()
+    (root / ".git").symlink_to(store)
+    run = SimpleNamespace(repo_root=root)
+    guard = permissions.guard_git_dir(run)
+    copy = tmp_path / "evil.git"
+    subprocess.run(["cp", "-a", str(store), str(copy)], check=True)
+    plant_hook(copy / "hooks")
+    (root / ".git").unlink()
+    (root / ".git").symlink_to(copy)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)
+    assert os.readlink(root / ".git") == str(store)
+
+
+def test_a_retargeted_hooks_path_link_is_seen(repo, tmp_path):
+    good = tmp_path / "goodhooks"
+    good.mkdir()
+    link = tmp_path / "hooklink"
+    link.symlink_to(good)
+    git(repo, "config", "core.hooksPath", str(link))
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evilhooks"
+    plant_hook(evil)
+    link.unlink()
+    link.symlink_to(evil)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)
+    assert os.readlink(link) == str(good)
+    assert commit_runs_no_hook(repo)
+
+
+def test_a_latin1_include_path_does_not_stop_the_run(repo):
+    target = os.fsdecode(bytes(repo / ".git") + b"/caf\xe9.inc")
+    with open(os.fsencode(target), "w") as f:
+        f.write("")
+    with open(repo / ".git" / "config", "ab") as f:
+        f.write(b"[include]\n\tpath = caf\xe9.inc\n")
+    guard = permissions.guard_git_dir(SimpleNamespace(repo_root=repo))
+    assert target in guard["paths"]
+    assert permissions.restore_git_dir(SimpleNamespace(repo_root=repo), guard) == []

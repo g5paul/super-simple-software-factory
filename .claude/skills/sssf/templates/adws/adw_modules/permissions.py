@@ -165,9 +165,19 @@ fi
 # the agent doesn't run, and a follow pack is compared as far as it goes.
 PACK_CAP = 16 * 1024 * 1024
 
-# Removes every watched path, carrying on past a failure, then unpacks the
-# saved stream from the file SSSF just wrote, and deletes that file.
-_UNPACK = """f=$1; shift
+# Puts the links on the way back first, so the paths behind them are removed
+# and unpacked where they were, not where the agent pointed them. Then removes
+# every watched path, carrying on past a failure, unpacks the saved stream
+# from the file SSSF just wrote, and deletes that file. The exit code is not
+# trusted; the restore compares again afterwards.
+_UNPACK = """f=$1; n=$2; shift 2
+i=0
+for p in "$@"; do
+  [ $i -ge $n ] && break
+  rm -f "$p"
+  base64 -d < "$f" | tar -xpf - -C / "${p#/}" 2>/dev/null
+  i=$((i+1))
+done
 for p in "$@"; do rm -rf "$p" || failed=1; done
 if [ -s "$f" ]; then base64 -d < "$f" | tar -xpf - -C / || failed=1; fi
 rm -f "$f"
@@ -190,11 +200,33 @@ done
 """
 
 
+# Prints, NUL-separated, every symlink each path passes through: the path
+# itself and each parent. The guard keeps these links too, so an agent that
+# points one somewhere else is seen, and the restore puts it back first.
+_LINKS = """for p in "$@"; do
+  q=$p
+  while [ -n "$q" ] && [ "$q" != / ]; do
+    if [ -L "$q" ]; then printf "%s\\0" "$q"; fi
+    q=${q%/*}
+  done
+done
+"""
+
+
 def _sh(script: str, *args: str):
-    return sandbox.current().run(["sh", "-c", script, "sh", *args])
+    """Run a guard script. Output is decoded leniently: a Latin-1 name in a
+    path must not stop the run."""
+    import subprocess
+    done = sandbox.current().run(["sh", "-c", script, "sh", *args], text=False)
+    out, err = done.stdout, done.stderr
+    if isinstance(out, bytes):
+        out = out.decode("utf-8", "surrogateescape")
+    if isinstance(err, bytes):
+        err = err.decode("utf-8", "surrogateescape")
+    return subprocess.CompletedProcess(done.args, done.returncode, out, err)
 
 
-def _watched(run) -> list[str]:
+def _watched(run) -> tuple[list[str], list[str]]:
     """Every path the guard covers.
 
     The repo's git directories (the shared one and a worktree's own) and a
@@ -208,8 +240,9 @@ def _watched(run) -> list[str]:
     out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
     dirs = list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
     if not dirs:
-        return []
+        return [], []
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
+    logical = [f"{root}/.git"]            # a symlinked .git is a link on the way
     if sandbox.current().is_file(f"{root}/.git"):
         paths.append(f"{root}/.git")
     home = _sh('printf "%s\\0%s" "$HOME" "${XDG_CONFIG_HOME:-$HOME/.config}"').stdout.split("\0")
@@ -247,9 +280,17 @@ def _watched(run) -> list[str]:
     # so the restore would delete such a file and fail to put it back. Each
     # parent is resolved with cd -P where it exists, lexically where it doesn't.
     import posixpath
+    hooks_value = _git(["config", "core.hooksPath"], root).strip()
+    if hooks_value:
+        logical.append(absolute(hooks_value, f"{root}/x"))
     paths = [p for p in dict.fromkeys(paths)
              if p.startswith("/") and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
+    logical = ["/" + posixpath.normpath(p).lstrip("/")
+               for p in dict.fromkeys(logical + paths) if p.startswith("/")]
+    links = [q for q in _sh(_LINKS, *logical).stdout.split("\0") if q]
     real = _sh(_REAL, *paths).stdout.split("\0")
+    if len(real) != len(paths) + 1:
+        raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
     resolved = []
     for p, r in zip(paths, real):
         r = r if r.startswith("/") else "/" + posixpath.normpath(p).lstrip("/")
@@ -258,7 +299,9 @@ def _watched(run) -> list[str]:
                                    "which the git guard can't save, so the agent did not run. "
                                    "Check core.hooksPath and include.path.")
         resolved.append(r)
-    return list(dict.fromkeys(resolved))
+    resolved = list(dict.fromkeys(resolved))
+    links = [q for q in dict.fromkeys(links) if q not in resolved and q != "/"]
+    return links, resolved
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:
@@ -288,7 +331,8 @@ def _members(packed: str) -> dict[str, tuple]:
 
 def _differs(guard: dict) -> list[str] | None:
     """The watched paths that differ from the saved packs, or None if packing failed."""
-    plain, followed = _pack(guard["paths"], follow=False), _pack(guard["paths"], follow=True)
+    every = guard.get("links", []) + guard["paths"]
+    plain, followed = _pack(every, follow=False), _pack(guard["paths"], follow=True)
     if plain is None:
         return None
     now = (_members(plain), _members(followed or ""))
@@ -298,21 +342,25 @@ def _differs(guard: dict) -> list[str] | None:
         rel = path.lstrip("/")
         return {k: v for k, v in members.items() if k == rel or k.startswith(rel + "/")}
 
-    return [p for p in guard["paths"]
-            if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
+    def exact(members: dict, path: str) -> object:
+        return members.get(path.lstrip("/"))   # a link: the link itself, never what it holds
+
+    moved = [q for q in guard.get("links", []) if exact(now[0], q) != exact(then[0], q)]
+    return moved + [p for p in guard["paths"]
+                    if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
 
 
 def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs. None outside a git repo."""
-    paths = _watched(run)
+    links, paths = _watched(run)
     if not paths:
         return None
-    plain = _pack(paths, follow=False)
+    plain = _pack(links + paths, follow=False)
     if plain is None:
         raise PermissionBreach("Could not save the git directory and git config "
                                "before the agent ran, so it did not run.")
-    return {"paths": paths, "plain": plain, "followed": _pack(paths, follow=True) or "",
-            "done": False}
+    return {"links": links, "paths": paths, "plain": plain,
+            "followed": _pack(paths, follow=True) or "", "done": False}
 
 
 def git_dir_changed(guard: dict | None) -> bool:
@@ -341,7 +389,7 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     guard["done"] = True
     changed = _differs(guard)
     if changed is None:
-        changed = list(guard["paths"])        # could not compare: put everything back
+        changed = guard.get("links", []) + list(guard["paths"])   # could not compare
     if not changed and guard.get("seen"):
         changed = ["(a watched path, changed while the agent ran and changed back since)"]
     restored = True
@@ -355,7 +403,8 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
             held = made.stdout.strip()
         if made.returncode == 0 and held.startswith("/"):
             box.write_text(held, guard["plain"])
-            _sh(_UNPACK, held, *guard["paths"])
+            links = guard.get("links", [])
+            _sh(_UNPACK, held, str(len(links)), *links, *guard["paths"])
         restored = _differs(guard) == []
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]

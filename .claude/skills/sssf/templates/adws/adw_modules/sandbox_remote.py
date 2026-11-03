@@ -51,7 +51,7 @@ MARGIN_SECONDS = 30
 TOOLS = {
     "git":    {"command": "git --version"},
     "uv":     {"command": "uv --version"},
-    "claude": {"command": "claude --version", "min": "2.1.316", "tested": 2, "for": "claude_code"},
+    "claude": {"command": "claude --version", "min": "2.1.312", "tested": 2, "for": "claude_code"},
     "node":   {"command": "node --version", "min": "22.19.0", "for": "pi"},   # pi's engines field
     "pi":     {"command": "pi --version", "min": "1.4.0", "tested": 1, "for": "pi"},
 }

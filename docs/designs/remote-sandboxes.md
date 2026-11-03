@@ -138,7 +138,7 @@ Step 3 kept everything above and settled this:
 E2B's template pins Node and pi, but Vercel's default image brings its own `claude` and `pi`, at versions Vercel picks and can change. So once the branch is cloned into the VM and before any agent starts, `sandbox_remote` reads the version of each tool the run needs, in one command:
 
 - Every run: git and uv.
-- A Claude Code agent: `claude`, at least 2.1.316, the oldest SSSF has run on in a VM.
+- A Claude Code agent: `claude`, at least 2.1.312, the oldest SSSF has run on in a VM (Vercel's image on 2026-11-03).
 - A pi agent: Node, at least 22.19.0, pi's own `engines` floor, and `pi`, at least 1.4.0, which has `auth print-bearer-token`.
 
 A tool that's missing, unreadable or below its minimum fails the `sandbox` phase with a message naming each one, and the VM is deleted. Nothing has run in it. A major version newer than SSSF has run on (`claude` 3.x, `pi` 2.x) is noted on the console and the dashboard, and the run goes on. Refusing it would stop every run the day Vercel updates its image.
@@ -182,3 +182,4 @@ The versions go into the trace as a `sandbox_tools` event and into the `sandbox`
 | 2026-11-03 | sssf-sandbox | `just trial --sandbox e2b "<count_spaces>" main main`, trial b2c03567 | both attempts success and passed the panel, $1.28 in all. 7ea8ab05 in VM irrlr1vgbo4hvs4rhcspr (113.3s, 9.9 CPU s, ~$0.0052) and d8ef9f1d in iruhtgjudvgzfzuepffx1 (145.5s, 13.0 CPU s, ~$0.0067), 3 commits back each, both deleted; each attempt's trial tag says `sandbox: e2b`. The panel ran on the host. Discarded after |
 | 2026-11-03 | sssf-sandbox | the chatgpt roster in E2B, plan_build_test. First try 10e3a50d failed at the planner: pi couldn't make its session folder, which stayed root's (fixed in 673a70d). Rerun 27129786 | success, $0.06: planner and builder on gpt-6.1-sol, suite passed in the VM, 1 commit back, 84.7 VM seconds, VM deleted. No token in the trace, the session files or the log. Discarded |
 | 2026-11-03 | sssf-sandbox | the chatgpt roster in Vercel, plan_build_test, run b7487076 | success, $0.06: suite passed in VM scarlet-obedient-lamprey-n9uZ3F, 1 commit back, 66.3 VM seconds, VM deleted. No token in the trace, the session files or the log. Discarded |
+| 2026-11-03 | sssf-sandbox | the tool check, build_test on each image: chatgpt in E2B (0d2c0e92) and Vercel (7e085166), Claude Code in Vercel (ce5226f0, then 4f17f236) | E2B: git 2.39.5, uv 0.13.6, node 24.11.1, pi 1.5.0. Vercel: git 2.53.0, uv 0.13.6, node 24.22.1, pi 1.4.0, claude 2.1.312. ce5226f0 stopped in 4 seconds on the first floor, claude 2.1.316, which no run had proved; the floor went to 2.1.312 and 4f17f236 passed. All discarded |

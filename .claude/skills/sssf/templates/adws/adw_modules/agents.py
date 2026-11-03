@@ -30,6 +30,10 @@ class GateFailure(RuntimeError):
     pass
 
 
+class AgentFailed(RuntimeError):
+    """The agent itself reported status fail or blocked. Its summary says why."""
+
+
 # ── config ───────────────────────────────────────────────────────────────────
 
 def load_config(path: str = "adws/adw_sssf_config/sssf.config.yaml") -> SSSFConfig:
@@ -393,7 +397,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                           "context_window": context.context_window}))
     run.console.agent_finished(agent.name, spent.total_tokens, spent.total_cost)
     if envelope.status != "success":
-        raise RuntimeError(f"{agent.name} reported status={envelope.status!r}: {envelope.summary}")
+        raise AgentFailed(f"{agent.name} reported status={envelope.status!r}: {envelope.summary}")
     return envelope
 
 

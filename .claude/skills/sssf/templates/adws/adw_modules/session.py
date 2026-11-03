@@ -43,7 +43,7 @@ def _finalize_when_killed(run: Run) -> None:
 # what to do, and the trace already holds the failed phase, so a Python
 # traceback on top adds nothing but noise. Anything else is a crash, and
 # keeps its traceback.
-STOPS = (agents.GateFailure, permissions.PermissionBreach,
+STOPS = (agents.GateFailure, agents.AgentFailed, permissions.PermissionBreach,
          budget.BudgetStop, account.RateLimitStop, changes.ChangeCaptureError,
          agent_cc.NotLoggedIn, worktree.SetupFailed, rules.RuleBreach, sandbox.SandboxFailed,
          silence.SilentStop)

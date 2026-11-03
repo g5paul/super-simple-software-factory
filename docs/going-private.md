@@ -2,6 +2,8 @@
 
 Status: undecided. As of 2026-11-02 pushes are on hold while the engineer decides whether to move this repo to a private one. Commits stay local on `main` until then.
 
+On 2026-11-03, after the leak scans below and with the pre-push scan in place, the engineer said SSSF can be public. So the project repos keep SSSF on the branch they push, and none needs fusion-harness's split for SSSF's sake. The hold itself stays until the engineer lifts it.
+
 ## Where things stand
 
 - `origin` is g5paul/super-simple-software-factory, a public fork of disler/super-simple-software-factory. On 2026-11-02 it had no forks and no stars.

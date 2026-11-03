@@ -260,3 +260,32 @@ def test_a_new_turn_reopens_the_call():
         dog.finished()
         dog.reopen()
         assert dog.limit == 60 and not dog.done
+
+
+# ── what the agent was waiting on ────────────────────────────────────────────
+
+def test_the_tracker_names_the_call_still_open():
+    tracker = agent_pi.ToolCallTracker()
+    tracker.observe({"type": "tool_execution_start", "toolCallId": "a", "toolName": "bash",
+                     "args": {"command": "ls"}})
+    tracker.observe({"type": "tool_execution_end", "toolCallId": "a", "toolName": "bash",
+                     "args": {"command": "ls"}, "result": {}})
+    assert tracker.running() == {}
+    tracker.observe({"type": "tool_execution_start", "toolCallId": "b", "toolName": "bash",
+                     "args": {"command": "npm run dev"}})
+    assert tracker.running()["label"] == "bash: npm run dev"
+    assert tracker.running()["started_at"]
+
+
+def test_claude_codes_tracker_names_it_too():
+    tracker = agent_cc.ToolCallTracker()
+    tracker.observe({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "sleep 240"}}]}})
+    assert tracker.running()["label"] == "Bash: sleep 240"
+
+
+def test_the_stop_says_what_was_running():
+    stop = silence.SilentStop("builder", 15, "ab12cd34")
+    assert "waiting on" not in str(stop)
+    stop.running = {"label": "bash: npm run dev", "started_at": "2026-11-03T10:00:00Z"}
+    assert "It was waiting on `bash: npm run dev`, started 2026-11-03T10:00:00Z." in str(stop)

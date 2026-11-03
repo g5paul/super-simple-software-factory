@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Phase } from "../shared/types.ts";
-import { caps, sandbox, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
+import { caps, leftovers, sandbox, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
 
 let seq = 0;
 function phase(name: string, status: Phase["status"], error: string | null = null): Phase {
@@ -200,4 +200,17 @@ test("a VM's tool check shows on its sandbox, with any notes", () => {
   expect(box?.tools).toEqual({ git: "git version 2.43.0", pi: "2.0.1" });
   expect(box?.tool_notes).toHaveLength(1);
   expect(sandbox(events.slice(0, 1))?.tools).toBeUndefined();
+});
+
+test("an agent whose leftovers were stopped is listed, in order", () => {
+  const events = [
+    ev("log", "leftovers_stopped", { agent: "scout", minutes: 15 }, "a1_02_scout"),
+    ev("log", "rule_refused", { agent: "builder" }, "a1_03_build"),
+    ev("log", "leftovers_stopped", { agent: "builder", minutes: 15 }, "a1_03_build"),
+  ];
+  expect(leftovers(events)).toEqual([
+    { agent: "scout", phase_id: "a1_02_scout" },
+    { agent: "builder", phase_id: "a1_03_build" },
+  ]);
+  expect(leftovers([])).toEqual([]);
 });

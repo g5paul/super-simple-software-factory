@@ -28,7 +28,7 @@ Each ran scout with "Run exactly this one shell command with your bash tool and 
 
 No `sleep 240` was left running after any of them.
 
-## Not done
+## Added after
 
-- A stop doesn't say which command was running. The agent's `raw_output.jsonl` shows its last step, and the message says to look there.
-- `leftovers_stopped` is in the trace but not on the dashboard.
+- **The stop names what was running.** The event forwarder's tool tracker holds every call that has started and not returned. On a silent stop, `agents.py` asks it for the latest, and the message ends "It was waiting on `bash: npm run dev`, started ...". The `agent_silent` event carries it as `running` and `running_since`, and the dashboard's stop shows the message.
+- **Leftovers on the dashboard.** The run summary has a line for each `leftovers_stopped` event, naming the agent and linking to its phase.

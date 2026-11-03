@@ -14,7 +14,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { SANDBOX_EVENTS, caps, sandbox, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
+import { SANDBOX_EVENTS, caps, leftovers, sandbox, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
 import { runTrial, type AttemptRow } from "./trials.ts";
 import type {
   AgentSession,
@@ -385,6 +385,7 @@ export class SssfDb {
       session,
       caps: caps(events),
       stop: stopReason(events, phases, session.status),
+      leftovers: leftovers(events),
       tickets: ticketRun(events, phases),
       worktree: worktree(events),
       sandbox: sandbox(events),

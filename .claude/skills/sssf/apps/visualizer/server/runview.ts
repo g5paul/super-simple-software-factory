@@ -7,7 +7,7 @@
  * Everything is derived from what the tracer already wrote: a run from before
  * these events existed simply has no caps and no ticket table.
  */
-import type { Phase, RunCaps, RunLanded, RunRebased, RunSandbox, RunWorktree, SandboxEnd, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
+import type { Phase, RunCaps, RunLanded, RunLeftover, RunRebased, RunSandbox, RunWorktree, SandboxEnd, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
 
 /** The event columns these functions read. */
 export interface RunEvent {
@@ -122,6 +122,13 @@ export function stopReason(events: RunEvent[], phases: Phase[], status: SessionS
     message: `${failed.name}: ${failed.error ?? "failed"}`,
     phase_id: failed.phase_id,
   };
+}
+
+/** Every leftovers_stopped event, oldest first (silent-agents.md). */
+export function leftovers(events: RunEvent[]): RunLeftover[] {
+  return events
+    .filter((e) => e.type === "log" && e.name === "leftovers_stopped")
+    .map((e) => ({ agent: payload<{ agent?: string }>(e)?.agent ?? "an agent", phase_id: e.phase_id || null }));
 }
 
 /** One row per ticket, in build order, or null when this is not a ticket run. */

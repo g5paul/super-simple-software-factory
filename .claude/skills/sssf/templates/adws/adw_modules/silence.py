@@ -55,6 +55,15 @@ class SilentStop(RuntimeError):
         self.agent = agent
         self.minutes = minutes
         self.partial = None       # the call's result so far, priced, set by the runner
+        self.running: dict = {}   # the tool call still open, set by agents.py
+
+    def __str__(self) -> str:
+        text = super().__str__()
+        label = self.running.get("label")
+        if not label:
+            return text
+        since = self.running.get("started_at", "")
+        return f"{text} It was waiting on `{label}`" + (f", started {since}." if since else ".")
 
 
 def _minutes(value: float) -> str:

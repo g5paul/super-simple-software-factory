@@ -4,10 +4,12 @@
  * `--sandbox` run's work went to, spend against
  * the run's cap, why a failed run stopped, and for an adw_tickets run one row
  * per ticket. Each part draws only when the
- * run recorded what it needs, so an old run shows nothing here.
+ * run recorded what it needs, so an old run shows nothing here. An agent whose
+ * leftovers the watchdog stopped gets a line too: its answer stands, but a
+ * command it started never finished.
  */
 import { computed } from 'vue'
-import type { RunCaps, RunSandbox, RunTrial, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
+import type { RunCaps, RunLeftover, RunSandbox, RunTrial, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
 import { trialHref } from '../lib/router'
 import { fmtCost, rosterLabel } from '../lib/format'
 
@@ -15,6 +17,7 @@ const props = defineProps<{
   cost: number | null
   caps: RunCaps | null
   stop: StopReason | null
+  leftovers?: RunLeftover[]
   tickets: TicketRun | null
   worktree: RunWorktree | null
   sandbox?: RunSandbox | null
@@ -96,7 +99,7 @@ function open(phaseId: string | null) {
 </script>
 
 <template>
-  <div v-if="worktree || sandbox || cap || stop || tickets || trial" class="run-summary">
+  <div v-if="worktree || sandbox || cap || stop || leftovers?.length || tickets || trial" class="run-summary">
     <div v-if="trial" class="branch">
       <span v-if="trial.role === 'attempt'">attempt with roster <code>{{ rosterLabel(trial.roster, trial.coding_agent) }}</code> in</span>
       <span v-else>the panel of</span>
@@ -129,6 +132,10 @@ function open(phaseId: string | null) {
       <span class="dim">{{ fmtCost(cost) }} of {{ fmtCost(cap) }} run cap</span>
     </div>
 
+    <div v-for="(left, i) in leftovers ?? []" :key="i" class="leftover" :class="{ link: left.phase_id }"
+         @click="open(left.phase_id)">
+      {{ left.agent }} had answered but left something running. The watchdog stopped it and kept the answer.
+    </div>
     <div v-if="stop" class="stop" :class="{ link: stop.phase_id }" @click="open(stop.phase_id)">
       <span class="stop-head">Stopped: {{ stopLabel }}</span>
       <pre class="stop-message">{{ stop.message }}</pre>
@@ -228,6 +235,15 @@ function open(phaseId: string | null) {
 }
 .fill.high {
   background: var(--red);
+}
+
+.leftover {
+  color: var(--faint);
+  font-size: 0.92em;
+}
+
+.leftover.link {
+  cursor: pointer;
 }
 
 .stop {

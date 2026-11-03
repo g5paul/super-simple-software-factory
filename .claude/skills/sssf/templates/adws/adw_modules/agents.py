@@ -215,10 +215,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             refuse_rules=rules.refusing(enforced),
             max_silence_seconds=silent_after,
         )
+        forward = _event_forwarder(run, phase, agent.name, interface, enforced)
         try:
             result = interface.run(
                 request,
-                on_event=_event_forwarder(run, phase, agent.name, interface, enforced),
+                on_event=forward,
                 on_spawn=lambda pid: run.tracer.process_start(
                     run.adw_id, "agent", agent.name, pid,
                     f"{agent.coding_agent} {agent.name} {agent.model}"),
@@ -250,10 +251,13 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             raise
         except silence.SilentStop as stop:
             count_partial(stop)
+            stop.running = forward.tracker.running()
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="error", name="agent_silent",
                                          payload={"agent": agent.name, "error": str(stop),
                                                   "minutes": stop.minutes,
+                                                  "running": stop.running.get("label", ""),
+                                                  "running_since": stop.running.get("started_at", ""),
                                                   "spent": stop.partial.cost if stop.partial else 0.0}))
             raise
         except agent_pi.UsageLimitStop as stop:
@@ -431,6 +435,7 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
                                          started_at=record.pop("started_at", None),
                                          ended_at=record.pop("ended_at", None),
                                          payload={**record, "agent": agent_name}))
+    forward.tracker = tracker      # a silent stop asks it what was running
     return forward
 
 

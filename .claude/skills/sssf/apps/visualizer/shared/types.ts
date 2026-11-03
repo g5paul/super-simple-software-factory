@@ -365,6 +365,15 @@ export interface RunLanded {
   head?: string;
 }
 
+/**
+ * An agent that had answered but stayed alive: the watchdog stopped what it
+ * left running, often a background command, and the call kept its answer.
+ */
+export interface RunLeftover {
+  agent: string;
+  phase_id: string | null;
+}
+
 /** Why a failed run stopped, from its own stop event or its first failed phase. */
 export interface StopReason {
   kind: "call_budget_stop" | "budget_stop" | "live_budget_stop" | "daily_budget_stop" | "machine_budget_stop" | "rate_limit_stop" | "rule_breach" | "agent_silent" | "not_accepted" | "phase_failed";
@@ -407,6 +416,8 @@ export interface SessionDetail {
   caps: RunCaps | null;
   /** null unless the run failed. */
   stop: StopReason | null;
+  /** Each agent whose leftovers the watchdog stopped, in order; empty for most runs. */
+  leftovers: RunLeftover[];
   /** null unless this is an adw_tickets run. */
   tickets: TicketRun | null;
   /** null unless the run worked on its own branch (`--worktree`). */

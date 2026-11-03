@@ -10,7 +10,7 @@ import type {
   PhaseKind,
   Session,
   RunCaps,
-  RunTrial, RunSandbox, RunWorktree,
+  RunTrial, RunSandbox, RunLeftover, RunWorktree,
   SessionUsage,
   StopReason,
   TicketRun,
@@ -37,6 +37,7 @@ const stop = ref<StopReason | null>(null)
 const tickets = ref<TicketRun | null>(null)
 const runWorktree = ref<RunWorktree | null>(null)
 const runSandbox = ref<RunSandbox | null>(null)
+const leftovers = ref<RunLeftover[]>([])
 const runTrial = ref<RunTrial | null>(null)
 const events = ref<EventRow[]>([])
 const envelopes = ref<Envelope[]>([])
@@ -65,6 +66,7 @@ async function tick() {
     tickets.value = detail.tickets
     runWorktree.value = detail.worktree
     runSandbox.value = detail.sandbox
+    leftovers.value = detail.leftovers
     runTrial.value = detail.trial
 
     const fresh: EventRow[] = []
@@ -465,6 +467,7 @@ function selectPhase(p: Phase) {
       :cost="session.total_cost"
       :caps="caps"
       :stop="stop"
+      :leftovers="leftovers"
       :tickets="tickets"
       :worktree="runWorktree"
       :sandbox="runSandbox"

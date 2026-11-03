@@ -220,6 +220,17 @@ class ToolCallTracker:
             record["started_at"] = opened["started_at"]
         return record
 
+    def running(self) -> dict:
+        """The latest call started and not yet returned, as {"label",
+        "started_at"}, or {} when none is open. A silent stop names it: it's
+        what the agent was waiting on."""
+        if not self._open:
+            return {}
+        opened = max(self._open.values(), key=lambda call: call.get("clock") or 0)
+        return {"label": _label(str(opened.get("tool") or "tool"), opened.get("args") or {},
+                                self.primary_args),
+                "started_at": opened.get("started_at")}
+
     def _announce(self, call_id, tool, args) -> None:
         """First sighting starts the clock; a later sighting only fills gaps."""
         if not call_id:

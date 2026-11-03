@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Phase } from "../shared/types.ts";
-import { caps, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
+import { caps, sandbox, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
 
 let seq = 0;
 function phase(name: string, status: Phase["status"], error: string | null = null): Phase {
@@ -145,4 +145,40 @@ test("a ChatGPT plan's usage stop carries its provider; Claude's does not", () =
   expect(stopReason(pi, phases, "fail")).toMatchObject({ kind: "rate_limit_stop", provider: "openai" });
   const claude = [ev("error", "rate_limit_stop", { error: "Claude's 5-hour window is at 85%" }, phases[0].phase_id)];
   expect(stopReason(claude, phases, "fail")?.provider).toBeUndefined();
+});
+
+test("a sandbox run shows its VM, what came back, and how the VM ended", () => {
+  const vm = "irq4wy";
+  const events = [
+    ev("log", "sandbox", { kind: "code", owner: "sandbox" }),
+    ev("log", "sandbox", { message: "▶ 01 sandbox" }),
+    ev("log", "sandbox", { provider: "e2b", vm, session_minutes: 60, python: "3.13" }),
+    ev("log", "sandbox", { provider: "e2b", vm, swept: [] }),
+    ev("log", "sandbox_commits", { vm, count: 1, head: "abc" }),
+    ev("log", "sandbox_refresh", { vm, refreshes: 1 }),
+    ev("log", "sandbox_commits", { vm, count: 2, head: "def" }),
+    ev("log", "sandbox_end", { provider: "e2b", vm, vm_seconds: 20, cpu_seconds: 4.6, deleted: true,
+                               uncommitted_patch: "", vcpus: 2, memory_gib: 4, vm_cost_usd: 0.0009 }),
+  ];
+  const box = sandbox(events);
+  expect(box).toMatchObject({ provider: "e2b", vm, python: "3.13", session_minutes: 60, commits: 3, refreshes: 1, error: null });
+  expect(box?.end?.cpu_seconds).toBe(4.6);
+  expect(box?.end?.vm_cost_usd).toBe(0.0009);
+});
+
+test("a sandbox run whose VM is still up has no end, and a failed delete says why", () => {
+  const vm = "plum";
+  const up = [ev("log", "sandbox", { provider: "vercel", vm, session_minutes: 45, python: "" })];
+  expect(sandbox(up)?.end).toBeNull();
+  expect(sandbox(up)?.python).toBeUndefined();
+  const ended = [...up,
+    ev("log", "sandbox_error", { vm, error: "delete failed: 500" }),
+    ev("log", "sandbox_end", { provider: "vercel", vm, vm_seconds: 9, deleted: false, uncommitted_patch: "" })];
+  expect(sandbox(ended)?.error).toBe("delete failed: 500");
+  expect(sandbox(ended)?.end?.deleted).toBe(false);
+});
+
+test("a run on the host has no sandbox, even with a phase named sandbox", () => {
+  expect(sandbox([ev("log", "sandbox", { message: "▶ 01 sandbox" })])).toBeNull();
+  expect(sandbox([])).toBeNull();
 });

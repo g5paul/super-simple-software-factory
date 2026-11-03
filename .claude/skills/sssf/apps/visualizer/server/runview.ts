@@ -7,7 +7,7 @@
  * Everything is derived from what the tracer already wrote: a run from before
  * these events existed simply has no caps and no ticket table.
  */
-import type { Phase, RunCaps, RunLanded, RunRebased, RunWorktree, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
+import type { Phase, RunCaps, RunLanded, RunRebased, RunSandbox, RunWorktree, SandboxEnd, SessionStatus, StopReason, TicketRow, TicketRun } from "../shared/types.ts";
 
 /** The event columns these functions read. */
 export interface RunEvent {
@@ -58,6 +58,42 @@ export function worktree(events: RunEvent[]): RunWorktree | null {
     : null;
   const rebase = latest(events, "worktree_rebased");
   return { ...p, landed, rebased: rebase ? payload<RunRebased>(rebase) : null };
+}
+
+/** The events runview.sandbox reads. */
+export const SANDBOX_EVENTS = ["sandbox", "sandbox_commits", "sandbox_refresh", "sandbox_end", "sandbox_error"];
+
+/**
+ * Where a `--sandbox` run worked, and how its VM ended. null for a run on the
+ * host. The `sandbox` phase also logs lines under that name, so the VM is the
+ * one whose payload names a provider and a VM.
+ */
+export function sandbox(events: RunEvent[]): RunSandbox | null {
+  type Opened = { provider?: string; vm?: string; python?: string; session_minutes?: number };
+  let opened: Opened | null = null;
+  for (const e of events) {
+    if (e.name !== "sandbox") continue;
+    const p = payload<Opened>(e);
+    if (p?.provider && p.vm && (!opened || p.session_minutes !== undefined)) opened = p;
+  }
+  if (!opened?.provider || !opened.vm) return null;
+  const mine = (e: RunEvent) => payload<{ vm?: string }>(e)?.vm === opened.vm;
+  const commits = events
+    .filter((e) => e.name === "sandbox_commits" && mine(e))
+    .reduce((sum, e) => sum + (payload<{ count?: number }>(e)?.count ?? 0), 0);
+  const refreshes = events.filter((e) => e.name === "sandbox_refresh" && mine(e)).length;
+  const endEvent = events.findLast((e) => e.name === "sandbox_end" && mine(e));
+  const errorEvent = events.findLast((e) => e.name === "sandbox_error" && mine(e));
+  return {
+    provider: opened.provider,
+    vm: opened.vm,
+    python: opened.python || undefined,
+    session_minutes: opened.session_minutes,
+    commits,
+    refreshes,
+    end: endEvent ? payload<SandboxEnd>(endEvent) : null,
+    error: errorEvent ? (payload<{ error?: string }>(errorEvent)?.error ?? null) : null,
+  };
 }
 
 /**

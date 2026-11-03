@@ -3,6 +3,7 @@ import type {
   DaySpend,
   LiveSpend,
   MachineDay,
+  SandboxUsage,
   Envelope,
   EventRow,
   EventsPage,
@@ -42,6 +43,7 @@ export async function fetchSession(adwId: string): Promise<SessionDetail> {
     stop: detail.stop ?? null,
     tickets: detail.tickets ?? null,
     worktree: detail.worktree ?? null,
+    sandbox: detail.sandbox ?? null,
     trial: detail.trial ?? null,
     usage: detail.usage ?? { read: 0, written: 0 },
     phases: detail.phases ?? [],
@@ -110,6 +112,11 @@ export function fetchLive(project: string): Promise<LiveSpend> {
 /** Every registered repo's last 24 hours against the machine's max_daily_cost in limits.yaml. */
 export function fetchMachineDay(): Promise<MachineDay> {
   return getJson('/api/machine/day') as Promise<MachineDay>
+}
+
+/** What remote VM runs in every registered repo used of each provider's free allowance. */
+export function fetchSandboxUsage(): Promise<SandboxUsage> {
+  return getJson('/api/machine/sandbox') as Promise<SandboxUsage>
 }
 
 /** A trial's attempts side by side, with the panel's scorecard once it ran. */

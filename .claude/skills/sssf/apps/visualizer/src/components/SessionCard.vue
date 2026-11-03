@@ -15,10 +15,11 @@ const emit = defineEmits<{ archived: [adwId: string] }>()
 const branchTitle = computed(() => {
   const w = props.session.worktree
   if (!w) return ''
-  if (w.landed?.state === 'merged') return `worked on its own branch (--worktree), merged into ${w.landed.into}`
-  if (w.landed?.state === 'discarded') return 'worked on its own branch (--worktree), since discarded'
+  const where = w.sandbox ? `worked on its own branch in a ${w.sandbox} VM (--sandbox)` : 'worked on its own branch (--worktree)'
+  if (w.landed?.state === 'merged') return `${where}, merged into ${w.landed.into}`
+  if (w.landed?.state === 'discarded') return `${where}, since discarded`
   const rebased = w.rebased?.kept ? `, rebased onto ${w.rebased.onto}` : ''
-  return `worked on its own branch (--worktree)${rebased}; \`${w.just ?? 'just'} merge ${props.session.adw_id}\` lands it on ${w.launch_branch}`
+  return `${where}${rebased}; \`${w.just ?? 'just'} merge ${props.session.adw_id}\` lands it on ${w.launch_branch}`
 })
 
 // The card is an <a>; the button lives inside it, so the click must not
@@ -259,7 +260,7 @@ const hiddenRowCount = computed(() =>
         class="branch dim"
         :class="{ gone: session.worktree.landed }"
         :title="branchTitle"
-      >{{ session.worktree.branch }}<template v-if="session.worktree.landed"> · {{ session.worktree.landed.state }}</template><template v-else-if="session.worktree.rebased?.kept"> · rebased</template></span>
+      ><template v-if="session.worktree.sandbox">{{ session.worktree.sandbox }} · </template>{{ session.worktree.branch }}<template v-if="session.worktree.landed"> · {{ session.worktree.landed.state }}</template><template v-else-if="session.worktree.rebased?.kept"> · rebased</template></span>
     </div>
   </a>
 </template>

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /**
- * Under the run strip: the branch a `--worktree` run worked on, spend against
+ * Under the run strip: the branch a `--worktree` run worked on, the VM a
+ * `--sandbox` run's work went to, spend against
  * the run's cap, why a failed run stopped, and for an adw_tickets run one row
  * per ticket. Each part draws only when the
  * run recorded what it needs, so an old run shows nothing here.
  */
 import { computed } from 'vue'
-import type { RunCaps, RunTrial, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
+import type { RunCaps, RunSandbox, RunTrial, RunWorktree, StopReason, TicketRun, TicketStatus } from '../lib/types'
 import { trialHref } from '../lib/router'
 import { fmtCost, rosterLabel } from '../lib/format'
 
@@ -16,6 +17,7 @@ const props = defineProps<{
   stop: StopReason | null
   tickets: TicketRun | null
   worktree: RunWorktree | null
+  sandbox?: RunSandbox | null
   trial?: RunTrial | null
 }>()
 const emit = defineEmits<{ select: [phaseId: string] }>()
@@ -29,6 +31,22 @@ const rebase = computed(() => {
   if (!r.kept) return `rebased onto ${r.onto}, but the checks failed (run ${r.checks}), so the branch is back at ${r.old}`
   return `rebased onto ${r.onto}, ${r.old} to ${r.new}, checks passed (run ${r.checks})`
 })
+
+// The VM's use, in the units its provider's allowance counts (remote-sandboxes decision 15).
+const vmUse = computed(() => {
+  const end = props.sandbox?.end
+  if (!end) return []
+  const parts = [`${fmtSeconds(end.vm_seconds)} VM`]
+  if (end.cpu_seconds !== undefined) parts.push(end.cpu_seconds === null ? 'CPU unknown' : `${end.cpu_seconds.toFixed(1)} s CPU`)
+  if (end.memory_gb_hours !== undefined) parts.push(`${end.memory_gb_hours.toFixed(3)} GB-h`)
+  if (end.vm_cost_usd !== undefined) parts.push(`~$${end.vm_cost_usd.toFixed(4)} VM`)
+  if (end.vcpus) parts.push(`${end.vcpus} vCPU, ${end.memory_gib ?? '?'} GiB`)
+  return parts
+})
+
+function fmtSeconds(s: number): string {
+  return s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
+}
 
 const cap = computed(() => props.caps?.max_run_cost ?? null)
 const spentPct = computed(() => (cap.value ? Math.min(100, ((props.cost ?? 0) / cap.value) * 100) : 0))
@@ -68,7 +86,7 @@ function open(phaseId: string | null) {
 </script>
 
 <template>
-  <div v-if="worktree || cap || stop || tickets || trial" class="run-summary">
+  <div v-if="worktree || sandbox || cap || stop || tickets || trial" class="run-summary">
     <div v-if="trial" class="branch">
       <span v-if="trial.role === 'attempt'">attempt with roster <code>{{ rosterLabel(trial.roster, trial.coding_agent) }}</code> in</span>
       <span v-else>the panel of</span>
@@ -83,6 +101,16 @@ function open(phaseId: string | null) {
       </span>
       <span v-else-if="worktree.landed?.state === 'discarded'" class="landed discarded">· discarded</span>
       <span v-if="rebase" class="rebase" :class="{ put_back: !worktree.rebased?.kept }">· {{ rebase }}</span>
+    </div>
+
+    <div v-if="sandbox" class="branch vm" :title="sandbox.python ? `UV_PYTHON ${sandbox.python}` : ''">
+      <span>in {{ sandbox.provider }} VM <code>{{ sandbox.vm }}</code></span>
+      <span v-if="!sandbox.end" class="dim">· up now</span>
+      <span v-for="part in vmUse" :key="part" class="dim">· {{ part }}</span>
+      <span class="dim">· {{ sandbox.commits }} {{ sandbox.commits === 1 ? 'commit' : 'commits' }} back</span>
+      <span v-if="sandbox.refreshes" class="dim">· {{ sandbox.refreshes }} {{ sandbox.refreshes === 1 ? 'refresh' : 'refreshes' }}</span>
+      <span v-if="sandbox.end && !sandbox.end.deleted" class="landed discarded">· not deleted: {{ sandbox.error ?? 'see the trace' }}</span>
+      <span v-if="sandbox.end?.uncommitted_patch" class="rebase put_back" :title="sandbox.end.uncommitted_patch">· uncommitted work saved as a patch, not applied</span>
     </div>
 
     <div v-if="cap" class="budget" :title="`max_run_cost ${fmtCost(cap)}`">

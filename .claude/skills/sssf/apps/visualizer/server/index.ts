@@ -19,6 +19,7 @@ import { Account, type PiCallAt } from "./account.ts";
 import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
 import { liveSpend, readLiveCap } from "./live.ts";
 import { machineDay, readMachineCap } from "./machine.ts";
+import { sandboxUsage } from "./sandbox.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import { leaderboard, rosterSha, trialView } from "./trials.ts";
 import type {
@@ -28,6 +29,7 @@ import type {
   DaySpend,
   LiveSpend,
   MachineDay,
+  SandboxUsage,
   HealthResponse,
   PiLimitHit,
   ProjectsResponse,
@@ -263,6 +265,12 @@ const server = listen((port) => Bun.serve({
       const repos = projects.everyProject().map((p) => ({ name: p.name, calls: projects.db(p)?.dayCalls(since) ?? [] }));
       const { cap, error } = readMachineCap();
       return json(machineDay(repos, cap, error, now) satisfies MachineDay);
+    }),
+
+    // What remote VM runs in every registered repo used of each provider's free allowance.
+    "/api/machine/sandbox": safely(() => {
+      const repos = projects.everyProject().map((p) => ({ name: p.name, ends: projects.db(p)?.sandboxEnds() ?? [] }));
+      return json(sandboxUsage(repos, Date.now()) satisfies SandboxUsage);
     }),
 
     // What the live runs spend together against repo.yaml's max_live_cost.

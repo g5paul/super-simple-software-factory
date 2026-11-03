@@ -5,6 +5,7 @@ import { fetchAccount } from '../lib/api'
 import { fmtCost, fmtDate, fmtTokens } from '../lib/format'
 import { modelName } from '../lib/models'
 import MachineGauge from './MachineGauge.vue'
+import SandboxGauge from './SandboxGauge.vue'
 
 const usage = shallowRef<AccountUsage | null>(null)
 const error = ref<string | null>(null)
@@ -94,6 +95,7 @@ function share(row: SpendRow, total: number): string {
     </div>
 
     <MachineGauge />
+    <SandboxGauge />
 
     <div v-if="usage" class="spend">
       <div class="spend-head">

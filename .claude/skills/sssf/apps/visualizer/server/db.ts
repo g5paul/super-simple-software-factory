@@ -14,7 +14,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { caps, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
+import { SANDBOX_EVENTS, caps, sandbox, stopReason, ticketRun, worktree, type RunEvent } from "./runview.ts";
 import { runTrial, type AttemptRow } from "./trials.ts";
 import type {
   AgentSession,
@@ -387,6 +387,7 @@ export class SssfDb {
       stop: stopReason(events, phases, session.status),
       tickets: ticketRun(events, phases),
       worktree: worktree(events),
+      sandbox: sandbox(events),
       trial: runTrial(events),
       usage: this.usage(adwId),
       phases,
@@ -413,13 +414,23 @@ export class SssfDb {
     return byAdw;
   }
 
+  /** Every remote VM's end, for the allowance gauge: when, and what it used. */
+  sandboxEnds(): { at: string; payload_json: string | null }[] {
+    return this.db
+      .query<{ at: string; payload_json: string | null }, []>(
+        `SELECT started_at AS at, payload_json FROM events WHERE name = 'sandbox_end' ORDER BY started_at`,
+      )
+      .all();
+  }
+
   /** The few events runview reads: caps, stops, the worktree, the ticket list, and agent costs. */
   private runEvents(adwId: string): RunEvent[] {
     return this.db
       .query<RunEvent, [string]>(
         `SELECT type, name, phase_id, payload_json FROM events
           WHERE adw_id = ? AND (type IN ('agent_end', 'error')
-                                OR name IN ('run_caps', 'tickets', 'trial', 'trial_panel', ${WORKTREE_EVENTS}))
+                                OR name IN ('run_caps', 'tickets', 'trial', 'trial_panel', ${WORKTREE_EVENTS},
+                                            ${SANDBOX_EVENTS.map((n) => `'${n}'`).join(", ")}))
           ORDER BY rowid`,
       )
       .all(adwId);

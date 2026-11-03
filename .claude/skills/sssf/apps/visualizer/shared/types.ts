@@ -270,10 +270,68 @@ export interface RunWorktree {
   launch_dirty: boolean;
   /** How this repo runs SSSF's recipes, `just` or `just sssf`. Absent on runs from before it was recorded. */
   just?: string;
+  /** The provider whose VM did the run's work (`--sandbox`). Absent for a run on the host. */
+  sandbox?: string;
   /** How the branch ended: merged, or discarded. null while it waits. */
   landed: RunLanded | null;
   /** The latest `just rebase` of the branch. null if it was never rebased. */
   rebased: RunRebased | null;
+}
+
+/** How a `--sandbox` run's VM ended, from its `sandbox_end` event. */
+export interface SandboxEnd {
+  vm_seconds: number;
+  /** Busy CPU over all vCPUs, from the VM's /proc/stat. null when the reading failed; absent on runs from before it was measured. */
+  cpu_seconds?: number | null;
+  deleted: boolean;
+  /** Where uncommitted work in the VM was saved, not applied. "" when there was none. */
+  uncommitted_patch: string;
+  vcpus?: number;
+  memory_gib?: number;
+  /** E2B: the VM's size times its seconds, at E2B's rates. */
+  vm_cost_usd?: number;
+  /** Vercel: the memory the VM held, which Hobby counts busy or idle. */
+  memory_gb_hours?: number;
+}
+
+/** Where a `--sandbox` run did its work (remote-sandboxes decision 15). */
+export interface RunSandbox {
+  provider: string;
+  vm: string;
+  /** The Python the host's uv picked, passed to the VM as UV_PYTHON. */
+  python?: string;
+  session_minutes?: number;
+  /** Commits brought back to the branch, over every sandbox_commits event. */
+  commits: number;
+  /** Times the VM was stopped and resumed for a fresh session. */
+  refreshes: number;
+  /** null while the VM is up. */
+  end: SandboxEnd | null;
+  /** The latest sandbox_error, such as a delete that failed. */
+  error: string | null;
+}
+
+/** One provider's free allowance, as SSSF's runs used it, over every registered repo. */
+export interface SandboxAllowance {
+  provider: "vercel" | "e2b";
+  /** Vercel's allowance resets monthly, so its window is 30 days; E2B's credit is all time, null. */
+  window_days: number | null;
+  runs: number;
+  vm_seconds: number;
+  cpu_seconds: number;
+  /** Runs with no CPU reading. */
+  cpu_unknown: number;
+  /** Vercel: memory GB-hours against its monthly allowance. */
+  gb_hours: number;
+  /** E2B: dollars of VM time against its one-time credit. */
+  cost_usd: number;
+  /** The allowance, from the provider's pricing page; not a setting. */
+  allowed: { cpu_hours?: number; gb_hours?: number; creations?: number; credit_usd?: number };
+  repos: { name: string; runs: number }[];
+}
+
+export interface SandboxUsage {
+  providers: SandboxAllowance[];
 }
 
 /** From the `worktree_rebased` event `just rebase` logs, kept or not. */
@@ -349,6 +407,8 @@ export interface SessionDetail {
   tickets: TicketRun | null;
   /** null unless the run worked on its own branch (`--worktree`). */
   worktree: RunWorktree | null;
+  /** null unless the run's work went to a remote VM (`--sandbox`). */
+  sandbox: RunSandbox | null;
   /** null unless the run is an attempt of a trial, or its panel. */
   trial: RunTrial | null;
   /** Derived from agent_end payloads, so historical runs have it too. */

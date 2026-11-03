@@ -82,7 +82,7 @@ What step 2 settled that the decisions left open, or changed:
 - **The SDK isn't in the chains' headers.** `--sandbox vercel` starts the chain again once under `uv run --with vercel-sandbox==0.10.0`, so a run without it never fetches the SDK.
 - **A refresh is a stop.** The VM is persistent, and the next call resumes it with its files in a new session. No command asks for more than half a session, or a short session would stop the VM before every command.
 - **A VM's snapshots go with it.** Each stop saves an automatic snapshot of about 800MB, which Vercel keeps after the VM is deleted unless asked. `destroy(delete_orphan_snapshots=True)` deletes them, at the end of a run and in the sweep.
-- **Not built yet:** the dashboard's sandbox view (decision 15). The trace already holds what the view needs, in the `sandbox`, `sandbox_commits`, `sandbox_refresh` and `sandbox_end` events.
+- **The dashboard's sandbox view (decision 15)** was built after both providers; see "As built: the dashboard".
 
 ## As built: the repo default
 
@@ -98,6 +98,15 @@ Decision 4's `sandbox:` setting, built after both providers:
 - **Vercel's `sandbox_end` adds `memory_gb_hours`,** from the VM's size and seconds. Hobby counts memory busy or idle.
 - **`just sandbox-usage` adds up traces.** An allowance belongs to a team, and each repo keeps its own trace, so it takes other repos' traces too. It counts Vercel over the last 30 days and E2B over all time, against the Hobby numbers in `sandbox_usage.py`.
 - **First numbers.** A full `adw_simple_sdlc` on Vercel used 12.7 CPU seconds in 130 VM seconds, about 10% of one vCPU, because the agents spend most of a run waiting on the model. At that rate Vercel's 5 hours covers well over a thousand runs a month, and its 420 GB-hours about 2,900. A repo whose tests take longer will use more.
+
+## As built: the dashboard
+
+Decision 15, built after the usage numbers, from events the trace already held:
+
+- **The run page has a VM line** under the branch: the provider and VM ID, VM time, CPU seconds, Vercel's GB-hours or E2B's estimated cost, the VM's size, and the commits brought back and refreshes. It says when the VM is still up, when it wasn't deleted and why, and when uncommitted work was saved as a patch. Hovering shows the Python the VM was given.
+- **A run card names its provider** before its branch, from the `worktree` event, which records it.
+- **The account panel has an allowance gauge** for each provider a registered repo has used: Vercel's CPU, memory and creations over 30 days, and E2B's credit over all time, with each repo's run count. It adds up every registered repo, because an allowance belongs to the account, and it agrees with `just sandbox-usage`, which uses the same Hobby numbers. `just obs-all` shows it; `just obs` shows one repo's runs.
+- **No process tags.** Decision 15 asked for each process to be tagged with its VM, but the dashboard has no process list: agents are lanes, and one run has one VM, so the run's VM line covers it.
 
 ## As built: E2B
 
@@ -116,11 +125,12 @@ Step 3 kept everything above and settled this:
 ## Open
 
 - **A ChatGPT roster in the VM.** It needs pi's OAuth sign-in in the VM, and a decision on how it gets there.
-- **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in.
-- **VM cost in the caps.** Waits for real numbers, per decision 13.
+- **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
+- **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on yt-summarizer), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.
+- **`--sandbox` for tickets and trials.** Waits for batches of runs, where VMs help most: no local CPU, and no worktrees sharing ports or caches.
 - **Rebase checks off the host.** Per decision 11.
 - **Vercel's Hobby limits beyond the allowance.** Resuming is rate-limited to 40 vCPUs a minute, and snapshot storage is capped; past the cap, Vercel refuses every new VM until the month resets or snapshots are deleted. Both were hit in the proof, by a bug since fixed. How far a day of real runs is from either is not known.
-- **Not yet known:** which exception Vercel's SDK raises when a session ends mid-stream.
+- **Not yet known:** which exception Vercel's SDK raises when a session ends mid-stream. The trace will show it when it happens; nothing to build until then.
 
 ## Log
 
@@ -144,3 +154,4 @@ Step 3 kept everything above and settled this:
 | 2026-11-02 | yt-summarizer | first project run on E2B: 7337d8da, `yts --usage` by model and effort | 15 of 15 phases, $1.46, 3 commits back, 333 VM seconds, $0.0153 VM estimate. The VM's Python 3.11 against the host's 3.13 cost a fix round; fixed by passing the host's choice as `UV_PYTHON` |
 | 2026-11-02 | sssf-sandbox | repo.yaml `sandbox: e2b`, no flag: build_test run 9435413c | went to E2B VM i02iyvgotfev649b32sfx on Python 3.13, 5 of 5 phases, $0.04, 21.9 VM seconds. The chain doesn't commit, so the work came back as the patch. Discarded, and the setting put back to `none` |
 | 2026-11-03 | sssf-sandbox | `cpu_seconds` on both providers: build_test b9bc57f9 on Vercel and c23224a7 on E2B, then simple_sdlc 3753ce47 on Vercel | b9bc57f9 5.0 CPU seconds in 18.4 VM seconds, 0.02 GB-hours; c23224a7 4.6 in 20.0, $0.0009; 3753ce47 12 of 12 phases, $0.45, 12.7 in 129.5, 0.144 GB-hours. All three discarded. `just sandbox-usage` over sssf-sandbox's and yt-summarizer's traces added them up |
+| 2026-11-03 | sssf-sandbox and every registered repo | the dashboard's sandbox view, on a test server on port 4691 | run 3753ce47's page showed its Vercel VM, 2m 10s, 12.7 s CPU, 0.144 GB-h, 3 commits back; cards named vercel and e2b; the gauge matched `just sandbox-usage`: Vercel 8 runs, 1.23 GB-h; E2B 9 runs, $0.0542, sssf-sandbox 7 and yt-summarizer 2. Checked at desktop and phone width |

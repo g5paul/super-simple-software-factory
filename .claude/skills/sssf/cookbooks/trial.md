@@ -35,7 +35,7 @@ It refuses, and starts nothing, when:
 - a roster isn't signed in, or doesn't load: report the roster and the reason.
 - there are fewer free worktree slots than attempts: `max_worktree_runs` in `adws/adw_sssf_config/repo.yaml` is 2 by default, so a three-roster trial needs it raised. That is the engineer's call.
 - a cost cap is reached: report the stop's message, which says when it clears.
-- the attempts would run in a remote VM, from `--sandbox` or repo.yaml's `sandbox:`, and a roster runs pi agents, which can't yet. The message names `--sandbox none`. Pass it on; keeping the attempts on this machine is the engineer's call.
+- the attempts would run in a remote VM, from `--sandbox` or repo.yaml's `sandbox:`, and a roster runs pi agents that can't go there: on a provider other than `openai/`, or loading `harness_engineering` extensions. The message names `--sandbox none`. Pass it on; keeping the attempts on this machine is the engineer's call.
 
 With `--sandbox vercel` or `--sandbox e2b`, or `sandbox:` set in repo.yaml, every attempt works in its own VM, and its first line says so. Put the flag before the request: `just trial --sandbox e2b "<request>" main main`. Each attempt reports its VM as any VM run does ([run_adw.md](run_adw.md), section "In a remote VM"). The panel runs on this machine.
 

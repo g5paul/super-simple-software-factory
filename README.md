@@ -519,7 +519,7 @@ A run works on your current branch unless you ask for one of its own. For real w
 
 Known gaps in this fork, none of which blocks a run. Each design doc in [`docs/designs/`](docs/designs/) keeps its own list. Open items in the repos running SSSF are in [`docs/projects.md`](docs/projects.md).
 
-- Remote sandboxes: `--sandbox vercel` and `--sandbox e2b` are built and proved in sssf-sandbox. repo.yaml's `sandbox:` sets a repo's default, and the dashboard shows each run's VM and each provider's allowance. `just tickets` and `just trial` take `--sandbox` too. A ChatGPT roster in the VM and a narrower VM network wait. See [`docs/designs/remote-sandboxes.md`](docs/designs/remote-sandboxes.md).
+- Remote sandboxes: `--sandbox vercel` and `--sandbox e2b` are built and proved in sssf-sandbox. repo.yaml's `sandbox:` sets a repo's default, and the dashboard shows each run's VM and each provider's allowance. `just tickets` and `just trial` take `--sandbox` too. A ChatGPT roster runs there too, and each VM's tool versions are checked before any agent starts. pi extensions in a VM and a narrower VM network wait. See [`docs/designs/remote-sandboxes.md`](docs/designs/remote-sandboxes.md).
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 

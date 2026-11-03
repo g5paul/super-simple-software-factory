@@ -346,7 +346,7 @@ def test_the_prefix_hands_on_to_an_operators_own(tmp_path):
 
 
 def test_an_anchored_pattern_finds_the_command_in_a_line_of_another_shape():
-    # From yt-summarizer: `gh` follows `eval '`, so the whole line alone misses it.
+    # From a project's session: `gh` follows `eval '`, so the whole line alone misses it.
     anchored = json.dumps([{"rule": "No gh writes.", "forbid": [r"(^|[;&|(`]\s*)gh\s+pr\s+create\b"]}])
     line = f"source snap.sh; eval {shlex.quote('gh pr create --fill')}; pwd -P"
     assert prefix(line, anchored).returncode == 126

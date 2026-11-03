@@ -1,7 +1,7 @@
 """A quality block still on the placeholder echo is not counted as a pass.
 
 quality.py ships every block as `echo PLACEHOLDER ...`, which exits 0. In
-yt-summarizer the build block was never wired up, and every quality run still
+one project the build block was never wired up, and every quality run still
 reported 5/5, a check that never ran. The tally now names it.
 
 Run from the skill root:

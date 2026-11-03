@@ -10,8 +10,9 @@
 # It needs gitleaks 8.30.1 or later on PATH: https://github.com/gitleaks/gitleaks
 # More in SSSF's cookbooks/install.md, "Secret scan before every push".
 #
-# It also refuses a push whose commits name a private project, when the
-# clone lists them in .git/sssf-private-names, one per line, # for comments.
+# It also refuses a push whose commits name a private project, in a message
+# or an added line, when the
+# clone lists it in .git/sssf-private-names, one per line, # for comments.
 # The list lives in .git, so it's never committed. Without it, nothing is
 # checked. Case is ignored.
 set -uo pipefail
@@ -34,7 +35,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$remote_sha" = "$zero" ]; then range="$local_sha --not --remotes=$1"; else range="$remote_sha..$local_sha"; fi
   if [ -n "$names" ]; then
     for commit in $(git rev-list $range); do
-      hits="$(git show --format='%B' --patch "$commit" | grep -o -i -F -f <(printf '%s\n' "$names") | sort -fu | paste -sd, -)"
+      # The message and the lines it adds. A removed line doesn't send the
+      # name anywhere new, and taking a name out must be allowed.
+      hits="$({ git show -s --format='%B' "$commit"; git show --format= --patch "$commit" | grep '^+'; } | grep -o -i -F -f <(printf '%s\n' "$names") | sort -fu | paste -sd, -)"
       if [ -n "$hits" ]; then
         echo "pre-push: commit $(git rev-parse --short "$commit") names a private project ($hits), in its message or its changes, so $local_ref wasn't pushed to $1. The names are listed in $names_file." >&2
         found=1

@@ -1,6 +1,6 @@
 # Design: run the operator session in a container
 
-Status: built and shipped as an opt-in install option (`install.py --container`, fdbeb08). In real use in yt-summarizer since 2026-10-30. This file tracks the experiment: what was decided, what was tested, and what's still open. Add to the log as it moves.
+Status: built and shipped as an opt-in install option (`install.py --container`, fdbeb08). In real use in a project since 2026-10-30. This file tracks the experiment: what was decided, what was tested, and what's still open. Add to the log as it moves.
 
 ## Why
 
@@ -43,15 +43,15 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 | 2026-10-30 | sssf-sandbox `exp/container-operator` | run 1d56f792 after the `CLAUDE_ENV_FILE` fix | success |
 | 2026-10-30 | hub | `--container` install option, fdbeb08 | shipped |
 | 2026-10-30 | sssf-sandbox `exp/container-option` | reinstalled through `--container`, existing token, run 888c6d27 | success, visible in the host trace and dashboard |
-| 2026-10-30 | yt-summarizer `sssf-run` | `--container` setup through the skill, aa2140b, quality 7f07c83d | set up; token and login checks passed inside |
-| 2026-10-30 | yt-summarizer `sssf-run` | first real run from the container, 47caf9b9 (`--brief` option) | success after 3 failed test rounds: no C compiler to build `brotli`, and no tzdata, so named time zones fell back to UTC. The builder rewrote two existing tests to POSIX `TZ` strings to pass. Launch, host trace and dashboard, commit author, and file ownership were all right |
+| 2026-10-30 | an unlisted project | `--container` setup through the skill, aa2140b, quality 7f07c83d | set up; token and login checks passed inside |
+| 2026-10-30 | an unlisted project | first real run from the container, 47caf9b9 (`--brief` option) | success after 3 failed test rounds: no C compiler to build `brotli`, and no tzdata, so named time zones fell back to UTC. The builder rewrote two existing tests to POSIX `TZ` strings to pass. Launch, host trace and dashboard, commit author, and file ownership were all right |
 | 2026-10-30 | hub | image gets build-essential, python3-dev and tzdata; container doc gaps closed, bbcff04 | shipped |
-| 2026-10-30 | yt-summarizer `sssf-run` | rebuilt image, run 650cbab9 (`--brief` shows progress) | success: all 5 checks passed on the first round, 10 phases, about 3 minutes. Author and file ownership right |
+| 2026-10-30 | an unlisted project | rebuilt image, run 650cbab9 (`--brief` shows progress) | success: all 5 checks passed on the first round, 10 phases, about 3 minutes. Author and file ownership right |
 | 2026-10-30 | sssf-sandbox `master` | worktree runs from the container: 84f61760, then d8fc85aa | the first died on a closed output pipe, not the container; the second merged. See [branch-per-run.md](branch-per-run.md) |
 
 ## Open
 
-- **First real use: done.** yt-summarizer runs from the container. Its first run exposed the missing compiler and tzdata, and the doc gaps its setup found are closed. Its second run, after the fix, passed every check on the first round.
+- **First real use: done.** A project runs from the container. Its first run exposed the missing compiler and tzdata, and the doc gaps its setup found are closed. Its second run, after the fix, passed every check on the first round.
 - **Branch per run and a merge back: done.** Built to [branch-per-run.md](branch-per-run.md) on 2026-10-30, proven in sssf-sandbox on the host and in this container (run d8fc85aa), and rolled out to both projects. The sandbox seam it left open is now built; see "The sandbox seam" below.
 - **Sandbox branches: done.** sssf-sandbox is on its trunk, `master`, with no other branches.
 - **Parallel runs in the container: done.** Built to [parallel-worktree-runs.md](parallel-worktree-runs.md). Each worktree run in the container gets its own project environment, removed on merge or discard, and `run.sh` gives the container a fixed hostname, so the trace tells its processes from the host's. Proven in sssf-sandbox (pr3conso and pr3title together, then pr4contr beside a host run). Each environment's editable install points at its own worktree, checked in this image with a scratch package.

@@ -27,7 +27,7 @@ If both answers point to one task, use `adw_simple_sdlc`, or a shorter chain if 
 
 ## What each costs
 
-These figures come from one repo, yt-summarizer, so treat them as a rough guide. Its `adw_simple_sdlc` runs cost $0.55 to $2.34, most of them $1.20 to $1.70. Its one ticket feature, six tickets, cost $3.52 over two runs. A ticket feature also costs the engineer's time up front: the grilling, approving the spec, and approving the breakdown into tickets.
+These figures come from one project repo, so treat them as a rough guide. Its `adw_simple_sdlc` runs cost $0.55 to $2.34, most of them $1.20 to $1.70. Its one ticket feature, six tickets, cost $3.52 over two runs. A ticket feature also costs the engineer's time up front: the grilling, approving the spec, and approving the breakdown into tickets.
 
 ## What each leaves behind
 

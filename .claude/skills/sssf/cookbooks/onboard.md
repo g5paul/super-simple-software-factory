@@ -1,6 +1,6 @@
 # Onboard a repo
 
-Bring SSSF into a new project, from "should we?" to the first reviewed run. This cookbook is for the Claude session that works in the project repo. [install.md](install.md) covers the install itself. This page wraps it in the steps that came up the first time SSSF went into a real repo (yt-summarizer). Each one cost a fix when it was missed.
+Bring SSSF into a new project, from "should we?" to the first reviewed run. This cookbook is for the Claude session that works in the project repo. [install.md](install.md) covers the install itself. This page wraps it in the steps that came up the first time SSSF went into a real repo. Each one cost a fix when it was missed.
 
 ## Two sessions
 
@@ -48,7 +48,7 @@ Ask the engineer one question here: should the operator session run in a contain
 The verify phase runs every block in `adws/adw_modules/quality.py`: test, lint, format, typecheck, and build. Each starts as a placeholder that passes, so until you fill them in, a run checks nothing.
 
 1. Find the commands CI runs: `.github/workflows/`, a Makefile, `pyproject.toml`, or `package.json`.
-2. Put each one in its block as an argv list, with bare binary names. Point lint and format at the project's own paths (for example `yt_summarizer` and `tests`), not at `.`. Point the build's output at the block's `output_dir`, for example `uv build --out-dir <output_dir>`, so a run writes its build into the session folder and not the repo.
+2. Put each one in its block as an argv list, with bare binary names. Point lint and format at the project's own paths (for example `my_app` and `tests`), not at `.`. Point the build's output at the block's `output_dir`, for example `uv build --out-dir <output_dir>`, so a run writes its build into the session folder and not the repo.
 3. Leave a block as its placeholder only when the project has no such check, and say so in `docs/sssf.md`.
    If a block needs files the project did not have, such as a `tsconfig.json` added so typecheck can run, commit them with the onboarding and list them in `docs/sssf.md`. They are part of the install from then on, though SSSF does not stamp or update them.
 4. Run `uv run adws/adw_quality.py "check the tree"`. Every block must pass.

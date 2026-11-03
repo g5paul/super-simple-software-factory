@@ -70,7 +70,7 @@ Every case runs in sssf-sandbox before any project gets it:
 6. A second worktree run while one is alive, which refuses.
 7. A resume with `--adw-id`.
 
-Then yt-summarizer and pi-agent-observability get it through a normal SSSF update.
+Then the project repos get it through a normal SSSF update.
 
 ## Log
 
@@ -89,9 +89,9 @@ Then yt-summarizer and pi-agent-observability get it through a normal SSSF updat
 | 2026-10-30 | sssf-sandbox | case 2 again, container run d8fc85aa | success: the operator chose `adw_simple_sdlc --worktree` from the request's wording, logged to a file, and merged when told. Its prompt file in the checkout blocked the first merge, so run_adw.md now says to keep prompt files out (24db188) |
 | 2026-10-30 | hub | merged and pushed, 24db188 | shipped |
 | 2026-10-30 | hub | `just kill`, 7a582c3 and ea718ae | shipped. The starter justfile never had it, though run_adw.md named it. Live test c716a01b hung 10s: the chain can't exit while its agent runs, so kill now stops the agents once the chain has closed the run (9d83c72f: 0.8s) |
-| 2026-10-30 | yt-summarizer, pi-agent-observability | SSSF update to ea718ae | updated; quality 5/5 in both |
+| 2026-10-30 | an unlisted project, pi-agent-observability | SSSF update to ea718ae | updated; quality 5/5 in both |
 | 2026-10-30 | hub | one `# sssf runtime` block in `.gitignore`, 836ff09 | shipped; each update had been adding its own header |
 | 2026-10-30 | hub | `--ff-only` and `SSSF_MERGE_FF_ONLY`, 4523b6c; then `repo.yaml` with `merge: ff_only`, 9191931 | shipped. pi-agent-observability only takes fast-forwards, and a rule in the untracked `.env` never reaches a fresh clone. Live run ff8d0878 refused under `ff_only` and merged with the `.env` override set to 0 |
-| 2026-10-30 | yt-summarizer, pi-agent-observability | SSSF update to 9191931 | updated; pi-agent-observability keeps `merge: ff_only` in `repo.yaml` (2ad5fd6) |
+| 2026-10-30 | an unlisted project, pi-agent-observability | SSSF update to 9191931 | updated; pi-agent-observability keeps `merge: ff_only` in `repo.yaml` (2ad5fd6) |
 | 2026-10-30 | hub | the dashboard shows a worktree run's branch, on its card and in the run view | built; checked against a copy of the sandbox trace: 4 recent runs show a branch, older plain runs show none |
 | 2026-10-30 | sssf-sandbox | merge and discard logged to the trace, ee155e9; run 3a7cae7f merged, run 3dc529bf discarded | both events recorded; the dashboard shows "merged" and "discarded" on the cards, and the merge's commit in the run view |

@@ -212,3 +212,12 @@ def test_a_push_without_the_names_passes(pushed):
     names(pushed, "secret-ledger\nother-thing\n")
     commit(pushed, "a.txt", "a public change\n")
     assert push(pushed).returncode == 0
+
+
+@pytest.mark.skipif(not GITLEAKS, reason="gitleaks isn't installed")
+def test_taking_a_name_out_passes(pushed):
+    commit(pushed, "notes.md", "Installed SSSF in secret-ledger.\nOther notes.\n")
+    git(pushed, "update-ref", "refs/remotes/origin/main", "HEAD")   # as if pushed before the name was listed
+    names(pushed, "secret-ledger\n")
+    commit(pushed, "notes.md", "Other notes.\n")
+    assert push(pushed).returncode == 0

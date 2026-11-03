@@ -49,14 +49,14 @@ def test_subagent_sections_apply_only_with_the_tools():
 
 def test_builder_leaves_the_spec_and_records_alone():
     # Ruff 0.16 formats Python blocks inside Markdown. A builder that ran
-    # `ruff format .` rewrote a committed spec in a yt-summarizer run.
+    # `ruff format .` rewrote a committed spec in a project's run.
     text = system("builder")
     assert "The spec in `specs/` is read-only" in text
     assert "never on `specs/` or `app_docs/`" in text
 
 
 # The write-ups in app_docs/ are the record of changes already shipped. In
-# yt-summarizer's run 1f8b7211 the planner told the builder to edit an older
+# a project's run the planner told the builder to edit an older
 # one, the builder declined because app_docs/ is the documenter's, and the
 # reviewer blocked twice on it. Every agent has to agree on who owns them.
 

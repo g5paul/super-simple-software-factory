@@ -1,7 +1,7 @@
 """The diff a documenter reads is the project's change, never SSSF's own files.
 
 Updating SSSF on a branch is routine, so a diff against main often carries
-adws/ and .claude/skills/sssf/. On yt-summarizer the documenter then wrote a
+adws/ and .claude/skills/sssf/. In one project the documenter then wrote a
 whole section on SSSF internals into the project's write-up (957a1d8f).
 
 Run from the skill root:

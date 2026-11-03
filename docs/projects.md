@@ -4,14 +4,13 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 | Repo | SSSF branch | Skill | Agent rules |
 |---|---|---|---|
-| yt-summarizer | `sssf-run` (`main` follows it on the engineer's word; at f911645, two commits behind) | 47b7621 (e9cf348) | No push and no GitHub writes. A `forbid` rule with `on_match: refuse` since cd9d356, and the tracked `pre-push` hook, which refuses when `SSSF_ADW_ID` is set |
 | pi-agent-observability | `main` | 47b7621 (6a19381). Its roster loads the obs extension, so `--sandbox` still refuses it | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
 | fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 47b7621 (97385d6) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
 | sssf-sandbox | `master` | 3c8ec97 (0fd421f) | The hub's own test bed. None |
 
-## Private projects
+## Unlisted projects
 
-A private repo's install is recorded in a separate private repo, `sssf-private`, never here. In this repo's files and commit messages, a private project is "a private project", fixes it turns up included: their tests and comments describe the bug without naming it. Each private name goes in the hub clone's `.git/sssf-private-names`, and the pre-push hook refuses a push that names one ([secret-scan.md](secret-scan.md)). A private install keeps `sandbox: none`, so its code goes to a remote VM only when the engineer asks.
+This page lists only the repos the engineer chose to name in public. Unlisted is the default for a new install, for any repo the engineer would rather not have named, public or private on GitHub. An unlisted repo's install is recorded in a separate private repo, `sssf-private`, never here. In this repo's files and commit messages it's "an unlisted project", fixes it turns up included: their tests and comments describe the bug without naming it. Each unlisted name goes in the hub clone's `.git/sssf-private-names`, and the pre-push hook refuses a push whose messages or added lines name one ([secret-scan.md](secret-scan.md)). An install that's private on GitHub also keeps `sandbox: none`, so its code goes to a remote VM only when the engineer asks.
 
 ## Open items
 
@@ -31,7 +30,6 @@ Each repo has the hub's gitleaks hook in `.githooks/pre-push` ([secret-scan.md](
 
 | Repo | Hook commit | Switched on |
 |---|---|---|
-| yt-summarizer | f911645, on `main` too; the skill's template since dec0d13 | yes |
 | pi-agent-observability | d5d958a on `main`; the skill's template since a6f1e3f | yes |
 | fusion-harness | 54ac5d8 on `main`, merged into `sssf-run` as beaca9b. Its own, kept: `sssf-run`'s copy gained the agent refusal in 1cc5d81 and the template's wording in 97385d6, `main`'s didn't | yes |
 | sssf-sandbox | dfc09a0, stamped by the installer; it has no remote | no |
@@ -40,5 +38,5 @@ Each repo has the hub's gitleaks hook in `.githooks/pre-push` ([secret-scan.md](
 
 The hub checks these read-only, from the trace and the raw logs, when each run happens.
 
-- **yt-summarizer's next Claude Code run: the output count.** It's the first project run since 102217c. Each agent's `raw_output.jsonl` should hold a `message_delta` per message and no text deltas. Priced from the raw log the way a killed call is priced, each finished call should match its `total_cost_usd`. Sandbox runs 28f436d5 and b2367eda matched to the cent.
+- **The next Claude Code run in a project: the output count.** The first since 102217c. Each agent's `raw_output.jsonl` should hold a `message_delta` per message and no text deltas. Priced from the raw log the way a killed call is priced, each finished call should match its `total_cost_usd`. Sandbox runs 28f436d5 and b2367eda matched to the cent.
 - **The first refusal in a project.** That can happen in fusion-harness, whose recipe rule refuses on Claude Code and pi agents alike, or in pi-agent-observability, if its engineer adopts a refuse rule. The trace should show a `rule_refused` event, the call's result should start "SSSF refused this command", and nothing it named should have run. Sandbox runs 6f9929be and f893de05 showed both on pi. On Claude Code, 2c3b149b on this machine and 12c1f748 in a Vercel VM did too, the result starting `Exit code 126` first; in 12c1f748 the planner's own Bash calls ran through the same prefix as normal.

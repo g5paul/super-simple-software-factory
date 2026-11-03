@@ -47,11 +47,11 @@ def test_the_sample_sits_beside_the_registry(private_registry):
 
 
 def test_record_then_latest(private_registry):
-    account.record(info(0.42), at="2026-10-29T16:00:00Z", source="yt-summarizer")
+    account.record(info(0.42), at="2026-10-29T16:00:00Z", source="app-one")
     sample = account.latest()
     assert sample["info"]["unifiedWindows"]["five_hour"]["utilization"] == 0.42
     assert sample["recorded_at"] == "2026-10-29T16:00:00Z"
-    assert sample["source"] == "yt-summarizer"
+    assert sample["source"] == "app-one"
 
 
 def test_an_older_sample_never_replaces_a_newer_one(private_registry):

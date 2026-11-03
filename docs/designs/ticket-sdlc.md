@@ -1,6 +1,6 @@
 # Design: a ticket SDLC for SSSF
 
-Status: built. Settled in a grilling session on 2026-10-29. `adw_tickets` and its dashboard view shipped, and decision 37 records the first real run (yt-summarizer, six tickets). A ticket run can take `--worktree`, one branch per feature, built to decisions 26 to 38 of [parallel-worktree-runs.md](parallel-worktree-runs.md). Still not built: the items under "Not in the first version". The decisions at the end are the record. Where the text and a decision disagree, the decision wins.
+Status: built. Settled in a grilling session on 2026-10-29. `adw_tickets` and its dashboard view shipped, and decision 37 records the first real run (six tickets). A ticket run can take `--worktree`, one branch per feature, built to decisions 26 to 38 of [parallel-worktree-runs.md](parallel-worktree-runs.md). Still not built: the items under "Not in the first version". The decisions at the end are the record. Where the text and a decision disagree, the decision wins.
 
 SSSF's chains follow disler's SDLC: one task in, one plan, one build, checks, review, docs, three commits, all headless. This design adds a second way to build, based on Matt Pocock's engineering skills ([mattpocock/skills](https://github.com/mattpocock/skills), MIT, read from the fork at `~/github/skills`, commit `a496f55`). It sits beside the current chains and replaces none of them. It also adds cost caps to every chain, because keeping unattended spend under control is the engineer's main concern as SSSF grows.
 
@@ -105,7 +105,7 @@ The account panel already covers the account. The session view gets:
 
 ### Build order and testing
 
-First the cost caps, then `adw_tickets`, then the dashboard. Each is built test-first in this repo, then tried on `sssf-sandbox`, then on yt-summarizer, whose multi-run designs are already shaped like ticket sets.
+First the cost caps, then `adw_tickets`, then the dashboard. Each is built test-first in this repo, then tried on `sssf-sandbox`, then on a project repo whose multi-run designs are already shaped like ticket sets.
 
 ## Decisions
 
@@ -141,7 +141,7 @@ Settled in the grilling session, in order.
 28. **Every agent gets a session cap.** That includes `adw_simple_sdlc`'s planner, builder, reviewer, and documenter. Each cap goes in the roster, set from that agent's past costs with headroom.
 29. **Seams come from the spec.** This revises 13 after reading `to-spec` and `to-tickets`.
 30. **Onboarding covers the setup.** `cookbooks/onboard.md` gets an optional step to run `/setup-matt-pocock-skills` with the local markdown tracker, and a new `cookbooks/tickets.md` covers the whole flow.
-31. **Build order.** First the cost caps for every chain (20 to 22, 25, 27, 28). Then `adw_tickets`, tried on the sandbox and then yt-summarizer. Then the dashboard's ticket grouping and cost bar. Each piece is tested and committed before the next starts.
+31. **Build order.** First the cost caps for every chain (20 to 22, 25, 27, 28). Then `adw_tickets`, tried on the sandbox and then a project. Then the dashboard's ticket grouping and cost bar. Each piece is tested and committed before the next starts.
 32. **The fork stays Matt's.** Nothing SSSF needs is changed in `~/github/skills`, so pulling upstream stays free of conflicts. The engineer's installed skills are symlinks into the fork's working tree.
 33. **This design is committed before the build starts.** Nothing is pushed without the engineer's go-ahead.
 34. **What the build found about the caps.** Tested on a subscription login on 2026-10-29: `--max-budget-usd` works there, so 22 needs no alternative. Claude Code counts it per call, even on a resumed session, and checks it after each request, so a call can go over by one request. The roster key is `max_call_cost`. The run cap is checked before every send, not only when an agent starts, so a phase's retries can't spend past it.
@@ -157,9 +157,9 @@ Settled in the grilling session, in order.
     - The stop reason comes from the run's own stop event when there is one (`call_budget_stop`, `budget_stop`, `rate_limit_stop`, `not_accepted`), and otherwise from the first failed phase. It shows the full message, git advice included.
     - A ticket row's cost is what this run's agents spent on it. A ticket finished by an earlier run shows as "done earlier" at $0, so the feature's total across runs stays in the read step's log, not the table.
     - Checked against the sandbox: b7ff8391's tickets show done at $0.084 and $0.061, matching the trace, and the capped scout run 5ccc3f20 shows its `call_budget_stop` message.
-37. **What the first real run settled** (yt-summarizer d30adda3, usage-summary, six tickets). All six tickets were built and committed, three with one fix pass each, for $2.76 of the $5 cap. The run then stopped in review_fix, for three reasons in SSSF:
+37. **What the first real run settled** (six tickets). All six tickets were built and committed, three with one fix pass each, for $2.76 of the $5 cap. The run then stopped in review_fix, for three reasons in SSSF:
     - Code wrote `Status: done`, but Matt Pocock's local tracker calls a finished ticket `resolved`, so the standards reviewer blocked on all six ticket files. Code now writes `resolved`, and still reads `done` as finished so older runs resume.
     - The fixer tried to change those protected files, and the permission check rolled them back and failed the whole fix pass. Both reviewers and the fixer are now told which paths are protected. A blocking finding located in a protected file never reaches the fixer; it is printed for the engineer.
     - A permission breach ended in a traceback after the stop message. It now exits 1 like any other stop.
     - The rerun (03ff4967) skipped straight to review, fixed one blocking finding, and documented the feature, for $0.76 and $3.52 in all. Its spec reviewer called the SSSF update commit on the feature branch scope creep. The reviewers' diff and commit list now leave out `adws/` and `.claude/skills/sssf/`, which is everything `just sssf-update` writes except the justfile. The justfile stays in, since a feature can change it too.
-    - The same reasoning reached the documenter. A follow-up write-up on yt-summarizer (957a1d8f) had a section on SSSF internals, because its diff against the feature's base held an SSSF update. `changes.capture`, which every documenter reads, now leaves out `adws/` and `.claude/skills/sssf/` by default and says so at the top of the diff. `git_helper.SSSF_PATHS` is the one list both use.
+    - The same reasoning reached the documenter. A follow-up write-up had a section on SSSF internals, because its diff against the feature's base held an SSSF update. `changes.capture`, which every documenter reads, now leaves out `adws/` and `.claude/skills/sssf/` by default and says so at the top of the diff. `git_helper.SSSF_PATHS` is the one list both use.

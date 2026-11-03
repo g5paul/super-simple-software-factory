@@ -351,7 +351,7 @@ def test_a_live_worktree_leaves_the_checkout_clean(repo):
 
 
 def test_a_new_ignore_entry_joins_the_existing_sssf_block(tmp_path):
-    """yt-summarizer's .gitignore had three `# sssf runtime` headers, one per update."""
+    """A project's .gitignore had three `# sssf runtime` headers, one per update."""
     sys.path.insert(0, str(SKILL / "scripts"))
     import install
     gitignore = tmp_path / ".gitignore"

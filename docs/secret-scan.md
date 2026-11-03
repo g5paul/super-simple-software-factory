@@ -5,7 +5,7 @@
 - **Set up once per clone:** `git config core.hooksPath .githooks`. Git doesn't run a repo's tracked hooks on its own, so a fresh clone has to opt in.
 - **gitleaks** 8.30.1 or later. On this machine it's in `~/.local/bin`, installed from its GitHub release after checking the release's SHA-256.
 - **Tested** by running the hook as git does, with ref lines on stdin. A clean commit and a clean new branch pass. A planted fake GitHub token is refused on an existing branch and on a new one. With gitleaks missing from `PATH`, the hook refuses.
-- **Private names.** The hook also refuses a push whose commits name a private project, in a message or a change, when `.git/sssf-private-names` lists it. In the hub, that keeps the records of private installs out of this public fork. [projects.md](projects.md#private-projects) says where they go.
+- **Private names.** The hook also refuses a push whose commits name a private project, in a message or a change, when `.git/sssf-private-names` lists it. In the hub, that keeps the records of unlisted installs out of this public fork. [projects.md](projects.md#unlisted-projects) says where they go.
 - **To push anyway,** `git push --no-verify` skips the hook. Use it only knowing nothing was scanned.
 
 ## Where it comes from
@@ -18,4 +18,4 @@ On this machine `~/.claude/settings.json` denies `git push`, `git * push`, `gh p
 
 ## In the project repos
 
-yt-summarizer, pi-agent-observability and fusion-harness each added the hook by hand before the installer shipped it, with `core.hooksPath` set in their clones. [projects.md](projects.md) lists the commits. On their update to skill 96f1130, pi-agent-observability and yt-summarizer took the template's hook. fusion-harness kept its own and copied in the agent refusal, on `sssf-run` only.
+pi-agent-observability and fusion-harness each added the hook by hand before the installer shipped it, with `core.hooksPath` set in their clones. [projects.md](projects.md) lists the commits. On their update to skill 96f1130, pi-agent-observability took the template's hook. fusion-harness kept its own and copied in the agent refusal, on `sssf-run` only.

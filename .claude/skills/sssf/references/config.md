@@ -164,8 +164,15 @@ directory's copies too. After the agent, a change to any of them is put back and
 stops the run with a breach naming the paths. A hook there would run on the
 chain's own commit, a `core.fsmonitor` or `filter` line in `config` runs on
 ordinary git commands, and a line in `info/exclude` would hide a new file from
-the change-set. An agent that fails is put back the same way, so a hook it
-planted can't run on the engineer's next commit. No agent has a reason to
+the change-set. The user's global git config, `~/.gitconfig` and
+`~/.config/git/`, gets the same check, since `git config --global
+core.hooksPath` points every commit at the agent's hooks. Contents are
+compared byte for byte with the copy. A breach here doesn't skip the other
+checks: an agent's own commit is still undone and its other writes still
+rolled back, and the breach names both. An agent that fails is put back the
+same way, so a hook it planted can't run on the engineer's next commit. One
+cost: an edit you make to your global git config while an agent runs is put
+back too. No agent has a reason to
 write there: SSSF does the committing, and an agent's own commit is undone.
 
 The run stops there, so the agent's permitted changes are never verified,

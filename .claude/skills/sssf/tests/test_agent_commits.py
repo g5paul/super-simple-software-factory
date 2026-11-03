@@ -129,3 +129,37 @@ def test_a_reset_past_the_start_stops_the_run(run):
 @pytest.mark.parametrize("name", ["planner", "builder", "documenter", "ticket_builder"])
 def test_every_writing_agent_is_told_not_to_commit(name):
     assert "Do not commit" in (PROMPTS / name / "system.md").read_text()
+
+
+def test_a_git_dir_change_does_not_shield_other_changes(run, tmp_path, monkeypatch):
+    """bypass-reviewer: an agent that commits a protected file and also touches
+    .git/info/exclude must still have its commit undone and the file rolled
+    back. The git-directory breach is reported alongside, not instead."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    tree_before, head_before = permissions.snapshot(run), permissions.head(run)
+    git_before = permissions.guard_git_dir(run)
+    commit(run, "adws/adw_modules/quality.py", "bad\n")
+    with open(run.repo_root / ".git" / "info" / "exclude", "a") as f:
+        f.write("hidden.py\n")
+    git_breach = None
+    try:
+        permissions.restore_git_dir(run, git_before)
+    except permissions.PermissionBreach as found:
+        git_breach = found
+    assert git_breach is not None
+    permissions.undo_commits(run, head_before)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.enforce(run, None, agent("builder"), tree_before)
+    assert git("log", "--oneline").count("\n") == 0           # the agent's commit is gone
+    assert (run.repo_root / "adws/adw_modules/quality.py").read_text() == "old\n"
+
+
+def test_agents_run_every_check_before_raising():
+    text = (SKILL / "templates" / "adws" / "adw_modules" / "agents.py").read_text()
+    git_check = text.index("permissions.restore_git_dir(run, git_before)")
+    assert text.index("except permissions.PermissionBreach as found:", git_check) \
+        < text.index("permissions.undo_commits(run, head_before)", git_check) \
+        < text.index("permissions.enforce(run, phase, agent, tree_before)", git_check) \
+        < text.index("raise git_breach", git_check)

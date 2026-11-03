@@ -329,18 +329,30 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         # wrote somewhere it was not allowed to.
         # An agent's own commit would hide its changes from enforce, so it is
         # undone first and its changes go back in the tree, unstaged.
-        # The git directory first: a hook planted there would run on any
-        # later commit, the chain's own included.
+        # All three checks run, whatever the first finds: a git-directory
+        # breach must not skip the commit undo or the rollback, or an agent
+        # could touch .git to keep its other changes.
         try:
-            permissions.restore_git_dir(run, git_before)
-            undone = permissions.undo_commits(run, head_before)
-            if undone:
-                run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                             type="log", name="agent_committed",
-                                             payload={"agent": agent.name, "undone": undone}))
-                run.console.note(f"{agent.name} committed {len(undone)} time(s) itself "
-                                 f"({', '.join(undone)}). Undid the commits and kept the changes.")
-            touched = permissions.enforce(run, phase, agent, tree_before)
+            git_breach = None
+            try:
+                permissions.restore_git_dir(run, git_before)
+            except permissions.PermissionBreach as found:
+                git_breach = found
+            try:
+                undone = permissions.undo_commits(run, head_before)
+                if undone:
+                    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                                 type="log", name="agent_committed",
+                                                 payload={"agent": agent.name, "undone": undone}))
+                    run.console.note(f"{agent.name} committed {len(undone)} time(s) itself "
+                                     f"({', '.join(undone)}). Undid the commits and kept the changes.")
+                touched = permissions.enforce(run, phase, agent, tree_before)
+            except permissions.PermissionBreach as found:
+                if git_breach:
+                    raise permissions.PermissionBreach(f"{git_breach}\n{found}") from found
+                raise
+            if git_breach:
+                raise git_breach
         except permissions.PermissionBreach as breach:
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="error", name="permission_breach",

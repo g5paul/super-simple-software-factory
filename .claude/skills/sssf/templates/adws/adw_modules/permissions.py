@@ -121,108 +121,114 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
     return shas
 
 
-# ── the git directory ────────────────────────────────────────────────────────
+# ── the git directory and git config ─────────────────────────────────────────
 # `git status` never shows the git directory, so snapshot() cannot see an
 # agent write there. Some of it runs code: a hook in hooks/ runs on the
 # chain's own commit, and a core.fsmonitor, core.pager or filter line in
 # config runs on ordinary git commands. A line in info/exclude hides a new
-# file from snapshot(). So these paths are copied aside before each agent and
-# put back after it if they changed, and a change stops the run. No agent has
-# a reason to write there: SSSF does the committing.
+# file from snapshot(). The user's global git config is just as live:
+# `git config --global core.hooksPath` points every commit at the agent's
+# hooks. So these paths are copied aside before each agent and put back after
+# it if they changed, and a change stops the run. No agent has a reason to
+# write them: SSSF does the committing.
 
 GIT_WATCHED = ("hooks", "info", "config", "config.worktree")
-_WATCH = " ".join(GIT_WATCHED)
 
-_SAVE = f"""b=$(mktemp -d) || exit 1
+_SAVE = """b=$(mktemp -d) || exit 1
 i=0
-for d in "$@"; do
+for p in "$@"; do
   mkdir -p "$b/$i" || exit 1
-  for n in {_WATCH}; do
-    if [ -e "$d/$n" ] || [ -L "$d/$n" ]; then cp -a "$d/$n" "$b/$i/" || exit 1; fi
-  done
+  if [ -e "$p" ] || [ -L "$p" ]; then cp -a "$p" "$b/$i/" || exit 1; fi
   i=$((i+1))
 done
 echo "$b"
 """
 
-_STATE = f"""for d in "$@"; do
-  for n in {_WATCH}; do
-    p="$d/$n"
-    if [ -e "$p" ] || [ -L "$p" ]; then
-      find "$p" -exec sh -c 'for f; do printf "M %s %s\\t%s\\n" "$(ls -ldn "$f" | cut -d" " -f1)" "$(readlink "$f")" "$f"; done' sh {{}} +
-      find "$p" -type f -exec cksum {{}} +
-    fi
-  done
-done
-"""
-
-_RESTORE = f"""b=$1; shift
+# Modes and link targets from ls, contents compared byte for byte with the
+# copy (cmp through diff -r), so a crafted file with a matching checksum
+# still counts as changed. Prints each watched path that differs.
+_DIFFERS = """b=$1; shift
 i=0
-for d in "$@"; do
-  for n in {_WATCH}; do
-    rm -rf "$d/$n" || exit 1
-    if [ -e "$b/$i/$n" ] || [ -L "$b/$i/$n" ]; then cp -a "$b/$i/$n" "$d/" || exit 1; fi
-  done
+for p in "$@"; do
+  c="$b/$i/${p##*/}"
+  if [ -e "$p" ] || [ -L "$p" ]; then live=1; else live=0; fi
+  if [ -e "$c" ] || [ -L "$c" ]; then kept=1; else kept=0; fi
+  if [ $live != $kept ]; then echo "$p"
+  elif [ $live = 1 ]; then
+    if ! diff -r "$c" "$p" >/dev/null 2>&1; then echo "$p"
+    elif [ "$(cd "${c%/*}" && find "${p##*/}" -exec ls -ldn {} + | awk '{print $1, $NF}')" != \
+           "$(cd "${p%/*}" && find "${p##*/}" -exec ls -ldn {} + | awk '{print $1, $NF}')" ]; then echo "$p"
+    fi
+  fi
   i=$((i+1))
 done
 """
 
-
-def _git_dirs(run) -> list[str]:
-    """The repo's git directories: the shared one, and a worktree's own."""
-    out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
-               run.repo_root)
-    return list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
+_RESTORE = """b=$1; shift
+i=0
+for p in "$@"; do
+  c="$b/$i/${p##*/}"
+  rm -rf "$p" || exit 1
+  if [ -e "$c" ] || [ -L "$c" ]; then cp -a "$c" "${p%/*}/" || exit 1; fi
+  i=$((i+1))
+done
+"""
 
 
 def _sh(script: str, *args: str):
     return sandbox.current().run(["sh", "-c", script, "sh", *args])
 
 
-def _git_state(dirs: list[str]) -> dict[str, str]:
-    """Every watched path's mode, link target and checksum. Plain POSIX
-    tools, since the agent's machine may be macOS or a remote VM."""
-    state: dict[str, str] = {}
-    done = _sh(_STATE, *dirs)
-    for line in done.stdout.splitlines():
-        if line.startswith("M "):
-            meta, _, path = line[2:].partition("\t")
-            state[path] = meta + " " + state.get(path, "")
-        elif line.count(" ") >= 2:
-            crc, size, path = line.split(" ", 2)     # cksum: POSIX, so macOS has it too
-            state[path] = state.get(path, "") + f"{crc}:{size}"
-    return state
+def _watched(run) -> list[str]:
+    """Every path the guard covers: the repo's git directories (the shared one
+    and a worktree's own), and the user's global git config."""
+    out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
+               run.repo_root)
+    dirs = list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
+    if not dirs:
+        return []
+    home = _sh('printf "%s\\n%s\\n" "$HOME" "${XDG_CONFIG_HOME:-$HOME/.config}"').stdout.split("\n")
+    paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
+    if len(home) >= 2 and home[0].startswith("/"):
+        paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git"]
+    return paths
 
 
 def guard_git_dir(run) -> dict | None:
-    """Copy the watched git-directory paths aside, before an agent runs.
-    None outside a git repo."""
-    dirs = _git_dirs(run)
-    if not dirs:
+    """Copy the watched paths aside, before an agent runs. None outside a git repo."""
+    paths = _watched(run)
+    if not paths:
         return None
-    saved = _sh(_SAVE, *dirs)
+    saved = _sh(_SAVE, *paths)
     if saved.returncode != 0 or not saved.stdout.strip():
-        raise PermissionBreach("Could not copy the git directory's hooks and config aside "
+        raise PermissionBreach("Could not copy the git directory and git config aside "
                                f"before the agent ran: {saved.stderr.strip()}")
-    return {"dirs": dirs, "backup": saved.stdout.strip(), "state": _git_state(dirs),
-            "done": False}
+    return {"paths": paths, "backup": saved.stdout.strip(), "done": False}
+
+
+def _differs(guard: dict) -> list[str] | None:
+    done = _sh(_DIFFERS, guard["backup"], *guard["paths"])
+    return done.stdout.split() if done.returncode == 0 else None
 
 
 def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str]:
-    """Put the watched git-directory paths back if the agent changed them.
+    """Put the watched paths back if the agent changed them.
 
     Returns the paths that changed. With `breach`, a change raises
     PermissionBreach after the restore; without it, as on an agent that
-    already failed, it only restores. Either way the copy is removed.
+    already failed, it only restores. Either way the copy is removed once
+    the paths match it again.
     """
     if not guard or guard["done"]:
         return []
     guard["done"] = True
-    changed = changed_paths(guard["state"], _git_state(guard["dirs"]))
+    changed = _differs(guard)
+    if changed is None:
+        changed = list(guard["paths"])        # could not compare: put everything back
     restored = True
     if changed:
-        done = _sh(_RESTORE, guard["backup"], *guard["dirs"])
-        restored = done.returncode == 0 and _git_state(guard["dirs"]) == guard["state"]
+        done = _sh(_RESTORE, guard["backup"], *guard["paths"])
+        restored = done.returncode == 0 and _differs(guard) == []
     if restored:
         sandbox.current().run(["rm", "-rf", guard["backup"]])
     root = str(run.repo_root).rstrip("/") + "/"
@@ -231,9 +237,9 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
         outcome = ("put back as they were" if restored else
                    f"NOT put back; the originals are in {guard['backup']}")
         raise PermissionBreach(
-            f"The agent changed the git directory, which no agent may write: hooks and "
-            f"config there run code on later git commands. {len(changed)} path(s), "
-            f"{outcome}:\n" + "\n".join(f"  - {p}" for p in shown))
+            "The agent changed the git directory or the git config, which no agent may "
+            "write: hooks and config there run code on later git commands. "
+            f"{len(changed)} path(s), {outcome}:\n" + "\n".join(f"  - {p}" for p in shown))
     return shown
 
 

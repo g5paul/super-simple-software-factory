@@ -33,6 +33,18 @@ def git(cwd: Path, *args: str) -> str:
                           cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+@pytest.fixture(autouse=True)
+def home(tmp_path, monkeypatch):
+    """A HOME of the test's own, so the guard copies and restores a test
+    ~/.gitconfig, never the real one."""
+    path = tmp_path / "home"
+    path.mkdir()
+    (path / ".gitconfig").write_text("[user]\n\tname = t\n")
+    monkeypatch.setenv("HOME", str(path))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    return path
+
+
 @pytest.fixture
 def repo(tmp_path):
     root = tmp_path / "repo"
@@ -104,7 +116,7 @@ def test_a_failed_agent_is_restored_without_a_second_error(repo):
     run = SimpleNamespace(repo_root=repo)
     guard = permissions.guard_git_dir(run)
     (repo / ".git" / "hooks" / "post-commit").write_text("#!/bin/sh\n")
-    assert permissions.restore_git_dir(run, guard, breach=False) == [".git/hooks/post-commit"]
+    assert permissions.restore_git_dir(run, guard, breach=False) == [".git/hooks"]
     assert not (repo / ".git" / "hooks" / "post-commit").exists()
     assert permissions.restore_git_dir(run, guard) == []      # once only
 
@@ -114,7 +126,7 @@ def test_a_worktree_guards_the_shared_git_directory(repo, tmp_path):
     git(repo, "worktree", "add", "-q", "-b", "run", str(tree))
     run = SimpleNamespace(repo_root=tree)
     guard = permissions.guard_git_dir(run)
-    assert len(guard["dirs"]) == 2
+    assert sum(p.endswith("/hooks") for p in guard["paths"]) == 2
     (repo / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\n")
     with pytest.raises(permissions.PermissionBreach):
         permissions.restore_git_dir(run, guard)
@@ -131,3 +143,31 @@ def test_every_agent_call_guards_the_git_directory():
     assert "permissions.guard_git_dir(run)" in text
     assert "permissions.restore_git_dir(run, git_before)" in text
     assert "permissions.restore_git_dir(run, git_before, breach=False)" in text
+
+
+@pytest.mark.parametrize("plant", ["global_hooks_path", "xdg_config"])
+def test_the_global_git_config_is_put_back(repo, home, plant):
+    run = SimpleNamespace(repo_root=repo)
+    before = (home / ".gitconfig").read_bytes()
+    guard = permissions.guard_git_dir(run)
+    if plant == "global_hooks_path":
+        git(repo, "config", "--global", "core.hooksPath", str(home / "evil"))
+    else:
+        (home / ".config" / "git").mkdir(parents=True)
+        (home / ".config" / "git" / "config").write_text("[core]\n\tfsmonitor = touch X\n")
+    with pytest.raises(permissions.PermissionBreach, match="git config"):
+        permissions.restore_git_dir(run, guard)
+    assert (home / ".gitconfig").read_bytes() == before
+    assert not (home / ".config" / "git").exists()
+
+
+def test_a_same_size_edit_is_caught(repo):
+    run = SimpleNamespace(repo_root=repo)
+    config = repo / ".git" / "config"
+    guard = permissions.guard_git_dir(run)
+    text = config.read_text()
+    config.write_text(text.replace("false", "fals3", 1) if "false" in text else text[:-1] + "#")
+    assert config.stat().st_size == len(text.encode())
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)
+    assert config.read_text() == text

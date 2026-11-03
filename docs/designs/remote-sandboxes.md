@@ -133,6 +133,18 @@ Step 3 kept everything above and settled this:
 - **The VM uses the host's Python.** The host's uv picks it in the worktree, and every VM command gets it as `UV_PYTHON`, as major.minor. yt-summarizer's `.python-version` is untracked, so its clone in the VM had none. uv there picked the image's 3.11, where argparse prints help differently, and three help tests failed until a fix round loosened them. Both providers do this.
 - **Past the credit, E2B blocks.** Its billing page says a team with no payment method has every project blocked shortly after the credit runs out, so nothing is charged. Paused sandboxes aren't billed and are kept with no limit; SSSF deletes them anyway.
 
+## As built: the tool check
+
+E2B's template pins Node and pi, but Vercel's default image brings its own `claude` and `pi`, at versions Vercel picks and can change. So once the branch is cloned into the VM and before any agent starts, `sandbox_remote` reads the version of each tool the run needs, in one command:
+
+- Every run: git and uv.
+- A Claude Code agent: `claude`, at least 2.1.316, the oldest SSSF has run on in a VM.
+- A pi agent: Node, at least 22.19.0, pi's own `engines` floor, and `pi`, at least 1.4.0, which has `auth print-bearer-token`.
+
+A tool that's missing, unreadable or below its minimum fails the `sandbox` phase with a message naming each one, and the VM is deleted. Nothing has run in it. A major version newer than SSSF has run on (`claude` 3.x, `pi` 2.x) is noted on the console and the dashboard, and the run goes on. Refusing it would stop every run the day Vercel updates its image.
+
+The versions go into the trace as a `sandbox_tools` event and into the `sandbox` phase's log, and the dashboard's VM line shows them when you hover over it. The minimums are in `TOOLS` in `sandbox_remote.py`. Raise one when SSSF starts using a newer tool feature, and bump `tested` after a run on a new major.
+
 ## Open
 
 - **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in, and rosters with `harness_engineering` extensions, which aren't copied yet. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.

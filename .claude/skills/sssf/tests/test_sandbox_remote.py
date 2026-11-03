@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -542,3 +543,47 @@ def test_the_vm_user_owns_the_runs_session_folder_for_pi_sessions(box):
     setup = [c for c in box.raw.calls if "chown" in " ".join(c.get("argv") or [c.get("line", "")])]
     words = " ".join(setup[0].get("argv") or [setup[0]["line"]])
     assert box.fake._map(str(box.run_.session_dir)) in words.split()
+
+
+# --- the tool check (remote-sandboxes.md, "As built: the tool check") ---------
+
+def test_open_records_the_vms_tools_in_the_trace(box):
+    tools = dict(box.events)["sandbox_tools"]
+    assert set(tools["tools"]) == {"git", "uv"}          # no roster: what every run needs
+    assert tools["tools"]["git"].startswith("git version") and tools["problems"] == []
+    assert box.tools == tools["tools"]
+
+
+def test_a_missing_or_old_tool_fails_the_vm_before_any_agent(box, tmp_path, monkeypatch):
+    from adw_modules import sandbox, sandbox_remote
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "uv").symlink_to(shutil.which("uv"))
+    (bin_ / "pi").write_text("#!/bin/sh\necho 0.9.0\n")
+    (bin_ / "pi").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:/usr/bin:/bin")
+    box.run_.cfg = types.SimpleNamespace(agents=[types.SimpleNamespace(coding_agent="pi"),
+                                                 types.SimpleNamespace(coding_agent="claude_code")])
+    with pytest.raises(sandbox.SandboxFailed) as error:
+        box._check_tools()
+    said = str(error.value)
+    assert "claude is missing" in said and "node is missing" in said
+    assert "pi is 0.9.0, and SSSF needs 1.4.0 or later" in said and "Nothing ran in it" in said
+    assert dict(box.events)["sandbox_tools"]["tools"]["git"].startswith("git version")
+
+
+def test_the_tool_check_reads_only_what_the_roster_runs():
+    from adw_modules.sandbox_remote import tools_needed
+    agents = lambda *kinds: types.SimpleNamespace(agents=[types.SimpleNamespace(coding_agent=k) for k in kinds])
+    assert tools_needed(agents("claude_code")) == ["git", "uv", "claude"]
+    assert tools_needed(agents("pi")) == ["git", "uv", "node", "pi"]
+    assert tools_needed(agents("pi", "claude_code")) == ["git", "uv", "claude", "node", "pi"]
+
+
+def test_a_newer_major_is_noted_and_an_older_minimum_refused():
+    from adw_modules.sandbox_remote import judge_tools
+    assert judge_tools({"pi": "1.5.0", "node": "v24.11.1", "claude": "2.1.317 (Claude Code)"}) == ([], [])
+    problems, notes = judge_tools({"pi": "2.0.1", "node": "v22.18.0", "claude": "weird"})
+    assert problems == ["node is 22.18.0, and SSSF needs 22.19.0 or later",
+                        "claude is unreadable ('weird')"]
+    assert notes == ["pi 2.0.1 is a newer major than SSSF has run on (1.x); the run goes on"]

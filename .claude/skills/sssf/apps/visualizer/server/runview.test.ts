@@ -182,3 +182,16 @@ test("a run on the host has no sandbox, even with a phase named sandbox", () => 
   expect(sandbox([ev("log", "sandbox", { message: "▶ 01 sandbox" })])).toBeNull();
   expect(sandbox([])).toBeNull();
 });
+
+
+test("a VM's tool check shows on its sandbox, with any notes", () => {
+  const events = [
+    ev("log", "sandbox", { provider: "vercel", vm: "v1", python: "3.13", session_minutes: 45 }),
+    ev("log", "sandbox_tools", { vm: "v1", tools: { git: "git version 2.43.0", pi: "2.0.1" },
+                          notes: ["pi 2.0.1 is a newer major than SSSF has run on (1.x); the run goes on"], problems: [] }),
+  ];
+  const box = sandbox(events);
+  expect(box?.tools).toEqual({ git: "git version 2.43.0", pi: "2.0.1" });
+  expect(box?.tool_notes).toHaveLength(1);
+  expect(sandbox(events.slice(0, 1))?.tools).toBeUndefined();
+});

@@ -301,6 +301,10 @@ export interface RunSandbox {
   /** The Python the host's uv picked, passed to the VM as UV_PYTHON. */
   python?: string;
   session_minutes?: number;
+  /** What the tool check read in the VM before any agent, by tool: a version line, or "missing". */
+  tools?: Record<string, string>;
+  /** The check's notes, such as a newer major than SSSF has run on. */
+  tool_notes?: string[];
   /** Commits brought back to the branch, over every sandbox_commits event. */
   commits: number;
   /** Times the VM was stopped and resumed for a fresh session. */

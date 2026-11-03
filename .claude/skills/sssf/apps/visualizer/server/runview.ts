@@ -61,7 +61,7 @@ export function worktree(events: RunEvent[]): RunWorktree | null {
 }
 
 /** The events runview.sandbox reads. */
-export const SANDBOX_EVENTS = ["sandbox", "sandbox_commits", "sandbox_refresh", "sandbox_end", "sandbox_error"];
+export const SANDBOX_EVENTS = ["sandbox", "sandbox_tools", "sandbox_commits", "sandbox_refresh", "sandbox_end", "sandbox_error"];
 
 /**
  * Where a `--sandbox` run worked, and how its VM ended. null for a run on the
@@ -84,11 +84,15 @@ export function sandbox(events: RunEvent[]): RunSandbox | null {
   const refreshes = events.filter((e) => e.name === "sandbox_refresh" && mine(e)).length;
   const endEvent = events.findLast((e) => e.name === "sandbox_end" && mine(e));
   const errorEvent = events.findLast((e) => e.name === "sandbox_error" && mine(e));
+  const toolsEvent = events.findLast((e) => e.name === "sandbox_tools" && mine(e));
+  const checked = toolsEvent ? payload<{ tools?: Record<string, string>; notes?: string[] }>(toolsEvent) : null;
   return {
     provider: opened.provider,
     vm: opened.vm,
     python: opened.python || undefined,
     session_minutes: opened.session_minutes,
+    tools: checked?.tools,
+    tool_notes: checked?.notes?.length ? checked.notes : undefined,
     commits,
     refreshes,
     end: endEvent ? payload<SandboxEnd>(endEvent) : null,

@@ -172,5 +172,5 @@ def _open_sandbox(run: Run, place: dict, provider: str, asked: str | None) -> No
         atexit.register(box.close)
         box.open()
         sandbox.use(box)
-        ph.log(provider=provider, vm=box.vm, swept=swept)
+        ph.log(provider=provider, vm=box.vm, swept=swept, tools=box.tools)
     run.console.note(f"working in {provider} VM {box.vm}; commits come back to {place['branch']}")

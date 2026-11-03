@@ -33,6 +33,15 @@ const rebase = computed(() => {
 })
 
 // The VM's use, in the units its provider's allowance counts (remote-sandboxes decision 15).
+// The hover title: the Python the VM was given, then each tool the check read.
+const vmTitle = computed(() => {
+  const box = props.sandbox
+  if (!box) return ''
+  const parts = box.python ? [`UV_PYTHON ${box.python}`] : []
+  for (const [name, line] of Object.entries(box.tools ?? {})) parts.push(`${name}: ${line}`)
+  return parts.join('\n')
+})
+
 const vmUse = computed(() => {
   const end = props.sandbox?.end
   if (!end) return []
@@ -103,11 +112,12 @@ function open(phaseId: string | null) {
       <span v-if="rebase" class="rebase" :class="{ put_back: !worktree.rebased?.kept }">· {{ rebase }}</span>
     </div>
 
-    <div v-if="sandbox" class="branch vm" :title="sandbox.python ? `UV_PYTHON ${sandbox.python}` : ''">
+    <div v-if="sandbox" class="branch vm" :title="vmTitle">
       <span>in {{ sandbox.provider }} VM <code>{{ sandbox.vm }}</code></span>
       <span v-if="!sandbox.end" class="dim">· up now</span>
       <span v-for="part in vmUse" :key="part" class="dim">· {{ part }}</span>
       <span class="dim">· {{ sandbox.commits }} {{ sandbox.commits === 1 ? 'commit' : 'commits' }} back</span>
+      <span v-for="note in sandbox.tool_notes ?? []" :key="note" class="rebase put_back">· {{ note }}</span>
       <span v-if="sandbox.refreshes" class="dim">· {{ sandbox.refreshes }} {{ sandbox.refreshes === 1 ? 'refresh' : 'refreshes' }}</span>
       <span v-if="sandbox.end && !sandbox.end.deleted" class="landed discarded">· not deleted: {{ sandbox.error ?? 'see the trace' }}</span>
       <span v-if="sandbox.end?.uncommitted_patch" class="rebase put_back" :title="sandbox.end.uncommitted_patch">· uncommitted work saved as a patch, not applied</span>

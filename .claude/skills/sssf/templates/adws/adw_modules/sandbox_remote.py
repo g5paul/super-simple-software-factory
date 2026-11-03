@@ -27,6 +27,7 @@ import base64
 import importlib
 import io
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -42,6 +43,48 @@ PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
 COMMAND_SECONDS = 60                # what a command with no timeout may need: git, a read
 MARGIN_SECONDS = 30
+# The tools a VM must have, by what the roster runs (docs/designs/remote-sandboxes.md,
+# "As built: the tool check"). `min` is the oldest version SSSF has run on, or
+# the tool's own floor; a VM below it fails before any agent starts. `tested`
+# is the newest major SSSF has run on: a newer one is noted in the trace, not
+# refused, because Vercel updates its image on its own.
+TOOLS = {
+    "git":    {"command": "git --version"},
+    "uv":     {"command": "uv --version"},
+    "claude": {"command": "claude --version", "min": "2.1.316", "tested": 2, "for": "claude_code"},
+    "node":   {"command": "node --version", "min": "22.19.0", "for": "pi"},   # pi's engines field
+    "pi":     {"command": "pi --version", "min": "1.4.0", "tested": 1, "for": "pi"},
+}
+MISSING = "missing"
+
+
+def _version(text: str) -> tuple[int, ...] | None:
+    found = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text)
+    return tuple(int(n) for n in found.groups() if n is not None) if found else None
+
+
+def tools_needed(cfg) -> list[str]:
+    """The TOOLS a roster's agents need in the VM, in TOOLS order."""
+    agents = {a.coding_agent for a in getattr(cfg, "agents", None) or []}
+    return [name for name, tool in TOOLS.items() if tool.get("for") in (None, *agents)]
+
+
+def judge_tools(found: dict[str, str]) -> tuple[list[str], list[str]]:
+    """What stops the run, and what is only noted, for the versions found."""
+    problems, notes = [], []
+    for name, text in found.items():
+        tool, version = TOOLS[name], _version(text)
+        if text == MISSING or version is None:
+            problems.append(f"{name} is {'missing' if text == MISSING else f'unreadable ({text[:60]!r})'}")
+            continue
+        if "min" in tool and version < _version(tool["min"]):
+            problems.append(f"{name} is {'.'.join(map(str, version))}, and SSSF needs {tool['min']} or later")
+        elif "tested" in tool and version[0] > tool["tested"]:
+            notes.append(f"{name} {'.'.join(map(str, version))} is a newer major than SSSF has run on "
+                         f"({tool['tested']}.x); the run goes on")
+    return problems, notes
+
+
 CPU_READ = ("awk -v hz=\"$(getconf CLK_TCK)\" "
             "'/^cpu /{printf \"%.2f\\n\", ($2+$3+$4+$7+$8+$9)/hz; exit}' /proc/stat")
 
@@ -166,6 +209,7 @@ class Remote:
         self.installed: set[str] = set()    # paths install() has copied in
         self.synced = ""
         self.python = ""
+        self.tools: dict[str, str] = {}
         self._token = ""
         self._created = 0.0
         self._session = 0.0
@@ -201,8 +245,33 @@ class Remote:
                                   "session_minutes": self.limit / 60, "python": self.python})
             self._clone()
             self.handoff_in()
+            self._check_tools()
         except self.errors as error:
             raise SandboxFailed(f"{self.name} would not make or set up the VM: {error}") from None
+
+    def _check_tools(self) -> None:
+        """Read the versions of the tools this run needs, in one call, before any
+        agent starts. Records them in the trace; raises SandboxFailed if one is
+        missing or too old, so the run fails here, not partway through a call."""
+        names = tools_needed(getattr(self.run_, "cfg", None))
+        line = "; ".join(f"printf '%s=' {name}; {{ {TOOLS[name]['command']} 2>&1 || echo {MISSING}; }} | head -1"
+                         for name in names)
+        out = self._must("sh", ["-c", line])
+        found = {name: MISSING for name in names}
+        for row in out.splitlines():
+            name, _, text = row.partition("=")
+            if name in found:
+                text = text.strip()
+                found[name] = MISSING if not text or "not found" in text else text
+        problems, notes = judge_tools(found)
+        self.tools = found
+        self._log("sandbox_tools", {"vm": self.vm, "tools": found, "notes": notes, "problems": problems})
+        for note in notes:
+            self.run_.console.note(note)
+        if problems:
+            raise SandboxFailed(f"{self.name} VM {self.vm} can't run this roster: {'; '.join(problems)}. "
+                                "Nothing ran in it. Pick the other provider, or see "
+                                "docs/designs/remote-sandboxes.md, \"As built: the tool check\".")
 
     def _clone(self) -> None:
         bundle = self.run_.session_dir / "sandbox-in.bundle"

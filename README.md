@@ -68,7 +68,7 @@ Copy `.claude/skills/sssf/` into the target repo and type `/sssf install` inside
 
 For the first two, see [Run on a subscription](#run-on-a-subscription).
 
-In a clone of this repo, `git config core.hooksPath .githooks` turns on its pre-push hook, which scans each push for secrets with [gitleaks](https://github.com/gitleaks/gitleaks) and refuses on a find. See [`docs/secret-scan.md`](docs/secret-scan.md).
+In a clone of this repo, or of a repo SSSF is installed in, `git config core.hooksPath .githooks` turns on the pre-push hook the installer stamps, which scans each push for secrets with [gitleaks](https://github.com/gitleaks/gitleaks) and refuses on a find. See [`docs/secret-scan.md`](docs/secret-scan.md).
 
 [`bun`](https://bun.sh) only if you want the visualizer.
 
@@ -394,7 +394,7 @@ super-simple-software-factory/
 ├── docs/fork.md                        # what this fork adds to upstream
 ├── docs/designs/                       # design records for what this fork added
 ├── docs/research/                      # findings behind the designs, and the fork survey
-├── .githooks/pre-push                  # the secret scan before every push
+├── .githooks/pre-push                  # the secret scan before every push, linked to its template
 └── .claude/skills/sssf/
     ├── SKILL.md                        # hard rules + request routing table
     ├── cookbooks/                      # 12 orchestrator playbooks, loaded lazily
@@ -405,6 +405,7 @@ super-simple-software-factory/
         ├── sssf.config*.yaml           # the starter rosters: pi, Claude Code, ChatGPT
         ├── repo.yaml                   # the repo's own SSSF rules
         ├── container/                  # the Podman sandbox, with --container
+        ├── githooks/pre-push           # the secret scan, stamped as .githooks/pre-push
         ├── prompt_engineering/{agent}/ # system.md + user.md per agent
         ├── harness_engineering/        # pi extensions
         └── adws/

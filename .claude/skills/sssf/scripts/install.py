@@ -11,7 +11,8 @@ Usage:
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
 (the starter agents), adws/adw_sssf_config/sssf.config.yaml and repo.yaml, .env.sample,
-.gitignore entries. --container adds container/, to run the operator
+.githooks/pre-push (a secret scan before every push, which the engineer turns
+on with `git config core.hooksPath .githooks`), .gitignore entries. --container adds container/, to run the operator
 session in a Podman container (Claude Code rosters only); run it again with
 --container in an installed repo to add it later.
 Existing files are skipped unless --force. --add-roster stamps a second
@@ -109,9 +110,48 @@ def targets(root: Path, roster: Path, container: bool = False,
     # are stamped into sssf.just. Otherwise they are the justfile, skipped like
     # any other file if the repo already has one.
     add(TEMPLATES / "justfile", root / (MODULE if loads_module(root) else "justfile"))
+    # A gitleaks scan of every push, and a refusal of any push from an agent.
+    # Tracked, so it travels with the repo; git runs it only once the clone
+    # opts in, which is the engineer's step (hook_steps).
+    add(TEMPLATES / "githooks", root / ".githooks")
     if container:
         add(TEMPLATES / "container", root / "container")
     return pairs
+
+
+def hook_steps(root: Path) -> list[str]:
+    """What the engineer has to do before git runs .githooks/pre-push here.
+
+    install.py doesn't set core.hooksPath itself: it changes what git runs on
+    every push from this clone, so a person decides it, and an agent's
+    permission check refuses it anyway. Setting it also switches off any hook
+    in .git/hooks, so those are named first."""
+    def git(*args: str) -> str:
+        result = subprocess.run(["git", "-C", str(root), *args],
+                                capture_output=True, text=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    if not (root / ".githooks" / "pre-push").is_file() or not git("rev-parse", "--git-dir"):
+        return []
+    lines = []
+    current = git("config", "--get", "core.hooksPath")
+    if current == ".githooks":
+        lines.append("pre-push secret scan: on (core.hooksPath is .githooks)")
+    else:
+        lines.append("git config core.hooksPath .githooks   # turns on the pre-push secret scan;")
+        lines.append("   you run this, not an agent")
+        if current:
+            lines.append(f"   core.hooksPath is {current} now; this replaces it, so move its hooks over first")
+        else:
+            common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
+            own = sorted(h.name for h in (common / "hooks").glob("*")
+                         if h.is_file() and not h.name.endswith(".sample"))
+            if own:
+                lines.append(f"   it switches off .git/hooks/{', .git/hooks/'.join(own)}:")
+                lines.append("   merge what they do into .githooks first")
+    if not shutil.which("gitleaks"):
+        lines.append("install gitleaks 8.30.1 or later: until then the hook refuses every push")
+    return lines
 
 
 def added_rosters(record: dict) -> list[tuple[Path, str]]:
@@ -458,6 +498,8 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
         print(f"  no longer in the skill (left in place): {len(gone)}")
         for rel in gone:
             print(f"    - {rel}")
+    for line in hook_steps(root):
+        print(f"  {line}")
     return 0
 
 
@@ -542,7 +584,13 @@ def main() -> int:
     dirs = ("adws/, .claude/ and container/" if (root / "container/run.sh").is_file()
             else "adws/ and .claude/")
     print(f"  5. exclude {dirs} from repo-wide lint, format, typecheck,")
-    print("     and package builds (see cookbooks/install.md, post-install checklist)")
+    print("     and package builds, and .githooks/ from package builds")
+    print("     (see cookbooks/install.md, post-install checklist)")
+    hooks = hook_steps(root)
+    if hooks:
+        print(f"  6. {hooks[0]}")
+        for line in hooks[1:]:
+            print(f"     {line}")
     if (root / "container/run.sh").is_file():
         print("  container: the operator session can run in Podman, with no permission prompts")
         print("     claude setup-token, then save it as described in cookbooks/install.md")

@@ -30,6 +30,7 @@ To run every agent on Pi signed into a ChatGPT subscription, add `--chatgpt`. Th
 | `adws/adw_data/prompt_engineering/{planner,builder,scout,reviewer,documenter}/` | `templates/prompt_engineering/` | yes — **the user-owned home for prompts** |
 | `adws/adw_data/harness_engineering/` | `templates/harness_engineering/` | yes — **the user-owned home for pi extensions** |
 | `justfile` | `templates/justfile` | yes — starter recipes: `just demo`, the workflows, the trace reads, `just obs` |
+| `.githooks/pre-push` | `templates/githooks/` | yes — the secret scan before every push. Off until the engineer turns it on: see [Secret scan before every push](#secret-scan-before-every-push) |
 | `adws/adw_data/sessions/`, `adws/adw_data/sssf.db` | created at runtime | no — gitignored |
 
 The two `*_engineering` dirs mirror the two config keys of the same name: `prompt_engineering` is what an agent is told, `harness_engineering` is what its harness can do. Both are yours the moment they are stamped. Edit them in `adws/adw_data/`, never back inside the skill.
@@ -40,7 +41,7 @@ The two `*_engineering` dirs mirror the two config keys of the same name: `promp
 
 Re-running is safe. `install.py` skips **every** file that already exists — your config, your prompts, and previously stamped code alike — and reports what it skipped, so a second run doubles as a drift check. `--force` overwrites ALL existing stamped files, including `sssf.config.yaml`, `quality.py`, and `prompt_engineering/`. To bring a repo up to a newer skill, use `--update` instead (next section).
 
-A repo's own `justfile` or `.env.sample`, there before SSSF, is skipped and recorded as kept, the same as `--update --keep` would record it. The first update leaves it alone, and it is only flagged again when the skill's template changes. A repo with its own justfile can load SSSF's recipes as a module instead: add `mod sssf 'sssf.just'` to it, then install or update. SSSF stamps its recipes into `sssf.just`, records it, and keeps it current on each update, like the rest of its code. Run them as `just sssf demo`, `just sssf sessions`, and so on. The repo's own recipes stay in its justfile, which SSSF never records or changes.
+A repo's own `justfile`, `.env.sample` or `.githooks/pre-push`, there before SSSF, is skipped and recorded as kept, the same as `--update --keep` would record it. The first update leaves it alone, and it is only flagged again when the skill's template changes. A repo with its own justfile can load SSSF's recipes as a module instead: add `mod sssf 'sssf.just'` to it, then install or update. SSSF stamps its recipes into `sssf.just`, records it, and keeps it current on each update, like the rest of its code. Run them as `just sssf demo`, `just sssf sessions`, and so on. The repo's own recipes stay in its justfile, which SSSF never records or changes.
 
 ## Update an installed repo
 
@@ -107,6 +108,7 @@ Run the update the way the repo takes any change: on a short branch cut from `ma
    - Trials (`just trial`) take one worktree slot per roster, so a trial of three rosters needs `max_worktree_runs: 3`. Don't raise it for that alone; the engineer raises it when they want a three-roster trial. A second roster, such as ChatGPT, arrives only through `install.py --add-roster <name>`, never through an update, so an update adds no roster file.
    - `agent_rules`: rules every agent gets at the end of its system prompt. A plain string asks; a rule with `forbid` regexes also stops the run when an agent's shell command matches (`references/config.md`). It arrives empty. Leave it `[]`: the rules are the engineer's to choose. If the repo has a rule every agent should follow, such as one in `CLAUDE.local.md` (agents never read it), suggest it in your report.
    - A setting not listed here: read its comment in the skill's `repo.yaml`, and keep the default unless the repo needs otherwise.
+   - If the update added or flagged `.githooks/pre-push`, read [Secret scan before every push](#secret-scan-before-every-push). For a `!` hook, the repo had its own: diff the two. The skill's scans with gitleaks and refuses a push from an agent. If the repo's does no more than that, `--take` it; if it does more, copy the skill's checks into it and `--keep` it. The update's last lines say whether the scan is on. If it isn't, pass that line to the engineer in your report; don't set `core.hooksPath` yourself.
 4. Commit the update on its own: `git add -A && git commit -m "Update SSSF to skill <sha>"`, with the sha the update printed. A file the update just added (`+`) that you edit straight away, such as `repo.yaml`, can go into this commit with your edit, since it never existed without it.
 5. Run `uv run adws/adw_quality.py "check after the SSSF update"`. A block reported as `not configured` is still on its placeholder, and checks nothing until you wire it in `quality.py`.
    Quality never starts an agent, so it cannot tell you the agents can still sign in. On a Claude Code roster, check that too, with the agents' own environment: `just login-check` (`just sssf login-check` with `mod sssf`). It runs the same check a chain runs before its first agent.
@@ -170,7 +172,7 @@ A session that already has `/sssf` keeps it through the switch. New sessions get
 2. **Pi is installed and on PATH** — `pi --version`. Set `PI_PATH` in `.env` if it is not.
 3. **The model resolves** — the config's default `gemini-3.6-flash` must be a registered id in `~/.pi/agent/models.json`. Check with `pi --list-models` or read the file directly; see `references/config.md` for model resolution.
 4. **Gitignore** — `install.py` appends `adws/adw_data/sessions/`, `adws/adw_data/sssf.db*`, and `.env` for you; confirm they landed. All three are runtime or secrets and must never be committed.
-5. **Git repo** — ADWs that end in a commit phase call `git_helper.commit_all`, which raises if the cwd is not a git repository. Run `git init` and make a first commit before using `adw_plan_build.py`, `adw_plan_build_test.py`, or `adw_simple_sdlc.py`. `adw_document.py` needs one too: it measures the change with `git diff` against a base ref (`main` by default, `--base` to override).
+5. **Git repo** — ADWs that end in a commit phase call `git_helper.commit_all`, which raises if the cwd is not a git repository. Run `git init` and make a first commit before using `adw_plan_build.py`, `adw_plan_build_test.py`, or `adw_simple_sdlc.py`. `adw_document.py` needs one too: it measures the change with `git diff` against a base ref (`main` by default, `--base` to override). Then ask the engineer to turn on the secret scan with the line `install.py` printed: [Secret scan before every push](#secret-scan-before-every-push).
 6. **Keep SSSF out of the project's own tools.** The install adds about 150 files of Python, TypeScript, and Vue under `adws/` and `.claude/`, and they don't follow your project's rules. A linter, formatter, or type checker that runs on the whole repo then fails on SSSF's code, not yours. In yt-summarizer, CI's `ruff check .` and `ruff format --check .` failed with 434 errors and 64 files, all in those two folders. A package build can also take them in: its first `uv build` put 148 SSSF files into the sdist. `quality.py` names your paths, so the chain passes, and CI fails later. Exclude both folders where your tools read the whole repo.
 
    Exclude `specs/` and `app_docs/` from formatters and linters too. They are SSSF's records of each run, not code, and ruff 0.16 also formats Python blocks inside Markdown. In one yt-summarizer run, the committed spec failed `ruff format --check .`, and the builder's `ruff format .` rewrote it. Package builds can leave these two folders alone; they are small and harmless.
@@ -186,6 +188,8 @@ A session that already has `/sssf` keeps it through the switch. New sessions get
    | hatchling sdist | `pyproject.toml`: `[tool.hatch.build.targets.sdist]` `exclude = ["/adws", "/.claude"]` |
    | setuptools sdist | `MANIFEST.in`: `prune adws` and `prune .claude` |
    | npm package | the `files` field in `package.json`, or `.npmignore` |
+
+   Package builds should leave out `.githooks/` too: `"/.githooks"` in the hatchling exclude, `prune .githooks` in `MANIFEST.in`.
 
    `install.py` does not edit these files: they belong to the project. A wheel limited to your package is already clean. The sdist still carries a few small SSSF files at the top level (`justfile`, `.env.sample`, `specs/`, `app_docs/`). They are harmless, and you can exclude them the same way.
 
@@ -207,3 +211,14 @@ sqlite3 adws/adw_data/sssf.db "select adw_id, status from sessions order by star
 ```
 
 If the smoke test fails, fix it before composing chains — every multi-agent ADW rides on this exact path.
+
+## Secret scan before every push
+
+`.githooks/pre-push` runs [gitleaks](https://github.com/gitleaks/gitleaks) over the commits a push would send, and refuses the push on a find. For a branch the remote already has, it scans the commits past the remote's copy; for a new branch, the commits on none of the remote's branches. Each find prints redacted, with its rule, file and commit. It also refuses when `SSSF_ADW_ID` is set, so an SSSF agent can't push, and when gitleaks isn't installed, so a missing scanner can't let a push through unscanned.
+
+- **Turning it on is the engineer's step:** `git config core.hooksPath .githooks`, once per clone. Git doesn't run a repo's tracked hooks until the clone opts in. Don't run it yourself, even when asked: it changes what git runs on every push, and an agent's permission check refuses it as persistence. Give the engineer the line `install.py` prints.
+- **It switches off `.git/hooks`.** With `core.hooksPath` set, git stops reading `.git/hooks`. `install.py` names any hook there; merge what it does into `.githooks/` before the switch. In yt-summarizer an untracked `.git/hooks/pre-push` refused agent pushes, which is why the skill's hook does that too.
+- **gitleaks** 8.30.1 or later, on `PATH`. Install it from its GitHub release and check the release's SHA-256 against its checksums file.
+- **Check it** by running the hook as git does, never with a real push: in a scratch clone, commit a fake token (`ghp_` and 36 random letters, never a real secret) and run `echo "refs/heads/main $(git rev-parse HEAD) refs/heads/main $(git rev-parse origin/main)" | .githooks/pre-push origin`. It should exit 1 and name the file. A clean commit exits 0.
+- **`git push --no-verify`** skips it. That's the engineer's call, knowing nothing was scanned.
+- **Keep `.githooks/` out of package builds**, beside `adws/` and `.claude/` (step 6 of the checklist).

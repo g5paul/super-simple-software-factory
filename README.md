@@ -289,8 +289,7 @@ run = session.ensure(cfg, adw_id)       # pin-or-create the session
 
 with run.phase(PhaseParams(name="plan", kind="agent", owner="planner",
                            description="Turn the request into an implementable plan")) as ph:
-    plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
-                             gates=[gates.artifacts_exist, gates.files_non_empty]))
+    plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt, gates=gates.PLAN))
 
 with run.phase(PhaseParams(name="commit", kind="code", owner="git",
                            description="Commit the working tree")) as ph:
@@ -330,7 +329,7 @@ class BuildOutput(EnvelopeBase):
 
 Determinism is wired into every step. Agents must return a specific structure, every time. If it does not parse, they get asked again until it does.
 
-Gates verify claims, never predictions. Nobody knows which files an agent will touch before it finishes, so gates run **after** the fact against the envelope's own declarations: `artifacts_exist`, `files_non_empty`, `json_parses`, `diff_matches_claims`, `tests_pass(...)`. A gate is a callable with the signature `gate(envelope, run) -> GateReport`, one `check(item, ok, note)` per thing it examined, so a green gate tells you *what* it verified.
+Gates verify claims, never predictions. Nobody knows which files an agent will touch before it finishes, so gates run **after** the fact against the envelope's own declarations: `artifacts_exist`, `files_non_empty`, `json_parses`, `diff_matches_claims`, `tests_pass(...)`. A planner's calls take `gates.PLAN`, which adds `plan_well_formed`: both copies of the plan the same, no committed spec overwritten, a verification heading, and a real file named, so a malformed plan goes back to the planner before a build spends on it. A gate is a callable with the signature `gate(envelope, run) -> GateReport`, one `check(item, ok, note)` per thing it examined, so a green gate tells you *what* it verified.
 
 When JSON does not parse or a gate returns violations, **nothing restarts**. The harness re-prompts the same session with a correction naming exactly what was wrong, and the context window stays intact. Pi treats `--session-id` as create-or-continue, so running an agent and continuing it are the same call. A cold restart throws away everything the agent learned. A correction costs one message.
 

@@ -89,6 +89,13 @@ def test_the_report_shows_shares_of_each_allowance_and_runs_left(tmp_path):
     assert "$0.0166" in text and "covers about 6023 runs" in text
 
 
+def test_cpu_with_no_readings_is_unknown_not_zero(tmp_path):
+    db = trace(tmp_path / "a.db", [(1, e2b("e1", 100, None, 0.01)), (1, vercel("v1", 100, None, 0.1))])
+    text = "\n".join(sandbox_usage.report([db], NOW))
+    assert "CPU unknown" in text and "active CPU   unknown" in text
+    assert "Hobby's one-time credit" in text and "not a setting" in text
+
+
 def test_a_trace_with_no_vm_runs_says_so(tmp_path):
     db = trace(tmp_path / "a.db", [])
     assert sandbox_usage.report([db], NOW)[-1] == "no remote VM runs in these traces"

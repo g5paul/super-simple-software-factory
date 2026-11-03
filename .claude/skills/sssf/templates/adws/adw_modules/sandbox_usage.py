@@ -92,6 +92,12 @@ def _share(used: float, allowed: float) -> str:
     return f"{used / allowed:.1%} of {allowed:g}"
 
 
+def _cpu_hours(t: Totals) -> str:
+    """CPU hours, or "unknown" when no run in `t` has a reading: a zero
+    would read as no CPU used."""
+    return "unknown" if t.runs and t.cpu_unknown == t.runs else f"{t.cpu_seconds / 3600:.3f} h"
+
+
 def report(dbs: list[Path], now: datetime | None = None) -> list[str]:
     found = totals(dbs, now)
     lines = [f"traces: {', '.join(str(db) for db in dbs)}"]
@@ -104,7 +110,7 @@ def report(dbs: list[Path], now: datetime | None = None) -> list[str]:
             cpu_h = window.cpu_seconds / 3600
             lines += [f"vercel, last {WINDOW_DAYS} days: {window.runs} runs, "
                       f"{window.vm_seconds / 3600:.2f} VM hours",
-                      f"  active CPU   {cpu_h:.3f} h     {_share(cpu_h, VERCEL_CPU_HOURS)} h",
+                      f"  active CPU   {_cpu_hours(window)}     {_share(cpu_h, VERCEL_CPU_HOURS)} h",
                       f"  memory       {window.gb_hours:.2f} GB-h   {_share(window.gb_hours, VERCEL_GB_HOURS)} GB-h",
                       f"  creations    {window.runs}           {_share(window.runs, VERCEL_CREATIONS)}"]
             if window.runs:
@@ -115,8 +121,9 @@ def report(dbs: list[Path], now: datetime | None = None) -> list[str]:
             unknown, estimated = window.cpu_unknown, window.estimated
         else:
             lines += [f"{name}, all time: {ever.runs} runs, {ever.vm_seconds / 3600:.2f} VM hours, "
-                      f"{ever.cpu_seconds / 3600:.3f} CPU hours",
-                      f"  credit       ${ever.cost_usd:.4f}   {_share(ever.cost_usd, E2B_CREDIT_USD)} dollars",
+                      f"CPU {_cpu_hours(ever)}",
+                      f"  credit       ${ever.cost_usd:.4f}   {_share(ever.cost_usd, E2B_CREDIT_USD)} dollars,"
+                      " Hobby's one-time credit",
                       f"  last {WINDOW_DAYS} days ${window.cost_usd:.4f} over {window.runs} runs"]
             if ever.runs:
                 lines.append(f"  at ${ever.cost_usd / ever.runs:.4f} a run, what's left covers about "
@@ -127,5 +134,7 @@ def report(dbs: list[Path], now: datetime | None = None) -> list[str]:
                          "or the reading failed")
         if estimated:
             lines.append(f"  {estimated} runs estimated from VM seconds at 2 vCPUs and 4 GiB")
-    lines += ["", "SSSF's runs only, from these traces. The provider's dashboard is the bill."]
+    lines += ["", "SSSF's runs only, from these traces, against each provider's Hobby allowance",
+              "as its pricing page gives it (built into sandbox_usage.py, not a setting).",
+              "The provider's dashboard is the bill."]
     return lines

@@ -38,7 +38,7 @@ def git(cwd: Path, *args: str) -> str:
 def fresh():
     """What git ignored before one test's agent isn't carried into the next."""
     yield
-    permissions._EXISTED = ()
+    permissions._EXISTED = (frozenset(), frozenset())
 
 
 @pytest.fixture(autouse=True)
@@ -821,3 +821,45 @@ def test_files_git_ignored_before_the_agent_are_never_deleted(repo, home, tmp_pa
     for path in (".env", "node_modules/x.js", "adws/adw_modules/__pycache__/x.pyc", "specs/local/notes.md"):
         assert (repo / path).exists(), path
     assert not (repo / "notes.txt").exists()
+
+
+@pytest.mark.parametrize("left, planted", [
+    ("specs/.DS_Store", "specs/approved.md"),
+    ("app/plugins/__pycache__/old.cpython-312.pyc", "app/plugins/evil.py"),
+    (".vscode/settings.json", ".vscode/tasks.json"),
+])
+def test_a_folder_of_only_ignored_files_does_not_shelter_a_new_one(repo, left, planted):
+    """Fourteenth review, B1: `ls-files --directory` lists such a folder as one
+    entry, and everything under it counted as existing, so the agent's new
+    file was kept. It needs no ignore change; the engineer's files still stay."""
+    (repo / ".gitignore").write_text(".DS_Store\n__pycache__/\n.vscode/settings.json\n")
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-qm", "ignore")
+    (repo / left).parent.mkdir(parents=True, exist_ok=True)
+    (repo / left).write_text("x\n")
+    run = default_config(repo)
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    (repo / planted).write_text("x\n")
+    permissions.restore_git_dir(run, guard)
+    with pytest.raises(permissions.PermissionBreach, match=f"{planted} — deleted"):
+        permissions.enforce(run, None, reviewer(), tree)
+    assert not (repo / planted).exists() and (repo / left).exists()
+
+
+def test_two_phases_cant_build_the_shelter(repo):
+    """Fourteenth review, B2: a scout's ignored pyc made the folder count as
+    existing in the next phase, and the reviewer's new file there was kept."""
+    (repo / ".gitignore").write_text("__pycache__/\n")
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-qm", "ignore")
+    run = default_config(repo)
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    (repo / "adws/adw_modules/hooks/__pycache__").mkdir(parents=True)
+    (repo / "adws/adw_modules/hooks/__pycache__/a.pyc").write_text("x\n")
+    permissions.restore_git_dir(run, guard)
+    assert permissions.enforce(run, None, reviewer(), tree) == []
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    (repo / "adws/adw_modules/hooks/__init__.py").write_text("x\n")
+    permissions.restore_git_dir(run, guard)
+    with pytest.raises(permissions.PermissionBreach, match="__init__.py — deleted"):
+        permissions.enforce(run, None, reviewer(), tree)

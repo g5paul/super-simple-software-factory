@@ -60,11 +60,15 @@ _NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
 # folder git ignores whole is one entry ending in "/"). An agent that changes
 # what git ignores makes the engineer's .env or node_modules look new; the
 # rollback must not delete them. Taken before the agent, so it can't add to it.
-_EXISTED: tuple[str, ...] = ()
+_EXISTED: tuple[frozenset[str], frozenset[str]] = (frozenset(), frozenset())   # files, folders
 
 
 def _existed(path: str) -> bool:
-    return any(path == e or (e.endswith("/") and path.startswith(e)) for e in _EXISTED)
+    files, folders = _EXISTED
+    if path in files:
+        return True
+    parts = path.split("/")
+    return any("/".join(parts[:i]) + "/" in folders for i in range(1, len(parts)))
 
 
 def _gitargv(args: list[str], *, writes: bool = False) -> list[str]:
@@ -381,7 +385,17 @@ def guard_git_dir(run) -> dict | None:
     global _EXISTED
     listed = _git(["ls-files", "--others", "--ignored", "--exclude-standard",
                    "--directory", "-z"], run.repo_root)
-    _EXISTED = tuple(p for p in listed.split("\0") if p)
+    entries = [p for p in listed.split("\0") if p]
+    # --directory also lists an untracked folder that holds only ignored files,
+    # such as specs/ with a .DS_Store in it. Counting that as existing would
+    # keep any new file the agent put there. A folder counts only when git
+    # ignores the folder itself, like node_modules/; its files are listed too.
+    folders = [p for p in entries if p.endswith("/")]
+    ignored = _sh('cd "$1" && shift && printf "%s\\0" "$@" | '
+                  'git -c core.fsmonitor= check-ignore -z --stdin',
+                  str(run.repo_root), *folders).stdout if folders else ""
+    _EXISTED = (frozenset(p for p in entries if not p.endswith("/")),
+                frozenset(p for p in ignored.split("\0") if p.endswith("/")))
     links, paths = _watched(run)
     if not paths:
         return None
@@ -564,8 +578,8 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
             if path not in after else "left as-is (was already modified)"
     if after.get(path) == "untracked":
         if _existed(path):
-            return ("left in place: it was there, ignored by git, before the agent ran; "
-                    "the agent changed what git ignores")
+            return ("left in place: git ignored it before the agent ran, so it is "
+                    "not the agent's; what git ignores has changed since")
         try:
             sandbox.current().remove(Path(run.repo_root) / path)
             return "deleted"

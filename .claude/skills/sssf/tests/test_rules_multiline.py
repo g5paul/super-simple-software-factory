@@ -37,7 +37,7 @@ CASES = [
     ("cd src && ls\n  pi", False),           # indented: the pattern itself allows no spaces after ^
     ("echo hi; pi", True),
     ("echo hi\necho pip install x", False),
-    ("cat > notes.md <<EOF\npi is the agent\nEOF", False),
+    ("cat > notes.md <<EOF\npi is the agent\nEOF", True),     # whole-command search
 ]
 
 

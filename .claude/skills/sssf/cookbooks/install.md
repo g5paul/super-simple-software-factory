@@ -110,7 +110,7 @@ Run the update the way the repo takes any change: on a short branch cut from `ma
    - `agent_rules`: rules every agent gets at the end of its system prompt. A plain string asks; a rule with `forbid` regexes also stops the run when an agent's shell command matches (`references/config.md`). It arrives empty. Leave it `[]`: the rules are the engineer's to choose. If the repo has a rule every agent should follow, such as one in `CLAUDE.local.md` (agents never read it), suggest it in your report.
    - A setting not listed here: read its comment in the skill's `repo.yaml`, and keep the default unless the repo needs otherwise.
    - If the update added or flagged `.githooks/pre-push`, read [Secret scan before every push](#secret-scan-before-every-push). For a `!` hook, the repo had its own: diff the two. The skill's scans with gitleaks and refuses a push from an agent. If the repo's does no more than that, `--take` it; if it does more, copy the skill's checks into it and `--keep` it. The update's last lines say whether the scan is on. If it isn't, pass that line to the engineer in your report; don't set `core.hooksPath` yourself.
-4. If the update changed `adws/adw_modules/rules.py`, `sssf_refuse.py` or `sssf_rules.ts`, and the repo's `agent_rules` has any `forbid` rule, retest those rules before you commit. These files decide what a rule catches, and a change can weaken a rule without any test in the skill knowing. Two project sessions caught a weakened rule this way, before committing it. Write the commands to try: for each `forbid` rule, a few forms it must refuse (plain, after `&&` or `;`, on the second line of a command, piped from a heredoc into `bash`, inside `bash -c`) and a few it must let through (a plan written with `cat > plan.md <<'EOF'` that names the command, a near-miss word). Run them through both checks, from the repo root. The snippet only calls the check functions, so nothing in the list is run. Don't test by running a command through `adws/adw_modules/sssf_refuse.py` itself: it runs every command it allows, so a plan case writes `plan.md` into the repo:
+4. If the update changed `adws/adw_modules/rules.py`, `sssf_refuse.py` or `sssf_rules.ts`, and the repo's `agent_rules` has any `forbid` rule, retest those rules before you commit. These files decide what a rule catches, and a change can weaken a rule without any test in the skill knowing. Two project sessions caught a weakened rule this way, before committing it. Write the commands to try: for each `forbid` rule, a few forms it must refuse (plain, after `&&` or `;`, on the second line of a command, piped from a heredoc into `bash`, inside `bash -c`) and a few it must let through (a near-miss word, such as `pip` for a `pi` rule, or the command's read-only form). Run them through both checks, from the repo root. The snippet only calls the check functions, so nothing in the list is run. Don't test by running a command through `adws/adw_modules/sssf_refuse.py` itself: it runs every command it allows, so a plan case writes `plan.md` into the repo:
 
    ```bash
    uv run --with pyyaml --with pydantic python3 - <<'EOF'
@@ -121,16 +121,18 @@ Run the update the way the repo takes any change: on a short branch cut from `ma
    rs = [rules.AgentRule(**r) for r in raw if isinstance(r, dict)]
    cases = [  # (command, should be refused)
        ("git push origin main", True),
-       ("cat > plan.md <<'X'\nnever run git push\nX", False),
+       ("git pull --ff-only", False),
    ]
    for command, want in cases:
-       got = (rules.breach(rs, command) is not None,
-              sssf_refuse.refusal(command, rules.refusing(rs)) is not None)
-       print("ok " if got == (want, want) else "BAD", got, repr(command))
+       hit = rules.breach(rs, command)   # the rule it breaks, or None
+       refused = sssf_refuse.refusal(command, rules.refusing(rs)) is not None
+       # only on_match: refuse rules are refused before they run; stop rules stop the run
+       ok = (hit is not None) == want and refused == (want and hit[0].on_match == "refuse")
+       print("ok " if ok else "BAD", hit is not None, refused, repr(command))
    EOF
    ```
 
-   `rules.breach` is the check on every agent's stream, and `refusal` is the one that refuses a command before it runs. On a pi roster, also run the cases through `sssf_rules.ts`'s `executed()` under `bun`, since pi's extension uses it. Every line must say `ok`. If a command the repo's rules refused before the update now passes, the update weakened a rule: don't commit. Put the tree back (`git checkout -- .`, and remove any file the update added, by name), and send the hub the failing commands. A rule that was already weak before the update, such as a pattern anchored with `^` that misses the second line, is the repo's to fix in `repo.yaml`, in the update commit; say so in your report.
+   `rules.breach` is the check on every agent's stream, and `refusal` is the one that refuses a command before it runs. On a pi roster, the extension `sssf_rules.ts` compiles the same patterns with the `m` flag; run the cases through it under `bun` too if the update changed it. Every line must say `ok`. If a command the repo's rules refused before the update now passes, the update weakened a rule: don't commit. Put the tree back (`git checkout -- .`, and remove any file the update added, by name), and send the hub the failing commands. A rule that was already weak before the update, such as a pattern anchored with `^` that misses the second line, is the repo's to fix in `repo.yaml`, in the update commit; say so in your report.
 5. Commit the update on its own: `git add -A && git commit -m "Update SSSF to skill <sha>"`, with the sha the update printed. A file the update just added (`+`) that you edit straight away, such as `repo.yaml`, can go into this commit with your edit, since it never existed without it.
 6. Run `uv run adws/adw_quality.py "check after the SSSF update"`. A block reported as `not configured` is still on its placeholder, and checks nothing until you wire it in `quality.py`.
    Quality never starts an agent, so it cannot tell you the agents can still sign in. On a Claude Code roster, check that too, with the agents' own environment: `just login-check` (`just sssf login-check` with `mod sssf`). It runs the same check a chain runs before its first agent.

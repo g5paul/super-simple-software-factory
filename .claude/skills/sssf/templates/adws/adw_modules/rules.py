@@ -35,8 +35,6 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from .sssf_refuse import executed
-
 # The shell tool's name in each harness: Claude Code's `Bash`, pi's `bash`.
 SHELL_TOOLS = {"Bash", "bash"}
 
@@ -163,13 +161,12 @@ def refusing(rules: list) -> list[dict]:
 def breach(rules: list, command: str) -> Optional[tuple[AgentRule, str]]:
     """The first enforced rule and pattern this command breaks, or None.
 
-    It searches what the command runs, without heredoc bodies that only feed a
-    file, the same text both refusers search, so a refusal and this backstop
-    never disagree about one command. `^` and `$` match at every line, as a
-    shell reads them, so a pattern anchored to a command's start finds one on
-    any line. All three matchers search that way.
+    It searches the whole command, heredoc bodies included. `^` and `$` match
+    at every line, as a shell reads them, so a pattern anchored to a command's
+    start finds one on any line. sssf_refuse.py and sssf_rules.ts search the
+    same way. Text an agent means only as text belongs in a file written with
+    its file tool, which no rule reads.
     """
-    command = executed(command)
     for rule in rules:
         if isinstance(rule, AgentRule):
             for pattern in rule.forbid:

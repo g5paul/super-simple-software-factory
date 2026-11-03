@@ -4,7 +4,7 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 | Repo | SSSF branch | Skill | Agent rules |
 |---|---|---|---|
-| yt-summarizer | `sssf-run` (`main` follows it, one update behind) | dbe4710 | No push. Enforced by a `forbid` rule, and by an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
+| yt-summarizer | `sssf-run` (`main` follows it, fast-forwarded by the engineer) | dbe4710 | No push. Enforced by a `forbid` rule, and by an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
 | pi-agent-observability | `main` | dbe4710 | Leave the obs server alone. A plain string: it asks, nothing enforces it |
 | fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | dbe4710 | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack |
 | sssf-sandbox | `master` | dbe4710 | The hub's own test bed. None |

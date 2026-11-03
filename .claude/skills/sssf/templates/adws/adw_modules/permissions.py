@@ -56,19 +56,17 @@ class PermissionBreach(RuntimeError):
 _SAFE = ["-c", "core.fsmonitor="]     # empty: off on every git; "false" runs `false` before 2.36
 _NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
 
-# What git ignored before the agent ran, as `ls-files --directory` lists it (a
-# folder git ignores whole is one entry ending in "/"). An agent that changes
-# what git ignores makes the engineer's .env or node_modules look new; the
-# rollback must not delete them. Taken before the agent, so it can't add to it.
-_EXISTED: tuple[frozenset[str], frozenset[str]] = (frozenset(), frozenset())   # files, folders
+# Every file git ignored before the agent ran, one by one. An agent that
+# changes what git ignores makes the engineer's .env or node_modules look new;
+# the rollback must not delete them. Taken before the agent, so it can't add to
+# it. No folder entries: a folder can't vouch for a file the agent adds to it.
+# Past EXISTED_CAP bytes the list is dropped and the rollback deletes as before.
+_EXISTED: frozenset[str] = frozenset()
+EXISTED_CAP = 64 * 1024 * 1024
 
 
 def _existed(path: str) -> bool:
-    files, folders = _EXISTED
-    if path in files:
-        return True
-    parts = path.split("/")
-    return any("/".join(parts[:i]) + "/" in folders for i in range(1, len(parts)))
+    return path in _EXISTED
 
 
 def _gitargv(args: list[str], *, writes: bool = False) -> list[str]:
@@ -383,19 +381,10 @@ def _differs(guard: dict) -> list[str] | None:
 def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs. None outside a git repo."""
     global _EXISTED
-    listed = _git(["ls-files", "--others", "--ignored", "--exclude-standard",
-                   "--directory", "-z"], run.repo_root)
-    entries = [p for p in listed.split("\0") if p]
-    # --directory also lists an untracked folder that holds only ignored files,
-    # such as specs/ with a .DS_Store in it. Counting that as existing would
-    # keep any new file the agent put there. A folder counts only when git
-    # ignores the folder itself, like node_modules/; its files are listed too.
-    folders = [p for p in entries if p.endswith("/")]
-    ignored = _sh('cd "$1" && shift && printf "%s\\0" "$@" | '
-                  'git -c core.fsmonitor= check-ignore -z --stdin',
-                  str(run.repo_root), *folders).stdout if folders else ""
-    _EXISTED = (frozenset(p for p in entries if not p.endswith("/")),
-                frozenset(p for p in ignored.split("\0") if p.endswith("/")))
+    listed = _git(["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+                  run.repo_root)
+    _EXISTED = frozenset(p for p in listed.split("\0") if p) \
+        if len(listed) <= EXISTED_CAP else frozenset()
     links, paths = _watched(run)
     if not paths:
         return None

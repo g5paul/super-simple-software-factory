@@ -13,10 +13,11 @@ merge: any
 # database. 1 means one at a time.
 max_worktree_runs: 2
 
-# Where a run does its work when the chain takes --sandbox and the flag is
-# left out: none on this machine, or a remote VM from vercel or e2b. It picks
-# for new runs only; a resume stays where its run started. `--sandbox none`
-# keeps one run here, and `--sandbox <provider>` picks another for one run.
+# Where a run does its work when it takes --sandbox (the SDLC chains,
+# tickets and trials) and the flag is left out: none on this machine, or a
+# remote VM from vercel or e2b. It picks for new runs only; a resume stays
+# where its run started. `--sandbox none` keeps one run here, and
+# `--sandbox <provider>` picks another for one run.
 # docs/designs/remote-sandboxes.md in the SSSF repo says what each one needs.
 sandbox: none
 

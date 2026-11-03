@@ -90,7 +90,7 @@ Decision 4's `sandbox:` setting, built after both providers:
 
 - **It picks for new runs only.** `session.choose_sandbox` reads it when a chain that takes `--sandbox` starts without the flag. A run whose adw_id is already in the trace keeps where it ran. A VM run resumes in a new VM, as decision 12 says, and a host run stays on the host, so a setting committed since can't move it into a worktree halfway through.
 - **`none`, not `null`.** The setting and the flag share one word for the host, so `--sandbox none` reads like the setting it overrides.
-- **Only the four chains that take `--sandbox` read it.** The single-phase chains, tickets and trials don't, so a repo with `sandbox: e2b` still runs them on the host.
+- **The runs that take `--sandbox` read it:** the four chains, and since "As built: tickets and trials", `just tickets` and `just trial`. The single-phase chains don't, so a repo with `sandbox: e2b` still runs them on the host.
 
 ## As built: usage
 
@@ -98,6 +98,17 @@ Decision 4's `sandbox:` setting, built after both providers:
 - **Vercel's `sandbox_end` adds `memory_gb_hours`,** from the VM's size and seconds. Hobby counts memory busy or idle.
 - **`just sandbox-usage` adds up traces.** An allowance belongs to a team, and each repo keeps its own trace, so it takes other repos' traces too. It counts Vercel over the last 30 days and E2B over all time, against the Hobby numbers in `sandbox_usage.py`.
 - **First numbers.** A full `adw_simple_sdlc` on Vercel used 12.7 CPU seconds in 130 VM seconds, about 10% of one vCPU, because the agents spend most of a run waiting on the model. At that rate Vercel's 5 hours covers well over a thousand runs a month, and its 420 GB-hours about 2,900. A repo whose tests take longer will use more.
+
+## As built: tickets and trials
+
+Decision 17's last step, built after the dashboard:
+
+- **`just tickets <folder> --sandbox vercel|e2b|none`.** The whole feature is one worktree run in one VM: the scout, every ticket's build, checks and commit, both reviews and the write-up. Each ticket's commit comes back to `sssf/<adw_id>` as it lands, so a VM that dies keeps every finished ticket on the host. The choice is made before the feature claim, because a VM run is a worktree run and builds from the feature folder as committed.
+- **Done marks go through the sandbox.** `tickets.mark_done` used to write the ticket file on the host, which in a VM run would have left the mark out of the ticket's commit. The sandbox has a `write_text` now, and the mark lands in the VM's tree.
+- **`just trial --sandbox vercel|e2b|none "<request>" <rosters>`.** The trial picks one place, from the flag or repo.yaml, and passes it to every attempt, so a trial never mixes VM and host attempts. Each roster is checked before anything starts. A pi roster can't run in a VM yet, so it refuses the trial and names `--sandbox none`. The panel runs on the host, from the branches the attempts' commits came back to.
+- **The trial doesn't load the SDK.** Loading it restarts a process under `uv run --with`, and the flag that guards that restart would have reached every attempt and stopped each one from fetching the SDK. The trial checks only the provider name and the roster, drops the flag from the attempts' environment, and each attempt fetches the SDK itself.
+- **A stop's message says where the work is.** It used to say to `git stash` on the host. In a VM run it now says the work will be saved as `sandbox-uncommitted.patch` when the VM closes.
+- **Changed for repos with `sandbox:` set.** A new ticket run in such a repo now goes to the VM without the flag. Trials already did: their attempts are `adw_simple_sdlc` runs, which read repo.yaml, so this design's earlier line saying trials stay on the host was wrong.
 
 ## As built: the dashboard
 
@@ -127,7 +138,7 @@ Step 3 kept everything above and settled this:
 - **A ChatGPT roster in the VM.** It needs pi's OAuth sign-in in the VM, and a decision on how it gets there.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on yt-summarizer), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.
-- **`--sandbox` for tickets and trials.** Waits for batches of runs, where VMs help most: no local CPU, and no worktrees sharing ports or caches.
+- **`--sandbox` for tickets and trials** was built after the dashboard; see "As built: tickets and trials".
 - **Rebase checks off the host.** Per decision 11.
 - **Vercel's Hobby limits beyond the allowance.** Resuming is rate-limited to 40 vCPUs a minute, and snapshot storage is capped; past the cap, Vercel refuses every new VM until the month resets or snapshots are deleted. Both were hit in the proof, by a bug since fixed. How far a day of real runs is from either is not known.
 - **Not yet known:** which exception Vercel's SDK raises when a session ends mid-stream. The trace will show it when it happens; nothing to build until then.

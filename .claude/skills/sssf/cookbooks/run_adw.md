@@ -108,7 +108,7 @@ A repo can have more than one worktree run going, up to its `max_worktree_runs`.
 
 ### In a remote VM: `--sandbox vercel` or `--sandbox e2b`
 
-Use it only when the engineer asks for it, with the provider they name, or when the repo's `adws/adw_sssf_config/repo.yaml` sets `sandbox: vercel` or `sandbox: e2b`. Then a new run of these chains goes to that provider's VM without the flag. Pass `--sandbox none` to keep one run on this machine only when the engineer says to. Don't change the setting yourself: it's the engineer's call, made in a commit. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, not yet for tickets or trials. The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
+Use it only when the engineer asks for it, with the provider they name, or when the repo's `adws/adw_sssf_config/repo.yaml` sets `sandbox: vercel` or `sandbox: e2b`. Then a new run of these chains goes to that provider's VM without the flag. Pass `--sandbox none` to keep one run on this machine only when the engineer says to. Don't change the setting yourself: it's the engineer's call, made in a commit. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, and for ticket runs ([tickets.md](tickets.md)) and trials ([trial.md](trial.md)). The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
 
 ```bash
 uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or e2b, or none for this machine

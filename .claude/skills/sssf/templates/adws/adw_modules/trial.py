@@ -387,7 +387,7 @@ def where(root: Path, asked: str | None) -> str | None:
 def vm_problems(cfg: SSSFConfig, name: str, provider: str) -> list[str]:
     """What stops this roster's attempts from working in a `provider` VM, or []."""
     try:
-        sandbox.prepare(provider, cfg)
+        sandbox.check_roster(provider, cfg)
     except SystemExit as error:
         return [f"{name}: {error} Run the trial with --sandbox none to keep every attempt on "
                 f"this machine."]
@@ -456,7 +456,9 @@ def start(request: str, names: list[str], out=sys.stdout, asked: str | None = No
                "sandbox": provider or "none"}
         log = root / cfg.defaults.data_dir / "sessions" / adw_id / "trial.log"
         log.parent.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, "SSSF_TRIAL": json.dumps(tag)}
+        # Each attempt fetches its provider's SDK itself (sandbox_remote.require_sdk).
+        env = {**{k: v for k, v in os.environ.items() if k != "SSSF_SANDBOX_SDK"},
+               "SSSF_TRIAL": json.dumps(tag)}
         with log.open("w") as handle:
             # A session of its own, so stopping `just trial` leaves the attempts running.
             proc = subprocess.Popen(

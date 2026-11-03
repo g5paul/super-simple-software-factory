@@ -413,8 +413,12 @@ def test_add_roster_stamps_a_starter_beside_the_repos_own_and_updates_keep_it(tm
 
 @pytest.fixture
 def no_sdk_needed(monkeypatch):
+    """A trial never imports a provider's SDK: that would start it again under uv."""
     from adw_modules import sandbox
-    monkeypatch.setattr(sandbox, "_provider", lambda name: SimpleNamespace(require_sdk=lambda: None))
+
+    def no_import(name):
+        raise AssertionError("the trial imported a provider SDK")
+    monkeypatch.setattr(sandbox, "_provider", no_import)
 
 
 def test_a_vm_trial_refuses_a_pi_roster_before_anything_starts(repo, no_sdk_needed):
@@ -426,6 +430,9 @@ def test_a_vm_trial_refuses_a_pi_roster_before_anything_starts(repo, no_sdk_need
     trial.check(repo, ["main", "chatgpt"], None)
 
 
+seen_env: list[dict] = []
+
+
 def launches(repo, monkeypatch, asked):
     """Start a trial with the attempts and the panel faked; returns each attempt's argv and tag."""
     seen = []
@@ -435,6 +442,7 @@ def launches(repo, monkeypatch, asked):
         if not (env and "SSSF_TRIAL" in env):
             return real(argv, env=env, **kwargs)           # git, and the rest of the host's work
         seen.append((argv, json.loads(env["SSSF_TRIAL"])))
+        seen_env.append(env)
         return SimpleNamespace(wait=lambda: 0, poll=lambda: None)
     monkeypatch.setattr(trial.subprocess, "Popen", popen)
     monkeypatch.setattr(trial, "_wait_for_starts", lambda db, launched: [])
@@ -445,7 +453,9 @@ def launches(repo, monkeypatch, asked):
 
 
 def test_every_attempt_gets_the_trials_sandbox_from_the_flag_or_repo_yaml(repo, monkeypatch, no_sdk_needed):
+    monkeypatch.setenv("SSSF_SANDBOX_SDK", "1")      # as after the trial's own uv restart
     seen, out = launches(repo, monkeypatch, "e2b")
+    assert all("SSSF_SANDBOX_SDK" not in env for env in seen_env)
     assert [argv[argv.index("--sandbox") + 1] for argv, _ in seen] == ["e2b", "e2b"]
     assert [tag["sandbox"] for _, tag in seen] == ["e2b", "e2b"]
     assert "each in its own e2b VM" in out

@@ -137,6 +137,14 @@ def _provider(name: str):
 def prepare(provider: str, cfg) -> None:
     """Check a remote run can start, before anything is created: the provider
     is known, the roster can run there, and its SDK imports (see sandbox_remote)."""
+    check_roster(provider, cfg)
+    _provider(provider).require_sdk()
+
+
+def check_roster(provider: str, cfg) -> None:
+    """The provider is known and every agent in the roster can run in its VM.
+    A trial checks this for every roster without importing the SDK, which
+    would start the trial again under `uv run --with`."""
     if provider not in PROVIDERS:
         raise SystemExit(f"--sandbox {provider}: SSSF knows {', '.join(PROVIDERS)}")
     pi = [a.name for a in cfg.agents if a.coding_agent == "pi"]
@@ -144,7 +152,6 @@ def prepare(provider: str, cfg) -> None:
         raise SystemExit(f"--sandbox runs Claude Code agents only for now, and {', '.join(pi)} "
                          "run on pi. A ChatGPT roster in the VM is still open in "
                          "docs/designs/remote-sandboxes.md.")
-    _provider(provider).require_sdk()
 
 
 def open_remote(provider: str, run, branch: str, project: str, live: set[str]):

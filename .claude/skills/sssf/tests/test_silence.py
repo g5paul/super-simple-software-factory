@@ -231,3 +231,31 @@ def test_finished_shortens_the_limit_to_the_grace(monkeypatch):
         dog.finished()
         time.sleep(0.5)
     assert dog.fired and not dog.hung and process.stopped == 1
+
+
+# Claude Code with a background task still running: its result isn't final.
+# The CLI waits for the task, then opens a new turn with another result.
+TASKS = '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}'
+NO_TASKS = '{"type":"system","subtype":"background_tasks_changed","tasks":[]}'
+
+
+def test_a_result_while_a_background_task_runs_waits_the_full_limit(tmp_path, linger, monkeypatch):
+    script, pid_file = linger
+    monkeypatch.setenv("FAKE_LINES", "\n".join([CLAUDE_INIT, TASKS, CLAUDE_RESULT]))
+    monkeypatch.setattr(agent_cc, "CLAUDE_PATH", str(script))
+    monkeypatch.setattr(agent_cc, "AUTH", "subscription")
+    began = time.monotonic()
+    result = agent_cc.run(request(tmp_path, max_silence_seconds=3))
+    waited = time.monotonic() - began
+    assert waited >= 3                 # not cut to the grace
+    assert result.text == "done"       # and still not a failure
+    time.sleep(0.2)
+    assert not alive(int(pid_file.read_text()))
+
+
+def test_a_new_turn_reopens_the_call():
+    process = FakeProcess()
+    with silence.watch(process, 60, poll=0.05) as dog:
+        dog.finished()
+        dog.reopen()
+        assert dog.limit == 60 and not dog.done

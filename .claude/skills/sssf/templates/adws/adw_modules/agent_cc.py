@@ -258,6 +258,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     turns: dict[str, dict] = {}     # message id -> the message, for a call killed mid-turn
     output: dict[str, int] = {}     # message id -> its output tokens so far, from message_delta
     streaming: dict = {}            # parent_tool_use_id -> the message id now streaming
+    background = 0                  # Claude Code's background tasks still running
     # sandbox.start gives the child a DEVNULL stdin, for the reason agent_pi gives.
     tree = sandbox.current()
     process = tree.start(cmd, cwd=request.cwd,
@@ -292,7 +293,10 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     if not isinstance(event, dict):
                         continue
                     etype = event.get("type")
+                    if etype == "system" and event.get("subtype") == "background_tasks_changed":
+                        background = len(event.get("tasks") or [])
                     if etype == "system" and event.get("subtype") == "init":
+                        dog.reopen()
                         source = event.get("apiKeySource")
                         if AUTH == "subscription" and source not in (None, "none"):
                             process.kill()
@@ -326,7 +330,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                             raise stop
                     elif etype == "result":
                         final = event
-                        dog.finished()
+                        dog.finished(waiting=background > 0)
                     if on_event:
                         try:
                             on_event(event)

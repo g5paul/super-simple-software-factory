@@ -18,11 +18,16 @@ no time limit on one, so a pi agent stuck on a command that prints nothing
 for the limit is stopped. A repo whose agents run longer quiet commands
 raises it.
 
-Once the agent has sent its final result it has nothing left to say, but it
-can stay alive: Claude Code waits for a background command it started, a
-server or a `sleep`, before it exits. The runner calls `finished()`, and after
-GRACE quiet seconds the watchdog kills what's left and the call keeps its
-result.
+Once the agent has sent its final result it has nothing left to say, but its
+process can stay alive. The runner calls `finished()`, and after GRACE quiet
+seconds the watchdog kills what's left and the call keeps its result.
+
+Claude Code needs care here. With a background command still running, its
+result isn't final: the CLI waits for the command, then starts a new turn and
+sends another result (checked by hand against claude 2.1.317). So a result
+sent while background tasks run is `finished(waiting=True)`: the full limit
+still applies, since the agent may yet have work to do, and a stop then
+keeps the latest result instead of failing the call. A new turn `reopen()`s.
 """
 
 from __future__ import annotations
@@ -60,6 +65,7 @@ class Watchdog:
     def __init__(self, process, limit: Optional[float], poll: float):
         self.process = process
         self.limit = limit
+        self._full = limit
         self.poll = poll
         self.fired = False
         self.done = False
@@ -69,12 +75,18 @@ class Watchdog:
     def touch(self) -> None:
         self._last = time.monotonic()
 
-    def finished(self) -> None:
-        """The agent sent its final result: quiet from here on is it done,
-        not hung. Only leftovers can keep it alive, so they get GRACE."""
+    def finished(self, waiting: bool = False) -> None:
+        """The agent sent a result: quiet from here on is it done, not hung.
+        Only leftovers keep it alive, so they get GRACE, unless it's
+        `waiting` on background tasks that may wake it for another turn."""
         self.done = True
-        if self.limit:
-            self.limit = min(self.limit, GRACE)
+        if self.limit and not waiting:
+            self.limit = min(self._full, GRACE)
+
+    def reopen(self) -> None:
+        """A new turn began after a result: the agent is working again."""
+        self.done = False
+        self.limit = self._full
 
     @property
     def hung(self) -> bool:

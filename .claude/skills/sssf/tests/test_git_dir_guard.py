@@ -34,6 +34,13 @@ def git(cwd: Path, *args: str) -> str:
 
 
 @pytest.fixture(autouse=True)
+def unpinned():
+    """A partial restore pins SSSF's git for the rest of that run; not past a test."""
+    yield
+    permissions._PIN = None
+
+
+@pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
     """A HOME of the test's own, so the guard copies and restores a test
     ~/.gitconfig, never the real one."""
@@ -617,3 +624,66 @@ def test_nothing_is_written_through_a_link(repo, tmp_path, monkeypatch):
     assert os.readlink(real / ".config") == str(evil)      # reported, not touched
     assert list(evil.iterdir()) == []                      # nothing written into it
     assert commit_runs_no_hook(repo)                       # the plain hook still went back
+
+
+# ── tenth bypass-reviewer pass ──────────────────────────────────────────────
+
+def test_a_config_left_live_through_a_link_cant_hide_files(repo, home, tmp_path):
+    """P1: a retargeted ~/.config is reported, not put back, so SSSF's own git
+    would load the agent's excludesFile. After a partial restore it is pinned
+    to the config saved before the agent ran."""
+    dot = tmp_path / "dotfiles"
+    (dot / "git").mkdir(parents=True)
+    (dot / "git" / "config").write_text("")
+    (home / ".config").symlink_to(dot)
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evil"
+    (evil / "git").mkdir(parents=True)
+    (evil / "ign").write_text("*\n")
+    (evil / "git" / "config").write_text(f"[core]\n\texcludesFile = {evil / 'ign'}\n"
+                                         "\tfsmonitor = touch PWNED\n")
+    (home / ".config").unlink()
+    (home / ".config").symlink_to(evil)
+    (repo / "hidden.py").write_text("x\n")
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    try:
+        assert "hidden.py" in permissions._git(["ls-files", "--others", "--exclude-standard"], repo)
+        assert permissions._git(["config", "user.name"], repo).strip() == "t"   # the saved ~/.gitconfig
+        assert not (repo / "PWNED").exists()
+    finally:
+        permissions._PIN = None
+
+
+def test_a_clean_restore_leaves_git_unpinned(repo):
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    plant_hook(repo / ".git" / "hooks")
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert permissions._PIN is None
+
+
+def test_a_change_undone_before_the_restore_says_so(repo):
+    """F1: not "NOT all put back", which would send the engineer looking."""
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    plant_hook(repo / ".git" / "hooks")
+    assert permissions.git_dir_changed(guard)
+    (repo / ".git" / "hooks" / "pre-commit").unlink()
+    with pytest.raises(permissions.PermissionBreach, match="changed back since"):
+        permissions.restore_git_dir(run, guard)
+
+
+def test_a_crash_in_undo_or_enforce_keeps_the_git_breach():
+    """P2: a Latin-1 branch name crashed undo_commits, and the git breach was lost."""
+    text = (SKILL / "templates" / "adws" / "adw_modules" / "agents.py").read_text()
+    undo = text.index("permissions.undo_commits(run, head_before)")
+    assert "except Exception as failed:     # a crash in the undo or rollback keeps the git breach" \
+        in text[undo:undo + 1500]
+
+
+def test_a_latin1_branch_name_does_not_crash_head(repo):
+    subprocess.run([b"git", b"checkout", b"-qb", b"caf\xe9"], cwd=repo, check=True)
+    assert "caf" in permissions.head(SimpleNamespace(repo_root=repo))["branch"]

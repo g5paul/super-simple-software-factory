@@ -363,6 +363,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                 if git_breach:
                     raise permissions.PermissionBreach(f"{git_breach}\n{found}") from found
                 raise
+            except Exception as failed:     # a crash in the undo or rollback keeps the git breach
+                raise permissions.PermissionBreach(
+                    (f"{git_breach}\n" if git_breach else "")
+                    + f"Could not undo the agent's commits or roll back its writes: {failed!r}. "
+                    "Check the tree by hand.") from failed
             if git_breach:
                 raise git_breach
         except permissions.PermissionBreach as breach:

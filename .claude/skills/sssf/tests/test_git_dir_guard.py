@@ -373,3 +373,17 @@ def test_any_guard_error_still_runs_undo_and_enforce():
         < text.index("permissions.undo_commits(run, head_before)", check)
     loop = text.index("permissions.git_dir_changed(git_before)")
     assert "except Exception:" in text[loop:loop + 200]
+
+
+def test_a_change_seen_before_the_gates_sticks(repo):
+    """bypass-reviewer, fourth pass: a process left behind can toggle a file so
+    the gate-time check sees it and the restore doesn't. The first sighting
+    still ends in a breach."""
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    hook = repo / ".git" / "hooks" / "post-commit"
+    hook.write_text("")
+    assert permissions.git_dir_changed(guard)
+    hook.unlink()
+    with pytest.raises(permissions.PermissionBreach, match="changed back"):
+        permissions.restore_git_dir(run, guard)

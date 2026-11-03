@@ -289,7 +289,14 @@ def git_dir_changed(guard: dict | None) -> bool:
     """Whether the agent has changed a watched path so far. Runs no git."""
     if not guard or guard["done"]:
         return False
-    return _differs(guard) != []
+    try:
+        changed = _differs(guard) != []
+    except Exception:
+        guard["seen"] = True
+        raise
+    if changed:
+        guard["seen"] = True        # sticks: a change undone before the restore still counts
+    return changed
 
 
 def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str]:
@@ -305,6 +312,8 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     changed = _differs(guard)
     if changed is None:
         changed = list(guard["paths"])        # could not compare: put everything back
+    if not changed and guard.get("seen"):
+        changed = ["(a watched path, changed while the agent ran and changed back since)"]
     restored = True
     if changed:
         box = sandbox.current()

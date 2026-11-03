@@ -5,7 +5,7 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 | Repo | SSSF branch | Skill | Agent rules |
 |---|---|---|---|
 | yt-summarizer | `sssf-run` (`main` follows it on the engineer's word; at a97f7dd, one commit behind, without the pre-push hook) | 647c7a5 (a97f7dd) | No push and no GitHub writes. A `forbid` rule with `on_match: refuse` since cd9d356, and an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
-| pi-agent-observability | `main` | 673a70d (6a46888), one skill commit behind: 647c7a5 changed only the cookbooks. Its roster loads the obs extension, so `--sandbox` still refuses it | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
+| pi-agent-observability | `main` | 96f1130 (a6f1e3f). Its roster loads the obs extension, so `--sandbox` still refuses it | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
 | fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 647c7a5 (ae49dae) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
 | sssf-sandbox | `master` | 96f1130 (dfc09a0) | The hub's own test bed. None |
 
@@ -20,7 +20,7 @@ Each repo has the hub's gitleaks hook in `.githooks/pre-push` ([secret-scan.md](
 | Repo | Hook commit | Switched on |
 |---|---|---|
 | yt-summarizer | f911645 on `sssf-run`; also refuses pushes from SSSF agents | yes |
-| pi-agent-observability | d5d958a on `main` | yes |
+| pi-agent-observability | d5d958a on `main`; the skill's template since a6f1e3f | yes |
 | fusion-harness | 54ac5d8 on `main`, merged into `sssf-run` as beaca9b | yes |
 | sssf-sandbox | dfc09a0, stamped by the installer; it has no remote | no |
 

@@ -35,10 +35,10 @@ def git(cwd: Path, *args: str) -> str:
 
 
 @pytest.fixture(autouse=True)
-def sure():
-    """A partial restore makes the rollback keep new files for that run; not past a test."""
+def fresh():
+    """What git ignored before one test's agent isn't carried into the next."""
     yield
-    permissions._UNSURE = False
+    permissions._EXISTED = ()
 
 
 @pytest.fixture(autouse=True)
@@ -749,7 +749,6 @@ def test_an_unreadable_hooks_dir_does_not_keep_a_planted_protected_file(repo):
     try:
         with pytest.raises(permissions.PermissionBreach):
             permissions.restore_git_dir(run, guard)
-        permissions._UNSURE = True          # as when the restore couldn't read it back
         with pytest.raises(permissions.PermissionBreach, match="json.py — deleted"):
             permissions.enforce(run, None, builder(), tree)
     finally:
@@ -757,26 +756,68 @@ def test_an_unreadable_hooks_dir_does_not_keep_a_planted_protected_file(repo):
     assert not (repo / "adws" / "json.py").exists()
 
 
-def test_unsure_keeps_only_files_off_protected_paths(repo, home, tmp_path):
-    """After a partial restore a new file outside protected_files is kept and
-    named; one inside is deleted."""
-    dot = tmp_path / "dotfiles"
-    dot.mkdir()
-    (dot / "gitconfig").write_text("[user]\n\tname = t\n")
-    (home / ".gitconfig").unlink()
-    (home / ".gitconfig").symlink_to(dot / "gitconfig")
-    cfg = SSSFConfig(defaults=ConfigDefaults(data_dir="adws/adw_data", protected_files=["adws/"]))
-    run = SimpleNamespace(cfg=cfg, repo_root=repo)
-    reader = AgentConfig(name="reviewer", writes=[], prompt_engineering=PromptEngineering(system="s", user="u"))
+def default_config(repo: Path) -> SimpleNamespace:
+    return SimpleNamespace(cfg=SSSFConfig(), repo_root=repo)
+
+
+def reviewer() -> AgentConfig:
+    return AgentConfig(name="reviewer", writes=[], prompt_engineering=PromptEngineering(system="s", user="u"))
+
+
+@pytest.mark.parametrize("how", ["hooks", "info", "xdg"])
+def test_a_planted_script_shadow_is_deleted_under_the_shipped_config(repo, home, tmp_path, how):
+    """Thirteenth review: with the shipped protected_files, adws/json.py is on
+    no protected path, so after an agent made the restore unsure the rollback
+    kept it, and it shadowed `import json` on the next `uv run adws/...`."""
+    run = default_config(repo)
     tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
-    subprocess.run(["git", "config", "--global", "color.ui", "auto"], cwd=repo, check=True)
-    (repo / "notes.txt").write_text("x\n")
     (repo / "adws").mkdir()
-    (repo / "adws" / "evil.py").write_text("x\n")
-    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+    (repo / "adws" / "json.py").write_text("print(1)\n")
+    locked = repo / ".git" / ("hooks" if how == "hooks" else "info")
+    if how == "xdg":
+        mine = tmp_path / "mine" / "git"
+        mine.mkdir(parents=True)
+        (mine / "config").write_text("[color]\n")
+        (home / ".config").symlink_to(mine.parent)
+    else:
+        locked.chmod(0)
+    try:
+        with pytest.raises(permissions.PermissionBreach):
+            permissions.restore_git_dir(run, guard)
+        with pytest.raises(permissions.PermissionBreach, match="json.py — deleted"):
+            permissions.enforce(run, None, reviewer(), tree)
+    finally:
+        locked.chmod(0o755)
+    assert not (repo / "adws" / "json.py").exists()
+
+
+def test_files_git_ignored_before_the_agent_are_never_deleted(repo, home, tmp_path):
+    """Thirteenth review s1 and s2, and the old q10: an agent that changes what
+    git ignores makes the engineer's ignored files look new. The ones that
+    were there before it ran stay; its own new files go."""
+    dot = tmp_path / "dotfiles"
+    (dot / "git").mkdir(parents=True)
+    (dot / "git" / "ignore").write_text(".env\n__pycache__/\nnode_modules/\n")
+    (home / ".config").symlink_to(dot)
+    (repo / ".git" / "info" / "exclude").write_text("specs/local/\n")
+    (repo / ".env").write_text("SECRET=1\n")
+    for path in ("node_modules/x.js", "adws/adw_modules/__pycache__/x.pyc", "specs/local/notes.md"):
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text("x\n")
+    run = default_config(repo)
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    empty = tmp_path / "empty"
+    (empty / "git").mkdir(parents=True)
+    (home / ".config").unlink()
+    (home / ".config").symlink_to(empty)
+    (repo / ".git" / "info" / "exclude").write_text("")
+    (repo / "notes.txt").write_text("agent\n")
+    with pytest.raises(permissions.PermissionBreach):
         permissions.restore_git_dir(run, guard)
+    (repo / ".git" / "info" / "exclude").write_text("")    # as if the restore couldn't put it back
     with pytest.raises(permissions.PermissionBreach) as found:
-        permissions.enforce(run, None, reader, tree)
-    assert "notes.txt — left in place" in str(found.value)
-    assert "evil.py — deleted" in str(found.value)
-    assert (repo / "notes.txt").exists() and not (repo / "adws" / "evil.py").exists()
+        permissions.enforce(run, None, reviewer(), tree)
+    assert "notes.txt — deleted" in str(found.value)
+    for path in (".env", "node_modules/x.js", "adws/adw_modules/__pycache__/x.pyc", "specs/local/notes.md"):
+        assert (repo / path).exists(), path
+    assert not (repo / "notes.txt").exists()

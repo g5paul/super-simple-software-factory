@@ -56,12 +56,15 @@ class PermissionBreach(RuntimeError):
 _SAFE = ["-c", "core.fsmonitor="]     # empty: off on every git; "false" runs `false` before 2.36
 _NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
 
-# Set when the git guard could not put everything back. The config git reads
-# may then not be the one the before-snapshot used, so a file can look new
-# only because what git ignores changed. The rollback then leaves new files
-# in place and names them, rather than delete what could be the engineer's
-# .env. Cleared by the next guard_git_dir.
-_UNSURE = False
+# What git ignored before the agent ran, as `ls-files --directory` lists it (a
+# folder git ignores whole is one entry ending in "/"). An agent that changes
+# what git ignores makes the engineer's .env or node_modules look new; the
+# rollback must not delete them. Taken before the agent, so it can't add to it.
+_EXISTED: tuple[str, ...] = ()
+
+
+def _existed(path: str) -> bool:
+    return any(path == e or (e.endswith("/") and path.startswith(e)) for e in _EXISTED)
 
 
 def _gitargv(args: list[str], *, writes: bool = False) -> list[str]:
@@ -375,8 +378,10 @@ def _differs(guard: dict) -> list[str] | None:
 
 def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs. None outside a git repo."""
-    global _UNSURE
-    _UNSURE = False
+    global _EXISTED
+    listed = _git(["ls-files", "--others", "--ignored", "--exclude-standard",
+                   "--directory", "-z"], run.repo_root)
+    _EXISTED = tuple(p for p in listed.split("\0") if p)
     links, paths = _watched(run)
     if not paths:
         return None
@@ -450,9 +455,6 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
             box.write_text(held, guard["plain"])
             _sh(_UNPACK, held, *paths)
         restored = _differs(guard) == []
-    if not restored:
-        global _UNSURE
-        _UNSURE = True
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]
     if changed and (breach or not restored):
@@ -561,13 +563,9 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
         return "REVERTED-BY-AGENT (uncommitted work lost, cannot restore)" \
             if path not in after else "left as-is (was already modified)"
     if after.get(path) == "untracked":
-        # A protected path is the factory's own code, and a file planted there
-        # runs on the next `uv run adws/...`: always deleted. Elsewhere, after
-        # a partial restore, a file may look new only because what git ignores
-        # changed, so it could be the engineer's .env: kept and named.
-        if _UNSURE and not any(_matches(path, g) for g in run.cfg.defaults.protected_files):
-            return ("left in place: the git config may have changed what git ignores, "
-                    "so SSSF did not delete it; check it by hand")
+        if _existed(path):
+            return ("left in place: it was there, ignored by git, before the agent ran; "
+                    "the agent changed what git ignores")
         try:
             sandbox.current().remove(Path(run.repo_root) / path)
             return "deleted"

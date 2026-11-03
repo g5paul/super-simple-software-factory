@@ -15,7 +15,9 @@ like agent_pi. Two things differ from pi and shape everything below:
 
 Agents run isolated from the operator's own Claude Code setup: `--safe-mode`
 drops their CLAUDE.md, skills, plugins, hooks, and MCP servers, so a factory
-agent sees its system.md and nothing else. Auth stays on the operator's
+agent sees its system.md and nothing else. Safe mode keeps environment
+variables, so a repo's refuse rules reach the agent as a shell prefix,
+sssf_refuse.py, not as a hook. Auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """
 
@@ -114,6 +116,26 @@ def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
     if AUTH == "subscription":
         for var in API_KEY_VARS:
             env.pop(var, None)
+    return env
+
+
+# SSSF's refusing shell for agent_rules marked `on_match: refuse` (rules.py).
+REFUSE_SHELL = Path(__file__).with_name("sssf_refuse.py")
+
+
+def _with_refusals(env: dict[str, str], refuse_rules: list[dict], tree) -> dict[str, str]:
+    """Run every Bash call through sssf_refuse.py when the repo has refuse rules.
+    Claude Code takes the prefix as one path, not a command line, and a prefix
+    it can't run fails every call, so the tree installs it first. An
+    operator's own prefix still runs after SSSF's on this machine."""
+    if not refuse_rules:
+        return env
+    tree.install(REFUSE_SHELL)
+    env["SSSF_REFUSE_RULES"] = json.dumps(refuse_rules)
+    previous = env.get("CLAUDE_CODE_SHELL_PREFIX")
+    if previous and tree is sandbox.LOCAL:
+        env["SSSF_NEXT_SHELL_PREFIX"] = previous
+    env["CLAUDE_CODE_SHELL_PREFIX"] = str(REFUSE_SHELL)
     return env
 
 
@@ -237,8 +259,10 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     output: dict[str, int] = {}     # message id -> its output tokens so far, from message_delta
     streaming: dict = {}            # parent_tool_use_id -> the message id now streaming
     # sandbox.start gives the child a DEVNULL stdin, for the reason agent_pi gives.
-    process = sandbox.current().start(cmd, cwd=request.cwd,
-                                      env=child_env(request.agent_name, request.adw_id))
+    tree = sandbox.current()
+    process = tree.start(cmd, cwd=request.cwd,
+                         env=_with_refusals(child_env(request.agent_name, request.adw_id),
+                                            request.refuse_rules, tree))
     if on_spawn:
         on_spawn(process.pid)
     try:

@@ -11,6 +11,7 @@ Run from the skill root:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -30,7 +31,9 @@ import json, os, sys
 with open(os.environ["FAKE_CC_LOG"], "a") as log:
     log.write(json.dumps({"argv": sys.argv[1:],
                           "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
-                          "marks": [os.environ.get(k) for k in ("SSSF_ADW_ID", "SSSF_AGENT")]}) + "\\n")
+                          "marks": [os.environ.get(k) for k in ("SSSF_ADW_ID", "SSSF_AGENT")],
+                          "refuse": [os.environ.get(k) for k in ("CLAUDE_CODE_SHELL_PREFIX",
+                                     "SSSF_REFUSE_RULES", "SSSF_NEXT_SHELL_PREFIX")]}) + "\\n")
 sys.stdout.write(open(os.environ["FAKE_CC_FIXTURE"]).read())
 sys.exit(int(os.environ.get("FAKE_CC_EXIT", "0")))
 """
@@ -341,3 +344,42 @@ def test_a_stop_mid_call_stops_the_agent_before_waiting_for_it(tmp_path, fake, m
     with pytest.raises(SystemExit):
         agent_cc.run(request(tmp_path), on_event=killed)
     assert stopped == [True]
+
+
+# ── refuse rules ─────────────────────────────────────────────────────────────
+
+RULES = [{"rule": "Never run `git push`.", "forbid": [r"\bgit\s+push\b"]}]
+
+
+def test_refuse_rules_route_bash_through_sssfs_shell_prefix(tmp_path, fake, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_SHELL_PREFIX", raising=False)
+    fake(FIXTURES / "cc_turn1.jsonl")
+    agent_cc.run(request(tmp_path, refuse_rules=RULES))
+    prefix, passed, following = fake.log()[0]["refuse"]
+    assert prefix == str(agent_cc.REFUSE_SHELL) and json.loads(passed) == RULES
+    assert following is None
+    assert os.access(agent_cc.REFUSE_SHELL, os.X_OK)
+
+
+def test_no_refuse_rules_leaves_the_shell_alone(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SHELL_PREFIX", "/opt/audit.sh")
+    fake(FIXTURES / "cc_turn1.jsonl")
+    agent_cc.run(request(tmp_path))
+    assert fake.log()[0]["refuse"] == ["/opt/audit.sh", None, None]
+
+
+def test_an_operators_own_prefix_runs_after_sssfs(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SHELL_PREFIX", "/opt/audit.sh")
+    fake(FIXTURES / "cc_turn1.jsonl")
+    agent_cc.run(request(tmp_path, refuse_rules=RULES))
+    prefix, _, following = fake.log()[0]["refuse"]
+    assert (prefix, following) == (str(agent_cc.REFUSE_SHELL), "/opt/audit.sh")
+
+
+def test_a_copy_without_the_exec_bit_gets_it_back(tmp_path, monkeypatch):
+    from adw_modules import sandbox
+    script = tmp_path / "sssf_refuse.py"
+    script.write_text(agent_cc.REFUSE_SHELL.read_text())
+    script.chmod(0o644)
+    sandbox.LOCAL.install(script)
+    assert os.access(script, os.X_OK)

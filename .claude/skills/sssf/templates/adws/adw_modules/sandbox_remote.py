@@ -163,6 +163,7 @@ class Remote:
         self.vm = ""
         self.refreshes = 0
         self.processes = 0
+        self.installed: set[str] = set()    # paths install() has copied in
         self.synced = ""
         self.python = ""
         self._token = ""
@@ -305,6 +306,17 @@ class Remote:
     def write_text(self, path, text: str) -> None:
         self._must("sh", ["-c", 'cat > "$0"', self._path(path)], input=text.encode())
 
+    def install(self, path) -> None:
+        """Copy one of SSSF's own host files into the VM at the same path,
+        executable, once per VM. The VM's clone holds the repo's committed
+        files, which can lag the skill the host is running."""
+        where = self._path(path)
+        if where in self.installed:
+            return
+        self._must("sh", ["-c", 'mkdir -p "$(dirname "$0")" && cat > "$0" && chmod 755 "$0"', where],
+                   input=Path(path).read_bytes())
+        self.installed.add(where)
+
     def remove(self, path) -> None:
         self._call(self.sandbox.run_process, "rm", ["-f", self._path(path)], capture_output=True)
 
@@ -378,6 +390,10 @@ class Remote:
     def _env(self, env) -> dict[str, str]:
         source = os.environ if env is None else env
         passed = {k: v for k, v in source.items() if k.startswith(PASSED)}
+        # SSSF's refusing shell (sssf_refuse.py), which agent_cc installs in the
+        # VM. An operator's own prefix names a host path, so it stays behind.
+        if "SSSF_REFUSE_RULES" in passed and source.get("CLAUDE_CODE_SHELL_PREFIX"):
+            passed["CLAUDE_CODE_SHELL_PREFIX"] = source["CLAUDE_CODE_SHELL_PREFIX"]
         return {"UV_PYTHON": self.python, **passed} if self.python else passed
 
     def _cwd(self, cwd) -> str:

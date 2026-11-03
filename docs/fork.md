@@ -46,7 +46,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 ### Rules the repo owns
 
 - `adws/adw_sssf_config/repo.yaml`, committed in each repo, holds its merge style, worktree setup, spend caps and `agent_rules`.
-- Every agent gets the rules in its prompt. A rule with a `forbid` pattern is enforced: a matching command stops a Claude agent, and on a pi agent with `on_match: refuse` it is refused before it runs and the run goes on.
+- Every agent gets the rules in its prompt. A rule with a `forbid` pattern is enforced: a matching command stops the run, and with `on_match: refuse` it is refused before it runs and the run goes on, on Claude Code and pi agents alike.
 - Every agent's environment carries `SSSF_ADW_ID`, so a repo's own scripts and hooks can tell an SSSF agent from the engineer.
 
 ### Running SSSF across several repos

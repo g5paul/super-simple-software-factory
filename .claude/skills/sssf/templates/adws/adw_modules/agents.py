@@ -208,13 +208,12 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             cwd=str(run.repo_root),
             max_cost=agent.max_call_cost,
             stop_on_usage_credits=run.cfg.defaults.rate_limit_stop is not None,
-            refuse_rules=rules.refusing(enforced) if agent.coding_agent == "pi" else [],
+            refuse_rules=rules.refusing(enforced),
         )
         try:
             result = interface.run(
                 request,
-                on_event=_event_forwarder(run, phase, agent.name, interface, enforced,
-                                          can_refuse=agent.coding_agent == "pi"),
+                on_event=_event_forwarder(run, phase, agent.name, interface, enforced),
                 on_spawn=lambda pid: run.tracer.process_start(
                     run.adw_id, "agent", agent.name, pid,
                     f"{agent.coding_agent} {agent.name} {agent.model}"),
@@ -370,13 +369,13 @@ def _agent_session_id(run, agent: AgentConfig, key: str) -> str:
 
 
 def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: list = (),
-                     can_refuse: bool = False):
+                     can_refuse: bool = True):
     """One tool_call event per real tool call, with its exact args and result.
     Raises RuleBreach the moment a call breaks a forbid rule; the interface
     then kills the agent before the call can finish.
 
-    A refuse rule, where the harness can refuse (can_refuse: pi with
-    sssf_rules.ts), waits for the call's result instead. SSSF's refusal there
+    A refuse rule waits for the call's result instead: sssf_rules.ts refuses
+    for pi, sssf_refuse.py for Claude Code. SSSF's refusal there
     means nothing ran, and the run goes on; any other result means it ran."""
     tracker = interface.ToolCallTracker()
     pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
@@ -394,7 +393,7 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
             if call_id not in pending:
                 continue
             rule, pattern, command = pending.pop(call_id)
-            if not text.startswith(rules.REFUSED):
+            if not rules.refused(text):
                 raise rules.RuleBreach(agent_name, rule, pattern, command)
             refusals += 1
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,

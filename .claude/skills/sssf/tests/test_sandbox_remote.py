@@ -502,3 +502,25 @@ def test_e2b_sweep_kills_only_vms_of_runs_that_are_not_live(monkeypatch, tmp_pat
     Sandbox.killed = []
     assert sandbox_e2b.sweep("repo", {"live1"}) == ["old (dead)"]
     assert Sandbox.killed == ["old"]
+
+
+def test_install_copies_a_host_file_into_the_vm_executable_once(box, tmp_path):
+    script = tmp_path / "host" / "skill" / "sssf_refuse.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\necho refused\n")
+    box.install(script)
+    box.install(script)
+    copied = Path(box.fake._map(str(script)))
+    assert copied.read_text() == script.read_text() and os.access(copied, os.X_OK)
+    assert box.installed == {str(script)}
+
+
+def test_an_agent_gets_sssfs_shell_prefix_only_with_refuse_rules(box, monkeypatch):
+    env = {**os.environ, "CLAUDE_CODE_SHELL_PREFIX": "/opt/audit.sh"}
+    seen = box.start(["sh", "-c", "env"], env=env)
+    assert "CLAUDE_CODE_SHELL_PREFIX" not in "".join(seen.stdout)
+    seen.wait()
+    env.update(SSSF_REFUSE_RULES="[]", CLAUDE_CODE_SHELL_PREFIX="/skill/sssf_refuse.py")
+    seen = box.start(["sh", "-c", "env"], env=env)
+    assert "CLAUDE_CODE_SHELL_PREFIX=/skill/sssf_refuse.py" in "".join(seen.stdout)
+    seen.wait()

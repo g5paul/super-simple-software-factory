@@ -16,12 +16,13 @@ harness may have started it already. So a breach stops the run and says the
 command may have run, the same way `writes` reports a write it caught after
 the fact.
 
-`on_match: refuse` asks for the softer mode, on pi agents only: SSSF's own pi
-extension (sssf_rules.ts) blocks a matching bash call before it runs and
-hands the rule back as the tool's result, and the run goes on. The stream
-check stays as the backstop: a matching call whose result isn't that refusal
-ran, and is a breach. Claude Code agents run with --safe-mode, which ignores
-every hook, so on them a refuse rule stops the run as `stop` does.
+`on_match: refuse` asks for the softer mode: the command is blocked before it
+runs, the agent reads the rule as the tool's result, and the run goes on. On
+pi, SSSF's own extension (sssf_rules.ts) blocks it. Claude Code agents run
+with --safe-mode, which ignores every hook, so their Bash calls go through
+SSSF's shell prefix (sssf_refuse.py) instead. The stream check stays as the
+backstop: a matching call whose result isn't that refusal ran, and is a
+breach.
 """
 
 from __future__ import annotations
@@ -37,8 +38,10 @@ from pydantic import BaseModel, ConfigDict, field_validator
 # The shell tool's name in each harness: Claude Code's `Bash`, pi's `bash`.
 SHELL_TOOLS = {"Bash", "bash"}
 
-# How sssf_rules.ts starts a refusal, so the stream check can tell it from output.
+# How sssf_rules.ts and sssf_refuse.py start a refusal, so the stream check can
+# tell it from output. Claude Code puts the exit line first.
 REFUSED = "SSSF refused this command"
+_CLAUDE_REFUSED = re.compile(r"Exit code 126\n" + re.escape(REFUSED))
 # An agent refused this many times in one call is looping: stop the run.
 MAX_REFUSALS = 3
 
@@ -68,7 +71,7 @@ class AgentRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rule: str                       # what every agent is told
     forbid: list[str] = []          # regexes; a command matching any one stops the run
-    on_match: Literal["stop", "refuse"] = "stop"    # refuse: pi agents only, see above
+    on_match: Literal["stop", "refuse"] = "stop"    # refuse: blocked before it runs, see above
 
     @field_validator("forbid")
     @classmethod
@@ -143,8 +146,14 @@ def _text(content) -> str:
     return str(content or "")
 
 
+def refused(text: str) -> bool:
+    """Whether a call's result is SSSF's refusal, from either harness."""
+    return text.startswith(REFUSED) or bool(_CLAUDE_REFUSED.match(text))
+
+
 def refusing(rules: list) -> list[dict]:
-    """The refuse rules, as sssf_rules.ts reads them from SSSF_REFUSE_RULES."""
+    """The refuse rules, as sssf_rules.ts and sssf_refuse.py read them from
+    SSSF_REFUSE_RULES."""
     return [{"rule": rule.rule, "forbid": rule.forbid} for rule in rules
             if isinstance(rule, AgentRule) and rule.on_match == "refuse" and rule.forbid]
 

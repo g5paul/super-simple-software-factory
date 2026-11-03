@@ -45,6 +45,7 @@ class Sandbox(Protocol):
     def size(self, path) -> int: ...
     def read_text(self, path) -> str: ...
     def write_text(self, path, text: str) -> None: ...
+    def install(self, path) -> None: ...
     def remove(self, path) -> None: ...
 
 
@@ -100,6 +101,14 @@ class Local:
 
     def write_text(self, path, text: str) -> None:
         Path(path).write_text(text)
+
+    def install(self, path) -> None:
+        """This machine's file at `path`, executable, where the tree's processes
+        can run it. Here it is already there; only the mode can be missing,
+        since a copy of the skill may drop it."""
+        mode = Path(path).stat().st_mode
+        if mode & 0o111 != 0o111:
+            Path(path).chmod(mode | 0o755)
 
     def remove(self, path) -> None:
         Path(path).unlink()

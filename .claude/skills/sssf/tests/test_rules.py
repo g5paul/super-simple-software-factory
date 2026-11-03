@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -225,7 +226,6 @@ def test_the_third_refusal_stops_the_run_and_says_nothing_ran():
 
 
 def test_a_harness_that_cannot_refuse_stops_at_the_announcement():
-    # Claude Code runs with --safe-mode, so no hook can refuse for it.
     forward, _, _ = forwarder(can_refuse=False)
     with pytest.raises(rules.RuleBreach, match="may have run"):
         forward(announce("c1"))
@@ -281,3 +281,65 @@ console.log(JSON.stringify(out));
     assert blocked["block"] is True and blocked["reason"].startswith(rules.REFUSED)
     assert REFUSE.rule in blocked["reason"]
     assert spared is None and other is None
+
+
+def test_a_claude_code_refusal_is_read_past_its_exit_line():
+    forward, events, _ = forwarder()
+    claude_call = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "git push"}}]}}
+    result = lambda text: {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "is_error": True, "content": text}]}}
+    forward(claude_call)
+    forward(result(f"Exit code 126\n{rules.REFUSED}, by this repo's rule: x"))
+    assert [e.name for e in events] == ["rule_refused"]
+    forward(claude_call)
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(result(f"Exit code 1\n{rules.REFUSED}"))
+
+
+# ── sssf_refuse.py, the Claude Code shell prefix ─────────────────────────────
+
+def claude_line(command):
+    """The shell line Claude Code hands its prefix (2.1.317)."""
+    return ("source /home/u/.claude/shell-snapshots/snapshot-bash-1.sh 2>/dev/null || true && "
+            "{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; } >/dev/null 2>&1 || true"
+            f" && eval {shlex.quote(command)} < /dev/null && pwd -P >| /tmp/claude-ab12-cwd")
+
+
+def prefix(line, rules_json, **env):
+    return subprocess.run([sys.executable, str(agent_cc.REFUSE_SHELL), line], capture_output=True,
+                          text=True, env={**os.environ, "SSSF_REFUSE_RULES": rules_json, **env})
+
+
+def test_the_prefix_refuses_a_matching_command_and_nothing_runs(tmp_path):
+    marker = tmp_path / "ran"
+    done = prefix(claude_line(f"git -C . push origin main; touch {marker}"),
+                  json.dumps(rules.refusing([REFUSE])))
+    assert done.returncode == 126 and done.stderr.startswith(rules.REFUSED)
+    assert REFUSE.rule in done.stderr and not marker.exists()
+    assert rules.refused(f"Exit code 126\n{done.stderr}")
+
+
+def test_the_prefix_runs_anything_else_as_claude_meant(tmp_path):
+    done = prefix(claude_line("git stash list >/dev/null 2>&1; echo it\\'s fine"),
+                  json.dumps(rules.refusing([REFUSE])))
+    assert done.returncode == 0 and "it's fine" in done.stdout
+
+
+def test_the_prefix_searches_a_line_of_another_shape_whole():
+    done = prefix("git push origin main", json.dumps(rules.refusing([REFUSE])))
+    assert done.returncode == 126
+
+
+def test_the_prefix_skips_a_pattern_python_cannot_compile_and_bad_rules_json():
+    bad = json.dumps([{"rule": "r", "forbid": ["("]}])
+    assert prefix(claude_line("echo ok"), bad).returncode == 0
+    assert prefix(claude_line("echo ok"), "not json").returncode == 0
+
+
+def test_the_prefix_hands_on_to_an_operators_own(tmp_path):
+    audit = tmp_path / "audit.sh"
+    audit.write_text(f'#!/bin/sh\necho "$1" > {tmp_path}/audited\nexec bash -c "$1"\n')
+    audit.chmod(0o755)
+    done = prefix(claude_line("echo hi"), "[]", SSSF_NEXT_SHELL_PREFIX=str(audit))
+    assert done.stdout.strip().endswith("hi") and "eval" in (tmp_path / "audited").read_text()

@@ -46,8 +46,8 @@ worktree_setup_timeout: 600
 # are searched in every shell command an agent runs, and a match kills the
 # agent and stops the run. The command may have started first, so forbid what
 # must not happen, and still say it in the rule. `on_match: refuse` refuses
-# the command on a pi agent before it runs and lets the run go on; Claude Code
-# agents still stop.
+# the command before it runs and lets the run go on, on Claude Code and pi
+# agents alike.
 #   agent_rules:
 #     - Keep commit subjects under 72 characters.
 #     - rule: Never run `just deploy`. It spends real money outside SSSF's caps.

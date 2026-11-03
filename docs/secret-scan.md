@@ -17,4 +17,4 @@ On this machine `~/.claude/settings.json` denies `git push`, `git * push`, `gh p
 
 ## In the project repos
 
-yt-summarizer, pi-agent-observability and fusion-harness each added the hook by hand before the installer shipped it, with `core.hooksPath` set in their clones. [projects.md](projects.md) lists the commits. Their next SSSF update flags `.githooks/pre-push` for review, since theirs differ from the template: pi-agent-observability's and fusion-harness's only in their doc pointers and the agent refusal, so `--take` fits; yt-summarizer's already refuses agent pushes, so `--take` fits there too.
+yt-summarizer, pi-agent-observability and fusion-harness each added the hook by hand before the installer shipped it, with `core.hooksPath` set in their clones. [projects.md](projects.md) lists the commits. On their update to skill 96f1130, pi-agent-observability and yt-summarizer took the template's hook. fusion-harness kept its own and copied in the agent refusal, on `sssf-run` only.

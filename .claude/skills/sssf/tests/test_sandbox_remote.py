@@ -386,6 +386,12 @@ def test_files_are_read_in_the_vm_not_on_the_host(box):
     assert not box.exists("only-in-vm.json")
 
 
+def test_a_write_lands_in_the_vm_not_on_the_host(box):
+    box.write_text("a.txt", "written in the vm\n")
+    assert (box.vm_tree / "a.txt").read_text() == "written in the vm\n"
+    assert (box.host_tree / "a.txt").read_text() == "a\n"
+
+
 def test_close_records_the_vms_busy_cpu_seconds(box):
     box.run(["sh", "-c", "i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done"])
     box.close()

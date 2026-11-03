@@ -5,7 +5,7 @@
 """ADW Tickets — build an approved feature one ticket at a time, test-first.
 
 Usage:
-    uv run adws/adw_tickets.py .scratch/<feature>/ [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree]
+    uv run adws/adw_tickets.py .scratch/<feature>/ [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel|e2b|none]
 
 The engineer's half runs first, interactively, with mattpocock/skills:
 `grill-with-docs`, then `to-spec`, then `to-tickets` on the local markdown
@@ -48,7 +48,13 @@ With --worktree the whole feature is built on branch sssf/<adw_id>, in its own
 worktree, and may launch from main; `just merge <adw_id>` lands it. A stopped
 run resumes by rejoining with --adw-id, which starts every agent fresh and
 reuses the scout's notes. While a worktree run holds a feature folder, no
-other run builds it. Design: docs/designs/parallel-worktree-runs.md in the SSSF
+other run builds it.
+
+With --sandbox vercel or e2b, the feature's worktree run works in a remote VM:
+every ticket, check and commit happens there, and each commit comes back to
+sssf/<adw_id> as it lands. repo.yaml's `sandbox:` sets the default for a new
+run, and `--sandbox none` keeps one run on this machine. A stopped VM run
+resumes in a new VM. Design: docs/designs/parallel-worktree-runs.md in the SSSF
 repo, decisions 26 to 38.
 """
 
@@ -74,11 +80,15 @@ DOCUMENT_NOTES = ("Read diff_path in full before writing. Document only what the
 
 
 def main(folder: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None,
-         use_worktree: bool = False) -> int:
+         use_worktree: bool = False, sandbox_name: str | None = None) -> int:
     cfg = agents.load_config(config)
     agents.validate(cfg, REQUIRED_AGENTS)
+    # Chosen before the claim: a VM run is a worktree run, so it builds from
+    # the feature folder as committed.
+    sandbox_name = session.choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
+    use_worktree = use_worktree or bool(sandbox_name)
     claim(cfg, folder, adw_id, use_worktree)
-    run = session.ensure(cfg, adw_id, use_worktree=use_worktree)
+    run = session.ensure(cfg, adw_id, use_worktree=use_worktree, sandbox_name=sandbox_name)
     # Every attempt starts its agents fresh, so a rejoin's builder doesn't
     # carry the attempt that failed. Within an attempt, fixes keep their session.
     run.agent_map = {}
@@ -349,5 +359,8 @@ if __name__ == "__main__":
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
     parser.add_argument("--worktree", action="store_true",
                         help="build on branch sssf/<adw_id> in its own worktree; `just merge <adw_id>` lands it")
+    parser.add_argument("--sandbox", choices=["vercel", "e2b", "none"], default=None,
+                        help="build in a remote VM (implies --worktree); none keeps this run on this "
+                             "machine. Default: repo.yaml's sandbox")
     args = parser.parse_args()
-    sys.exit(main(args.folder, args.config, args.adw_id, args.worktree))
+    sys.exit(main(args.folder, args.config, args.adw_id, args.worktree, args.sandbox))

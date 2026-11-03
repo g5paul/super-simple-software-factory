@@ -11,6 +11,7 @@ Run from the skill root:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sqlite3
@@ -406,3 +407,52 @@ def test_add_roster_stamps_a_starter_beside_the_repos_own_and_updates_keep_it(tm
     path.write_text(path.read_text() + "# ours\n")
     assert "= adws/adw_sssf_config/sssf.config.chatgpt.yaml" in install("--update").stdout
     assert path.read_text().endswith("# ours\n")
+
+
+# ── a trial in remote VMs (remote-sandboxes.md, "As built: tickets and trials") ──
+
+@pytest.fixture
+def no_sdk_needed(monkeypatch):
+    from adw_modules import sandbox
+    monkeypatch.setattr(sandbox, "_provider", lambda name: SimpleNamespace(require_sdk=lambda: None))
+
+
+def test_a_vm_trial_refuses_a_pi_roster_before_anything_starts(repo, no_sdk_needed):
+    with pytest.raises(trial.TrialError) as error:
+        trial.check(repo, ["main", "chatgpt"], "vercel")
+    assert "chatgpt: --sandbox runs Claude Code agents only" in str(error.value)
+    assert "--sandbox none" in str(error.value)
+    trial.check(repo, ["main", "main"], "vercel")
+    trial.check(repo, ["main", "chatgpt"], None)
+
+
+def launches(repo, monkeypatch, asked):
+    """Start a trial with the attempts and the panel faked; returns each attempt's argv and tag."""
+    seen = []
+    real = subprocess.Popen
+
+    def popen(argv, env=None, **kwargs):
+        if not (env and "SSSF_TRIAL" in env):
+            return real(argv, env=env, **kwargs)           # git, and the rest of the host's work
+        seen.append((argv, json.loads(env["SSSF_TRIAL"])))
+        return SimpleNamespace(wait=lambda: 0, poll=lambda: None)
+    monkeypatch.setattr(trial.subprocess, "Popen", popen)
+    monkeypatch.setattr(trial, "_wait_for_starts", lambda db, launched: [])
+    monkeypatch.setattr(trial, "review", lambda t, out=None: 0)
+    out = io.StringIO()
+    trial.start("make app.txt say two", ["main", "main"], out=out, asked=asked)
+    return seen, out.getvalue()
+
+
+def test_every_attempt_gets_the_trials_sandbox_from_the_flag_or_repo_yaml(repo, monkeypatch, no_sdk_needed):
+    seen, out = launches(repo, monkeypatch, "e2b")
+    assert [argv[argv.index("--sandbox") + 1] for argv, _ in seen] == ["e2b", "e2b"]
+    assert [tag["sandbox"] for _, tag in seen] == ["e2b", "e2b"]
+    assert "each in its own e2b VM" in out
+
+    (repo / "adws/adw_sssf_config/repo.yaml").write_text("sandbox: vercel\n")
+    seen, _ = launches(repo, monkeypatch, None)
+    assert [argv[argv.index("--sandbox") + 1] for argv, _ in seen] == ["vercel", "vercel"]
+    seen, out = launches(repo, monkeypatch, "none")
+    assert [argv[argv.index("--sandbox") + 1] for argv, _ in seen] == ["none", "none"]
+    assert "VM" not in out

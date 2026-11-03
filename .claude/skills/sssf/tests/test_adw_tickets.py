@@ -24,7 +24,8 @@ SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 import adw_tickets
-from adw_modules import agent_cc, agents, quality, tickets
+from adw_modules import agent_cc, agents, quality, session, tickets
+from adw_modules import sandbox as sandbox_mod
 from adw_modules.data_types import (AgentConfig, AgentResult, ConfigDefaults, ObservabilityConfig,
                                     QualityResult, SSSFConfig, UsageBreakdown)
 
@@ -407,3 +408,59 @@ def test_a_worktree_run_refuses_an_uncommitted_feature_folder(from_main):
         adw_tickets.main(FOLDER, adw_id="tk000005", use_worktree=True)
     assert from_main.calls == []
     assert not Path("adws/adw_data/worktrees/tk000005").exists()
+
+
+# ── a ticket run in a remote VM (remote-sandboxes.md, "As built: tickets and trials") ──
+
+class VMTree(sandbox_mod.Local):
+    """Stands in for a VM: the tree is the worktree here, and each done mark is
+    written down, so the test sees it went through the sandbox."""
+
+    name = "vm"
+
+    def __init__(self):
+        self.writes: list[str] = []
+
+    def write_text(self, path, text):
+        self.writes.append(str(path))
+        super().write_text(path, text)
+
+
+@pytest.fixture
+def vm(from_main, monkeypatch):
+    """--sandbox with the VM faked: prepare checks nothing, and opening the VM
+    makes the run use a VMTree. The worktree event still records the provider."""
+    tree = VMTree()
+    opened = []
+    monkeypatch.setattr(sandbox_mod, "_current", sandbox_mod.LOCAL)
+    monkeypatch.setattr(sandbox_mod, "prepare", lambda provider, cfg: None)
+
+    def open_vm(run, place, provider, asked):
+        opened.append(provider)
+        sandbox_mod.use(tree)
+    monkeypatch.setattr(session, "_open_sandbox", open_vm)
+    return SimpleNamespace(tree=tree, opened=opened)
+
+
+def test_a_sandbox_run_builds_on_its_own_branch_and_marks_tickets_done_in_the_vm(vm):
+    assert adw_tickets.main(FOLDER, adw_id="tk000006", sandbox_name="vercel") == 0
+    assert vm.opened == ["vercel"]
+    assert on_branch("sssf/tk000006") == ["01: A", "03: C", "02: B", "Document summaries"]
+    assert sorted(Path(p).name for p in vm.tree.writes) == ["01-a.md", "02-b.md", "03-c.md"]
+    assert "resolved" in git("show", f"sssf/tk000006:{FOLDER}/issues/01-a.md")
+
+
+def test_repo_yaml_picks_the_sandbox_for_a_new_ticket_run(vm):
+    Path("adws/adw_sssf_config").mkdir(parents=True, exist_ok=True)
+    Path("adws/adw_sssf_config/repo.yaml").write_text("sandbox: e2b\n")
+    assert adw_tickets.main(FOLDER, adw_id="tk000007") == 0
+    assert vm.opened == ["e2b"]
+    assert on_branch("sssf/tk000007")[-1] == "Document summaries"
+
+
+def test_none_keeps_a_ticket_run_on_this_machine(vm):
+    Path("adws/adw_sssf_config").mkdir(parents=True, exist_ok=True)
+    Path("adws/adw_sssf_config/repo.yaml").write_text("sandbox: e2b\n")
+    assert adw_tickets.main(FOLDER, adw_id="tk000008", use_worktree=True, sandbox_name="none") == 0
+    assert vm.opened == [] and vm.tree.writes == []
+    assert on_branch("sssf/tk000008")[-1] == "Document summaries"

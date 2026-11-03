@@ -35,7 +35,7 @@ from typing import Optional
 
 import yaml
 
-from . import git_helper, repo_settings, worktree
+from . import git_helper, repo_settings, sandbox, worktree
 from .data_types import AgentResult, EventRecord
 
 
@@ -78,6 +78,11 @@ def uncommitted_help(run) -> str:
             return ""
     except (OSError, RuntimeError):         # not a repo, or no git: nothing to advise
         return ""
+    if sandbox.current() is not sandbox.LOCAL:
+        # The work is in the VM. Closing it saves the work as a patch, not applied.
+        return ("\nThe VM has uncommitted work from this run. Nothing was discarded: when the "
+                f"VM closes, it is saved as {run.session_dir / 'sandbox-uncommitted.patch'}, "
+                "and `git apply` on the run's branch brings it back.")
     # A worktree run's work is in its own folder, not the engineer's checkout.
     root = git_helper.repo_root()
     cd = f"cd {root} && " if Path(root).resolve() != worktree.main_checkout() else ""

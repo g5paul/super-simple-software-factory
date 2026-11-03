@@ -23,6 +23,7 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
+from . import sandbox
 from .data_types import Feature, Ticket
 
 TICKET_FILE = re.compile(r"^(\d{2,3})-.+\.md$")
@@ -58,16 +59,18 @@ def load(folder: str | Path) -> Feature:
 
 
 def mark_done(ticket: Ticket) -> None:
-    """Set the ticket's Status line to resolved, changing nothing else in the file."""
-    path = Path(ticket.path)
-    text = path.read_text()
+    """Set the ticket's Status line to resolved, changing nothing else in the file.
+    It goes through the run's sandbox, so in a VM run the mark lands in the
+    VM's tree and in the ticket's commit."""
+    tree = sandbox.current()
+    text = tree.read_text(ticket.path)
     if STATUS.search(text):
         text = STATUS.sub(lambda m: m.group(1) + "resolved", text, count=1)
     else:
         lines = text.splitlines(keepends=True)
         lines[1:1] = ["\n", "**Status:** resolved\n"]
         text = "".join(lines)
-    path.write_text(text)
+    tree.write_text(ticket.path, text)
 
 
 def _require_seams(spec: Path) -> None:

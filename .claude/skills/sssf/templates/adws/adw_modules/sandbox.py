@@ -1,7 +1,7 @@
 """Where a run's tree lives: every process and file read SSSF does in it.
 
-A run's agents, quality checks, plan checks, gates, git, and worktree setup
-go through `current()`. The only sandbox today is `Local`: the tree is a
+A run's agents, quality checks, plan checks, gates, git, worktree setup, and
+adw_tickets' done marks go through `current()`. The only sandbox today is `Local`: the tree is a
 checkout on this machine, and each call is a subprocess here. A remote
 sandbox (docs/designs/remote-sandboxes.md in the SSSF repo) keeps these calls
 and runs them in a VM, so nothing above this module changes when one exists.
@@ -44,6 +44,7 @@ class Sandbox(Protocol):
     def is_file(self, path) -> bool: ...
     def size(self, path) -> int: ...
     def read_text(self, path) -> str: ...
+    def write_text(self, path, text: str) -> None: ...
     def remove(self, path) -> None: ...
 
 
@@ -96,6 +97,9 @@ class Local:
 
     def read_text(self, path) -> str:
         return Path(path).read_text()
+
+    def write_text(self, path, text: str) -> None:
+        Path(path).write_text(text)
 
     def remove(self, path) -> None:
         Path(path).unlink()

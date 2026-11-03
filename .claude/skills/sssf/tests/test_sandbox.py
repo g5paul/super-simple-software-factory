@@ -136,3 +136,19 @@ def test_in_tree_modules_start_nothing_around_the_sandbox(name):
     for at in calls:
         assert any(0 <= a and abs(a - at) < 120 for a in allowed), \
             f"{name} calls subprocess.run at offset {at}; in-tree work goes through sandbox.current()"
+
+
+def test_a_write_goes_through_the_sandbox(repo):
+    sandbox.LOCAL.write_text("w.txt", "w\n")
+    assert (repo / "w.txt").read_text() == "w\n"
+
+
+def test_a_stop_in_a_vm_says_the_work_is_saved_as_a_patch(repo, monkeypatch):
+    from adw_modules import budget
+    (repo / "a.txt").write_text("changed\n")
+    run = type("Run", (), {"cfg": type("C", (), {"defaults": type("D", (), {"data_dir": "adws/adw_data"})()})(),
+                           "session_dir": repo / "adws/adw_data/sessions/r1"})()
+    assert "git stash" in budget.uncommitted_help(run)
+    monkeypatch.setattr(sandbox, "_current", Recording())
+    help_text = budget.uncommitted_help(run)
+    assert "sandbox-uncommitted.patch" in help_text and "git stash" not in help_text

@@ -302,6 +302,9 @@ class Remote:
             raise FileNotFoundError(path)
         return done.stdout or ""
 
+    def write_text(self, path, text: str) -> None:
+        self._must("sh", ["-c", 'cat > "$0"', self._path(path)], input=text.encode())
+
     def remove(self, path) -> None:
         self._call(self.sandbox.run_process, "rm", ["-f", self._path(path)], capture_output=True)
 

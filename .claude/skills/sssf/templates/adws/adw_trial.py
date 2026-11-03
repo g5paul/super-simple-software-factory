@@ -5,7 +5,7 @@
 """ADW Trial — one request, several rosters, the best one merged.
 
 Usage:
-    uv run adws/adw_trial.py start "<prompt or path/to/prompt.md>" <roster> <roster> [...]
+    uv run adws/adw_trial.py start [--sandbox vercel|e2b|none] "<prompt or path/to/prompt.md>" <roster> <roster> [...]
     uv run adws/adw_trial.py review <trial>
     uv run adws/adw_trial.py show <trial>
     uv run adws/adw_trial.py merge <trial> <adw_id> [--ff-only]
@@ -15,7 +15,8 @@ start: one adw_simple_sdlc worktree run per roster, from the same commit. A
 roster is `main` (adws/adw_sssf_config/sssf.config.yaml) or the <name> of
 adws/adw_sssf_config/sssf.config.<name>.yaml; the same one twice is allowed.
 Every roster must be signed in and every attempt must have a worktree slot,
-or nothing starts. Once all have ended, the panel reviews them and the
+or nothing starts. With --sandbox vercel or e2b, each attempt works in its
+own remote VM; repo.yaml's `sandbox:` is the default. Once all have ended, the panel reviews them and the
 scorecard prints.
 review: run the panel again, for a trial whose `start` died or whose panel failed.
 show: the scorecard, at any point.
@@ -36,7 +37,7 @@ def main(args: argparse.Namespace) -> int:
     sys.stdout.reconfigure(line_buffering=True)
     try:
         if args.action == "start":
-            trial.start(utils.resolve_prompt(args.prompt), args.rosters)
+            trial.start(utils.resolve_prompt(args.prompt), args.rosters, asked=args.sandbox)
             return 0
         if args.action == "review":
             return trial.review(args.trial)
@@ -61,6 +62,9 @@ if __name__ == "__main__":
     start = actions.add_parser("start", help="launch one attempt per roster")
     start.add_argument("prompt", help="inline text or a path to a prompt file")
     start.add_argument("rosters", nargs="+", help="main, or the <name> of sssf.config.<name>.yaml")
+    start.add_argument("--sandbox", choices=["vercel", "e2b", "none"], default=None,
+                       help="run every attempt in its own remote VM; none keeps them on this "
+                            "machine. Default: repo.yaml's sandbox")
     for name in ("review", "show", "discard"):
         actions.add_parser(name).add_argument("trial")
     land = actions.add_parser("merge", help="land one attempt and drop the rest")

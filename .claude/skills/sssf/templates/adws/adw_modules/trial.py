@@ -7,6 +7,12 @@ reviewer per model family. The scorecard suggests the cheapest attempt that
 passed every gate; the engineer picks, and `just trial-merge` lands it and
 drops the rest.
 
+`just trial --sandbox vercel ...` (or e2b) runs every attempt in its own remote
+VM; without the flag, repo.yaml's `sandbox:` decides, and `--sandbox none`
+keeps them all on this machine. The choice is made once, checked for every
+roster before anything starts, and passed to each attempt, so a trial's
+attempts all work in the same place. The panel runs on this machine.
+
 Everything a trial knows lives in the trace, as events:
   trial            on each attempt, at its start (session.ensure, from SSSF_TRIAL)
   trial_panel      on the panel run: the families reviewing, the attempts reviewed
@@ -31,7 +37,7 @@ import time
 from pathlib import Path
 from statistics import mean
 
-from . import agent_cc, agent_pi, agents, budget, gates, kill, repo_settings, worktree
+from . import agent_cc, agent_pi, agents, budget, gates, kill, repo_settings, sandbox, worktree
 from .data_types import (AgentCall, EventRecord, PanelOutput, PhaseParams, PromptEngineering,
                          SSSFConfig, TrialAttempt, TrialAttempts)
 from .tracer import Tracer
@@ -371,13 +377,33 @@ def _tail(path: Path, lines: int = 12) -> str:
         return "(no output)"
 
 
-def check(root: Path, names: list[str]) -> tuple[SSSFConfig, dict[str, SSSFConfig], list[str]]:
+def where(root: Path, asked: str | None) -> str | None:
+    """The provider every attempt works in, or None for this machine: the
+    flag, else repo.yaml's `sandbox`. `none` means this machine."""
+    name = asked or repo_settings.load(root).sandbox
+    return None if name == "none" else name
+
+
+def vm_problems(cfg: SSSFConfig, name: str, provider: str) -> list[str]:
+    """What stops this roster's attempts from working in a `provider` VM, or []."""
+    try:
+        sandbox.prepare(provider, cfg)
+    except SystemExit as error:
+        return [f"{name}: {error} Run the trial with --sandbox none to keep every attempt on "
+                f"this machine."]
+    return []
+
+
+def check(root: Path, names: list[str], provider: str | None = None
+          ) -> tuple[SSSFConfig, dict[str, SSSFConfig], list[str]]:
     """Everything that must hold before the first attempt starts. Returns the
     main config, each roster's config, and warnings; raises TrialError otherwise."""
     if len(names) < 2:
         raise TrialError("a trial races at least two attempts: name two rosters, or one twice")
     cfgs = {name: agents.load_config(str(roster_path(root, name))) for name in dict.fromkeys(names)}
     found = [p for name, cfg in cfgs.items() for p in problems(cfg, name)]
+    if provider:
+        found += [p for name, cfg in cfgs.items() for p in vm_problems(cfg, name, provider)]
     if found:
         raise TrialError("not every roster is ready, so no attempt started:\n- " + "\n- ".join(found))
     cfg = _main_config(root)
@@ -406,16 +432,18 @@ def check(root: Path, names: list[str]) -> tuple[SSSFConfig, dict[str, SSSFConfi
     return cfg, cfgs, warnings
 
 
-def start(request: str, names: list[str], out=sys.stdout) -> str:
+def start(request: str, names: list[str], out=sys.stdout, asked: str | None = None) -> str:
     """Launch every attempt, wait for them, run the panel, print the scorecard.
-    Returns the trial id."""
+    `asked` is the --sandbox flag. Returns the trial id."""
     root = worktree.main_checkout()
     os.chdir(root)
-    cfg, cfgs, warnings = check(root, names)
+    provider = where(root, asked)
+    cfg, cfgs, warnings = check(root, names, provider)
     db = cfg.observability.db
     trial = new_id(8)
     base = worktree.git("rev-parse", "HEAD", cwd=root).stdout.strip()
-    print(f"trial {trial}: {len(names)} attempts from {base[:7]}", file=out)
+    in_vm = f", each in its own {provider} VM" if provider else ""
+    print(f"trial {trial}: {len(names)} attempts from {base[:7]}{in_vm}", file=out)
     for warning in warnings:
         print(f"  note: {warning}", file=out)
 
@@ -424,7 +452,8 @@ def start(request: str, names: list[str], out=sys.stdout) -> str:
         adw_id = new_id(8)
         tag = {"trial": trial, "index": index, "roster": name, "roster_file": roster_file(name),
                "roster_sha256": sha256(root / roster_file(name)), "coding_agent": coding_agent(cfgs[name]),
-               "family": family(agents.resolve(cfgs[name], "reviewer")), "base": base}
+               "family": family(agents.resolve(cfgs[name], "reviewer")), "base": base,
+               "sandbox": provider or "none"}
         log = root / cfg.defaults.data_dir / "sessions" / adw_id / "trial.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "SSSF_TRIAL": json.dumps(tag)}
@@ -432,7 +461,8 @@ def start(request: str, names: list[str], out=sys.stdout) -> str:
             # A session of its own, so stopping `just trial` leaves the attempts running.
             proc = subprocess.Popen(
                 ["uv", "run", str(root / "adws" / f"{CHAIN}.py"), request,
-                 "--config", roster_file(name), "--adw-id", adw_id, "--worktree"],
+                 "--config", roster_file(name), "--adw-id", adw_id, "--worktree",
+                 "--sandbox", provider or "none"],
                 cwd=root, env=env, stdin=subprocess.DEVNULL, stdout=handle,
                 stderr=subprocess.STDOUT, start_new_session=True)
         launched.append(({**tag, "adw_id": adw_id}, proc, log))

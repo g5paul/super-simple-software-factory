@@ -40,7 +40,7 @@ On 2026-11-03 the hub's full history and the three project repos' (every branch)
 
 ## What stops a leak
 
-Since 2026-11-03 the hub has a `pre-push` hook, `.githooks/pre-push`, which runs gitleaks over the commits a push would send. For a branch the remote already has, that's the commits past its copy. For a new branch, it's the commits on none of the remote's branches. A find refuses the push, and gitleaks prints it redacted. Without gitleaks the hook refuses too, so a missing scanner can't let a push through unscanned.
+Since 2026-11-03 the hub has a `pre-push` hook, `.githooks/pre-push`, which runs gitleaks over the commits a push would send. For a branch the remote already has, that's the commits past its copy. For a new branch, it's the commits on none of the remote's branches. A find refuses the push, and gitleaks prints it redacted, with its rule, file and commit. The hook passes `--verbose` for that; without it gitleaks 8.30.1 prints only a count, which pi-agent-observability's session caught. Without gitleaks the hook refuses too, so a missing scanner can't let a push through unscanned.
 
 - **Set up once per clone:** `git config core.hooksPath .githooks`. Git doesn't run a repo's tracked hooks on its own, so a fresh clone has to opt in. This checkout has.
 - **gitleaks** is 8.30.1, in `~/.local/bin`, installed from its GitHub release after checking the release's SHA-256. Its default rules found nothing in the hub's full history.

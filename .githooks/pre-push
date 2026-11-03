@@ -2,8 +2,10 @@
 # Refuse a push that would send a secret. Git runs this before every push,
 # with the remote's name in $1 and one line per ref on stdin. It scans only the
 # commits the push would send: those past the remote's copy of the ref, or, for
-# a new branch, those on no branch of that remote yet. gitleaks prints each find
-# redacted. Set up once per clone: git config core.hooksPath .githooks
+# a new branch, those on no branch of that remote yet. gitleaks prints each find,
+# redacted, with its rule, file and commit. That needs --verbose: without it,
+# gitleaks prints only a count. Set up once per clone:
+# git config core.hooksPath .githooks
 # (docs/going-private.md, "What stops a leak").
 set -uo pipefail
 zero=0000000000000000000000000000000000000000
@@ -19,7 +21,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   else
     range="$remote_sha..$local_sha"
   fi
-  if ! gitleaks git --no-banner --redact --log-level warn --log-opts="$range" .; then
+  if ! gitleaks git --no-banner --redact --verbose --log-level warn --log-opts="$range" .; then
     echo "pre-push: gitleaks found a secret in what $local_ref would send to $1 $remote_ref. Nothing was pushed. Remove it from those commits, then push again." >&2
     found=1
   fi

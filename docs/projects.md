@@ -13,6 +13,14 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 None as of 2026-11-03.
 
+## If the hub session goes to the background
+
+On 2026-11-02 the hub session became a background job without the engineer meaning it to. The next day, `claude --continue` refused to open it ("Your most recent conversation moved to a background session ... registered from another machine or container"), and `claude --resume 8236c0c7-361e-485d-966a-a6f30eaa813f` brought it back. The likely cause is pressing the left arrow on an empty prompt, for example twice after clearing the line with Backspace: Claude Code's agent view takes that as "background this session". Nothing records which key it was.
+
+- **Getting it back:** `claude --resume <session id>`, `claude attach <id>`, or `claude agents` and Enter on its row. Don't use `--fork-session`: it makes a second hub session with the same history, two writers in one repo.
+- **Side effect:** the failed `--continue` left a stale socket in `/run/user/1000/cc-socks/` with no process behind it, and the restarted session registered as "super-simple-software-factory (2)". The engineer removed the socket. Replies from project sessions still arrived.
+- **If it happens again:** turn off `leftArrowOpensAgents` in `/config`. The engineer left it on for now, on 2026-11-03. It's stored in `~/.claude.json`, so change it through `/config`, not by hand.
+
 ## Pre-push secret scan
 
 Each repo has the hub's gitleaks hook in `.githooks/pre-push` ([secret-scan.md](secret-scan.md)), and each clone needs `git config core.hooksPath .githooks`, which only the engineer can set: the project sessions' permission checks refuse it.

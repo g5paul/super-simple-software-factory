@@ -108,10 +108,10 @@ A repo can have more than one worktree run going, up to its `max_worktree_runs`.
 
 ### In a remote VM: `--sandbox vercel` or `--sandbox e2b`
 
-Use it only when the engineer asks for it, with the provider they name. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, not yet for tickets or trials. The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
+Use it only when the engineer asks for it, with the provider they name, or when the repo's `adws/adw_sssf_config/repo.yaml` sets `sandbox: vercel` or `sandbox: e2b`. Then a new run of these chains goes to that provider's VM without the flag. Pass `--sandbox none` to keep one run on this machine only when the engineer says to. Don't change the setting yourself: it's the engineer's call, made in a commit. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, not yet for tickets or trials. The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
 
 ```bash
-uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or --sandbox e2b
+uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or e2b, or none for this machine
 ```
 
 - It implies `--worktree`, so merge, discard, rebase and `max_worktree_runs` work as for any worktree run. The chain stays on this machine, and its agents, checks, git and `worktree_setup` run in a VM made for the run and deleted at its end.
@@ -119,7 +119,7 @@ uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or --sandbox e2b
 - The roster must be Claude Code only. A pi agent stops the run before anything is made.
 - Both need the engineer's own Claude token in `~/.config/sssf-sandbox/token.env`, and `ANTHROPIC_API_KEY` must not be set. Vercel needs `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` in `.env`; E2B needs `E2B_API_KEY`. Never read these files' values; check them by key name.
 - E2B makes the VM from SSSF's `sssf` template, which the engineer builds once per E2B team with `uv run <skill>/scripts/e2b_template.py` from a repo whose `.env` has the key. If E2B says the template doesn't exist, tell the engineer that; don't build it yourself.
-- If the provider won't make the VM, for example past Vercel's Hobby allowance or E2B's credit, the run stops in its `sandbox` phase with the provider's message. Report that message. Don't rerun without `--sandbox`, and don't switch providers unless the engineer says to.
+- If the provider won't make the VM, for example past Vercel's Hobby allowance or E2B's credit, the run stops in its `sandbox` phase with the provider's message. Report that message. Don't rerun without `--sandbox` or with `--sandbox none`, and don't switch providers unless the engineer says to.
 - Report the VM name and VM seconds from the `sandbox_end` event with the run's other results, and on E2B its `vm_cost_usd` estimate too.
 
 ## Observe

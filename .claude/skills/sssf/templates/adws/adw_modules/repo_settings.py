@@ -31,6 +31,9 @@ class RepoSettings(BaseModel):
     max_live_cost: Optional[float] = Field(None, gt=0)
     # What the repo's runs may spend in the last 24 hours, rolling, in dollars. None = off.
     max_daily_cost: Optional[float] = Field(None, gt=0)
+    # Where a chain that takes --sandbox does a new run's work when the flag
+    # is left out: "none" on this machine, or a provider's remote VM.
+    sandbox: Literal["none", "vercel", "e2b"] = "none"
     worktree_setup: list[str] = Field(default_factory=list)
     worktree_setup_timeout: int = Field(600, ge=1)
     # Rules every agent gets at the end of its system prompt, whatever its role.

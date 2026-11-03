@@ -14,7 +14,8 @@ import signal
 import sys
 from pathlib import Path
 
-from . import account, agent_cc, agents, budget, changes, permissions, rules, sandbox, worktree
+from . import (account, agent_cc, agents, budget, changes, permissions, repo_settings,
+               rules, sandbox, worktree)
 from .data_types import EventRecord, PhaseParams, SSSFConfig
 from .runner import Run
 from .tracer import Tracer
@@ -79,13 +80,33 @@ def _start(cfg: SSSFConfig, adw_id: str, place: dict | None) -> tuple[Tracer, Ru
     return tracer, run
 
 
+def choose_sandbox(asked: str | None, db: str, adw_id: str | None) -> str | None:
+    """The provider a run of a chain that takes --sandbox works in, or None
+    for this machine. The flag wins, and `none` means this machine. Without
+    it, a new run takes repo.yaml's `sandbox`. A run that already exists keeps
+    where it ran: a VM run resumes in a new VM (design decision 12), and a
+    host run stays on the host, so a setting added since can't move it."""
+    if asked:
+        return None if asked == "none" else asked
+    root = budget._root()
+    path = Path(db) if Path(db).is_absolute() else root / db
+    if adw_id and worktree._query(str(path), "select 1 from sessions where adw_id=?", adw_id):
+        return None
+    name = repo_settings.load(root).sandbox
+    return None if name == "none" else name
+
+
 def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False,
-           sandbox_name: str | None = None) -> Run:
+           sandbox_name: str | None = None, repo_sandbox: bool = False) -> Run:
     """Join or create the session. With `use_worktree`, or when this adw_id
     already has a worktree, the process moves into the run's worktree first
     (see worktree.py), so everything after this works there. With
     `sandbox_name`, the run's work goes to a VM (see sandbox.py); that implies
-    a worktree."""
+    a worktree. `repo_sandbox` is for the chains that take --sandbox: it reads
+    `sandbox_name` as the flag, `none` included, and fills a missing one from
+    repo.yaml (see choose_sandbox)."""
+    if repo_sandbox:
+        sandbox_name = choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
     adw_id = adw_id or new_id(8)
     if sandbox_name:
         use_worktree = True

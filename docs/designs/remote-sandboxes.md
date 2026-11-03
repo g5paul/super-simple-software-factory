@@ -30,7 +30,7 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 1. **For parallel runs and a stronger boundary, with the host on.** The host is up for the whole run. A run that outlives this machine is not a goal.
 2. **A sandbox run is a worktree run.** `--sandbox <provider>` implies `--worktree`, and counts toward `max_worktree_runs`. Its commits land on `sssf/<adw_id>`, and `just merge`, `just discard` and the dashboard's branch view work as they do today.
 3. **The ADW stays on the host, and every process it starts in the tree goes through one runner.** The runner is local by default, or a VM. The trace, the caps, the launch lock and the dashboard stay on the host. The VM holds the run's tree and does all its work: agents, checks and git. This runner is the seam. It covers the host's own reads of files in the tree too, such as the gates checking that an agent's declared artifacts exist and parse.
-4. **`--sandbox` sits beside `--container`.** `--container` puts the operator session in Podman; `--sandbox` sends one run's work to a VM. They combine. repo.yaml's `sandbox: vercel|e2b|null`, `null` by default, sets a repo's default, and the flag overrides it.
+4. **`--sandbox` sits beside `--container`.** `--container` puts the operator session in Podman; `--sandbox` sends one run's work to a VM. They combine. repo.yaml's `sandbox: none|vercel|e2b`, `none` by default, sets a repo's default, and the flag overrides it. `--sandbox none` keeps one run on the host.
 
 ### The VM
 
@@ -82,7 +82,15 @@ What step 2 settled that the decisions left open, or changed:
 - **The SDK isn't in the chains' headers.** `--sandbox vercel` starts the chain again once under `uv run --with vercel-sandbox==0.10.0`, so a run without it never fetches the SDK.
 - **A refresh is a stop.** The VM is persistent, and the next call resumes it with its files in a new session. No command asks for more than half a session, or a short session would stop the VM before every command.
 - **A VM's snapshots go with it.** Each stop saves an automatic snapshot of about 800MB, which Vercel keeps after the VM is deleted unless asked. `destroy(delete_orphan_snapshots=True)` deletes them, at the end of a run and in the sweep.
-- **Not built yet:** the dashboard's sandbox view (decision 15) and repo.yaml's `sandbox:` default (decision 4). The trace already holds what the view needs, in the `sandbox`, `sandbox_commits`, `sandbox_refresh` and `sandbox_end` events.
+- **Not built yet:** the dashboard's sandbox view (decision 15). The trace already holds what the view needs, in the `sandbox`, `sandbox_commits`, `sandbox_refresh` and `sandbox_end` events.
+
+## As built: the repo default
+
+Decision 4's `sandbox:` setting, built after both providers:
+
+- **It picks for new runs only.** `session.choose_sandbox` reads it when a chain that takes `--sandbox` starts without the flag. A run whose adw_id is already in the trace keeps where it ran. A VM run resumes in a new VM, as decision 12 says, and a host run stays on the host, so a setting committed since can't move it into a worktree halfway through.
+- **`none`, not `null`.** The setting and the flag share one word for the host, so `--sandbox none` reads like the setting it overrides.
+- **Only the four chains that take `--sandbox` read it.** The single-phase chains, tickets and trials don't, so a repo with `sandbox: e2b` still runs them on the host.
 
 ## As built: E2B
 

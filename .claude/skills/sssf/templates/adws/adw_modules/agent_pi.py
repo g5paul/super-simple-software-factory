@@ -236,6 +236,42 @@ class ToolCallTracker:
 # SSSF's own extension for agent_rules marked `on_match: refuse` (rules.py).
 REFUSE_EXTENSION = Path(__file__).with_name("sssf_rules.ts")
 
+# What a pi agent in a remote VM needs left on its ChatGPT token when it
+# starts: a call may take AGENT_SECONDS (30 minutes), plus a margin.
+VM_TOKEN_MINUTES = 35
+
+
+def vm_token() -> str:
+    """A ChatGPT access token for one pi agent in a remote VM, from the host's
+    sign-in (docs/research/pi-chatgpt-in-vm.md). pi refreshes the login under
+    its own lock if it has to, so the login and its refresh token stay on this
+    machine and the VM gets only an access token that expires within the hour.
+    Never print it."""
+    done = subprocess.run([PI_PATH, "auth", "print-bearer-token", "--provider", "openai",
+                           "--min-expiry", f"{VM_TOKEN_MINUTES}m"],
+                          capture_output=True, text=True, check=False, env=operator_env())
+    token = done.stdout.strip()
+    if done.returncode != 0 or not token:
+        raise sandbox.SandboxFailed(
+            "pi has no ChatGPT sign-in to hand a VM a token from (pi auth print-bearer-token "
+            f"--provider openai exited {done.returncode}). Sign in with `pi`, then /login.")
+    if token.startswith("sk-"):
+        raise sandbox.SandboxFailed(
+            "pi's openai credential is an API key, not the ChatGPT sign-in, and SSSF doesn't "
+            "put API keys in a VM. Sign in to ChatGPT with `pi` and /login.")
+    return token
+
+
+def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict]) -> dict[str, str]:
+    """On a remote tree: the ChatGPT token, renamed to OPENAI_API_KEY in the VM
+    (sandbox_remote), and SSSF's refuse extension copied in."""
+    if tree is sandbox.LOCAL:
+        return env
+    env["SSSF_PI_TOKEN"] = vm_token()
+    if refuse_rules:
+        tree.install(REFUSE_EXTENSION)
+    return env
+
 
 def _with_refusals(env: dict[str, str], refuse_rules: list[dict]) -> dict[str, str]:
     if refuse_rules:
@@ -310,9 +346,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     # How the last assistant turn ended. Pi retries some errors itself, so only
     # the last turn says whether the call failed.
     last_stop, last_error = None, ""
-    process = sandbox.current().start(cmd, cwd=request.cwd,
-                                      env=_with_refusals(child_env(request.agent_name, request.adw_id),
-                                                         request.refuse_rules))
+    tree = sandbox.current()
+    env = _with_refusals(child_env(request.agent_name, request.adw_id), request.refuse_rules)
+    process = tree.start(cmd, cwd=request.cwd, env=_in_vm(env, tree, request.refuse_rules))
     if on_spawn:
         on_spawn(process.pid)
     with raw_path.open("a") as raw:

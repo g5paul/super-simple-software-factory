@@ -147,6 +147,9 @@ def prepare(provider: str, cfg) -> None:
     """Check a remote run can start, before anything is created: the provider
     is known, the roster can run there, and its SDK imports (see sandbox_remote)."""
     check_roster(provider, cfg)
+    if any(a.coding_agent == "pi" for a in cfg.agents):
+        from . import agent_pi
+        agent_pi.vm_token()             # the host's ChatGPT sign-in can hand out a token
     _provider(provider).require_sdk()
 
 
@@ -156,11 +159,16 @@ def check_roster(provider: str, cfg) -> None:
     would start the trial again under `uv run --with`."""
     if provider not in PROVIDERS:
         raise SystemExit(f"--sandbox {provider}: SSSF knows {', '.join(PROVIDERS)}")
-    pi = [a.name for a in cfg.agents if a.coding_agent == "pi"]
-    if pi:
-        raise SystemExit(f"--sandbox runs Claude Code agents only for now, and {', '.join(pi)} "
-                         "run on pi. A ChatGPT roster in the VM is still open in "
-                         "docs/designs/remote-sandboxes.md.")
+    pi = [a for a in cfg.agents if a.coding_agent == "pi"]
+    other = [a.name for a in pi if not str(a.model).startswith("openai/")]
+    if other:
+        raise SystemExit(f"--sandbox runs pi agents on the ChatGPT sign-in only (openai/ models), "
+                         f"and {', '.join(other)} use another provider, whose key would have to "
+                         "go into the VM.")
+    extended = [a.name for a in pi if a.harness_engineering]
+    if extended:
+        raise SystemExit(f"--sandbox can't take pi extensions yet, and {', '.join(extended)} load "
+                         "harness_engineering ones. Run without them, or with --sandbox none.")
 
 
 def open_remote(provider: str, run, branch: str, project: str, live: set[str]):

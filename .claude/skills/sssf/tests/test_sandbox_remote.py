@@ -524,3 +524,15 @@ def test_an_agent_gets_sssfs_shell_prefix_only_with_refuse_rules(box, monkeypatc
     seen = box.start(["sh", "-c", "env"], env=env)
     assert "CLAUDE_CODE_SHELL_PREFIX=/skill/sssf_refuse.py" in "".join(seen.stdout)
     seen.wait()
+
+
+def test_a_pi_token_reaches_the_vm_as_openai_api_key_and_a_host_key_does_not(box):
+    env = {**os.environ, "OPENAI_API_KEY": "sk-host-key"}
+    seen = box.start(["sh", "-c", "env"], env=env)
+    out = "".join(seen.stdout)
+    seen.wait()
+    assert "OPENAI_API_KEY" not in out
+    seen = box.start(["sh", "-c", "env"], env={**env, "SSSF_PI_TOKEN": "chatgpt-access"})
+    out = "".join(seen.stdout)
+    seen.wait()
+    assert "OPENAI_API_KEY=chatgpt-access" in out and "SSSF_PI_TOKEN" not in out

@@ -121,7 +121,7 @@ def test_a_started_process_streams_lines_and_stops_with_its_children(tmp_path):
 # never in the run's tree. A new in-tree call goes through sandbox.current().
 HOST_ONLY = {
     "agent_cc.py": ['[CLAUDE_PATH, "auth", "status"]'],   # the sign-in check
-    "agent_pi.py": ["subprocess.run("],                   # pi's sign-in check
+    "agent_pi.py": ["subprocess.run(", '[PI_PATH, "auth", "print-bearer-token"'],  # sign-in, VM token
 }
 IN_TREE = ["git_helper.py", "permissions.py", "gates.py", "quality.py", "plan_checks.py",
            "agent_cc.py", "agent_pi.py"]

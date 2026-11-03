@@ -394,6 +394,10 @@ class Remote:
         # VM. An operator's own prefix names a host path, so it stays behind.
         if "SSSF_REFUSE_RULES" in passed and source.get("CLAUDE_CODE_SHELL_PREFIX"):
             passed["CLAUDE_CODE_SHELL_PREFIX"] = source["CLAUDE_CODE_SHELL_PREFIX"]
+        # A pi agent's ChatGPT token (agent_pi.vm_token), under the name pi reads.
+        # Only this name crosses: an OPENAI_API_KEY on the host stays there.
+        if "SSSF_PI_TOKEN" in passed:
+            passed["OPENAI_API_KEY"] = passed.pop("SSSF_PI_TOKEN")
         return {"UV_PYTHON": self.python, **passed} if self.python else passed
 
     def _cwd(self, cwd) -> str:

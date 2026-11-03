@@ -421,13 +421,17 @@ def no_sdk_needed(monkeypatch):
     monkeypatch.setattr(sandbox, "_provider", no_import)
 
 
-def test_a_vm_trial_refuses_a_pi_roster_before_anything_starts(repo, no_sdk_needed):
+def test_a_vm_trial_refuses_a_pi_roster_off_chatgpt_before_anything_starts(repo, no_sdk_needed):
+    trial.check(repo, ["main", "chatgpt"], "vercel")      # ChatGPT sign-in: allowed in a VM
+    config = repo / "adws" / "adw_sssf_config"
+    roster = (config / "sssf.config.chatgpt.yaml").read_text()
+    (config / "sssf.config.gemini.yaml").write_text(
+        roster.replace("model: openai/gpt-6.1-sol", "model: google/gemini-3.6-flash", 1))
     with pytest.raises(trial.TrialError) as error:
-        trial.check(repo, ["main", "chatgpt"], "vercel")
-    assert "chatgpt: --sandbox runs Claude Code agents only" in str(error.value)
+        trial.check(repo, ["main", "gemini"], "vercel")
+    assert "gemini: --sandbox runs pi agents on the ChatGPT sign-in only" in str(error.value)
     assert "--sandbox none" in str(error.value)
-    trial.check(repo, ["main", "main"], "vercel")
-    trial.check(repo, ["main", "chatgpt"], None)
+    trial.check(repo, ["main", "gemini"], None)
 
 
 seen_env: list[dict] = []

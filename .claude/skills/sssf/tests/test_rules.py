@@ -352,3 +352,57 @@ def test_an_anchored_pattern_finds_the_command_in_a_line_of_another_shape():
     assert prefix(line, anchored).returncode == 126
     assert prefix(claude_line("gh pr create --fill"), anchored).returncode == 126
     assert prefix(claude_line("echo gh pr create"), anchored).returncode == 0
+
+
+# ── pi in a remote VM (docs/research/pi-chatgpt-in-vm.md) ────────────────────
+
+def fake_pi(tmp_path, monkeypatch, body):
+    script = tmp_path / "pi"
+    script.write_text("#!/bin/sh\n" + body)
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    return script
+
+
+def test_the_vm_token_comes_from_the_hosts_sign_in_with_35_minutes_left(tmp_path, monkeypatch):
+    fake_pi(tmp_path, monkeypatch, f'echo "$@" > {tmp_path}/argv\necho eyJ-access\n')
+    assert agent_pi.vm_token() == "eyJ-access"
+    assert (tmp_path / "argv").read_text().split() == [
+        "auth", "print-bearer-token", "--provider", "openai", "--min-expiry", "35m"]
+
+
+@pytest.mark.parametrize("body, says", [
+    ("exit 1\n", "no ChatGPT sign-in"),
+    ("echo sk-proj-key\n", "an API key, not the ChatGPT sign-in"),
+])
+def test_no_vm_token_from_a_missing_login_or_an_api_key(tmp_path, monkeypatch, body, says):
+    from adw_modules import sandbox
+    fake_pi(tmp_path, monkeypatch, body)
+    with pytest.raises(sandbox.SandboxFailed, match=says):
+        agent_pi.vm_token()
+
+
+def test_a_pi_agent_in_a_vm_gets_a_token_and_the_refuse_extension(tmp_path, monkeypatch):
+    from adw_modules import sandbox
+    monkeypatch.setattr(agent_pi, "vm_token", lambda: "eyJ-access")
+    installed = []
+    vm = SimpleNamespace(install=installed.append)
+    env = agent_pi._in_vm({}, vm, rules.refusing([REFUSE]))
+    assert env == {"SSSF_PI_TOKEN": "eyJ-access"} and installed == [agent_pi.REFUSE_EXTENSION]
+    assert agent_pi._in_vm({}, sandbox.LOCAL, rules.refusing([REFUSE])) == {}
+
+
+def test_a_vm_refuses_pi_extensions_and_other_providers():
+    from adw_modules import sandbox
+    agent = lambda **kw: SimpleNamespace(name="builder", coding_agent="pi", model="openai/gpt-6.1-sol",
+                                         harness_engineering=[], **{k: v for k, v in kw.items()})
+    ok = SimpleNamespace(agents=[agent()])
+    sandbox.check_roster("vercel", ok)
+    with pytest.raises(SystemExit, match="ChatGPT sign-in only"):
+        sandbox.check_roster("vercel", SimpleNamespace(agents=[
+            SimpleNamespace(name="b", coding_agent="pi", model="google/gemini-3.6-flash",
+                            harness_engineering=[])]))
+    with pytest.raises(SystemExit, match="pi extensions"):
+        sandbox.check_roster("vercel", SimpleNamespace(agents=[
+            SimpleNamespace(name="b", coding_agent="pi", model="openai/gpt-6.1-sol",
+                            harness_engineering=["x.ts"])]))

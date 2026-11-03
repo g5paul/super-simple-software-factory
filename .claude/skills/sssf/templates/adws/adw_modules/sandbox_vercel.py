@@ -47,6 +47,14 @@ class Vercel(Remote):
         return create_sandbox(tags={"sssf": self.project, "adw_id": self.run_.adw_id},
                               execution_time_limit=timedelta(seconds=self.limit), persistent=True)
 
+    def _end(self, seconds: float) -> dict:
+        """The VM's size and the GB-hours of memory it held, which Hobby's
+        monthly allowance counts busy or idle. Its active CPU is cpu_seconds."""
+        vcpus = getattr(self.sandbox, "vcpus", None) or 2
+        memory_gib = (getattr(self.sandbox, "memory", None) or 2048 * vcpus) / 1024
+        return {"vcpus": vcpus, "memory_gib": memory_gib,
+                "memory_gb_hours": round(memory_gib * seconds / 3600, 3)}
+
     def _delete(self) -> None:
         # Each stop saved a snapshot of the VM, which Vercel keeps unless
         # asked. Hobby caps snapshot storage, and at about 800MB each, a

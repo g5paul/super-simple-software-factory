@@ -144,6 +144,11 @@ tail ADW_ID:
 procs ADW_ID:
     @sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"
 
+# what remote VM runs used of Vercel's and E2B's free allowances. Name other
+# repos' traces to add theirs: just sandbox-usage ../other/adws/adw_data/sssf.db
+sandbox-usage *ARGS:
+    uv run adws/adw_sandbox_usage.py {{ARGS}} --config {{config}}
+
 # Checks each pid is still the process the trace recorded; pids get reused.
 # stop a run, the chain first, then its agents: just kill <adw_id>
 kill ADW_ID:

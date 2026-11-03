@@ -45,6 +45,7 @@ class FakeVercel:
     def __init__(self, host: Path, vm: Path):
         self.host, self.vm = str(host), str(vm)
         self.name = "fake-vm"
+        self.vcpus, self.memory = 2, 4096
         self.calls: list[dict] = []
         self.stops = 0
         self.destroyed = False
@@ -385,6 +386,31 @@ def test_files_are_read_in_the_vm_not_on_the_host(box):
     assert not box.exists("only-in-vm.json")
 
 
+def test_close_records_the_vms_busy_cpu_seconds(box):
+    box.run(["sh", "-c", "i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done"])
+    box.close()
+    cpu = dict(box.events)["sandbox_end"]["cpu_seconds"]
+    assert cpu is not None and cpu >= 0
+
+
+def test_cpu_adds_each_session_and_a_reboot_starts_the_count_again(box, monkeypatch):
+    # Open read 10. A refresh reads 15, then the VM boots again and reads 2;
+    # close reads 5. The run used 5 + 3.
+    readings = iter([15.0, 2.0, 5.0])
+    box._cpu_base = 10.0
+    monkeypatch.setattr(box, "_cpu_now", lambda: next(readings))
+    box._session -= box.limit
+    box.run(["true"])
+    box.close()
+    assert dict(box.events)["sandbox_end"]["cpu_seconds"] == 8.0
+
+
+def test_a_cpu_reading_that_fails_makes_the_total_unknown_not_wrong(box, monkeypatch):
+    monkeypatch.setattr(box, "_cpu_now", lambda: None)
+    box.close()
+    assert dict(box.events)["sandbox_end"]["cpu_seconds"] is None
+
+
 def test_a_command_past_its_timeout_raises_timeout_expired(box):
     with pytest.raises(subprocess.TimeoutExpired):
         box.run(["sleep", "5"], timeout=1)
@@ -409,6 +435,16 @@ def test_kill_leaves_vm_stand_in_pids_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(kill.os, "kill", lambda pid, sig: signalled.append(pid))
     report = kill.kill(str(db), "abc")
     assert signalled == [] and "sandbox VM" in report[0]
+
+
+def test_vercel_close_records_the_memory_gb_hours_hobby_counts(box):
+    if box.name != "vercel":
+        pytest.skip("Vercel only")
+    box._created -= 1800
+    box.close()
+    end = dict(box.events)["sandbox_end"]
+    assert end["vcpus"] == 2 and end["memory_gib"] == 4.0
+    assert end["memory_gb_hours"] == pytest.approx(2.0, abs=0.01)
 
 
 # --- E2B only -----------------------------------------------------------------

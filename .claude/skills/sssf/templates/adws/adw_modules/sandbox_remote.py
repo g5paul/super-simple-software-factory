@@ -42,6 +42,8 @@ PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
 COMMAND_SECONDS = 60                # what a command with no timeout may need: git, a read
 MARGIN_SECONDS = 30
+CPU_READ = ("awk -v hz=\"$(getconf CLK_TCK)\" "
+            "'/^cpu /{printf \"%.2f\\n\", ($2+$3+$4+$7+$8+$9)/hz; exit}' /proc/stat")
 
 
 def require_sdk(provider: str, module: str, requirement: str) -> None:
@@ -166,6 +168,8 @@ class Remote:
         self._token = ""
         self._created = 0.0
         self._session = 0.0
+        self.cpu_seconds: float | None = 0.0
+        self._cpu_base: float | None = None
 
     # --- what a provider writes ---------------------------------------------
 
@@ -191,6 +195,7 @@ class Remote:
             self.sandbox = self._create()
             self.vm = self.sandbox.name
             self._created = self._session = time.monotonic()
+            self._cpu_base = self._cpu_now()
             self._log("sandbox", {"provider": self.name, "vm": self.vm,
                                   "session_minutes": self.limit / 60, "python": self.python})
             self._clone()
@@ -229,6 +234,7 @@ class Remote:
                 patch = str(path)
         except Exception as error:   # the VM may already be gone; deleting it still matters
             self._log("sandbox_error", {"vm": self.vm, "error": str(error)[-500:]})
+        self._cpu_add()
         seconds = round(time.monotonic() - self._created, 1)
         try:
             self._delete()
@@ -238,7 +244,9 @@ class Remote:
             self._log("sandbox_error", {"vm": self.vm, "error": f"delete failed: {error}"[-500:]})
         self._log("sandbox_end", {"provider": self.name, "vm": self.vm, "vm_seconds": seconds,
                                   "refreshes": self.refreshes, "deleted": deleted,
-                                  "uncommitted_patch": patch, **self._end(seconds)})
+                                  "uncommitted_patch": patch,
+                                  "cpu_seconds": None if self.cpu_seconds is None else round(self.cpu_seconds, 1),
+                                  **self._end(seconds)})
         if patch:
             self.run_.console.note(f"uncommitted work from the VM is saved, not applied: {patch}")
         self.sandbox = None
@@ -336,10 +344,33 @@ class Remote:
         need = min(need, self.limit / 2)
         if time.monotonic() - self._session + need <= self.limit - MARGIN_SECONDS:
             return
+        self._cpu_add()
         self._call(self.sandbox.stop)
         self._session = time.monotonic()
+        self._cpu_base = self._cpu_now()
         self.refreshes += 1
         self._log("sandbox_refresh", {"vm": self.vm, "refreshes": self.refreshes})
+
+    def _cpu_now(self) -> float | None:
+        """The VM's busy CPU seconds since it booted, from /proc/stat: user,
+        nice, system, irq, softirq and steal, summed over its vCPUs. Waiting
+        is left out, as Vercel leaves it out of active CPU. None if unread."""
+        try:
+            done = self.sandbox.run_process("sh", ["-c", CPU_READ], capture_output=True)
+            return float(done.stdout.strip()) if done.returncode == 0 else None
+        except Exception:
+            return None
+
+    def _cpu_add(self) -> None:
+        """Add this session's CPU to the run's. A reading that fails makes the
+        run's total unknown, never wrong. A count lower than its base means
+        the VM booted again, and all of it is this session's."""
+        now = self._cpu_now() if self.cpu_seconds is not None else None
+        if now is None or self._cpu_base is None:
+            self.cpu_seconds = None
+        else:
+            self.cpu_seconds += now - self._cpu_base if now >= self._cpu_base else now
+        self._cpu_base = None
 
     def _env(self, env) -> dict[str, str]:
         source = os.environ if env is None else env

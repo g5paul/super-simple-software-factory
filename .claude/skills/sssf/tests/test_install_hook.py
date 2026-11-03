@@ -137,9 +137,10 @@ def fake_token() -> str:
 
 def test_an_agent_push_is_refused(pushed):
     commit(pushed, "a.txt", "fine\n")
-    result = push(pushed, env={"SSSF_ADW_ID": "test1234"})
+    result = push(pushed, env={"SSSF_ADW_ID": "test1234", "SSSF_AGENT": "builder"})
     assert result.returncode == 1
     assert "SSSF agent is pushing" in result.stderr
+    assert "test1234, agent builder" in result.stderr
 
 
 def test_a_push_without_gitleaks_is_refused(pushed, tmp_path):

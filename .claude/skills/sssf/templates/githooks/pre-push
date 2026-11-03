@@ -11,7 +11,7 @@
 set -uo pipefail
 zero=0000000000000000000000000000000000000000
 if [ -n "${SSSF_ADW_ID:-}" ]; then
-  echo "pre-push: SSSF_ADW_ID is set ($SSSF_ADW_ID), so an SSSF agent is pushing. Agents commit locally only; the engineer pushes." >&2
+  echo "pre-push: SSSF_ADW_ID is set ($SSSF_ADW_ID${SSSF_AGENT:+, agent $SSSF_AGENT}), so an SSSF agent is pushing. Agents commit locally only; the engineer pushes." >&2
   exit 1
 fi
 if ! command -v gitleaks >/dev/null; then

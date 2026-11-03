@@ -7,7 +7,8 @@
 # commit. That needs --verbose: without it, gitleaks prints only a count.
 # Stamped by SSSF's install.py. Set up once per clone:
 # git config core.hooksPath .githooks
-# (.claude/skills/sssf/cookbooks/install.md, "Secret scan before every push").
+# It needs gitleaks 8.30.1 or later on PATH: https://github.com/gitleaks/gitleaks
+# More in SSSF's cookbooks/install.md, "Secret scan before every push".
 set -uo pipefail
 zero=0000000000000000000000000000000000000000
 if [ -n "${SSSF_ADW_ID:-}" ]; then
@@ -15,7 +16,7 @@ if [ -n "${SSSF_ADW_ID:-}" ]; then
   exit 1
 fi
 if ! command -v gitleaks >/dev/null; then
-  echo "pre-push: gitleaks isn't installed, so this push is refused. Install it (.claude/skills/sssf/cookbooks/install.md), or push with --no-verify knowing nothing was scanned." >&2
+  echo "pre-push: gitleaks isn't installed, so this push is refused. Install gitleaks 8.30.1 or later (https://github.com/gitleaks/gitleaks), or push with --no-verify knowing nothing was scanned." >&2
   exit 1
 fi
 found=0

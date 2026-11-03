@@ -531,3 +531,77 @@ def test_a_latin1_include_path_does_not_stop_the_run(repo):
     guard = permissions.guard_git_dir(SimpleNamespace(repo_root=repo))
     assert target in guard["paths"]
     assert permissions.restore_git_dir(SimpleNamespace(repo_root=repo), guard) == []
+
+
+# ── eighth bypass-reviewer pass ─────────────────────────────────────────────
+
+def nested_home(tmp_path, monkeypatch, *, locked=False):
+    """HOME a link to realhome, and realhome/.config a link to dotfiles, as
+    with stow or chezmoi."""
+    real = tmp_path / "realhome"
+    real.mkdir()
+    (real / ".gitconfig").write_text("[user]\n\tname = t\n")
+    dot = tmp_path / "dotfiles" / "config"
+    (dot / "git").mkdir(parents=True)
+    (dot / "git" / "config").write_text("[user]\n\temail = t@example.com\n")
+    (real / ".config").symlink_to(dot)
+    parent = tmp_path / "homes"
+    parent.mkdir()
+    link = parent / "homelink"
+    link.symlink_to(real)
+    if locked:
+        parent.chmod(0o555)
+    monkeypatch.setenv("HOME", str(link))
+    return link, real, dot
+
+
+@pytest.mark.parametrize("locked", [False, True])
+def test_a_restore_keeps_nested_home_links(repo, tmp_path, monkeypatch, locked):
+    link, real, dot = nested_home(tmp_path, monkeypatch, locked=locked)
+    try:
+        run = SimpleNamespace(repo_root=repo)
+        guard = permissions.guard_git_dir(run)
+        plant_hook(repo / ".git" / "hooks")
+        with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+            permissions.restore_git_dir(run, guard)
+        assert os.readlink(link) == str(real)
+        assert os.readlink(real / ".config") == str(dot)
+        assert (dot / "git" / "config").read_text() == "[user]\n\temail = t@example.com\n"
+        assert commit_runs_no_hook(repo)
+    finally:
+        (tmp_path / "homes").chmod(0o755)
+
+
+def test_a_retargeted_inner_link_is_put_back(repo, tmp_path, monkeypatch):
+    link, real, dot = nested_home(tmp_path, monkeypatch)
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evil"
+    (evil / "git").mkdir(parents=True)
+    (evil / "git" / "config").write_text("[core]\n\tfsmonitor = touch PWNED\n")
+    (real / ".config").unlink()
+    (real / ".config").symlink_to(evil)
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert os.readlink(link) == str(real)
+    assert os.readlink(real / ".config") == str(dot)
+
+
+def test_a_parent_swapped_under_a_relative_link_is_seen(repo, tmp_path, monkeypatch):
+    """n1: the link's text stays the same, but it now sits in the agent's folder."""
+    (tmp_path / "store" / "home").mkdir(parents=True)
+    (tmp_path / "store" / "home" / ".gitconfig").write_text("")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "link").symlink_to("../store/home")
+    monkeypatch.setenv("HOME", str(tmp_path / "a" / "link"))
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    (tmp_path / "x" / "evildir").mkdir(parents=True)
+    (tmp_path / "x" / "evildir" / "link").symlink_to("../store/home")
+    (tmp_path / "x" / "store" / "home").mkdir(parents=True)
+    (tmp_path / "x" / "store" / "home" / ".gitconfig").write_text("[core]\n\tfsmonitor = touch PWNED\n")
+    (tmp_path / "a").rename(tmp_path / "a.bak")
+    (tmp_path / "a").symlink_to(tmp_path / "x" / "evildir")
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)

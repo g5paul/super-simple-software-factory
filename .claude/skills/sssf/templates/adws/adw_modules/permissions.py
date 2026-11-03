@@ -165,21 +165,25 @@ fi
 # the agent doesn't run, and a follow pack is compared as far as it goes.
 PACK_CAP = 16 * 1024 * 1024
 
-# Puts the links on the way back first, so the paths behind them are removed
-# and unpacked where they were, not where the agent pointed them. Then removes
-# every watched path, carrying on past a failure, unpacks the saved stream
-# from the file SSSF just wrote, and deletes that file. The exit code is not
-# trusted; the restore compares again afterwards.
+# Puts back what changed, and only that. First each changed link, outermost
+# first, made again with ln -s from its saved target (tar can't put back a link
+# inside another link). Then each changed path: removed, and unpacked from the
+# saved stream in the file SSSF just wrote. Links are never removed with
+# rm -rf, and unchanged paths are never touched. The exit code is not trusted;
+# the restore compares again afterwards.
+# Args: file, number of links, then link/target pairs, then the changed paths.
 _UNPACK = """f=$1; n=$2; shift 2
 i=0
-for p in "$@"; do
-  [ $i -ge $n ] && break
-  rm -f "$p"
-  base64 -d < "$f" | tar -xpf - -C / "${p#/}" 2>/dev/null
+while [ $i -lt $n ]; do
+  l=$1; t=$2; shift 2
+  if [ -d "$l" ] && [ ! -L "$l" ]; then rm -rf "$l"; else rm -f "$l"; fi
+  ln -s "$t" "$l" || failed=1
   i=$((i+1))
 done
 for p in "$@"; do rm -rf "$p" || failed=1; done
-if [ -s "$f" ]; then base64 -d < "$f" | tar -xpf - -C / || failed=1; fi
+for p in "$@"; do
+  base64 -d < "$f" | tar -xpf - -C / "${p#/}" 2>/dev/null
+done
 rm -f "$f"
 exit ${failed:-0}
 """
@@ -345,7 +349,14 @@ def _differs(guard: dict) -> list[str] | None:
     def exact(members: dict, path: str) -> object:
         return members.get(path.lstrip("/"))   # a link: the link itself, never what it holds
 
-    moved = [q for q in guard.get("links", []) if exact(now[0], q) != exact(then[0], q)]
+    links = guard.get("links", [])
+    moved = [q for q in links if exact(now[0], q) != exact(then[0], q)]
+    # A parent swapped under a link with a relative target keeps the link's
+    # text the same; where the link sits physically shows it.
+    if links and _sh(_REAL, *links).stdout != guard.get("parents", ""):
+        before = guard.get("parents", "").split("\0")
+        after = _sh(_REAL, *links).stdout.split("\0")
+        moved += [q for q, b, a in zip(links, before, after) if b != a and q not in moved]
     return moved + [p for p in guard["paths"]
                     if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
 
@@ -360,7 +371,8 @@ def guard_git_dir(run) -> dict | None:
         raise PermissionBreach("Could not save the git directory and git config "
                                "before the agent ran, so it did not run.")
     return {"links": links, "paths": paths, "plain": plain,
-            "followed": _pack(paths, follow=True) or "", "done": False}
+            "followed": _pack(paths, follow=True) or "",
+            "parents": _sh(_REAL, *links).stdout, "done": False}
 
 
 def git_dir_changed(guard: dict | None) -> bool:
@@ -403,8 +415,13 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
             held = made.stdout.strip()
         if made.returncode == 0 and held.startswith("/"):
             box.write_text(held, guard["plain"])
-            links = guard.get("links", [])
-            _sh(_UNPACK, held, str(len(links)), *links, *guard["paths"])
+            saved = _members(guard["plain"])
+            moved = sorted((q for q in guard.get("links", []) if q in changed
+                            and (saved.get(q.lstrip("/")) or ("",))[0] == b"2"),
+                           key=lambda q: q.count("/"))
+            pairs = [x for q in moved for x in (q, saved[q.lstrip("/")][2])]
+            paths = [p for p in guard["paths"] if p in changed]
+            _sh(_UNPACK, held, str(len(moved)), *pairs, *paths)
         restored = _differs(guard) == []
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]

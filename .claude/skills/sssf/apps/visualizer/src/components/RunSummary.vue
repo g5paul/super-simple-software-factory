@@ -69,6 +69,7 @@ const STOP_LABELS: Record<StopReason['kind'], string> = {
   machine_budget_stop: 'every repo on this machine hit max_daily_cost for the last 24 hours',
   rate_limit_stop: 'the account neared its usage limit',
   rule_breach: 'an agent ran a command this repo forbids',
+  agent_silent: 'an agent went quiet for max_silence_minutes',
   not_accepted: 'the result was not accepted',
   phase_failed: 'a phase failed',
 }

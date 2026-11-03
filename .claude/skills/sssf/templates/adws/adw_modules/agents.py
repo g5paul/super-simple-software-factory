@@ -16,7 +16,8 @@ from typing import Optional
 
 import yaml
 
-from . import account, agent_cc, agent_pi, budget, permissions, prices, prompts, repo_settings, rules
+from . import (account, agent_cc, agent_pi, budget, permissions, prices, prompts, repo_settings,
+               rules, silence)
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -178,6 +179,9 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     spent = UsageBreakdown()
     interface = _interface(agent)
 
+    quiet = repo_settings.load(run.repo_root).max_silence_minutes
+    silent_after = quiet * 60 if quiet else None
+
     def count_partial(stop) -> None:
         """A call killed mid-turn sent no final usage. What its turns reported,
         priced by the interface, still counts."""
@@ -209,6 +213,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             max_cost=agent.max_call_cost,
             stop_on_usage_credits=run.cfg.defaults.rate_limit_stop is not None,
             refuse_rules=rules.refusing(enforced),
+            max_silence_seconds=silent_after,
         )
         try:
             result = interface.run(
@@ -242,6 +247,14 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                                   "usage_credits": True,
                                                   "spent": stop.partial.cost if stop.partial else 0.0,
                                                   "sample": account.latest()}))
+            raise
+        except silence.SilentStop as stop:
+            count_partial(stop)
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="agent_silent",
+                                         payload={"agent": agent.name, "error": str(stop),
+                                                  "minutes": stop.minutes,
+                                                  "spent": stop.partial.cost if stop.partial else 0.0}))
             raise
         except agent_pi.UsageLimitStop as stop:
             # Named like Claude's usage stop, so the trace and the dashboard

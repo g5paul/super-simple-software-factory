@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import rules, sandbox
+from . import rules, sandbox, silence
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
 from .utils import mark_agent, now_iso, operator_env
@@ -351,54 +351,60 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     process = tree.start(cmd, cwd=request.cwd, env=_in_vm(env, tree, request.refuse_rules))
     if on_spawn:
         on_spawn(process.pid)
-    with raw_path.open("a") as raw:
-        assert process.stdout is not None
-        for line in process.stdout:
-            raw.write(line)
-            raw.flush()                      # events land on disk as they happen
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") == "message_end":
-                message = event.get("message", {})
-                if message.get("role") == "assistant":
-                    text = _text_of(message)
-                    if text:
-                        result.text = text   # last assistant message wins
-                    last_stop = message.get("stopReason")
-                    last_error = message.get("errorMessage") or ""
-                    usage = message.get("usage", {}) or {}
-                    turn = _context_tokens(usage)
-                    result.tokens += turn
-                    result.usage.add_turn(usage, turn)
-                    # Occupancy is read off the last VALID assistant turn, the
-                    # way pi does it — an aborted or errored turn reports usage
-                    # you can't trust, so it must not overwrite a good reading.
-                    if turn and message.get("stopReason") not in ("aborted", "error"):
-                        result.context_tokens = turn
-                    result.cost += (usage.get("cost", {}) or {}).get("total", 0.0) or 0.0
-            if on_event:
+    with silence.watch(process, request.max_silence_seconds) as dog:
+        with raw_path.open("a") as raw:
+            assert process.stdout is not None
+            for line in process.stdout:
+                dog.touch()
+                raw.write(line)
+                raw.flush()                      # events land on disk as they happen
+                line = line.strip()
+                if not line:
+                    continue
                 try:
-                    on_event(event)
-                except Exception as error:
-                    # A forbidden command (rules.RuleBreach), or a tracer
-                    # failure: either way the agent must not run on unwatched.
-                    process.stop_tree()
-                    if isinstance(error, rules.RuleBreach):
-                        error.partial = result       # pi priced every turn so far
-                    process.wait()
-                    if on_exit:
-                        on_exit(process.pid)
-                    raise
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") == "message_end":
+                    message = event.get("message", {})
+                    if message.get("role") == "assistant":
+                        text = _text_of(message)
+                        if text:
+                            result.text = text   # last assistant message wins
+                        last_stop = message.get("stopReason")
+                        last_error = message.get("errorMessage") or ""
+                        usage = message.get("usage", {}) or {}
+                        turn = _context_tokens(usage)
+                        result.tokens += turn
+                        result.usage.add_turn(usage, turn)
+                        # Occupancy is read off the last VALID assistant turn, the
+                        # way pi does it — an aborted or errored turn reports usage
+                        # you can't trust, so it must not overwrite a good reading.
+                        if turn and message.get("stopReason") not in ("aborted", "error"):
+                            result.context_tokens = turn
+                        result.cost += (usage.get("cost", {}) or {}).get("total", 0.0) or 0.0
+                if on_event:
+                    try:
+                        on_event(event)
+                    except Exception as error:
+                        # A forbidden command (rules.RuleBreach), or a tracer
+                        # failure: either way the agent must not run on unwatched.
+                        process.stop_tree()
+                        if isinstance(error, rules.RuleBreach):
+                            error.partial = result       # pi priced every turn so far
+                        process.wait()
+                        if on_exit:
+                            on_exit(process.pid)
+                        raise
 
     stderr = process.stderr.read() if process.stderr else ""
     result.returncode = process.wait()
     if on_exit:
         on_exit(process.pid)
+    if dog.fired:
+        stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
+        stop.partial = result           # pi priced every turn so far
+        raise stop
     if last_stop == "error" and USAGE_LIMIT in last_error:
         raise UsageLimitStop(
             f"The ChatGPT plan behind pi's sign-in hit its usage limit ({USAGE_LIMIT}). "

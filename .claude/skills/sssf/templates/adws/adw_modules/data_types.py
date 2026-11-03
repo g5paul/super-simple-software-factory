@@ -477,6 +477,7 @@ class AgentRequest(BaseModel):
     max_cost: Optional[float] = None  # claude: --max-budget-usd for this call
     stop_on_usage_credits: bool = True  # claude: kill the call once the plan moves onto credits
     refuse_rules: list[dict] = Field(default_factory=list)  # sssf_rules.ts (pi), sssf_refuse.py (claude)
+    max_silence_seconds: Optional[float] = None  # stop the agent after this long with no output (silence.py)
 
 
 class UsageBreakdown(BaseModel):

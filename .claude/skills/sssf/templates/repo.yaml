@@ -31,6 +31,14 @@ sandbox: none
 # says when enough spend ages out to go under it. Off unless set.
 #   max_daily_cost: 20.00
 
+# Minutes an agent may go without writing anything before SSSF stops it and
+# the run. A live agent streams as it works; one that hangs, say on a server
+# started in the foreground, goes quiet and spends nothing, so no cost cap
+# catches it. On at 15 unless set: a Claude Code Bash call can take 10 quiet
+# minutes, so keep it above that. Raise it if agents run longer quiet
+# commands; null turns it off.
+#   max_silence_minutes: 15
+
 # What a fresh checkout needs before the checks can run, such as the untracked
 # dependencies a worktree run's folder starts without. Shell commands, run in
 # order from the worktree's root before its first agent. A Python repo on uv

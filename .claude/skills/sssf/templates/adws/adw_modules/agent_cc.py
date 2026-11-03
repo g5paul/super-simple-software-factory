@@ -29,7 +29,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import account, budget, prices, rules, sandbox
+from . import account, budget, prices, rules, sandbox, silence
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import mark_agent, operator_env
@@ -265,87 +265,93 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                                             request.refuse_rules, tree))
     if on_spawn:
         on_spawn(process.pid)
-    try:
-        with raw_path.open("a") as raw:
-            assert process.stdout is not None
-            for line in process.stdout:
-                try:
-                    event = json.loads(line) if line.strip() else None
-                except json.JSONDecodeError:
-                    event = None
-                if isinstance(event, dict) and event.get("type") == "stream_event":
-                    # Partial messages: only their usage is read. The rest is
-                    # the text token by token, kept out of the raw log.
-                    inner = event.get("event") or {}
-                    stream = event.get("parent_tool_use_id")
-                    if inner.get("type") == "message_start":
-                        streaming[stream] = (inner.get("message") or {}).get("id")
-                    elif inner.get("type") == "message_delta" and streaming.get(stream):
-                        output[streaming[stream]] = (inner.get("usage") or {}).get("output_tokens") or 0
-                        raw.write(line)
-                        raw.flush()
-                    continue
-                raw.write(line)
-                raw.flush()
-                if not isinstance(event, dict):
-                    continue
-                etype = event.get("type")
-                if etype == "system" and event.get("subtype") == "init":
-                    source = event.get("apiKeySource")
-                    if AUTH == "subscription" and source not in (None, "none"):
-                        process.kill()
-                        raise RuntimeError(
-                            f"claude would bill the API (apiKeySource={source!r}) on a "
-                            "subscription run; remove that key source or set "
-                            "SSSF_CLAUDE_AUTH=api_key")
-                    if not resume:
-                        # The session exists from here on, so a send that dies
-                        # mid-turn is still resumed next time, never re-created.
-                        ledger.write_text(json.dumps({"cost": 0.0}))
-                if etype == "assistant":
-                    # Per message, subagents' too: a killed call never sends the
-                    # result event that totals them.
-                    message = event.get("message") or {}
-                    if message.get("id") and message.get("usage"):
-                        turns[message["id"]] = message
-                if etype == "assistant" and not event.get("parent_tool_use_id"):
-                    # One API message streams as one event per content block,
-                    # each repeating the same usage: read occupancy, never sum it.
-                    turn = _context_tokens(event.get("message", {}).get("usage") or {})
-                    if turn:
-                        result.context_tokens = turn
-                elif etype == "rate_limit_event" and event.get("rate_limit_info"):
-                    account.record(event["rate_limit_info"], source=request.cwd)
-                    if (AUTH == "subscription" and request.stop_on_usage_credits
-                            and account.on_credits(event["rate_limit_info"])):
-                        process.stop_tree()
-                        stop = account.RateLimitStop(account.CREDITS)
-                        stop.partial = _partial(turns, output)
-                        raise stop
-                elif etype == "result":
-                    final = event
-                if on_event:
+    with silence.watch(process, request.max_silence_seconds) as dog:
+        try:
+            with raw_path.open("a") as raw:
+                assert process.stdout is not None
+                for line in process.stdout:
+                    dog.touch()
                     try:
-                        on_event(event)
-                    except Exception as error:
-                        # A forbidden command (rules.RuleBreach), or a tracer
-                        # failure: either way the agent must not run on unwatched.
-                        process.stop_tree()
-                        if isinstance(error, rules.RuleBreach):
-                            error.partial = _partial(turns, output)
-                        raise
-    except BaseException:
-        # Leaving mid-call, by a stop or by `just kill`: the agent must not
-        # run on. On the host the kill reaches it too, but in a sandbox VM
-        # nothing else does, and the wait below would last until it finished.
-        process.stop_tree()
-        raise
-    finally:
-        stderr = process.stderr.read() if process.stderr else ""
-        result.returncode = process.wait()
-        if on_exit:
-            on_exit(process.pid)
+                        event = json.loads(line) if line.strip() else None
+                    except json.JSONDecodeError:
+                        event = None
+                    if isinstance(event, dict) and event.get("type") == "stream_event":
+                        # Partial messages: only their usage is read. The rest is
+                        # the text token by token, kept out of the raw log.
+                        inner = event.get("event") or {}
+                        stream = event.get("parent_tool_use_id")
+                        if inner.get("type") == "message_start":
+                            streaming[stream] = (inner.get("message") or {}).get("id")
+                        elif inner.get("type") == "message_delta" and streaming.get(stream):
+                            output[streaming[stream]] = (inner.get("usage") or {}).get("output_tokens") or 0
+                            raw.write(line)
+                            raw.flush()
+                        continue
+                    raw.write(line)
+                    raw.flush()
+                    if not isinstance(event, dict):
+                        continue
+                    etype = event.get("type")
+                    if etype == "system" and event.get("subtype") == "init":
+                        source = event.get("apiKeySource")
+                        if AUTH == "subscription" and source not in (None, "none"):
+                            process.kill()
+                            raise RuntimeError(
+                                f"claude would bill the API (apiKeySource={source!r}) on a "
+                                "subscription run; remove that key source or set "
+                                "SSSF_CLAUDE_AUTH=api_key")
+                        if not resume:
+                            # The session exists from here on, so a send that dies
+                            # mid-turn is still resumed next time, never re-created.
+                            ledger.write_text(json.dumps({"cost": 0.0}))
+                    if etype == "assistant":
+                        # Per message, subagents' too: a killed call never sends the
+                        # result event that totals them.
+                        message = event.get("message") or {}
+                        if message.get("id") and message.get("usage"):
+                            turns[message["id"]] = message
+                    if etype == "assistant" and not event.get("parent_tool_use_id"):
+                        # One API message streams as one event per content block,
+                        # each repeating the same usage: read occupancy, never sum it.
+                        turn = _context_tokens(event.get("message", {}).get("usage") or {})
+                        if turn:
+                            result.context_tokens = turn
+                    elif etype == "rate_limit_event" and event.get("rate_limit_info"):
+                        account.record(event["rate_limit_info"], source=request.cwd)
+                        if (AUTH == "subscription" and request.stop_on_usage_credits
+                                and account.on_credits(event["rate_limit_info"])):
+                            process.stop_tree()
+                            stop = account.RateLimitStop(account.CREDITS)
+                            stop.partial = _partial(turns, output)
+                            raise stop
+                    elif etype == "result":
+                        final = event
+                    if on_event:
+                        try:
+                            on_event(event)
+                        except Exception as error:
+                            # A forbidden command (rules.RuleBreach), or a tracer
+                            # failure: either way the agent must not run on unwatched.
+                            process.stop_tree()
+                            if isinstance(error, rules.RuleBreach):
+                                error.partial = _partial(turns, output)
+                            raise
+        except BaseException:
+            # Leaving mid-call, by a stop or by `just kill`: the agent must not
+            # run on. On the host the kill reaches it too, but in a sandbox VM
+            # nothing else does, and the wait below would last until it finished.
+            process.stop_tree()
+            raise
+        finally:
+            stderr = process.stderr.read() if process.stderr else ""
+            result.returncode = process.wait()
+            if on_exit:
+                on_exit(process.pid)
 
+    if dog.fired:
+        stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
+        stop.partial = _partial(turns, output)
+        raise stop
     if not final:
         raise RuntimeError(f"claude exited {result.returncode} without a result: "
                            f"{stderr.strip()[-800:]}")

@@ -34,6 +34,9 @@ class RepoSettings(BaseModel):
     # Where a chain that takes --sandbox does a new run's work when the flag
     # is left out: "none" on this machine, or a provider's remote VM.
     sandbox: Literal["none", "vercel", "e2b"] = "none"
+    # Stop an agent that writes nothing for this many minutes: a hang spends
+    # nothing, so the cost caps never see it (silence.py). None = off.
+    max_silence_minutes: Optional[float] = Field(15, gt=0)
     worktree_setup: list[str] = Field(default_factory=list)
     worktree_setup_timeout: int = Field(600, ge=1)
     # Rules every agent gets at the end of its system prompt, whatever its role.

@@ -78,6 +78,12 @@ test("a forbidden command is a stop reason of its own", () => {
   expect(stopReason(events, phases, "fail")).toMatchObject({ kind: "rule_breach", message: "builder ran `git push`, which this repo's rule forbids" });
 });
 
+test("an agent that went quiet is a stop reason of its own", () => {
+  const phases = [phase("build", "fail", "SilentStop: builder wrote nothing for 15 minutes")];
+  const events = [ev("error", "agent_silent", { error: "builder wrote nothing for 15 minutes and was stopped", minutes: 15 }, phases[0].phase_id)];
+  expect(stopReason(events, phases, "fail")).toMatchObject({ kind: "agent_silent", message: "builder wrote nothing for 15 minutes and was stopped" });
+});
+
 test("the repo's daily cap is a stop reason of its own", () => {
   const phases = [phase("build", "fail", "DailyBudgetStop: this repo's runs have spent $20.10")];
   const events = [ev("error", "daily_budget_stop", { error: "this repo's runs have spent $20.10 in the last 24 hours" }, phases[0].phase_id)];

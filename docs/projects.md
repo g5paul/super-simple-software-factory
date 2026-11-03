@@ -7,7 +7,7 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 | yt-summarizer | `sssf-run` (`main` follows it, level at cd9d356) | b909073 | No push and no GitHub writes. A `forbid` rule with `on_match: refuse` since cd9d356, and an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
 | pi-agent-observability | `main` | b909073 | Leave the obs server alone. A plain string: it asks, nothing enforces it |
 | fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | b909073 | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack |
-| sssf-sandbox | `master` | b909073 | The hub's own test bed. None |
+| sssf-sandbox | `master` | c9002cf | The hub's own test bed. None |
 
 ## Open items
 

@@ -165,13 +165,15 @@ def breach(rules: list, command: str) -> Optional[tuple[AgentRule, str]]:
 
     It searches what the command runs, without heredoc bodies that only feed a
     file, the same text both refusers search, so a refusal and this backstop
-    never disagree about one command.
+    never disagree about one command. `^` and `$` match at every line, as a
+    shell reads them, so a pattern anchored to a command's start finds one on
+    any line. All three matchers search that way.
     """
     command = executed(command)
     for rule in rules:
         if isinstance(rule, AgentRule):
             for pattern in rule.forbid:
-                if re.search(pattern, command):
+                if re.search(pattern, command, re.M):
                     return rule, pattern
     return None
 

@@ -122,7 +122,7 @@ def refusal(line: str, rules: list[dict]) -> str | None:
     for rule in rules:
         for pattern in rule.get("forbid") or []:
             try:
-                hit = any(re.search(pattern, text) for text in texts)
+                hit = any(re.search(pattern, text, re.M) for text in texts)
             except re.error:
                 continue
             if hit:

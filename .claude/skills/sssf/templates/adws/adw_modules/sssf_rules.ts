@@ -10,6 +10,8 @@
  *
  * Like sssf_refuse.py, it searches what the command runs: executed() drops
  * heredoc bodies only when each feeds cat or tee and nothing runs code.
+ * Patterns compile with the m flag, as the Python side searches with re.M, so
+ * `^` matches at the start of every line.
  * Keep it in step with executed() in sssf_refuse.py, which rules.breach uses.
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -63,7 +65,7 @@ export function executed(command: string): string {
 
 function compile(pattern: string): RegExp | null {
   try {
-    return new RegExp(pattern);
+    return new RegExp(pattern, "m");
   } catch {
     return null;
   }

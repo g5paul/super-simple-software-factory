@@ -536,3 +536,9 @@ def test_a_pi_token_reaches_the_vm_as_openai_api_key_and_a_host_key_does_not(box
     out = "".join(seen.stdout)
     seen.wait()
     assert "OPENAI_API_KEY=chatgpt-access" in out and "SSSF_PI_TOKEN" not in out
+
+
+def test_the_vm_user_owns_the_runs_session_folder_for_pi_sessions(box):
+    setup = [c for c in box.raw.calls if "chown" in " ".join(c.get("argv") or [c.get("line", "")])]
+    words = " ".join(setup[0].get("argv") or [setup[0]["line"]])
+    assert box.fake._map(str(box.run_.session_dir)) in words.split()

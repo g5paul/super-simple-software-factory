@@ -209,8 +209,11 @@ class Remote:
         _host_git("bundle", "create", "-q", str(bundle), self.branch, cwd=self.tree)
         name = _host_git("config", "user.name", cwd=self.tree)
         email = _host_git("config", "user.email", cwd=self.tree)
-        self._must("sh", ["-c", f'mkdir -p "$1" "$2" && chown -R {self.owner} "$1" "$2"',
-                          "sh", str(self.tree), str(self.handoff)], sudo=True)
+        # The run's session folder too, not only the handoff in it: a pi agent
+        # writes its session files beside the handoff (<session>/<agent>/pi_sessions).
+        self._must("sh", ["-c", f'mkdir -p "$1" "$2" "$3" && chown -R {self.owner} "$1" "$2" "$3"',
+                          "sh", str(self.tree), str(self.handoff), str(self.run_.session_dir)],
+                   sudo=True)
         self._must("sh", ["-c", "cat > /tmp/sssf-in.bundle"], input=bundle.read_bytes())
         self._must("git", ["clone", "-q", "--branch", self.branch, "/tmp/sssf-in.bundle", str(self.tree)])
         for args in (["remote", "remove", "origin"], ["config", "user.name", name],

@@ -11,10 +11,9 @@
 # More in SSSF's cookbooks/install.md, "Secret scan before every push".
 #
 # It also refuses a push whose commits name a private project, in a message
-# or an added line, when the
-# clone lists it in .git/sssf-private-names, one per line, # for comments.
-# The list lives in .git, so it's never committed. Without it, nothing is
-# checked. Case is ignored.
+# or an added line, when the clone lists it in .git/sssf-private-names, one
+# per line, # for comments. The list lives in .git, so it's never committed.
+# Without it, nothing is checked. Case is ignored.
 set -uo pipefail
 zero=0000000000000000000000000000000000000000
 if [ -n "${SSSF_ADW_ID:-}" ]; then

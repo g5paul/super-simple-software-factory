@@ -7,7 +7,7 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 | yt-summarizer | `sssf-run` (`main` follows it, one update behind) | 6858c72 | No push. Enforced by a `forbid` rule, and by an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
 | pi-agent-observability | `main` | 6858c72 | Leave the obs server alone. A plain string: it asks, nothing enforces it |
 | fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 6858c72 | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack |
-| sssf-sandbox | `master` | 6858c72 | The hub's own test bed. None |
+| sssf-sandbox | `master` | b909073 | The hub's own test bed. None |
 
 ## Open items
 
@@ -19,4 +19,4 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 The hub checks these read-only, from the trace and the raw logs, when each run happens.
 
 - **yt-summarizer's next Claude Code run: the output count.** It's the first project run since 102217c. Each agent's `raw_output.jsonl` should hold a `message_delta` per message and no text deltas. Priced from the raw log the way a killed call is priced, each finished call should match its `total_cost_usd`. Sandbox runs 28f436d5 and b2367eda matched to the cent.
-- **The first refusal in a project.** That can happen in fusion-harness, whose recipe rule refuses on its ChatGPT roster's pi agents, or in pi-agent-observability, if its engineer adopts a refuse rule. The trace should show a `rule_refused` event, the call's result should start "SSSF refused this command", and nothing it named should have run. Sandbox runs 6f9929be and f893de05 showed both.
+- **The first refusal in a project.** That can happen in fusion-harness, whose recipe rule refuses on its ChatGPT roster's pi agents, or in pi-agent-observability, if its engineer adopts a refuse rule. The trace should show a `rule_refused` event, the call's result should start "SSSF refused this command", and nothing it named should have run. Sandbox runs 6f9929be and f893de05 showed both on pi. On Claude Code, 2c3b149b on this machine and 12c1f748 in a Vercel VM did too, the result starting `Exit code 126` first; in 12c1f748 the planner's own Bash calls ran through the same prefix as normal.

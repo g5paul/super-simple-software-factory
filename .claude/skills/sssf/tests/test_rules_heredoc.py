@@ -5,9 +5,11 @@ and the plan's last line said not to run the live test recipe. The repo's
 refuse rule matched that line and refused the whole command, though it would
 have run nothing. Every agent is shown the rules, so plans and write-ups name
 them, and the third refusal in one call stops the run. All three matchers now
-search `executed(command)`: the command without the bodies of heredocs that
-only feed a file or a non-runner. A heredoc fed to a shell or an interpreter
-is still searched, since it runs.
+search `executed(command)`. It drops heredoc bodies only when each heredoc
+feeds `cat` or `tee` and no command word outside them runs code. The first
+version judged only the word before `<<`, so `cat <<EOF | bash` got past it.
+Two projects' sessions caught that on update, before committing it, and
+their cases are below.
 
 Run from the skill root:
     uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests
@@ -59,6 +61,17 @@ CASES = [
     ("bash -c 'just test live'", True),
     ("cat <<< 'just test live'", True),
     ("cat > notes.md <<EOF\nnever closed\njust test live", False),
+    # piped or handed to something that runs it, found on update
+    ("cat <<EOF | bash\njust test live\nEOF", True),
+    ("cat <<'X' | sh\njust test live\nX", True),
+    ("tee /tmp/x.sh <<EOF && sh /tmp/x.sh\njust test live\nEOF", True),
+    ("bash -c \"$(cat <<'EOF'\njust test live\nEOF\n)\"", True),
+    ("bash <(cat <<'EOF'\njust test live\nEOF\n)", True),
+    ("tee /dev/stdout <<EOF | bash\njust test live\nEOF", True),
+    ("cat > x.sh <<EOF\njust test live\nEOF\nbash x.sh", True),
+    ("ssh box <<EOF\njust test live\nEOF", True),
+    ("pi <<EOF\njust test live\nEOF", True),
+    ("<<EOF cat\njust test live\nEOF", True),
 ]
 
 

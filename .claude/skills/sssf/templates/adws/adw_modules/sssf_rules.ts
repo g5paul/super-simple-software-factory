@@ -8,8 +8,8 @@
  * compile is skipped, and SSSF's stream check, which reads them as Python,
  * stops the run if that command runs.
  *
- * Like sssf_refuse.py, it searches what the command runs: executed() drops the
- * body of a heredoc that only feeds a file, such as a plan written with cat.
+ * Like sssf_refuse.py, it searches what the command runs: executed() drops
+ * heredoc bodies only when each feeds cat or tee and nothing runs code.
  * Keep it in step with executed() in sssf_refuse.py, which rules.breach uses.
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -20,37 +20,45 @@ const REFUSED = "SSSF refused this command";
 interface Rule { rule: string; forbid: string[] }
 
 const HEREDOC = /(?<!<)<<(?!<)(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_.-]*)\2/g;
-const RUNS_STDIN = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "xargs",
-  "python", "python3", "node", "bun", "deno", "perl", "ruby", "php", "osascript"]);
-const WRAPPERS = new Set(["env", "sudo", "nohup", "command", "exec", "time", "nice", "timeout", "uv", "npx",
-  "bunx", "run"]);
+const RUNS_CODE = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "xargs", "exec",
+  "python", "python3", "node", "bun", "deno", "tsx", "perl", "ruby", "php", "osascript"]);
+const WRITERS = new Set(["cat", "tee"]);
+const WRAPPERS = new Set(["env", "sudo", "nohup", "command", "time", "nice", "timeout", "uv", "npx", "bunx",
+  "run"]);
 const base = (word: string) => word.split("/").pop() ?? word;
 
-function feedsARunner(before: string): boolean {
-  let words = (before.split(/[;&|(){}]/).pop() ?? "").split(/\s+/).filter(Boolean)
-    .filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && !/^-|^[0-9]+[smhd]?$/.test(w));
-  while (words.length && WRAPPERS.has(base(words[0]))) words = words.slice(1);
-  return !words.length || RUNS_STDIN.has(base(words[0]));
+function commandWords(line: string): string[] {
+  const found: string[] = [];
+  for (const segment of line.split(/[;&|(){}`]|\$\(/)) {
+    let words = segment.split(/\s+/).filter(Boolean)
+      .filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && !/^-|^[0-9]+[smhd]?$/.test(w));
+    while (words.length && WRAPPERS.has(base(words[0]))) words = words.slice(1);
+    if (words.length) found.push(base(words[0]));
+  }
+  return found;
 }
 
 export function executed(command: string): string {
-  const out: string[] = [];
-  const pending: [string, boolean, boolean][] = [];
+  const kept: string[] = [];
+  const pending: [string, boolean][] = [];
   for (const line of command.split("\n")) {
     if (pending.length) {
-      const [word, tabs, keep] = pending[0];
+      const [word, tabs] = pending[0];
       if ((tabs ? line.replace(/^\t+/, "") : line) === word) {
         pending.shift();
-        out.push(line);
-      } else if (keep) out.push(line);
+        kept.push(line);
+      }
       continue;
     }
-    out.push(line);
-    for (const found of line.matchAll(HEREDOC)) {
-      pending.push([found[3], found[1] === "-", feedsARunner(line.slice(0, found.index))]);
+    kept.push(line);
+    for (const m of line.matchAll(HEREDOC)) {
+      const words = commandWords(line.slice(0, m.index));
+      if (!words.length || !WRITERS.has(words[words.length - 1])) return command;
+      pending.push([m[3], m[1] === "-"]);
     }
   }
-  return out.join("\n");
+  if (kept.some((line) => commandWords(line).some((w) => RUNS_CODE.has(w)))) return command;
+  return kept.join("\n");
 }
 
 function compile(pattern: string): RegExp | null {

@@ -17,9 +17,10 @@ Claude Code wraps the agent's command in its own shell line, which ends
 `&& eval '<command>' < /dev/null && pwd -P ...`. The patterns are searched in
 that command. A line in another shape is searched whole, and so is each
 `eval '...'` argument in it, unquoted, so a pattern anchored to the start of
-a command still finds one. Text a heredoc only feeds to a file, such as a plan written with cat, is
-not run, so it is dropped before the search (executed below). A heredoc fed
-to a shell or an interpreter is kept, since it runs. Keep this docstring free of backslashes: a
+a command still finds one. Heredoc bodies are dropped before the search only
+when each feeds cat or tee and nothing in the command runs code (executed
+below): a plan written with cat is text. Any other command is searched
+whole. Keep this docstring free of backslashes: a
 warning on stderr would come before the refusal and hide it. A change in Claude
 Code's wrapping can still make a pattern miss, and SSSF's stream check stays
 the backstop either way.
@@ -41,44 +42,61 @@ ANY_EVAL = re.compile(r"\beval\s+('(?:[^']|'\\'')*')")   # one single-quoted eva
 
 # A heredoc operator, not a here-string: <<WORD, <<-WORD, <<'WORD', <<"WORD".
 HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_.-]*)\2")
-# Commands that run what a heredoc feeds them, so its body is searched.
-RUNS_STDIN = {"sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "xargs",
-              "python", "python3", "node", "bun", "deno", "perl", "ruby", "php", "osascript"}
-WRAPPERS = {"env", "sudo", "nohup", "command", "exec", "time", "nice", "timeout", "uv", "npx",
-            "bunx", "run"}
+# Commands that run code they are handed: a script, stdin, or a file. When one
+# appears anywhere in a command, its heredocs may be what it runs.
+RUNS_CODE = {"sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "xargs", "exec",
+             "python", "python3", "node", "bun", "deno", "tsx", "perl", "ruby", "php", "osascript"}
+# The only commands whose heredoc is treated as text: they copy it to a file
+# or to output. Anything else, ssh or pi included, may run it.
+WRITERS = {"cat", "tee"}
+WRAPPERS = {"env", "sudo", "nohup", "command", "time", "nice", "timeout", "uv", "npx", "bunx",
+            "run"}
 
 
-def _feeds_a_runner(before: str) -> bool:
-    """Whether the command a heredoc belongs to runs its input, judged by the
-    command word in front of the operator. Unknown means yes."""
-    words = re.split(r"[;&|(){}]", before)[-1].split()
-    words = [w for w in words if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w)
-             and not re.match(r"^-|^[0-9]+[smhd]?$", w)]
-    while words and words[0].rsplit("/", 1)[-1] in WRAPPERS:
-        words = words[1:]
-    return not words or words[0].rsplit("/", 1)[-1] in RUNS_STDIN
+def _command_words(line: str) -> list[str]:
+    """The command word of each simple command on a line, past assignments,
+    flags and wrappers such as `env` or `timeout 60`."""
+    found = []
+    for segment in re.split(r"[;&|(){}`]|\$\(", line):
+        words = [w for w in segment.split() if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w)
+                 and not re.match(r"^-|^[0-9]+[smhd]?$", w)]
+        while words and words[0].rsplit("/", 1)[-1] in WRAPPERS:
+            words = words[1:]
+        if words:
+            found.append(words[0].rsplit("/", 1)[-1])
+    return found
 
 
 def executed(command: str) -> str:
-    """The command without the bodies of heredocs that only feed a file or a
-    non-runner, such as `cat > plan.md <<EOF`. Those lines are text, not
-    commands: a plan that says "never run X" must not count as running X."""
-    out: list[str] = []
-    pending: list[tuple[str, bool, bool]] = []   # (word, strips tabs, keep body)
+    """The command without its heredoc bodies, when they can only be text.
+
+    A heredoc that only writes a file, such as `cat > plan.md <<EOF`, holds
+    text, not commands: a plan that says "never run X" must not count as
+    running X. But a body can run however the command is put together: fed to
+    a command that runs it (`bash <<EOF`, `ssh box <<EOF`), piped to a shell
+    (`cat <<EOF | bash`), or written to a file a later command runs
+    (`... && sh x.sh`). So the bodies are dropped only when every heredoc
+    feeds `cat` or `tee`, and no command word outside them, on any line, runs
+    code. Otherwise the whole command is searched, as it was before.
+    """
+    kept: list[str] = []
+    pending: list[tuple[str, bool]] = []   # (word, strips tabs)
     for line in command.split("\n"):
         if pending:
-            word, tabs, keep = pending[0]
+            word, tabs = pending[0]
             if (line.lstrip("\t") if tabs else line) == word:
                 pending.pop(0)
-                out.append(line)
-            elif keep:
-                out.append(line)
+                kept.append(line)
             continue
-        out.append(line)
-        for found in HEREDOC.finditer(line):
-            pending.append((found.group(3), found.group(1) == "-",
-                            _feeds_a_runner(line[:found.start()])))
-    return "\n".join(out)
+        kept.append(line)
+        for m in HEREDOC.finditer(line):
+            words = _command_words(line[:m.start()])
+            if not words or words[-1] not in WRITERS:
+                return command
+            pending.append((m.group(3), m.group(1) == "-"))
+    if any(word in RUNS_CODE for line in kept for word in _command_words(line)):
+        return command
+    return "\n".join(kept)
 
 
 def _unquote(word: str) -> str | None:

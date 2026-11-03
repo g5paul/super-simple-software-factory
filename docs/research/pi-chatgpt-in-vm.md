@@ -147,3 +147,5 @@ So option 2 works as described, and the token handout is one command on the host
 ## Terms, as the engineer read them, 2026-11-03
 
 The engineer checked OpenAI's published terms and help pages, using a chatbot's search as a pointer and reading the quoted sentences in context. Their summary: the exact combination isn't addressed in the documents reviewed, and no quoted provision specifically prohibits it. The combination is pi, a VM the engineer creates and deletes, unattended runs, and a short-lived access token as the only credential passed. On that reading the engineer approved building option 2.
+
+Built as option 2 in 51d54f6, with a fix in 673a70d; the proof run is in `docs/designs/remote-sandboxes.md`'s log.

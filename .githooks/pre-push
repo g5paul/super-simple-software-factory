@@ -6,11 +6,11 @@
 # redacted, with its rule, file and commit. That needs --verbose: without it,
 # gitleaks prints only a count. Set up once per clone:
 # git config core.hooksPath .githooks
-# (docs/going-private.md, "What stops a leak").
+# (docs/secret-scan.md).
 set -uo pipefail
 zero=0000000000000000000000000000000000000000
 if ! command -v gitleaks >/dev/null; then
-  echo "pre-push: gitleaks isn't installed, so this push is refused. Install it (docs/going-private.md), or push with --no-verify knowing nothing was scanned." >&2
+  echo "pre-push: gitleaks isn't installed, so this push is refused. Install it (docs/secret-scan.md), or push with --no-verify knowing nothing was scanned." >&2
   exit 1
 fi
 found=0

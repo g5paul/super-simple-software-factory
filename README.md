@@ -68,7 +68,7 @@ Copy `.claude/skills/sssf/` into the target repo and type `/sssf install` inside
 
 For the first two, see [Run on a subscription](#run-on-a-subscription).
 
-In a clone of this repo, `git config core.hooksPath .githooks` turns on its pre-push hook, which scans each push for secrets with [gitleaks](https://github.com/gitleaks/gitleaks) and refuses on a find. See [`docs/going-private.md`](docs/going-private.md), "What stops a leak".
+In a clone of this repo, `git config core.hooksPath .githooks` turns on its pre-push hook, which scans each push for secrets with [gitleaks](https://github.com/gitleaks/gitleaks) and refuses on a find. See [`docs/secret-scan.md`](docs/secret-scan.md).
 
 [`bun`](https://bun.sh) only if you want the visualizer.
 

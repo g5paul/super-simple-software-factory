@@ -55,7 +55,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 - `adws/adw_sssf_config/repo.yaml`, committed in each repo, holds its merge style, worktree setup, spend caps and `agent_rules`.
 - Every agent gets the rules in its prompt. A rule with a `forbid` pattern is enforced: a matching command stops the run, and with `on_match: refuse` it is refused before it runs and the run goes on, on Claude Code and pi agents alike.
 - Every agent's environment carries `SSSF_ADW_ID`, so a repo's own scripts and hooks can tell an SSSF agent from the engineer.
-- A tracked `pre-push` hook, `.githooks/pre-push`, scans what a push would send with gitleaks and refuses on a find. Each clone turns it on with `git config core.hooksPath .githooks`. See [going-private.md](going-private.md), "What stops a leak".
+- A tracked `pre-push` hook, `.githooks/pre-push`, scans what a push would send with gitleaks and refuses on a find. Each clone turns it on with `git config core.hooksPath .githooks`. See [secret-scan.md](secret-scan.md).
 
 ### Running SSSF across several repos
 

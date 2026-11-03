@@ -15,7 +15,7 @@ None as of 2026-11-03.
 
 ## Pre-push secret scan
 
-Each repo has the hub's gitleaks hook in `.githooks/pre-push` (`docs/going-private.md`, "What stops a leak"), and each clone needs `git config core.hooksPath .githooks`, which only the engineer can set: the project sessions' permission checks refuse it.
+Each repo has the hub's gitleaks hook in `.githooks/pre-push` ([secret-scan.md](secret-scan.md)), and each clone needs `git config core.hooksPath .githooks`, which only the engineer can set: the project sessions' permission checks refuse it.
 
 | Repo | Hook commit | Switched on |
 |---|---|---|

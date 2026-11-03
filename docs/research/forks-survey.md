@@ -11,7 +11,7 @@ Many forks, few active, none doing the whole of this one. 272 forks, 45 with com
 - `gh repo view` gave the fork count, 272. GitHub's forks page, sorted by last update, has 11 pages. Pages 1 to 6 and 11 were read. From page 3 on, every fork says "Never updated", so pages 7 to 10 were taken to say the same; the page totals add up to 272.
 - Every branch of the 50 updated forks was fetched into one scratch bare repo, and commits were counted with `git rev-list` against disler's `main`. GitHub's "N commits ahead" line doesn't come through a page fetch. One count was checked against GitHub's own: tviles, 49 of its own.
 - Features come from commit subjects and greps of the files, not from reading the code closely. Treat each as a lead to check.
-- `gh api` wasn't used: this machine's deny rules block it (`docs/going-private.md`). No fork's code was run.
+- `gh api` wasn't used: this machine's deny rules block it (`docs/secret-scan.md`). No fork's code was run.
 - Not seen: private forks, tags, and commits a fork pushed and later deleted.
 
 ## Counts
@@ -19,7 +19,7 @@ Many forks, few active, none doing the whole of this one. 272 forks, 45 with com
 - Disler's `main` is one commit, de31374, from 2026-08-04. It hasn't moved, so no fork is behind it.
 - 50 forks have pushed since they were made. Four of those have no commits of their own, so 45 do, besides this one.
 - 222 forks were never updated after forking.
-- This fork's public `main` was 48cc657, 150 commits ahead, when surveyed. The commits since were local then, during the push hold (`docs/going-private.md`).
+- This fork's public `main` was 48cc657, 150 commits ahead, when surveyed. The commits since were local then, while pushes were on hold.
 
 ## Active forks
 

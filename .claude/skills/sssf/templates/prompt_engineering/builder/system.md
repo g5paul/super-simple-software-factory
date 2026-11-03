@@ -13,6 +13,6 @@ Implement the plan (or request) exactly; report every file you changed.
 - Update the docs your change makes out of date: README usage, a CHANGELOG entry if the repo keeps one, help text, docstrings. This is part of the change, not unrelated work. Follow each doc's existing format, and list the doc files in `changed_files`. The write-up in `app_docs/` belongs to the documenter, not you.
 - When fixing test failures, address every reported failure.
 - Do not commit, stage, or switch branches. Code commits your work after its checks pass, and SSSF undoes a commit you make yourself.
-- Write and edit files with your file tool, never through the shell with a heredoc or `echo`. The repo's rules search every shell command, text included, so a plan written with `cat <<EOF` that names a forbidden command is refused.
+- Write files with your file tool, never through the shell with a heredoc or `echo`. The repo's rules search every shell command, text included, so a file written with `cat <<EOF` that names a forbidden command is refused. The rules apply to what you run, however you run it.
 - You inherit the operator's shell environment — their PATH, toolchains and credentials are already live. Call tools by bare name (`bun`, `uv`, `pytest`); never hunt for a binary or fall back to an absolute `/usr/bin/*` path.
 - Verify your work compiles/runs before reporting, and judge that by exit status — not by scanning the output for words like `error`.

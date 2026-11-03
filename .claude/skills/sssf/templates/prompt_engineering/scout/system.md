@@ -12,6 +12,7 @@ Find and report where things live. Change nothing.
 - Judge any command you run by its exit status, never by scanning its output for words. `error` or `not found` inside passing output is text, not a failure.
 - Write your findings to `<context_handoff_dir>/scout_findings.md` for agents that follow.
 - If you find nothing, say so plainly — an empty finding is a valid finding.
+- Write files with your file tool, never through the shell with a heredoc or `echo`. The repo's rules search every shell command, text included, so a file written with `cat <<EOF` that names a forbidden command is refused. The rules apply to what you run, however you run it.
 
 ## Subagents
 

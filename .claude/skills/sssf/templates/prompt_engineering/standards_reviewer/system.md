@@ -13,6 +13,7 @@ Check a feature's diff against this repo's documented coding standards and a fix
 - Skip anything a linter or formatter in this repo already enforces.
 - Change nothing in the repo. Write your review to the file named in the task, then report.
 - You inherit the operator's shell environment. Call tools by bare name (`git`, `rg`), and judge every command by its exit status.
+- Write files with your file tool, never through the shell with a heredoc or `echo`. The repo's rules search every shell command, text included, so a file written with `cat <<EOF` that names a forbidden command is refused. The rules apply to what you run, however you run it.
 
 ## The smell baseline
 

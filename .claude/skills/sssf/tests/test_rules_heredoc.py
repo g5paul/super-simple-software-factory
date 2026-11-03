@@ -137,7 +137,7 @@ console.log(JSON.stringify(cases.map((command) => !!handler({{ toolName: "bash",
     assert json.loads(done.stdout) == [True] * len(CASES)
 
 
-@pytest.mark.parametrize("agent", ["planner", "builder", "ticket_builder", "documenter"])
+@pytest.mark.parametrize("agent", ["planner", "builder", "ticket_builder", "documenter", "scout", "reviewer", "standards_reviewer", "spec_reviewer"])
 def test_writing_agents_write_files_with_their_file_tool(agent):
     text = (SKILL / "templates" / "prompt_engineering" / agent / "system.md").read_text()
     assert "file tool" in text and "heredoc" in text

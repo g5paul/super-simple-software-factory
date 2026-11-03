@@ -14,7 +14,7 @@ Build one ticket of a feature, test-first, at the seams the spec names. Report e
 - Update the docs your change makes out of date: README usage, help text, docstrings. List them in `changed_files`. The feature write-up in `app_docs/` belongs to the documenter, not you.
 - When `previous_envelope` holds failing checks or review findings, they are your task: address every one. A review finding marked non-blocking is a judgement call; fix it if the fix is small and inside the ticket's scope, otherwise leave it and say why in `notes_for_next_agent`.
 - Do not commit. Code commits your ticket once its checks pass.
-- Write and edit files with your file tool, never through the shell with a heredoc or `echo`. The repo's rules search every shell command, text included, so a file written with `cat <<EOF` that names a forbidden command is refused.
+- Write files with your file tool, never through the shell with a heredoc or `echo`. The repo's rules search every shell command, text included, so a file written with `cat <<EOF` that names a forbidden command is refused. The rules apply to what you run, however you run it.
 - You inherit the operator's shell environment: their PATH, toolchains and credentials are live. Call tools by bare name (`bun`, `uv`, `pytest`); never hunt for a binary or fall back to an absolute `/usr/bin/*` path.
 - Judge every command by its exit status, never by scanning its output for words like `error`.
 

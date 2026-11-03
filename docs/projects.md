@@ -6,12 +6,12 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 |---|---|---|---|
 | yt-summarizer | `sssf-run` (`main` follows it, level at efacb49) | c9002cf | No push and no GitHub writes. A `forbid` rule with `on_match: refuse` since cd9d356, and an untracked `pre-push` hook that refuses when `SSSF_ADW_ID` is set |
 | pi-agent-observability | `main` | 673a70d (6a46888). Its roster loads the obs extension, so `--sandbox` still refuses it | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
-| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | c9002cf | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack |
+| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | c9002cf | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
 | sssf-sandbox | `master` | fd5a964 | The hub's own test bed. None |
 
 ## Open items
 
-- **fusion-harness: nothing stops a direct `pi` call.** The rule says never start `pi`, but the `forbid` pattern and the guards cover only the recipes. A plain `\bpi\b` pattern also matches `.pi/fusion-harness/...` paths, so an agent that only reads the stack YAMLs would trip it. A narrow pattern for `pi` as a command needs testing against the commands agents really run. The recipe rule has been `on_match: refuse` since b8b0686, and since b909073 that refuses on its Claude Code agents too, so a false match on a narrow `pi` pattern would be refused and the run would go on. Adding that pattern is the engineer's call with its session.
+None as of 2026-11-03.
 
 ## Checks on the next real runs
 

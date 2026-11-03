@@ -25,6 +25,7 @@ Each ran scout with "Run exactly this one shell command with your bash tool and 
 | 7d8c3893 | Claude Code | After f5e8d83: the grace cut the wait 30 seconds after the first result, but that result wasn't final. Led to the hand check above and 448e88c |
 | 6d34ca01 | ChatGPT (pi) | Stopped at 73 seconds with `SilentStop`, its `sleep` killed with it. The pi case the watchdog is for |
 | 642f4c92 | Claude Code | After 448e88c: scout answered with the sleep in the background, the full minute passed, the watchdog stopped the sleep and kept the result, and the JSON retry reported the sleep as stopped. Correct |
+| 7164352b | ChatGPT (pi) | After 45310e3: stopped at one minute, and the message and the `agent_silent` event both name `bash: sleep 240` and when it started |
 
 No `sleep 240` was left running after any of them.
 

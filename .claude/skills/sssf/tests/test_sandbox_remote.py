@@ -587,3 +587,14 @@ def test_a_newer_major_is_noted_and_an_older_minimum_refused():
     assert problems == ["node is 22.18.0, and SSSF needs 22.19.0 or later",
                         "claude is unreadable ('weird')"]
     assert notes == ["pi 2.0.1 is a newer major than SSSF has run on (1.x); the run goes on"]
+
+
+def test_a_commit_with_git_options_still_lands_on_the_host(box):
+    """Twelfth review: git_helper's commit carries `-c core.fsmonitor=` before
+    `commit`, and the exact-argv match missed it, so commits came back only
+    at close."""
+    (box.vm_tree / "b.txt").write_text("b\n")
+    box.run(["git", "-c", "core.fsmonitor=", "add", "-A"])
+    assert box.run(["git", "-c", "core.fsmonitor=", "commit", "-qm", "b"]).returncode == 0
+    assert (box.host_tree / "b.txt").read_text() == "b\n"
+    assert "sandbox_commits" in dict(box.events)

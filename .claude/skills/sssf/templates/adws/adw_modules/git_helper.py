@@ -18,7 +18,7 @@ def _outside(exclude) -> list[str]:
 
 
 def _git(*args: str) -> str:
-    result = sandbox.current().run(["git", "-c", "core.fsmonitor=false", *args])
+    result = sandbox.current().run(["git", "-c", "core.fsmonitor=", *args])
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result.stdout.strip()
@@ -34,7 +34,7 @@ def create_branch(name: str) -> str:
 
 
 def is_repo() -> bool:
-    result = sandbox.current().run(["git", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"])
+    result = sandbox.current().run(["git", "-c", "core.fsmonitor=", "rev-parse", "--git-dir"])
     return result.returncode == 0
 
 
@@ -93,11 +93,11 @@ def work_in_progress(exclude: str = "") -> list[str]:
 
 
 def tracked(path: str) -> bool:
-    return sandbox.current().run(["git", "-c", "core.fsmonitor=false", "ls-files", "--error-unmatch", path]).returncode == 0
+    return sandbox.current().run(["git", "-c", "core.fsmonitor=", "ls-files", "--error-unmatch", path]).returncode == 0
 
 
 def ignored(path: str) -> bool:
-    return sandbox.current().run(["git", "-c", "core.fsmonitor=false", "check-ignore", "-q", path]).returncode == 0
+    return sandbox.current().run(["git", "-c", "core.fsmonitor=", "check-ignore", "-q", path]).returncode == 0
 
 
 def changed_files() -> list[str]:
@@ -109,7 +109,7 @@ def changed_files() -> list[str]:
 
 def ref_exists(ref: str) -> bool:
     """True when `ref` resolves to a commit. Never raises — this is a question."""
-    result = sandbox.current().run(["git", "-c", "core.fsmonitor=false", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
+    result = sandbox.current().run(["git", "-c", "core.fsmonitor=", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
     return result.returncode == 0
 
 

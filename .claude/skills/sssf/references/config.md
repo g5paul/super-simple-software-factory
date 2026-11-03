@@ -185,11 +185,12 @@ committing.
 
 SSSF's own git never runs an fsmonitor, and its undo and rollback run no
 hooks. After a breach that says "NOT all put back", git may ignore different
-files than it did before the agent ran, so the rollback leaves new files in
-place and names them instead of deleting them. That keeps your ignored `.env`
-and `node_modules` safe. It also means an ignore file the agent changed
-through a link can hide one of its own new files from the rollback, as it can
-on a run without this check.
+files than it did before the agent ran, so the rollback leaves new files
+outside `protected_files` in place and names them instead of deleting them.
+That keeps your ignored `.env` and `node_modules` safe. A new file on a
+protected path is always deleted. An ignore file the agent changed through a
+link can still hide one of its own new files from the rollback, as it can on
+a run without this check.
 
 Two costs. An edit you make to your git config while an agent runs is put back
 too. And a tool that writes git config or hooks on install, like husky's

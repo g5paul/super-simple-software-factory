@@ -658,10 +658,10 @@ def test_git_config_global_through_a_stow_link_deletes_nothing(repo, home, tmp_p
     (repo / "adws" / "evil.py").write_text("x\n")
     with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
         permissions.restore_git_dir(run, guard)
-    with pytest.raises(permissions.PermissionBreach, match="evil.py — left in place"):
+    with pytest.raises(permissions.PermissionBreach, match="evil.py — deleted"):
         permissions.enforce(run, None, builder(), tree)
     assert (repo / ".env").exists() and (repo / "node_modules" / "x.js").exists()
-    assert (repo / "adws" / "evil.py").exists()
+    assert not (repo / "adws" / "evil.py").exists()
 
 
 def test_a_clean_restore_still_deletes_new_protected_files(repo):
@@ -735,3 +735,48 @@ def test_a_crash_in_undo_or_enforce_keeps_the_git_breach():
 def test_a_latin1_branch_name_does_not_crash_head(repo):
     subprocess.run([b"git", b"checkout", b"-qb", b"caf\xe9"], cwd=repo, check=True)
     assert "caf" in permissions.head(SimpleNamespace(repo_root=repo))["branch"]
+
+
+def test_an_unreadable_hooks_dir_does_not_keep_a_planted_protected_file(repo):
+    """Twelfth review, r7: `chmod 000 .git/hooks` made the restore unsure, and
+    the rollback then kept the agent's adws/json.py, which runs on the next
+    `uv run adws/...`. Files on a protected path are always deleted."""
+    run = guarded(repo)
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    (repo / "adws").mkdir()
+    (repo / "adws" / "json.py").write_text("print(1)\n")
+    (repo / ".git" / "hooks").chmod(0)
+    try:
+        with pytest.raises(permissions.PermissionBreach):
+            permissions.restore_git_dir(run, guard)
+        permissions._UNSURE = True          # as when the restore couldn't read it back
+        with pytest.raises(permissions.PermissionBreach, match="json.py — deleted"):
+            permissions.enforce(run, None, builder(), tree)
+    finally:
+        (repo / ".git" / "hooks").chmod(0o755)
+    assert not (repo / "adws" / "json.py").exists()
+
+
+def test_unsure_keeps_only_files_off_protected_paths(repo, home, tmp_path):
+    """After a partial restore a new file outside protected_files is kept and
+    named; one inside is deleted."""
+    dot = tmp_path / "dotfiles"
+    dot.mkdir()
+    (dot / "gitconfig").write_text("[user]\n\tname = t\n")
+    (home / ".gitconfig").unlink()
+    (home / ".gitconfig").symlink_to(dot / "gitconfig")
+    cfg = SSSFConfig(defaults=ConfigDefaults(data_dir="adws/adw_data", protected_files=["adws/"]))
+    run = SimpleNamespace(cfg=cfg, repo_root=repo)
+    reader = AgentConfig(name="reviewer", writes=[], prompt_engineering=PromptEngineering(system="s", user="u"))
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    subprocess.run(["git", "config", "--global", "color.ui", "auto"], cwd=repo, check=True)
+    (repo / "notes.txt").write_text("x\n")
+    (repo / "adws").mkdir()
+    (repo / "adws" / "evil.py").write_text("x\n")
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    with pytest.raises(permissions.PermissionBreach) as found:
+        permissions.enforce(run, None, reader, tree)
+    assert "notes.txt — left in place" in str(found.value)
+    assert "evil.py — deleted" in str(found.value)
+    assert (repo / "notes.txt").exists() and not (repo / "adws" / "evil.py").exists()

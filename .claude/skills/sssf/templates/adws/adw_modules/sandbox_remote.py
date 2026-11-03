@@ -158,6 +158,16 @@ def _tar(folder: Path) -> bytes:
     return buffer.getvalue()
 
 
+def _git_verb(argv: list[str]) -> str:
+    """The subcommand of a git argv, past any `-c key=value` options."""
+    if not argv or argv[0] != "git":
+        return ""
+    i = 1
+    while i < len(argv) and argv[i] == "-c":
+        i += 2
+    return argv[i] if i < len(argv) else ""
+
+
 class RemoteProcess:
     """An agent in the VM. Its pid is a negative stand-in, unique in the run:
     the trace records it, and `just kill` knows not to signal it on the host."""
@@ -336,7 +346,7 @@ class Remote:
         out, err = done.stdout or "", done.stderr or ""
         if timeout and done.returncode != 0 and time.monotonic() - started >= timeout - 1:
             raise subprocess.TimeoutExpired(command, timeout, output=out, stderr=err)
-        if argv[:2] == ["git", "commit"] and done.returncode == 0:
+        if done.returncode == 0 and _git_verb(argv) == "commit":
             self.commits_out()
         if not text:
             out, err = out.encode(), err.encode()

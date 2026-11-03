@@ -53,7 +53,7 @@ class PermissionBreach(RuntimeError):
 # fsmonitor, and its writes never run a hook: neither is needed, and either
 # could be one the agent planted. On the command line, which no config file or
 # GIT_CONFIG_PARAMETERS overrides.
-_SAFE = ["-c", "core.fsmonitor=false"]
+_SAFE = ["-c", "core.fsmonitor="]     # empty: off on every git; "false" runs `false` before 2.36
 _NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
 
 # Set when the git guard could not put everything back. The config git reads
@@ -459,8 +459,8 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
         outcome = ("changed back since" if sentinel else
                    "put back as they were" if restored else
                    "NOT all put back. A change through a symlink is reported, never "
-                   "written back, and a restore with nowhere safe to write is skipped, "
-                   "so check these by hand before the next git command in this repo")
+                   "written back; a path SSSF couldn't read or write is left as it is. "
+                   "Check these by hand before the next git command in this repo")
         raise PermissionBreach(
             "The agent changed the git directory or the git config, which no agent may "
             "write: hooks and config there run code on later git commands. "
@@ -561,7 +561,11 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
         return "REVERTED-BY-AGENT (uncommitted work lost, cannot restore)" \
             if path not in after else "left as-is (was already modified)"
     if after.get(path) == "untracked":
-        if _UNSURE:
+        # A protected path is the factory's own code, and a file planted there
+        # runs on the next `uv run adws/...`: always deleted. Elsewhere, after
+        # a partial restore, a file may look new only because what git ignores
+        # changed, so it could be the engineer's .env: kept and named.
+        if _UNSURE and not any(_matches(path, g) for g in run.cfg.defaults.protected_files):
             return ("left in place: the git config may have changed what git ignores, "
                     "so SSSF did not delete it; check it by hand")
         try:

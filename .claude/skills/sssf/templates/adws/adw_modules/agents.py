@@ -280,12 +280,14 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         latest = result
         return result
 
+    git_before = None
     try:
         # What the tree looked like before this agent got its hands on it. Every
         # send in this phase — first prompt, JSON retries, gate corrections — is
         # measured against this one baseline.
         tree_before = permissions.snapshot(run)
         head_before = permissions.head(run)
+        git_before = permissions.guard_git_dir(run)
 
         result = send(user_text)
         envelope, attempt = _parse_with_retries(run, phase, call, result, send)
@@ -323,7 +325,10 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         # wrote somewhere it was not allowed to.
         # An agent's own commit would hide its changes from enforce, so it is
         # undone first and its changes go back in the tree, unstaged.
+        # The git directory first: a hook planted there would run on any
+        # later commit, the chain's own included.
         try:
+            permissions.restore_git_dir(run, git_before)
             undone = permissions.undo_commits(run, head_before)
             if undone:
                 run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
@@ -357,6 +362,16 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                      payload={"artifacts": envelope.artifacts,
                                               "summary": envelope.summary}))
     except BaseException:
+        # A failed agent may still have planted a hook. Put the git directory
+        # back, so nothing it left there runs on the engineer's next commit.
+        try:
+            put_back = permissions.restore_git_dir(run, git_before, breach=False)
+            if put_back:
+                run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                             type="error", name="git_dir_restored",
+                                             payload={"agent": agent.name, "paths": put_back}))
+        except Exception:
+            pass
         # A failed phase spent too. The caps and the dashboard total agent_end
         # events, so without one here its spend would vanish from both.
         if spent.total_tokens or spent.total_cost:

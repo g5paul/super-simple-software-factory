@@ -156,6 +156,18 @@ redo; a write has already happened, so re-prompting fixes nothing. Instead:
    the same harm this module exists to prevent;
 3. the phase fails and names every path with what happened to it.
 
+The git directory is outside every agent's `writes`, and outside the
+change-set too, since `git status` never shows it. So it gets its own check.
+Before each agent, `hooks/`, `info/`, `config` and `config.worktree` in the
+repo's git directory are copied aside, and in a worktree run the shared git
+directory's copies too. After the agent, a change to any of them is put back and
+stops the run with a breach naming the paths. A hook there would run on the
+chain's own commit, a `core.fsmonitor` or `filter` line in `config` runs on
+ordinary git commands, and a line in `info/exclude` would hide a new file from
+the change-set. An agent that fails is put back the same way, so a hook it
+planted can't run on the engineer's next commit. No agent has a reason to
+write there: SSSF does the committing, and an agent's own commit is undone.
+
 The run stops there, so the agent's permitted changes are never verified,
 reviewed, or committed. The breach message lists them as left uncommitted, for
 the engineer to finish or discard.

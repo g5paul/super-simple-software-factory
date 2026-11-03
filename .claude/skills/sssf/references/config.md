@@ -158,22 +158,34 @@ redo; a write has already happened, so re-prompting fixes nothing. Instead:
 
 The git directory is outside every agent's `writes`, and outside the
 change-set too, since `git status` never shows it. So it gets its own check.
-Before each agent, `hooks/`, `info/`, `config` and `config.worktree` in the
-repo's git directory are copied aside, and in a worktree run the shared git
-directory's copies too. After the agent, a change to any of them is put back and
-stops the run with a breach naming the paths. A hook there would run on the
-chain's own commit, a `core.fsmonitor` or `filter` line in `config` runs on
-ordinary git commands, and a line in `info/exclude` would hide a new file from
-the change-set. The user's global git config, `~/.gitconfig` and
-`~/.config/git/`, gets the same check, since `git config --global
-core.hooksPath` points every commit at the agent's hooks. Contents are
-compared byte for byte with the copy. A breach here doesn't skip the other
-checks: an agent's own commit is still undone and its other writes still
-rolled back, and the breach names both. An agent that fails is put back the
-same way, so a hook it planted can't run on the engineer's next commit. One
-cost: an edit you make to your global git config while an agent runs is put
-back too. No agent has a reason to
-write there: SSSF does the committing, and an agent's own commit is undone.
+Before each agent, SSSF saves `hooks/`, `info/`, `config`, `config.worktree`
+and `commondir` in the repo's git directory, and in a worktree run the shared
+one's too. It also saves every git config file git loads in the repo, any file
+an `include` names, the directory `core.hooksPath` points at, and
+`~/.gitconfig` and `~/.config/git/config` even before they exist. It never
+saves the credential store. The copy is held in the SSSF process, not on disk,
+so the agent can't edit it.
+
+After the agent, and before any gate runs git, a change to any of them is put
+back and stops the run with a breach naming the paths. A hook would run on the
+chain's own commit, a `core.fsmonitor` or `filter` line runs on ordinary git
+commands, `git config --global core.hooksPath` points every commit at the
+agent's hooks, and a line in `info/exclude` would hide a new file from the
+change-set. A breach here doesn't skip the other checks: an agent's own commit
+is still undone and its other writes still rolled back, and the breach names
+both. An agent that fails is put back the same way. If a path can't be put
+back, such as a file changed through a symlinked `~/.gitconfig`, the run says
+so and names it. No agent has a reason to write there: SSSF does the
+committing.
+
+Two costs. An edit you make to your git config while an agent runs is put back
+too. And a tool that writes git config or hooks on install, like husky's
+`prepare` script on `npm install` or `pre-commit install`, stops a run if an
+agent runs it; run those in `worktree_setup`, which runs before the agents.
+
+The check catches mistakes and casual attempts. An agent runs as your user, so
+a determined one could still get past it, for example by killing the chain
+before the check runs. `--sandbox` and `--container` isolate the run.
 
 The run stops there, so the agent's permitted changes are never verified,
 reviewed, or committed. The breach message lists them as left uncommitted, for

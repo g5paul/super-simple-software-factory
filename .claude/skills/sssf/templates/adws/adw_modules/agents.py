@@ -298,6 +298,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 
         # claim gates — violations flow back into the SAME session as corrections
         for gate_attempt in range(1, max(1, phase.params.retries + 1) + 1):
+            # Gates run git, and git would run a hook or fsmonitor the agent
+            # planted. A changed git directory skips the gates; the check below
+            # puts it back and stops the run.
+            if permissions.git_dir_changed(git_before):
+                break
             violations = []
             for gate in call.gates:
                 report = _as_report(gate(envelope, run))
@@ -386,8 +391,13 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                 run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                              type="error", name="git_dir_restored",
                                              payload={"agent": agent.name, "paths": put_back}))
-        except Exception:
-            pass
+        except Exception as failed:
+            # The restore itself failed. Say so loudly: the engineer's next git
+            # command in this repo could run what the agent left.
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="git_dir_restore_failed",
+                                         payload={"agent": agent.name, "error": str(failed)}))
+            run.console.note(str(failed))
         # A failed phase spent too. The caps and the dashboard total agent_end
         # events, so without one here its spend would vanish from both.
         if spent.total_tokens or spent.total_cost:

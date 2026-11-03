@@ -126,52 +126,45 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
 # agent write there. Some of it runs code: a hook in hooks/ runs on the
 # chain's own commit, and a core.fsmonitor, core.pager or filter line in
 # config runs on ordinary git commands. A line in info/exclude hides a new
-# file from snapshot(). The user's global git config is just as live:
-# `git config --global core.hooksPath` points every commit at the agent's
-# hooks. So these paths are copied aside before each agent and put back after
-# it if they changed, and a change stops the run. No agent has a reason to
-# write them: SSSF does the committing.
+# file from snapshot(), and commondir points git at another directory
+# altogether. The user's git config is just as live: `git config --global
+# core.hooksPath` points every commit at the agent's hooks. So these paths
+# are packed before each agent, as a tar stream held in this process where
+# the agent can't edit it, and unpacked over the live paths after it if they
+# changed. A change stops the run. No agent has a reason to write them: SSSF
+# does the committing.
+#
+# It catches mistakes and casual attempts. An agent runs as the same user as
+# SSSF, so a determined one could still get past it, for example by killing
+# the chain before the check runs. --sandbox and --container isolate.
 
-GIT_WATCHED = ("hooks", "info", "config", "config.worktree")
+GIT_WATCHED = ("hooks", "info", "config", "config.worktree", "commondir")
 
-_SAVE = """b=$(mktemp -d) || exit 1
-i=0
+# Packs the watched paths that exist, relative to /. With "h", follows
+# symlinks, so a write through a linked ~/.gitconfig shows; that pack is only
+# compared, never unpacked, and a dangling link in it is not an error.
+_PACK = """h=$1; shift
+n=$#
 for p in "$@"; do
-  mkdir -p "$b/$i" || exit 1
-  if [ -e "$p" ] || [ -L "$p" ]; then cp -a "$p" "$b/$i/" || exit 1; fi
-  i=$((i+1))
+  if [ -e "$p" ] || [ -L "$p" ]; then set -- "$@" "${p#/}"; fi
 done
-echo "$b"
+shift $n
+[ $# = 0 ] && exit 0
+cd / || exit 1
+if [ "$h" = h ]; then
+  tar -chf - "$@" 2>/dev/null | base64
+else
+  { tar -cf - "$@" || echo "tar failed" >&2; } | base64
+fi
 """
 
-# Modes and link targets from ls, contents compared byte for byte with the
-# copy (cmp through diff -r), so a crafted file with a matching checksum
-# still counts as changed. Prints each watched path that differs.
-_DIFFERS = """b=$1; shift
-i=0
-for p in "$@"; do
-  c="$b/$i/${p##*/}"
-  if [ -e "$p" ] || [ -L "$p" ]; then live=1; else live=0; fi
-  if [ -e "$c" ] || [ -L "$c" ]; then kept=1; else kept=0; fi
-  if [ $live != $kept ]; then echo "$p"
-  elif [ $live = 1 ]; then
-    if ! diff -r "$c" "$p" >/dev/null 2>&1; then echo "$p"
-    elif [ "$(cd "${c%/*}" && find "${p##*/}" -exec ls -ldn {} + | awk '{print $1, $NF}')" != \
-           "$(cd "${p%/*}" && find "${p##*/}" -exec ls -ldn {} + | awk '{print $1, $NF}')" ]; then echo "$p"
-    fi
-  fi
-  i=$((i+1))
-done
-"""
-
-_RESTORE = """b=$1; shift
-i=0
-for p in "$@"; do
-  c="$b/$i/${p##*/}"
-  rm -rf "$p" || exit 1
-  if [ -e "$c" ] || [ -L "$c" ]; then cp -a "$c" "${p%/*}/" || exit 1; fi
-  i=$((i+1))
-done
+# Removes every watched path, carrying on past a failure, then unpacks the
+# saved stream from the file SSSF just wrote, and deletes that file.
+_UNPACK = """f=$1; shift
+for p in "$@"; do rm -rf "$p" || failed=1; done
+if [ -s "$f" ]; then base64 -d < "$f" | tar -xpf - -C / || failed=1; fi
+rm -f "$f"
+exit ${failed:-0}
 """
 
 
@@ -180,35 +173,102 @@ def _sh(script: str, *args: str):
 
 
 def _watched(run) -> list[str]:
-    """Every path the guard covers: the repo's git directories (the shared one
-    and a worktree's own), and the user's global git config."""
-    out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
-               run.repo_root)
+    """Every path the guard covers.
+
+    The repo's git directories (the shared one and a worktree's own) and a
+    worktree's `.git` file. Every config file git loads here, by `git config
+    --show-origin`, and every file an include names, even an empty one. The
+    directory `core.hooksPath` points at. And the global config's usual
+    homes, even before they exist. Never the credential store: copying it
+    would copy tokens.
+    """
+    root = str(run.repo_root).rstrip("/")
+    out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
     dirs = list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
     if not dirs:
         return []
-    home = _sh('printf "%s\\n%s\\n" "$HOME" "${XDG_CONFIG_HOME:-$HOME/.config}"').stdout.split("\n")
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
-    if len(home) >= 2 and home[0].startswith("/"):
-        paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git"]
-    return paths
+    if sandbox.current().is_file(f"{root}/.git"):
+        paths.append(f"{root}/.git")
+    home = _sh('printf "%s\\0%s" "$HOME" "${XDG_CONFIG_HOME:-$HOME/.config}"').stdout.split("\0")
+    home = home if len(home) == 2 and home[0].startswith("/") else None
+
+    def absolute(path: str, beside: str) -> str:
+        if path.startswith("~/") and home:
+            return f"{home[0]}/{path[2:]}"
+        return path if path.startswith("/") else f"{beside.rsplit('/', 1)[0]}/{path}"
+
+    fields = _git(["config", "--list", "--show-origin", "-z"], root).split("\0")
+    for origin, entry in zip(fields[::2], fields[1::2]):
+        if not origin.startswith("file:"):
+            continue
+        source = absolute(origin[5:], f"{root}/x")
+        paths.append(source)
+        key, _, value = entry.partition("\n")
+        if key.lower() == "include.path" or (key.lower().startswith("includeif.")
+                                             and key.lower().endswith(".path")):
+            paths.append(absolute(value, source))
+    hooks = _git(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], root).strip()
+    if hooks.startswith("/"):
+        paths.append(hooks)
+    if home:
+        paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git/config", f"{home[1]}/git/attributes"]
+    return [p for p in dict.fromkeys(paths)
+            if p.startswith("/") and "/credentials" not in p and "\n" not in p]
 
 
-def guard_git_dir(run) -> dict | None:
-    """Copy the watched paths aside, before an agent runs. None outside a git repo."""
-    paths = _watched(run)
-    if not paths:
+def _pack(paths: list[str], *, follow: bool) -> str | None:
+    done = _sh(_PACK, "h" if follow else "-", *paths)
+    if done.returncode != 0 or "tar failed" in done.stderr:
         return None
-    saved = _sh(_SAVE, *paths)
-    if saved.returncode != 0 or not saved.stdout.strip():
-        raise PermissionBreach("Could not copy the git directory and git config aside "
-                               f"before the agent ran: {saved.stderr.strip()}")
-    return {"paths": paths, "backup": saved.stdout.strip(), "done": False}
+    return done.stdout
+
+
+def _members(packed: str) -> dict[str, tuple]:
+    """Each member's type, mode, link target and bytes. Not its mtime or owner."""
+    import base64, io, tarfile
+    found = {}
+    with tarfile.open(fileobj=io.BytesIO(base64.b64decode(packed)), mode="r:") as tar:
+        for m in tar:
+            data = tar.extractfile(m).read() if m.isfile() else b""
+            found[m.name.rstrip("/")] = (m.type, m.mode, m.linkname, data)
+    return found
 
 
 def _differs(guard: dict) -> list[str] | None:
-    done = _sh(_DIFFERS, guard["backup"], *guard["paths"])
-    return done.stdout.split() if done.returncode == 0 else None
+    """The watched paths that differ from the saved packs, or None if packing failed."""
+    plain, followed = _pack(guard["paths"], follow=False), _pack(guard["paths"], follow=True)
+    if plain is None:
+        return None
+    now = (_members(plain), _members(followed or ""))
+    then = (_members(guard["plain"]), _members(guard["followed"]))
+
+    def under(members: dict, path: str) -> dict:
+        rel = path.lstrip("/")
+        return {k: v for k, v in members.items() if k == rel or k.startswith(rel + "/")}
+
+    return [p for p in guard["paths"]
+            if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
+
+
+def guard_git_dir(run) -> dict | None:
+    """Pack the watched paths, before an agent runs. None outside a git repo."""
+    paths = _watched(run)
+    if not paths:
+        return None
+    plain = _pack(paths, follow=False)
+    if plain is None:
+        raise PermissionBreach("Could not save the git directory and git config "
+                               "before the agent ran, so it did not run.")
+    return {"paths": paths, "plain": plain, "followed": _pack(paths, follow=True) or "",
+            "done": False}
+
+
+def git_dir_changed(guard: dict | None) -> bool:
+    """Whether the agent has changed a watched path so far. Runs no git."""
+    if not guard or guard["done"]:
+        return False
+    return _differs(guard) != []
 
 
 def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str]:
@@ -216,8 +276,7 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
 
     Returns the paths that changed. With `breach`, a change raises
     PermissionBreach after the restore; without it, as on an agent that
-    already failed, it only restores. Either way the copy is removed once
-    the paths match it again.
+    already failed, it only restores, and raises only if that failed.
     """
     if not guard or guard["done"]:
         return []
@@ -227,15 +286,17 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
         changed = list(guard["paths"])        # could not compare: put everything back
     restored = True
     if changed:
-        done = _sh(_RESTORE, guard["backup"], *guard["paths"])
-        restored = done.returncode == 0 and _differs(guard) == []
-    if restored:
-        sandbox.current().run(["rm", "-rf", guard["backup"]])
+        box = sandbox.current()
+        held = box.run(["mktemp"]).stdout.strip()
+        box.write_text(held, guard["plain"])
+        _sh(_UNPACK, held, *guard["paths"])
+        restored = _differs(guard) == []
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]
-    if changed and breach:
+    if changed and (breach or not restored):
         outcome = ("put back as they were" if restored else
-                   f"NOT put back; the originals are in {guard['backup']}")
+                   "NOT all put back. Check them by hand before the next git command in "
+                   "this repo; a path changed through a symlink is only reported")
         raise PermissionBreach(
             "The agent changed the git directory or the git config, which no agent may "
             "write: hooks and config there run code on later git commands. "

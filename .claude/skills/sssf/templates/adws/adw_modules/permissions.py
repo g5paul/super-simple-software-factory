@@ -49,16 +49,23 @@ class PermissionBreach(RuntimeError):
     """An agent modified a path it was not permitted to modify."""
 
 
-# Set when the git guard could not put everything back, so a config the agent
-# left live (through a retargeted symlink) can't steer SSSF's own git: the
-# commit undo and the rollback run git with no global or system config but
-# the files saved before the agent ran, and no fsmonitor. Cleared by the next
-# guard_git_dir.
-_PIN: list[str] | None = None
+# SSSF's own git here (snapshots, the commit undo, the rollback) never runs an
+# fsmonitor, and its writes never run a hook: neither is needed, and either
+# could be one the agent planted. On the command line, which no config file or
+# GIT_CONFIG_PARAMETERS overrides.
+_SAFE = ["-c", "core.fsmonitor=false"]
+_NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
+
+# Set when the git guard could not put everything back. The config git reads
+# may then not be the one the before-snapshot used, so a file can look new
+# only because what git ignores changed. The rollback then leaves new files
+# in place and names them, rather than delete what could be the engineer's
+# .env. Cleared by the next guard_git_dir.
+_UNSURE = False
 
 
-def _gitargv(args: list[str]) -> list[str]:
-    return ["git", *args] if _PIN is None else ["env", *_PIN, "git", *args]
+def _gitargv(args: list[str], *, writes: bool = False) -> list[str]:
+    return ["git", *_SAFE, *(_NO_HOOKS if writes else []), *args]
 
 
 def _git(args: list[str], cwd) -> str:
@@ -123,13 +130,13 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
                 "which doesn't descend from it (a reset or rebase). Nothing was undone.")
         shas = _git(["rev-list", "--abbrev-commit", f"{before['sha']}..{after['sha']}"],
                     run.repo_root).split()
-        undo = _gitargv(["reset", "-q", before["sha"]])
+        undo = _gitargv(["reset", "-q", before["sha"]], writes=True)
     else:
         shas = _git(["rev-list", "--abbrev-commit", after["sha"]], run.repo_root).split()
-        undo = _gitargv(["update-ref", "-d", "HEAD"])
+        undo = _gitargv(["update-ref", "-d", "HEAD"], writes=True)
     failed = sandbox.current().run(undo, cwd=run.repo_root).returncode != 0
     if not failed and not before["sha"]:
-        failed = sandbox.current().run(_gitargv(["rm", "-rq", "--cached", "."]),
+        failed = sandbox.current().run(_gitargv(["rm", "-rq", "--cached", "."], writes=True),
                                        cwd=run.repo_root).returncode != 0
     if failed:
         raise PermissionBreach(f"The agent made commits {', '.join(shas)}, and undoing them failed.")
@@ -235,7 +242,7 @@ def _sh(script: str, *args: str):
     return subprocess.CompletedProcess(done.args, done.returncode, out, err)
 
 
-def _watched(run) -> tuple[list[str], list[str], list[str]]:
+def _watched(run) -> tuple[list[str], list[str]]:
     """Every path the guard covers.
 
     The repo's git directories (the shared one and a worktree's own) and a
@@ -249,7 +256,7 @@ def _watched(run) -> tuple[list[str], list[str], list[str]]:
     out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
     dirs = list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
     if not dirs:
-        return [], [], []
+        return [], []
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
     logical = [f"{root}/.git"]            # a symlinked .git is a link on the way
     if sandbox.current().is_file(f"{root}/.git"):
@@ -267,26 +274,21 @@ def _watched(run) -> tuple[list[str], list[str], list[str]]:
     if isinstance(listed, bytes):     # a Latin-1 name in a config must not stop the run
         listed = listed.decode("utf-8", "surrogateescape")
     fields = listed.split("\0")
-    configs: set[str] = set()     # global and included config files, for _pin
     for origin, entry in zip(fields[::2], fields[1::2]):
         if not origin.startswith("file:"):
             continue
         source = absolute(origin[5:], f"{root}/x")
         paths.append(source)
-        if not any(source.startswith(d.rstrip("/") + "/") for d in dirs):
-            configs.add(source)
         key, _, value = entry.partition("\n")
         if key.lower() in ("core.excludesfile", "core.attributesfile"):
             paths.append(absolute(value, source))
         if key.lower() == "include.path" or (key.lower().startswith("includeif.")
                                              and key.lower().endswith(".path")):
             paths.append(absolute(value, source))
-            configs.add(absolute(value, source))
     hooks = _git(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], root).strip()
     if hooks.startswith("/"):
         paths.append(hooks)
     if home:
-        configs |= {f"{home[0]}/.gitconfig", f"{home[1]}/git/config"}
         paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git/config",
                   f"{home[1]}/git/attributes", f"{home[1]}/git/ignore"]
     # The physical path, as git resolves it: tar renames a member with ".." in
@@ -305,7 +307,7 @@ def _watched(run) -> tuple[list[str], list[str], list[str]]:
     real = _sh(_REAL, *paths).stdout.split("\0")
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
-    resolved, config_files = [], []
+    resolved = []
     for p, r in zip(paths, real):
         r = r if r.startswith("/") else "/" + posixpath.normpath(p).lstrip("/")
         if r == "/" or posixpath.dirname(r) == r:
@@ -313,11 +315,9 @@ def _watched(run) -> tuple[list[str], list[str], list[str]]:
                                    "which the git guard can't save, so the agent did not run. "
                                    "Check core.hooksPath and include.path.")
         resolved.append(r)
-        if p in configs:
-            config_files.append(r)
     resolved = list(dict.fromkeys(resolved))
     links = [q for q in dict.fromkeys(links) if q not in resolved and q != "/"]
-    return links, resolved, list(dict.fromkeys(config_files))
+    return links, resolved
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:
@@ -375,9 +375,9 @@ def _differs(guard: dict) -> list[str] | None:
 
 def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs. None outside a git repo."""
-    global _PIN
-    _PIN = None
-    links, paths, configs = _watched(run)
+    global _UNSURE
+    _UNSURE = False
+    links, paths = _watched(run)
     if not paths:
         return None
     plain = _pack(links + paths, follow=False)
@@ -386,7 +386,7 @@ def guard_git_dir(run) -> dict | None:
                                "before the agent ran, so it did not run.")
     return {"links": links, "paths": paths, "plain": plain,
             "followed": _pack(paths, follow=True) or "",
-            "parents": _sh(_REAL, *links).stdout, "configs": configs, "done": False}
+            "parents": _sh(_REAL, *links).stdout, "done": False}
 
 
 def git_dir_changed(guard: dict | None) -> bool:
@@ -404,23 +404,6 @@ def git_dir_changed(guard: dict | None) -> bool:
 
 
 SEEN = "(a watched path, changed while the agent ran and changed back since)"
-
-
-def _pin(guard: dict) -> None:
-    """Pin SSSF's own git to the config saved before the agent ran.
-
-    Only config files that now match their copy are included; a global
-    config git would reach through a retargeted link is left out, and so is
-    the system config. No fsmonitor runs.
-    """
-    global _PIN
-    still = set(_differs(guard) or guard["paths"])
-    keep = [c for c in guard.get("configs", []) if c not in still]
-    pairs = [("core.fsmonitor", "false")] + [("include.path", c) for c in keep]
-    _PIN = ["GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
-            f"GIT_CONFIG_COUNT={len(pairs)}"]
-    for i, (k, v) in enumerate(pairs):
-        _PIN += [f"GIT_CONFIG_KEY_{i}={k}", f"GIT_CONFIG_VALUE_{i}={v}"]
 
 
 def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str]:
@@ -468,15 +451,16 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
             _sh(_UNPACK, held, *paths)
         restored = _differs(guard) == []
     if not restored:
-        _pin(guard)
+        global _UNSURE
+        _UNSURE = True
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]
     if changed and (breach or not restored):
         outcome = ("changed back since" if sentinel else
                    "put back as they were" if restored else
                    "NOT all put back. A change through a symlink is reported, never "
-                   "written back, so check these by hand before the next git command "
-                   "in this repo")
+                   "written back, and a restore with nowhere safe to write is skipped, "
+                   "so check these by hand before the next git command in this repo")
         raise PermissionBreach(
             "The agent changed the git directory or the git config, which no agent may "
             "write: hooks and config there run code on later git commands. "
@@ -577,12 +561,15 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
         return "REVERTED-BY-AGENT (uncommitted work lost, cannot restore)" \
             if path not in after else "left as-is (was already modified)"
     if after.get(path) == "untracked":
+        if _UNSURE:
+            return ("left in place: the git config may have changed what git ignores, "
+                    "so SSSF did not delete it; check it by hand")
         try:
             sandbox.current().remove(Path(run.repo_root) / path)
             return "deleted"
         except OSError as error:
             return f"could not delete ({error})"
-    result = sandbox.current().run(_gitargv(["checkout", "--", path]), cwd=run.repo_root)
+    result = sandbox.current().run(_gitargv(["checkout", "--", path], writes=True), cwd=run.repo_root)
     return "rolled back" if result.returncode == 0 else "could not roll back"
 
 

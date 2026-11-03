@@ -80,7 +80,7 @@ def test_the_default_sandbox_is_this_machine():
 def test_git_goes_through_the_sandbox(recording, repo):
     assert len(git_helper.rev()) == 40
     assert git_helper.tracked("a.txt")
-    assert ("run", ["git", "rev-parse", "HEAD"]) in recording.calls
+    assert ("run", ["git", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"]) in recording.calls
 
 
 def test_the_tree_check_and_its_rollback_go_through_the_sandbox(recording, repo):

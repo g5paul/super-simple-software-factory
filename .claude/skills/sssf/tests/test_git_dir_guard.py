@@ -25,7 +25,8 @@ import pytest
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import permissions
+from adw_modules import git_helper, permissions
+from adw_modules.data_types import AgentConfig, ConfigDefaults, PromptEngineering, SSSFConfig
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -34,10 +35,10 @@ def git(cwd: Path, *args: str) -> str:
 
 
 @pytest.fixture(autouse=True)
-def unpinned():
-    """A partial restore pins SSSF's git for the rest of that run; not past a test."""
+def sure():
+    """A partial restore makes the rollback keep new files for that run; not past a test."""
     yield
-    permissions._PIN = None
+    permissions._UNSURE = False
 
 
 @pytest.fixture(autouse=True)
@@ -628,41 +629,88 @@ def test_nothing_is_written_through_a_link(repo, tmp_path, monkeypatch):
 
 # ── tenth bypass-reviewer pass ──────────────────────────────────────────────
 
-def test_a_config_left_live_through_a_link_cant_hide_files(repo, home, tmp_path):
-    """P1: a retargeted ~/.config is reported, not put back, so SSSF's own git
-    would load the agent's excludesFile. After a partial restore it is pinned
-    to the config saved before the agent ran."""
+def guarded(repo: Path) -> SimpleNamespace:
+    cfg = SSSFConfig(defaults=ConfigDefaults(data_dir="adws/adw_data", protected_files=["adws/"]))
+    return SimpleNamespace(cfg=cfg, repo_root=repo)
+
+
+def builder() -> AgentConfig:
+    return AgentConfig(name="builder", prompt_engineering=PromptEngineering(system="s", user="u"))
+
+
+def test_git_config_global_through_a_stow_link_deletes_nothing(repo, home, tmp_path):
+    """Eleventh review, q8b: `git config --global color.ui auto` wrote through a
+    stow-linked ~/.gitconfig. The guard reports that, and the rollback that
+    follows must not delete the engineer's ignored .env and node_modules."""
+    dot = tmp_path / "dotfiles"
+    dot.mkdir()
+    (dot / "ignore").write_text(".env\nnode_modules/\n")
+    (dot / "gitconfig").write_text(f"[user]\n\tname = t\n[core]\n\texcludesFile = {dot / 'ignore'}\n")
+    (home / ".gitconfig").unlink()
+    (home / ".gitconfig").symlink_to(dot / "gitconfig")
+    (repo / ".env").write_text("SECRET=1\n")
+    (repo / "node_modules").mkdir()
+    (repo / "node_modules" / "x.js").write_text("x\n")
+    run = guarded(repo)
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    subprocess.run(["git", "config", "--global", "color.ui", "auto"], cwd=repo, check=True)
+    (repo / "adws").mkdir()
+    (repo / "adws" / "evil.py").write_text("x\n")
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    with pytest.raises(permissions.PermissionBreach, match="evil.py — left in place"):
+        permissions.enforce(run, None, builder(), tree)
+    assert (repo / ".env").exists() and (repo / "node_modules" / "x.js").exists()
+    assert (repo / "adws" / "evil.py").exists()
+
+
+def test_a_clean_restore_still_deletes_new_protected_files(repo):
+    run = guarded(repo)
+    tree, guard = permissions.snapshot(run), permissions.guard_git_dir(run)
+    plant_hook(repo / ".git" / "hooks")
+    (repo / "adws").mkdir()
+    (repo / "adws" / "evil.py").write_text("x\n")
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    with pytest.raises(permissions.PermissionBreach, match="evil.py — deleted"):
+        permissions.enforce(run, None, builder(), tree)
+    assert not (repo / "adws" / "evil.py").exists()
+
+
+def test_sssf_git_runs_no_fsmonitor_the_agent_left(repo, home, tmp_path):
+    """Eleventh review, q1b and h3: a config left live through a retargeted
+    ~/.config ran its fsmonitor inside SSSF's snapshot, and in the git status
+    the stopped run calls on its way out."""
     dot = tmp_path / "dotfiles"
     (dot / "git").mkdir(parents=True)
     (dot / "git" / "config").write_text("")
     (home / ".config").symlink_to(dot)
-    run = SimpleNamespace(repo_root=repo)
+    run = guarded(repo)
     guard = permissions.guard_git_dir(run)
     evil = tmp_path / "evil"
     (evil / "git").mkdir(parents=True)
-    (evil / "ign").write_text("*\n")
-    (evil / "git" / "config").write_text(f"[core]\n\texcludesFile = {evil / 'ign'}\n"
-                                         "\tfsmonitor = touch PWNED\n")
+    (evil / "git" / "config").write_text(f"[core]\n\tfsmonitor = touch {tmp_path / 'PWNED'}\n")
     (home / ".config").unlink()
     (home / ".config").symlink_to(evil)
-    (repo / "hidden.py").write_text("x\n")
     with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
         permissions.restore_git_dir(run, guard)
-    try:
-        assert "hidden.py" in permissions._git(["ls-files", "--others", "--exclude-standard"], repo)
-        assert permissions._git(["config", "user.name"], repo).strip() == "t"   # the saved ~/.gitconfig
-        assert not (repo / "PWNED").exists()
-    finally:
-        permissions._PIN = None
+    permissions.snapshot(run)
+    os.chdir(repo)
+    git_helper.work_in_progress()
+    assert not (tmp_path / "PWNED").exists()
 
 
-def test_a_clean_restore_leaves_git_unpinned(repo):
-    run = SimpleNamespace(repo_root=repo)
-    guard = permissions.guard_git_dir(run)
-    plant_hook(repo / ".git" / "hooks")
-    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
-        permissions.restore_git_dir(run, guard)
-    assert permissions._PIN is None
+def test_the_commit_undo_runs_no_hook(repo):
+    """Eleventh review, q9: a reference-transaction hook ran on undo_commits' reset."""
+    run = guarded(repo)
+    before = permissions.head(run)
+    (repo / "app.py").write_text("x = 2\n")
+    git(repo, "commit", "-qam", "agent")
+    hook = repo / ".git" / "hooks" / "reference-transaction"
+    hook.write_text("#!/bin/sh\ntouch HOOK_RAN\n")
+    hook.chmod(0o755)
+    permissions.undo_commits(run, before)
+    assert not (repo / "HOOK_RAN").exists()
 
 
 def test_a_change_undone_before_the_restore_says_so(repo):

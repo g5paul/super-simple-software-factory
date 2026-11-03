@@ -13,6 +13,17 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 None as of 2026-11-03.
 
+## Pre-push secret scan
+
+Each repo has the hub's gitleaks hook in `.githooks/pre-push` (`docs/going-private.md`, "What stops a leak"), and each clone needs `git config core.hooksPath .githooks`, which only the engineer can set: the project sessions' permission checks refuse it.
+
+| Repo | Hook commit | Switched on |
+|---|---|---|
+| yt-summarizer | f911645 on `sssf-run`; also refuses pushes from SSSF agents | yes |
+| pi-agent-observability | d5d958a on `main` | yes |
+| fusion-harness | 54ac5d8 on `main`, merged into `sssf-run` as beaca9b | not yet |
+| sssf-sandbox | none: it has no remote | n/a |
+
 ## Checks on the next real runs
 
 The hub checks these read-only, from the trace and the raw logs, when each run happens.

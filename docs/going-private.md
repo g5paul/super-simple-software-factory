@@ -46,7 +46,7 @@ Since 2026-11-03 the hub has a `pre-push` hook, `.githooks/pre-push`, which runs
 - **gitleaks** is 8.30.1, in `~/.local/bin`, installed from its GitHub release after checking the release's SHA-256. Its default rules found nothing in the hub's full history.
 - **Tested** by running the hook as git does, since the deny rules block test pushes. A clean commit and a clean new branch passed. A planted fake GitHub token was refused on an existing branch and on a new one. With gitleaks missing from `PATH`, the hook refused.
 - **To push anyway,** `git push --no-verify` skips the hook. Use it only knowing nothing was scanned.
-- **The project repos** don't have it yet. Each one's session would add the same hook.
+- **The project repos** have the same hook, tracked, with `--verbose`: pi-agent-observability d5d958a on `main`, yt-summarizer f911645 on `sssf-run` (which keeps its old check refusing pushes from SSSF agents), fusion-harness 54ac5d8 on `main`, merged into `sssf-run` as beaca9b. gitleaks found no leaks in any of their full histories. Each session's permission check refused the `core.hooksPath` setting, so the engineer runs it in each clone. Set in pi-agent-observability and yt-summarizer; fusion-harness is waiting on it as of 2026-11-03.
 
 ## What can't be undone
 

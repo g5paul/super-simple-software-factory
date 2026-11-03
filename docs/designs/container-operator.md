@@ -52,10 +52,10 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 ## Open
 
 - **First real use: done.** yt-summarizer runs from the container. Its first run exposed the missing compiler and tzdata, and the doc gaps its setup found are closed. Its second run, after the fix, passed every check on the first round.
-- **Branch per run and a merge back: done.** Built to [branch-per-run.md](branch-per-run.md) on 2026-10-30, proven in sssf-sandbox on the host and in this container (run d8fc85aa), and rolled out to both projects. Still open there: the sandbox seam that would let sandcastle, or another sandbox, sit beside this container. Its code waits for a second sandbox.
+- **Branch per run and a merge back: done.** Built to [branch-per-run.md](branch-per-run.md) on 2026-10-30, proven in sssf-sandbox on the host and in this container (run d8fc85aa), and rolled out to both projects. The sandbox seam it left open is now built; see "The sandbox seam" below.
 - **Sandbox branches: done.** sssf-sandbox is on its trunk, `master`, with no other branches.
 - **Parallel runs in the container: done.** Built to [parallel-worktree-runs.md](parallel-worktree-runs.md). Each worktree run in the container gets its own project environment, removed on merge or discard, and `run.sh` gives the container a fixed hostname, so the trace tells its processes from the host's. Proven in sssf-sandbox (pr3conso and pr3title together, then pr4contr beside a host run). Each environment's editable install points at its own worktree, checked in this image with a scratch package.
-- **The sandbox seam: designed.** [remote-sandboxes.md](remote-sandboxes.md), settled on 2026-11-02, builds it against Vercel Sandbox and E2B. It waits to be built.
+- **The sandbox seam: built.** [remote-sandboxes.md](remote-sandboxes.md), settled on 2026-11-02, built it against Vercel Sandbox and E2B the same week. `--sandbox vercel` and `--sandbox e2b` run beside `--container`, and that doc keeps what is still open.
 
 ### What a second sandbox means
 

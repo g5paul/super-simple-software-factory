@@ -4,9 +4,9 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 | Repo | SSSF branch | Skill | Agent rules |
 |---|---|---|---|
-| pi-agent-observability | `main` | 07bb46a (4dc9720). Its roster loads the obs extension, so `--sandbox` still refuses it | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
+| pi-agent-observability | `main` | bfe85f0 (06fb995). Its roster loads the obs extension, so `--sandbox` still refuses it | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
 | fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 07bb46a (4eeecd7) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
-| sssf-sandbox | `master` | bfe85f0 (eeb313e) | The hub's own test bed. None |
+| sssf-sandbox | `master` | 3e96943 (985e2e2) | The hub's own test bed. None |
 
 ## Unlisted projects
 

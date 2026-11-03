@@ -135,7 +135,7 @@ Step 3 kept everything above and settled this:
 
 ## Open
 
-- **A ChatGPT roster in the VM.** It needs pi's OAuth sign-in in the VM, and a decision on how it gets there.
+- **A ChatGPT roster in the VM.** It needs pi's OAuth sign-in in the VM, and a decision on how it gets there. `docs/research/pi-chatgpt-in-vm.md` recommends handing each pi agent a one-hour access token in `OPENAI_API_KEY`, refreshed on the host with `pi auth print-bearer-token --provider openai --min-expiry 35m`, and a live check on 2026-11-03 proved both roster models answer that way in an E2B VM. Not built. Waits on the engineer reading OpenAI's terms for subscription use on a remote machine.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on yt-summarizer), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.
 - **`--sandbox` for tickets and trials** was built after the dashboard; see "As built: tickets and trials".

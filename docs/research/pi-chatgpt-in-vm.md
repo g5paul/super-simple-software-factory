@@ -16,7 +16,7 @@ My recommendation:
 2. Later, with the domain allowlist the design already plans, move the token out of the VM entirely with Vercel's credentials brokering. The VM then holds a placeholder, and Vercel's firewall swaps in the real token for requests to `api.openai.com`.
 3. Don't copy `auth.json`, and don't run a login inside the VM.
 
-Unconfirmed, and worth one live check each before building: that pi in a fresh VM finds the roster's model from an env-var token, that the pi SDK's `ModelRuntime.getAuth` can refresh the host login from a script, and what OpenAI's consumer terms say today (their page refused automated fetches).
+Unconfirmed, and worth one live check each before building: that pi in a fresh VM finds the roster's model from an env-var token, that the pi SDK's `ModelRuntime.getAuth` can refresh the host login from a script, and what OpenAI's consumer terms say today (their page refused automated fetches). The live check on 2026-11-03 settled the first two; see "Live check" at the end. The terms are still unread.
 
 ## 1. Where the credentials live
 
@@ -130,3 +130,16 @@ Building it means writing `auth.json` and `settings.json` into the VM in `open`,
 - That pi's SDK `ModelRuntime.create()` reads the default `auth.json`, and that pi in a VM finds the roster's model with an env-var token.
 - For option 1: network policy support in `vercel-sandbox==0.10.0`'s sync API, whether a policy survives stop and resume, CA trust for Node in the VM, and in-place secret updates on E2B from Python.
 - The exact access-token lifetime on this machine. About an hour, estimated from the file's timestamp. OpenAI's docs say 3600 seconds.
+
+## Live check, 2026-11-03
+
+Run from the hub in two E2B VMs made from SSSF's `sssf` template, with sssf-sandbox's E2B key. The VMs were iuy28kwl3i8obsy2ncp38 and i9un9gablvpvs7jpxt0t0, both killed at the end. No token value was printed: the script replaced it in every output line.
+
+- **The host can refresh and hand out a token with no model call.** `pi auth print-bearer-token --provider openai --min-expiry 35m` refreshed the expired host login under pi's lock and printed a token with 57 minutes left. That replaces the `ModelRuntime.getAuth` question: SSSF can shell out to pi for the token, as it already does for `pi --list-models`.
+- **pi in the VM finds the roster's models from the token alone.** With no `~/.pi/agent/` in the VM, `pi --list-models` showed no openai models. With `OPENAI_API_KEY` set to the token it showed 44, including `gpt-6.1-sol` and `gpt-6.1-terra`, the chatgpt roster's two models. The host shows 45. `pi auth check --provider openai --no-refresh` said `ready`.
+- **Both models answered.** `pi -p --provider openai --model gpt-6.1-sol --no-tools --no-session` and the same with `gpt-6.1-terra` each replied `OK`.
+- **Nothing durable is left in the VM.** pi creates `~/.pi/agent/auth.json` and `models-store.json` on first use, both `{}`, and the token is in neither, nor anywhere under `~/.pi`.
+- **The host login was untouched.** After both checks, `pi auth check --provider openai --no-refresh` on the host still said `ready`.
+- **Versions differ.** The template's pi is 1.5.0 and the host's is 1.4.0, because the template installs the latest at build time. A build should pin the template's pi or note the version it ran.
+
+So option 2 works as described, and the token handout is one command on the host.

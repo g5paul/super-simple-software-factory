@@ -11,10 +11,18 @@ writes resets it. When nothing has come for `limit` seconds, it stops the
 agent's whole process tree, which ends the read loop, and the runner raises
 SilentStop. The limit is repo.yaml's `max_silence_minutes`; None turns it off.
 
-A tool call counts as quiet while it runs without output: Claude Code streams
-nothing during a Bash call, and pi streams only what the command prints. A
-Claude Code Bash call ends within 10 minutes on its own, so the default of 15
-leaves room for one. A repo whose agents run longer quiet commands raises it.
+Claude Code sends a heartbeat every 30 seconds or so while a tool runs, and
+its Bash calls end within 10 minutes on their own, so on Claude Code a stop
+means the CLI itself stalled. pi streams only what a command prints and has
+no time limit on one, so a pi agent stuck on a command that prints nothing
+for the limit is stopped. A repo whose agents run longer quiet commands
+raises it.
+
+Once the agent has sent its final result it has nothing left to say, but it
+can stay alive: Claude Code waits for a background command it started, a
+server or a `sleep`, before it exits. The runner calls `finished()`, and after
+GRACE quiet seconds the watchdog kills what's left and the call keeps its
+result.
 """
 
 from __future__ import annotations
@@ -23,6 +31,10 @@ import threading
 import time
 from contextlib import contextmanager
 from typing import Iterator, Optional
+
+
+# Seconds of quiet after the final result before what's left is killed.
+GRACE = 30.0
 
 
 class SilentStop(RuntimeError):
@@ -50,11 +62,24 @@ class Watchdog:
         self.limit = limit
         self.poll = poll
         self.fired = False
+        self.done = False
         self._last = time.monotonic()
         self._done = threading.Event()
 
     def touch(self) -> None:
         self._last = time.monotonic()
+
+    def finished(self) -> None:
+        """The agent sent its final result: quiet from here on is it done,
+        not hung. Only leftovers can keep it alive, so they get GRACE."""
+        self.done = True
+        if self.limit:
+            self.limit = min(self.limit, GRACE)
+
+    @property
+    def hung(self) -> bool:
+        """Stopped for silence before it had finished."""
+        return self.fired and not self.done
 
     def _watch(self) -> None:
         while not self._done.wait(self.poll):

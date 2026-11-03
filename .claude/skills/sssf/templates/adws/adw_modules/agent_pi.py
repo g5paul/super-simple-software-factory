@@ -365,6 +365,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if event.get("type") == "agent_end":
+                    dog.finished()
                 if event.get("type") == "message_end":
                     message = event.get("message", {})
                     if message.get("role") == "assistant":
@@ -401,7 +403,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     result.returncode = process.wait()
     if on_exit:
         on_exit(process.pid)
-    if dog.fired:
+    if dog.hung:
         stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
         stop.partial = result           # pi priced every turn so far
         raise stop

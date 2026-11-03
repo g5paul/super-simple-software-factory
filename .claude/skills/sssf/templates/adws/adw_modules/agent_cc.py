@@ -326,6 +326,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                             raise stop
                     elif etype == "result":
                         final = event
+                        dog.finished()
                     if on_event:
                         try:
                             on_event(event)
@@ -348,7 +349,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
             if on_exit:
                 on_exit(process.pid)
 
-    if dog.fired:
+    if dog.hung:
         stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
         stop.partial = _partial(turns, output)
         raise stop

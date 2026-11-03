@@ -168,3 +168,66 @@ def test_an_agent_that_keeps_writing_is_left_alone(tmp_path, monkeypatch):
     result = agent_pi.run(request(tmp_path, model="openai/gpt", max_silence_seconds=1))
     assert result.text == "working"
     assert result.cost == pytest.approx(0.06)
+
+
+# ── an agent that has finished but stays alive ───────────────────────────────
+
+# Claude Code waits for a background command it started before it exits, so a
+# finished agent can sit quiet with its result already sent. Seen in
+# sssf-sandbox run 95412cbf: scout answered, then waited on `sleep 240`.
+LINGER = """#!/usr/bin/env python3
+import os, subprocess, sys, time
+for line in os.environ["FAKE_LINES"].split("\\n"):
+    sys.stdout.write(line + "\\n")
+sys.stdout.flush()
+child = subprocess.Popen(["sleep", "60"])
+open(os.environ["FAKE_CHILD_PID"], "w").write(str(child.pid))
+time.sleep(60)
+"""
+
+CLAUDE_RESULT = ('{"type":"result","subtype":"success","is_error":false,"result":"done",'
+                 '"total_cost_usd":0.02,"usage":{"input_tokens":10,"output_tokens":5}}')
+PI_END = '{"type":"agent_end"}'
+
+
+@pytest.fixture
+def linger(tmp_path, monkeypatch):
+    script = tmp_path / "agent"
+    script.write_text(LINGER)
+    script.chmod(0o755)
+    pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_CHILD_PID", str(pid_file))
+    monkeypatch.setattr(silence, "GRACE", 0.5)
+    return script, pid_file
+
+
+def test_a_finished_claude_code_agent_keeps_its_result_and_its_leftovers_go(tmp_path, linger, monkeypatch):
+    script, pid_file = linger
+    monkeypatch.setenv("FAKE_LINES", CLAUDE_INIT + "\n" + CLAUDE_RESULT)
+    monkeypatch.setattr(agent_cc, "CLAUDE_PATH", str(script))
+    monkeypatch.setattr(agent_cc, "AUTH", "subscription")
+    began = time.monotonic()
+    result = agent_cc.run(request(tmp_path, max_silence_seconds=60))
+    assert time.monotonic() - began < 10       # the grace, not the minute
+    assert result.text == "done"
+    time.sleep(0.2)
+    assert not alive(int(pid_file.read_text()))
+
+
+def test_a_finished_pi_agent_keeps_its_result(tmp_path, linger, monkeypatch):
+    script, _ = linger
+    monkeypatch.setenv("FAKE_LINES", PI_TURN + "\n" + PI_END)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    monkeypatch.setattr(agent_pi, "resolve_model", lambda model: ("openai", "gpt"))
+    monkeypatch.setattr(agent_pi, "context_window", lambda provider, model_id: 0)
+    result = agent_pi.run(request(tmp_path, model="openai/gpt", max_silence_seconds=60))
+    assert result.text == "working"
+
+
+def test_finished_shortens_the_limit_to_the_grace(monkeypatch):
+    monkeypatch.setattr(silence, "GRACE", 0.2)
+    process = FakeProcess()
+    with silence.watch(process, 60, poll=0.05) as dog:
+        dog.finished()
+        time.sleep(0.5)
+    assert dog.fired and not dog.hung and process.stopped == 1

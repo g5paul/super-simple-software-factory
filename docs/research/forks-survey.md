@@ -75,8 +75,9 @@ None. No fork shares a commit with g5paul's `main` beyond disler's. No commit au
 Each is a lead from commit subjects and file greps. Check it against what SSSF already has before building it.
 
 - **tviles:** refuse a chain before it starts when the rate-limit window can't finish it. Record `permission_denials` from Claude Code's result in the trace. A `cost_basis` field, so the dashboard doesn't show dollars it can't know.
-- **pl018, ryancatlin:** a watchdog that stops an agent once it goes silent.
+  - Checked on 2026-11-03, and neither of the first two is worth building here. A chain's use of the window: across 80 runs in two repos, read from each agent's `rate_limit_event`s, no chain moved the 5-hour or 7-day window by more than 1%, the step Claude reports in. A chain could fail to fit only past 99%, and `rate_limit_stop` stops well before. `permission_denials`: SSSF's Claude Code agents run with `--permission-mode bypassPermissions` and `--safe-mode`, so nothing is ever denied; all 392 results in two repos had an empty list. SSSF's own refusals are traced as `rule_refused`.
+- **pl018, ryancatlin:** a watchdog that stops an agent once it goes silent. Built on 2026-11-03: [silent-agents.md](../designs/silent-agents.md).
 - **MadeSimpleWorkshop, GratefulDave:** acceptance tests the builder can't edit.
 - **iksnae:** `doctor --probe`, which asks the provider what it serves instead of trusting the model catalog.
-- **gauravdhiman:** plan gates that reject a malformed plan before the build.
+- **gauravdhiman:** plan gates that reject a malformed plan before the build. Built on 2026-11-03 as `gates.plan_well_formed`.
 - **sarjarapu:** a persistent Claude Code process, and a smaller system prompt and tool list per call.

@@ -24,6 +24,13 @@ A breach is NOT a gate violation. Gates are for work an agent can be asked to
 redo; a breach cannot be corrected by re-prompting, because the write already
 happened. It aborts the phase and names every offending path.
 
+An agent that commits would hide its changes from that comparison, since
+both fingerprints are taken against HEAD. `head()` records where HEAD was
+before the agent ran, and `undo_commits()` resets any commits it made, so
+their changes are back in the working tree, unstaged, for `enforce()` to check
+and roll back, and for the chain's own commit phase to commit. An agent that moved HEAD anywhere else
+(another branch, a rebase, a reset) stops the run instead.
+
 Two keys drive it, both in sssf.config.yaml:
     defaults.protected_files   paths no agent may touch unless it names them itself
     agents[].writes      None = unrestricted · [] = read-only · [...] = only these
@@ -66,6 +73,52 @@ def snapshot(run) -> dict[str, str]:
         if path.strip():
             fingerprints[path.strip()] = "untracked"
     return fingerprints
+
+
+def head(run) -> dict[str, str]:
+    """Where HEAD is: its commit and the branch it is on (empty when detached)."""
+    return {"sha": _git(["rev-parse", "-q", "--verify", "HEAD"], run.repo_root).strip(),
+            "branch": _git(["symbolic-ref", "-q", "HEAD"], run.repo_root).strip()}
+
+
+def undo_commits(run, before: dict[str, str]) -> list[str]:
+    """Undo commits an agent made itself, keeping their changes unstaged in the tree.
+
+    Returns the short shas undone, newest first, or [] when HEAD did not move.
+    Unstaged matters: _roll_back restores a path from the index, so a staged
+    change would be "restored" to itself. Raises PermissionBreach when HEAD
+    moved somewhere a reset can't safely
+    bring back: onto another branch, or to a commit that doesn't descend from
+    where it was.
+    """
+    after = head(run)
+    if after == before:
+        return []
+    if after["branch"] != before["branch"]:
+        raise PermissionBreach(
+            f"The agent switched HEAD from {before['branch'] or 'a detached HEAD'} to "
+            f"{after['branch'] or 'a detached HEAD'}. Nothing was undone; switch back by hand.")
+    if before["sha"]:
+        descends = sandbox.current().run(
+            ["git", "merge-base", "--is-ancestor", before["sha"], after["sha"]],
+            cwd=run.repo_root).returncode == 0
+        if not descends:
+            raise PermissionBreach(
+                f"The agent moved HEAD from {before['sha'][:7]} to {after['sha'][:7]}, "
+                "which doesn't descend from it (a reset or rebase). Nothing was undone.")
+        shas = _git(["rev-list", "--abbrev-commit", f"{before['sha']}..{after['sha']}"],
+                    run.repo_root).split()
+        undo = ["git", "reset", "-q", before["sha"]]
+    else:
+        shas = _git(["rev-list", "--abbrev-commit", after["sha"]], run.repo_root).split()
+        undo = ["git", "update-ref", "-d", "HEAD"]
+    failed = sandbox.current().run(undo, cwd=run.repo_root).returncode != 0
+    if not failed and not before["sha"]:
+        failed = sandbox.current().run(["git", "rm", "-rq", "--cached", "."],
+                                       cwd=run.repo_root).returncode != 0
+    if failed:
+        raise PermissionBreach(f"The agent made commits {', '.join(shas)}, and undoing them failed.")
+    return shas
 
 
 def changed_paths(before: dict[str, str], after: dict[str, str]) -> list[str]:

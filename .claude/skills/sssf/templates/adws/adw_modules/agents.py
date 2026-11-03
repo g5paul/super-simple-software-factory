@@ -285,6 +285,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         # send in this phase — first prompt, JSON retries, gate corrections — is
         # measured against this one baseline.
         tree_before = permissions.snapshot(run)
+        head_before = permissions.head(run)
 
         result = send(user_text)
         envelope, attempt = _parse_with_retries(run, phase, call, result, send)
@@ -320,7 +321,16 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         # Permission is checked after every send is done, and before the envelope is
         # accepted: an agent does not get to report success on a phase in which it
         # wrote somewhere it was not allowed to.
+        # An agent's own commit would hide its changes from enforce, so it is
+        # undone first and its changes go back in the tree, unstaged.
         try:
+            undone = permissions.undo_commits(run, head_before)
+            if undone:
+                run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                             type="log", name="agent_committed",
+                                             payload={"agent": agent.name, "undone": undone}))
+                run.console.note(f"{agent.name} committed {len(undone)} time(s) itself "
+                                 f"({', '.join(undone)}). Undid the commits and kept the changes.")
             touched = permissions.enforce(run, phase, agent, tree_before)
         except permissions.PermissionBreach as breach:
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,

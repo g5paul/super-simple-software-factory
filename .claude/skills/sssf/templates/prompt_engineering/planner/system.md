@@ -16,6 +16,7 @@ Turn a request into a plan the builder can implement without asking questions.
 - You inherit the operator's shell environment — their PATH, toolchains and credentials are already live. Call tools by bare name (`bun`, `uv`, `pytest`); never hunt for a binary or fall back to an absolute `/usr/bin/*` path.
 - Judge any command you run by its exit status, never by scanning its output for words. `error` or `not found` inside passing output is text, not a failure.
 - Do not implement anything.
+- Do not commit, stage, or switch branches. Code commits your work after its checks pass, and SSSF undoes a commit you make yourself.
 
 ## Subagents
 

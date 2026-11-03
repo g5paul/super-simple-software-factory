@@ -15,9 +15,12 @@ they had one (SSSF_NEXT_SHELL_PREFIX).
 
 Claude Code wraps the agent's command in its own shell line, which ends
 `&& eval '<command>' < /dev/null && pwd -P ...`. The patterns are searched in
-that command. A line in another shape is searched whole, so a change in
-Claude Code's wrapping still refuses, at worst on a false match. SSSF's
-stream check stays the backstop either way.
+that command. A line in another shape is searched whole, and so is each
+`eval '...'` argument in it, unquoted, so a pattern anchored to the start of
+a command still finds one. Keep this docstring free of backslashes: a
+warning on stderr would come before the refusal and hide it. A change in Claude
+Code's wrapping can still make a pattern miss, and SSSF's stream check stays
+the backstop either way.
 """
 
 from __future__ import annotations
@@ -31,25 +34,33 @@ import sys
 REFUSED = "SSSF refused this command"     # rules.REFUSED; the stream check looks for it
 EXIT = 126
 EVAL = re.compile(r"&& eval (.*) < /dev/null && pwd -P", re.S)
+ANY_EVAL = re.compile(r"\beval\s+('(?:[^']|'\\'')*')")   # one single-quoted eval argument
 
 
-def command(line: str) -> str:
-    """The agent's own command inside Claude Code's shell line."""
+def _unquote(word: str) -> str | None:
+    try:
+        return " ".join(shlex.split(word))
+    except ValueError:
+        return None
+
+
+def commands(line: str) -> list[str]:
+    """The agent's own command inside Claude Code's shell line or, for a line
+    in another shape, the whole line and every eval argument in it."""
     found = EVAL.search(line)
     if found:
-        try:
-            return " ".join(shlex.split(found.group(1)))
-        except ValueError:
-            pass
-    return line
+        own = _unquote(found.group(1))
+        if own is not None:
+            return [own]
+    return [line, *filter(None, (_unquote(m.group(1)) for m in ANY_EVAL.finditer(line)))]
 
 
 def refusal(line: str, rules: list[dict]) -> str | None:
-    text = command(line)
+    texts = commands(line)
     for rule in rules:
         for pattern in rule.get("forbid") or []:
             try:
-                hit = re.search(pattern, text)
+                hit = any(re.search(pattern, text) for text in texts)
             except re.error:
                 continue
             if hit:

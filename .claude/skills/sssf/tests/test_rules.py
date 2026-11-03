@@ -343,3 +343,12 @@ def test_the_prefix_hands_on_to_an_operators_own(tmp_path):
     audit.chmod(0o755)
     done = prefix(claude_line("echo hi"), "[]", SSSF_NEXT_SHELL_PREFIX=str(audit))
     assert done.stdout.strip().endswith("hi") and "eval" in (tmp_path / "audited").read_text()
+
+
+def test_an_anchored_pattern_finds_the_command_in_a_line_of_another_shape():
+    # From yt-summarizer: `gh` follows `eval '`, so the whole line alone misses it.
+    anchored = json.dumps([{"rule": "No gh writes.", "forbid": [r"(^|[;&|(`]\s*)gh\s+pr\s+create\b"]}])
+    line = f"source snap.sh; eval {shlex.quote('gh pr create --fill')}; pwd -P"
+    assert prefix(line, anchored).returncode == 126
+    assert prefix(claude_line("gh pr create --fill"), anchored).returncode == 126
+    assert prefix(claude_line("echo gh pr create"), anchored).returncode == 0

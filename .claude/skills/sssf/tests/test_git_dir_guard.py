@@ -447,7 +447,7 @@ def test_a_hooks_path_at_the_root_refuses_the_run(repo, hooks_path):
 
 # ── seventh bypass-reviewer pass: a link on the way, pointed elsewhere ──────
 
-def test_a_retargeted_config_dir_link_is_put_back(repo, home, tmp_path):
+def test_a_retargeted_config_dir_link_is_reported_not_written(repo, home, tmp_path):
     dot = tmp_path / "dotfiles"
     (dot / "git").mkdir(parents=True)
     (dot / "git" / "config").write_text("")
@@ -460,10 +460,8 @@ def test_a_retargeted_config_dir_link_is_put_back(repo, home, tmp_path):
     (home / ".config").unlink()
     (home / ".config").symlink_to(evil)
     assert permissions.git_dir_changed(guard)
-    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
         permissions.restore_git_dir(run, guard)
-    assert os.readlink(home / ".config") == str(dot)
-    assert "PWNED" not in git(repo, "config", "--list")
 
 
 def test_a_retargeted_home_link_is_seen(repo, tmp_path, monkeypatch):
@@ -480,9 +478,8 @@ def test_a_retargeted_home_link_is_seen(repo, tmp_path, monkeypatch):
     (evil / ".gitconfig").write_text("[core]\n\thooksPath = /evil\n")
     link.unlink()
     link.symlink_to(evil)
-    with pytest.raises(permissions.PermissionBreach):
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
         permissions.restore_git_dir(run, guard)
-    assert os.readlink(link) == str(real)
 
 
 def test_a_retargeted_dot_git_link_is_seen(tmp_path):
@@ -499,9 +496,8 @@ def test_a_retargeted_dot_git_link_is_seen(tmp_path):
     plant_hook(copy / "hooks")
     (root / ".git").unlink()
     (root / ".git").symlink_to(copy)
-    with pytest.raises(permissions.PermissionBreach):
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
         permissions.restore_git_dir(run, guard)
-    assert os.readlink(root / ".git") == str(store)
 
 
 def test_a_retargeted_hooks_path_link_is_seen(repo, tmp_path):
@@ -516,10 +512,8 @@ def test_a_retargeted_hooks_path_link_is_seen(repo, tmp_path):
     plant_hook(evil)
     link.unlink()
     link.symlink_to(evil)
-    with pytest.raises(permissions.PermissionBreach):
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
         permissions.restore_git_dir(run, guard)
-    assert os.readlink(link) == str(good)
-    assert commit_runs_no_hook(repo)
 
 
 def test_a_latin1_include_path_does_not_stop_the_run(repo):
@@ -572,7 +566,7 @@ def test_a_restore_keeps_nested_home_links(repo, tmp_path, monkeypatch, locked):
         (tmp_path / "homes").chmod(0o755)
 
 
-def test_a_retargeted_inner_link_is_put_back(repo, tmp_path, monkeypatch):
+def test_a_retargeted_inner_link_is_reported_not_written(repo, tmp_path, monkeypatch):
     link, real, dot = nested_home(tmp_path, monkeypatch)
     run = SimpleNamespace(repo_root=repo)
     guard = permissions.guard_git_dir(run)
@@ -581,10 +575,8 @@ def test_a_retargeted_inner_link_is_put_back(repo, tmp_path, monkeypatch):
     (evil / "git" / "config").write_text("[core]\n\tfsmonitor = touch PWNED\n")
     (real / ".config").unlink()
     (real / ".config").symlink_to(evil)
-    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
         permissions.restore_git_dir(run, guard)
-    assert os.readlink(link) == str(real)
-    assert os.readlink(real / ".config") == str(dot)
 
 
 def test_a_parent_swapped_under_a_relative_link_is_seen(repo, tmp_path, monkeypatch):
@@ -605,3 +597,23 @@ def test_a_parent_swapped_under_a_relative_link_is_seen(repo, tmp_path, monkeypa
     assert permissions.git_dir_changed(guard)
     with pytest.raises(permissions.PermissionBreach):
         permissions.restore_git_dir(run, guard)
+
+
+
+def test_nothing_is_written_through_a_link(repo, tmp_path, monkeypatch):
+    """n3 in the ninth pass: the old restore remade a link inside a folder the
+    agent swapped in. Links are now never written."""
+    link, real, dot = nested_home(tmp_path, monkeypatch)
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evil"
+    evil.mkdir()
+    (real / ".config").unlink()
+    (real / ".config").symlink_to(evil)
+    plant_hook(repo / ".git" / "hooks")
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert ".config" in str(caught.value)
+    assert os.readlink(real / ".config") == str(evil)      # reported, not touched
+    assert list(evil.iterdir()) == []                      # nothing written into it
+    assert commit_runs_no_hook(repo)                       # the plain hook still went back

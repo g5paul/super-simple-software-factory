@@ -174,9 +174,13 @@ commands, `git config --global core.hooksPath` points every commit at the
 agent's hooks, and a line in `info/exclude` would hide a new file from the
 change-set. A breach here doesn't skip the other checks: an agent's own commit
 is still undone and its other writes still rolled back, and the breach names
-both. An agent that fails is put back the same way. If a path can't be put
-back, such as a file changed through a symlinked `~/.gitconfig`, the run says
-so and names it. No agent has a reason to write there: SSSF does the
+both. An agent that fails is put back the same way. SSSF also notices
+when a symlink on the way to one of these paths, such as a symlinked
+`~/.config`, `HOME` or `.git`, now points somewhere else. It reports a change
+made through or to a symlink and stops the run, but never writes it back,
+since writing there could land in a folder the agent chose. The breach says
+"NOT all put back" and names the path, so check it by hand before your next
+git command in the repo. No agent has a reason to write there: SSSF does the
 committing.
 
 Two costs. An edit you make to your git config while an agent runs is put back

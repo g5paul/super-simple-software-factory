@@ -165,21 +165,11 @@ fi
 # the agent doesn't run, and a follow pack is compared as far as it goes.
 PACK_CAP = 16 * 1024 * 1024
 
-# Puts back what changed, and only that. First each changed link, outermost
-# first, made again with ln -s from its saved target (tar can't put back a link
-# inside another link). Then each changed path: removed, and unpacked from the
-# saved stream in the file SSSF just wrote. Links are never removed with
-# rm -rf, and unchanged paths are never touched. The exit code is not trusted;
-# the restore compares again afterwards.
-# Args: file, number of links, then link/target pairs, then the changed paths.
-_UNPACK = """f=$1; n=$2; shift 2
-i=0
-while [ $i -lt $n ]; do
-  l=$1; t=$2; shift 2
-  if [ -d "$l" ] && [ ! -L "$l" ]; then rm -rf "$l"; else rm -f "$l"; fi
-  ln -s "$t" "$l" || failed=1
-  i=$((i+1))
-done
+# Puts back the changed paths, and only those. Each is a physical path with no
+# symlink in it, checked just before this runs, so rm -rf and tar act where
+# the path was when the agent started. Links are never written. The exit code
+# is not trusted; the restore compares again afterwards.
+_UNPACK = """f=$1; shift
 for p in "$@"; do rm -rf "$p" || failed=1; done
 for p in "$@"; do
   base64 -d < "$f" | tar -xpf - -C / "${p#/}" 2>/dev/null
@@ -405,7 +395,17 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     if not changed and guard.get("seen"):
         changed = ["(a watched path, changed while the agent ran and changed back since)"]
     restored = True
-    if changed:
+    # Narrow on purpose: a change that went through a symlink is reported and
+    # stops the run, but nothing is written through or to a link. Writing
+    # there can land in a folder the agent chose. Only physical paths that
+    # still resolve to themselves are put back.
+    paths = [p for p in guard["paths"] if p in changed]
+    if paths:
+        now = _sh(_REAL, *paths).stdout.split("\0")[:len(paths)]
+        paths = [p for p, r in zip(paths, now) if r in ("", p)]
+    if changed and not paths:
+        restored = False
+    if paths:
         box = sandbox.current()
         made = box.run(["mktemp"])
         held = made.stdout.strip()
@@ -415,20 +415,15 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
             held = made.stdout.strip()
         if made.returncode == 0 and held.startswith("/"):
             box.write_text(held, guard["plain"])
-            saved = _members(guard["plain"])
-            moved = sorted((q for q in guard.get("links", []) if q in changed
-                            and (saved.get(q.lstrip("/")) or ("",))[0] == b"2"),
-                           key=lambda q: q.count("/"))
-            pairs = [x for q in moved for x in (q, saved[q.lstrip("/")][2])]
-            paths = [p for p in guard["paths"] if p in changed]
-            _sh(_UNPACK, held, str(len(moved)), *pairs, *paths)
+            _sh(_UNPACK, held, *paths)
         restored = _differs(guard) == []
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]
     if changed and (breach or not restored):
         outcome = ("put back as they were" if restored else
-                   "NOT all put back. Check them by hand before the next git command in "
-                   "this repo; a path changed through a symlink is only reported")
+                   "NOT all put back. A change through a symlink is reported, never "
+                   "written back, so check these by hand before the next git command "
+                   "in this repo")
         raise PermissionBreach(
             "The agent changed the git directory or the git config, which no agent may "
             "write: hooks and config there run code on later git commands. "

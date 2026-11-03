@@ -24,6 +24,18 @@ Since 2026-11-03 the engineer's user settings, `~/.claude/settings.json`, deny t
 
 A session that tries one is refused; `git push --help` was refused when they went in. The engineer stays logged in to `gh`, which is also git's credential helper for github.com, and pushes by running the command themselves (`! git push ...` in a session, or a terminal). The rules match commands as written, so they stop pushes nobody asked for, not a session set on getting around them, such as one that pushes from inside a script. They are not checked under SSSF agents' `--safe-mode`; each repo's `agent_rules` cover those. Remove the block when the hold lifts, or keep it so every push stays a person's.
 
+## What a push would publish
+
+On 2026-11-03 the hub's full history and the three project repos' (every branch) were scanned for secret-shaped strings, sensitive files and personal details.
+
+- **No secrets anywhere.** Every key-shaped string was a variable name, like `OPENAI_API_KEY`, or a test fake, like `sk-ant-oat-test`. No `.env`, key file, `auth.json`, token file or trace database was ever committed, and all four repos ignore `.env` and `sssf.db`.
+- **No work email, home path or machine name** in any tracked file.
+- **The hub** commits as `g5paul@users.noreply.github.com`, on every commit of the engineer's.
+- **The projects' commit email.** yt-summarizer, fusion-harness and pi-agent-observability are public forks too, each with its own `origin`. Their local commits carry the engineer's Gmail address: 183, 30 and 88 commits. None is on GitHub yet. Since 2026-11-03 each repo's own git config uses the noreply address, so new commits, SSSF agents' included, carry that. Before a first push, the old commits need their author rewritten to the noreply address, which changes every commit ID; each repo's session does that, once, just before the push.
+- **The backstop.** The engineer's GitHub account has "Block command line pushes that expose my email" on, so GitHub refuses a push carrying the Gmail address.
+- **The global git email** is still the Gmail address, so a new repo on this machine commits with it until it gets its own setting.
+- **Not secret, but public once pushed:** the hub's docs name the project repos and describe their agent rules, run IDs and VM names.
+
 ## What can't be undone
 
 - **A fork of a public repo can't be made private.** GitHub locks its visibility while it's in the parent's fork network.

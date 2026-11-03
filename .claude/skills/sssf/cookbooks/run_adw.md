@@ -120,7 +120,8 @@ uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or e2b, or none for this
 - Both need the engineer's own Claude token in `~/.config/sssf-sandbox/token.env`, and `ANTHROPIC_API_KEY` must not be set. Vercel needs `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` in `.env`; E2B needs `E2B_API_KEY`. Never read these files' values; check them by key name.
 - E2B makes the VM from SSSF's `sssf` template, which the engineer builds once per E2B team with `uv run <skill>/scripts/e2b_template.py` from a repo whose `.env` has the key. If E2B says the template doesn't exist, tell the engineer that; don't build it yourself.
 - If the provider won't make the VM, for example past Vercel's Hobby allowance or E2B's credit, the run stops in its `sandbox` phase with the provider's message. Report that message. Don't rerun without `--sandbox` or with `--sandbox none`, and don't switch providers unless the engineer says to.
-- Report the VM name and VM seconds from the `sandbox_end` event with the run's other results, and on E2B its `vm_cost_usd` estimate too.
+- Report the VM name, VM seconds and `cpu_seconds` from the `sandbox_end` event with the run's other results, and on E2B its `vm_cost_usd` estimate too.
+- When the engineer asks what VM runs have used of the providers' free allowances, run `just sandbox-usage`, naming other repos' `adws/adw_data/sssf.db` if they share the account. It counts SSSF's runs only; the provider's dashboard is the bill.
 
 ## Observe
 

@@ -92,6 +92,13 @@ Decision 4's `sandbox:` setting, built after both providers:
 - **`none`, not `null`.** The setting and the flag share one word for the host, so `--sandbox none` reads like the setting it overrides.
 - **Only the four chains that take `--sandbox` read it.** The single-phase chains, tickets and trials don't, so a repo with `sandbox: e2b` still runs them on the host.
 
+## As built: usage
+
+- **CPU comes from the VM itself.** Neither SDK reports active CPU, so the runner reads `/proc/stat` at open, before each refresh and at close, and adds each session's busy seconds: user, nice, system, irq, softirq and steal, over all vCPUs. Time waiting on I/O is left out, as Vercel leaves it out of active CPU. A count lower than its base means the VM booted again. A failed reading makes the run's `cpu_seconds` null, never a guess.
+- **Vercel's `sandbox_end` adds `memory_gb_hours`,** from the VM's size and seconds. Hobby counts memory busy or idle.
+- **`just sandbox-usage` adds up traces.** An allowance belongs to a team, and each repo keeps its own trace, so it takes other repos' traces too. It counts Vercel over the last 30 days and E2B over all time, against the Hobby numbers in `sandbox_usage.py`.
+- **First numbers.** A full `adw_simple_sdlc` on Vercel used 12.7 CPU seconds in 130 VM seconds, about 10% of one vCPU, because the agents spend most of a run waiting on the model. At that rate Vercel's 5 hours covers well over a thousand runs a month, and its 420 GB-hours about 2,900. A repo whose tests take longer will use more.
+
 ## As built: E2B
 
 Step 3 kept everything above and settled this:
@@ -136,3 +143,4 @@ Step 3 kept everything above and settled this:
 | 2026-11-02 | sssf-sandbox | E2B cases 2 and 5: 79b3f7e5 and bda89502 at once, 4-minute sessions | both passed, 15 of 15 and 12 of 12 phases; 79b3f7e5 refreshed once; no VMs left. The second merge conflicted in CHANGELOG and README and was discarded |
 | 2026-11-02 | yt-summarizer | first project run on E2B: 7337d8da, `yts --usage` by model and effort | 15 of 15 phases, $1.46, 3 commits back, 333 VM seconds, $0.0153 VM estimate. The VM's Python 3.11 against the host's 3.13 cost a fix round; fixed by passing the host's choice as `UV_PYTHON` |
 | 2026-11-02 | sssf-sandbox | repo.yaml `sandbox: e2b`, no flag: build_test run 9435413c | went to E2B VM i02iyvgotfev649b32sfx on Python 3.13, 5 of 5 phases, $0.04, 21.9 VM seconds. The chain doesn't commit, so the work came back as the patch. Discarded, and the setting put back to `none` |
+| 2026-11-03 | sssf-sandbox | `cpu_seconds` on both providers: build_test b9bc57f9 on Vercel and c23224a7 on E2B, then simple_sdlc 3753ce47 on Vercel | b9bc57f9 5.0 CPU seconds in 18.4 VM seconds, 0.02 GB-hours; c23224a7 4.6 in 20.0, $0.0009; 3753ce47 12 of 12 phases, $0.45, 12.7 in 129.5, 0.144 GB-hours. All three discarded. `just sandbox-usage` over sssf-sandbox's and yt-summarizer's traces added them up |

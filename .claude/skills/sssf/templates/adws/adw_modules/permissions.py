@@ -138,7 +138,9 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
 # SSSF, so a determined one could still get past it, for example by killing
 # the chain before the check runs. --sandbox and --container isolate.
 
-GIT_WATCHED = ("hooks", "info", "config", "config.worktree", "commondir")
+# info/refs is left out: git gc and repack rewrite it, and it runs nothing.
+GIT_WATCHED = ("hooks", "info/exclude", "info/attributes", "info/sparse-checkout",
+               "info/grafts", "config", "config.worktree", "commondir")
 
 # Packs the watched paths that exist, relative to /. With "h", follows
 # symlinks, so a write through a linked ~/.gitconfig shows; that pack is only
@@ -152,11 +154,16 @@ shift $n
 [ $# = 0 ] && exit 0
 cd / || exit 1
 if [ "$h" = h ]; then
-  tar -chf - "$@" 2>/dev/null | base64
+  tar -chf - "$@" 2>/dev/null | head -c $PACK_CAP | base64
 else
-  { tar -cf - "$@" || echo "tar failed" >&2; } | base64
+  { tar -cf - "$@" || echo "tar failed" >&2; } | head -c $((PACK_CAP + 1)) | base64
 fi
 """
+
+# A symlink to / in hooks would have the follow pack read the whole disk.
+# Each pack stops at this size; a plain pack over it can't be saved whole, so
+# the agent doesn't run, and a follow pack is compared as far as it goes.
+PACK_CAP = 16 * 1024 * 1024
 
 # Removes every watched path, carrying on past a failure, then unpacks the
 # saved stream from the file SSSF just wrote, and deletes that file.
@@ -198,13 +205,19 @@ def _watched(run) -> list[str]:
             return f"{home[0]}/{path[2:]}"
         return path if path.startswith("/") else f"{beside.rsplit('/', 1)[0]}/{path}"
 
-    fields = _git(["config", "--list", "--show-origin", "-z"], root).split("\0")
+    listed = sandbox.current().run(["git", "config", "--list", "--show-origin", "-z"],
+                                   cwd=root, text=False).stdout
+    if isinstance(listed, bytes):     # a Latin-1 name in a config must not stop the run
+        listed = listed.decode("utf-8", "surrogateescape")
+    fields = listed.split("\0")
     for origin, entry in zip(fields[::2], fields[1::2]):
         if not origin.startswith("file:"):
             continue
         source = absolute(origin[5:], f"{root}/x")
         paths.append(source)
         key, _, value = entry.partition("\n")
+        if key.lower() == "core.excludesfile":
+            paths.append(absolute(value, source))
         if key.lower() == "include.path" or (key.lower().startswith("includeif.")
                                              and key.lower().endswith(".path")):
             paths.append(absolute(value, source))
@@ -212,14 +225,17 @@ def _watched(run) -> list[str]:
     if hooks.startswith("/"):
         paths.append(hooks)
     if home:
-        paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git/config", f"{home[1]}/git/attributes"]
+        paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git/config",
+                  f"{home[1]}/git/attributes", f"{home[1]}/git/ignore"]
     return [p for p in dict.fromkeys(paths)
-            if p.startswith("/") and "/credentials" not in p and "\n" not in p]
+            if p.startswith("/") and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:
-    done = _sh(_PACK, "h" if follow else "-", *paths)
+    done = _sh(f"PACK_CAP={PACK_CAP}\n" + _PACK, "h" if follow else "-", *paths)
     if done.returncode != 0 or "tar failed" in done.stderr:
+        return None
+    if not follow and len(done.stdout) * 3 // 4 > PACK_CAP + 3:
         return None
     return done.stdout
 
@@ -228,10 +244,15 @@ def _members(packed: str) -> dict[str, tuple]:
     """Each member's type, mode, link target and bytes. Not its mtime or owner."""
     import base64, io, tarfile
     found = {}
-    with tarfile.open(fileobj=io.BytesIO(base64.b64decode(packed)), mode="r:") as tar:
-        for m in tar:
-            data = tar.extractfile(m).read() if m.isfile() else b""
-            found[m.name.rstrip("/")] = (m.type, m.mode, m.linkname, data)
+    if not packed:
+        return found
+    try:
+        with tarfile.open(fileobj=io.BytesIO(base64.b64decode(packed)), mode="r:") as tar:
+            for m in tar:
+                data = tar.extractfile(m).read() if m.isfile() else b""
+                found[m.name.rstrip("/")] = (m.type, m.mode, m.linkname, data)
+    except (tarfile.TarError, OSError):
+        found["(cut off at the cap)"] = (len(found),)    # a cut pack compares by what it read
     return found
 
 
@@ -287,9 +308,15 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     restored = True
     if changed:
         box = sandbox.current()
-        held = box.run(["mktemp"]).stdout.strip()
-        box.write_text(held, guard["plain"])
-        _sh(_UNPACK, held, *guard["paths"])
+        made = box.run(["mktemp"])
+        held = made.stdout.strip()
+        if made.returncode != 0 or not held.startswith("/"):
+            made = box.run(["mktemp", _git(["rev-parse", "--path-format=absolute", "--git-dir"],
+                                           run.repo_root).strip() + "/sssf.XXXXXX"])
+            held = made.stdout.strip()
+        if made.returncode == 0 and held.startswith("/"):
+            box.write_text(held, guard["plain"])
+            _sh(_UNPACK, held, *guard["paths"])
         restored = _differs(guard) == []
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]

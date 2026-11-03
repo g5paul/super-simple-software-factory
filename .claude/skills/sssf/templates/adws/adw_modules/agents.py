@@ -301,8 +301,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             # Gates run git, and git would run a hook or fsmonitor the agent
             # planted. A changed git directory skips the gates; the check below
             # puts it back and stops the run.
-            if permissions.git_dir_changed(git_before):
-                break
+            try:
+                if permissions.git_dir_changed(git_before):
+                    break
+            except Exception:
+                break                       # the check below reports it
             violations = []
             for gate in call.gates:
                 report = _as_report(gate(envelope, run))
@@ -343,6 +346,10 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                 permissions.restore_git_dir(run, git_before)
             except permissions.PermissionBreach as found:
                 git_breach = found
+            except Exception as failed:     # any guard error still gets undo and enforce
+                git_breach = permissions.PermissionBreach(
+                    f"Could not check or put back the git directory and git config: {failed!r}. "
+                    "Check them by hand before the next git command in this repo.")
             try:
                 undone = permissions.undo_commits(run, head_before)
                 if undone:

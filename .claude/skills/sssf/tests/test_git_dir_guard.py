@@ -290,3 +290,86 @@ def test_git_dir_changed_runs_no_restore(repo):
     assert (repo / ".git" / "hooks" / "pre-commit").exists()
     with pytest.raises(permissions.PermissionBreach):
         permissions.restore_git_dir(run, guard)
+
+
+# ── third bypass-reviewer pass ──────────────────────────────────────────────
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes anywhere")
+def test_an_unwritable_tmpdir_still_restores(repo, tmp_path, monkeypatch):
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    plant_hook(repo / ".git" / "hooks")
+    tmp.chmod(0o500)
+    try:
+        with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+            permissions.restore_git_dir(run, guard)
+    finally:
+        tmp.chmod(0o755)
+    assert commit_runs_no_hook(repo)
+    assert not list((repo / ".git").glob("sssf.*"))
+
+
+def test_a_symlink_to_a_big_tree_is_cut_off(repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
+    big = tmp_path / "big"
+    big.mkdir()
+    (big / "blob").write_bytes(os.urandom(1024 * 1024))
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    (repo / ".git" / "hooks" / "zz").symlink_to(big)
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)
+    assert not (repo / ".git" / "hooks" / "zz").exists()
+
+
+def test_a_repo_path_naming_credentials_is_still_guarded(tmp_path):
+    root = tmp_path / "credentials-api"
+    root.mkdir()
+    git(root, "init", "-qb", "main")
+    guard = permissions.guard_git_dir(SimpleNamespace(repo_root=root))
+    assert any(p.endswith("/hooks") for p in guard["paths"])
+
+
+def test_a_latin1_config_does_not_stop_the_run(repo, home):
+    with open(home / ".gitconfig", "ab") as f:
+        f.write(b"[alias]\n\tcafe = log --author=Ren\xe9\n")
+    guard = permissions.guard_git_dir(SimpleNamespace(repo_root=repo))
+    assert permissions.restore_git_dir(SimpleNamespace(repo_root=repo), guard) == []
+
+
+@pytest.mark.parametrize("where", ["xdg", "excludesfile"])
+def test_a_global_ignore_file_is_watched(repo, home, where):
+    if where == "excludesfile":
+        (home / ".gitignore_global").write_text("")
+        git(repo, "config", "--global", "core.excludesFile", str(home / ".gitignore_global"))
+        target = home / ".gitignore_global"
+    else:
+        target = home / ".config" / "git" / "ignore"
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("adws/evil.py\n")
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)
+    assert not target.exists() or target.read_text() == ""
+
+
+def test_git_gc_is_not_a_breach(repo):
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    git(repo, "gc", "-q")
+    git(repo, "repack", "-adq")
+    assert permissions.restore_git_dir(run, guard) == []
+
+
+def test_any_guard_error_still_runs_undo_and_enforce():
+    text = (SKILL / "templates" / "adws" / "adw_modules" / "agents.py").read_text()
+    check = text.index("permissions.restore_git_dir(run, git_before)")
+    assert text.index("except Exception as failed:", check) \
+        < text.index("permissions.undo_commits(run, head_before)", check)
+    loop = text.index("permissions.git_dir_changed(git_before)")
+    assert "except Exception:" in text[loop:loop + 200]

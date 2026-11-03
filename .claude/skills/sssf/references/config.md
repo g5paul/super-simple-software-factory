@@ -162,7 +162,8 @@ Before each agent, SSSF saves `hooks/`, `info/`, `config`, `config.worktree`
 and `commondir` in the repo's git directory, and in a worktree run the shared
 one's too. It also saves every git config file git loads in the repo, any file
 an `include` names, the directory `core.hooksPath` points at, and
-`~/.gitconfig` and `~/.config/git/config` even before they exist. It never
+`~/.gitconfig`, `~/.config/git/config` and the global ignore files even
+before they exist. It never
 saves the credential store. The copy is held in the SSSF process, not on disk,
 so the agent can't edit it.
 
@@ -185,7 +186,10 @@ agent runs it; run those in `worktree_setup`, which runs before the agents.
 
 The check catches mistakes and casual attempts. An agent runs as your user, so
 a determined one could still get past it, for example by killing the chain
-before the check runs. `--sandbox` and `--container` isolate the run.
+before the check runs, or by leaving a process behind that writes later. It
+also doesn't watch a submodule's git directory, the index's
+`--skip-worktree` flag, or the other name of a hard-linked `~/.gitconfig`.
+`--sandbox` and `--container` isolate the run.
 
 The run stops there, so the agent's permitted changes are never verified,
 reviewed, or committed. The breach message lists them as left uncommitted, for

@@ -264,6 +264,12 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                          payload={"agent": agent.name, "provider": "openai",
                                                   "error": str(stop)}))
             raise
+        if result.leftovers_stopped:
+            # Not a failure: the agent had answered. Logged so the trace says
+            # why a background command it started never finished.
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="leftovers_stopped",
+                                         payload={"agent": agent.name, "minutes": quiet}))
         run.add_usage(result.tokens, result.cost)
         spent.merge(result.usage)
         warn_unlisted(run, phase, agent.name, result.models)

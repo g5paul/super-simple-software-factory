@@ -407,6 +407,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
         stop.partial = result           # pi priced every turn so far
         raise stop
+    result.leftovers_stopped = dog.fired
     if last_stop == "error" and USAGE_LIMIT in last_error:
         raise UsageLimitStop(
             f"The ChatGPT plan behind pi's sign-in hit its usage limit ({USAGE_LIMIT}). "

@@ -568,3 +568,6 @@ class AgentResult(BaseModel):
     # killed before its final result: `cost` is then SSSF's list-price estimate.
     cost_reported: bool = True
     models: list[str] = []          # every model that answered, subagents' included
+    # True when the agent had sent its result but stayed alive, quiet, and the
+    # watchdog stopped what was left (silence.py). The result stands.
+    leftovers_stopped: bool = False

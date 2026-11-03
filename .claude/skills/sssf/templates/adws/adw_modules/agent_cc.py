@@ -357,6 +357,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
         stop.partial = _partial(turns, output)
         raise stop
+    result.leftovers_stopped = dog.fired
     if not final:
         raise RuntimeError(f"claude exited {result.returncode} without a result: "
                            f"{stderr.strip()[-800:]}")

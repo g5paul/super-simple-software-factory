@@ -30,6 +30,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 - **Claude's usage windows.** A run stops before a Claude agent starts when a window is past `rate_limit_stop`, or when the account has moved on to usage credits. A call already running is stopped the moment Claude reports credits in use.
 - **Caps in dollars.** `max_run_cost` and `max_call_cost` in the roster cap one run and one agent call. `max_live_cost` and `max_daily_cost` in repo.yaml cap what the repo's live runs spend together and what it spends in a day. `max_daily_cost` in `~/.config/sssf/limits.yaml` caps the whole machine's day. Design: [parallel-worktree-runs.md](designs/parallel-worktree-runs.md).
 - **The ChatGPT plan's limit.** That route sends no usage windows, so a pi run stops by name on the plan's 429. Design: [pi-usage-stop.md](designs/pi-usage-stop.md). Research: [pi-usage-limits.md](research/pi-usage-limits.md).
+- **Agents that go quiet.** An agent that writes nothing for `max_silence_minutes` in repo.yaml, 15 by default, is stopped with the run. A hang spends nothing, so the caps above never catch it. Design: [silent-agents.md](designs/silent-agents.md).
 - **Pricing.** A killed Claude call is priced from the output counts it streamed. `prices.json` holds Claude's list prices, a run and the dashboard warn about a model it doesn't list, and `scripts/check_prices.py` compares it with claude.com/pricing.
 
 ### A branch per run, and runs in parallel
@@ -74,3 +75,4 @@ A code change is committed under the first build's message, not the last repair'
 |---|---|---|
 | 2026-11-02 | 901e7f4 | First write, covering the fork from de31374 |
 | 2026-11-03 | 247ebda | Remote VMs, the ChatGPT roster in them, the VM tool check, and the pre-push secret scan |
+| 2026-11-03 | 448e88c | The installer stamps the pre-push hook; agents that go quiet are stopped |

@@ -209,7 +209,7 @@ def test_a_finished_claude_code_agent_keeps_its_result_and_its_leftovers_go(tmp_
     began = time.monotonic()
     result = agent_cc.run(request(tmp_path, max_silence_seconds=60))
     assert time.monotonic() - began < 10       # the grace, not the minute
-    assert result.text == "done"
+    assert result.text == "done" and result.leftovers_stopped
     time.sleep(0.2)
     assert not alive(int(pid_file.read_text()))
 
@@ -249,6 +249,7 @@ def test_a_result_while_a_background_task_runs_waits_the_full_limit(tmp_path, li
     waited = time.monotonic() - began
     assert waited >= 3                 # not cut to the grace
     assert result.text == "done"       # and still not a failure
+    assert result.leftovers_stopped
     time.sleep(0.2)
     assert not alive(int(pid_file.read_text()))
 

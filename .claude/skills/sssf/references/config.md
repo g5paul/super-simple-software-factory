@@ -226,6 +226,15 @@ This fails quietly. The extension still loads, the run still succeeds, and the t
 
 Rule: **every entry in `harness_engineering` that registers a tool must have that tool name added to the agent's `tools` list.** Adding an extension is therefore a two-line change, never one. The alternative is dropping the `tools` key *and* leaving `defaults.tools` unset so the agent resolves to `None` (all tools) — but with a roster-wide `defaults.tools` in place, that escape hatch is closed; naming the tool is the only path.
 
+## Agents that go quiet — `max_silence_minutes`
+
+`max_silence_minutes` in `repo.yaml` stops an agent that writes nothing for that long, and fails the run with `SilentStop` and an `agent_silent` event. A hung agent spends nothing, so no cost cap catches it, and it holds its run and its worktree slot. It's on at 15 by default; `null` turns it off. Every line the agent writes resets the timer, on this machine and in a VM.
+
+- **Claude Code** sends a heartbeat about every 30 seconds while a tool runs, and its Bash calls end within 10 minutes on their own. A stop there means the CLI itself stalled.
+- **pi** streams only what a command prints, with no time limit on a command. A pi agent stuck on a command that prints nothing, such as a server started in the foreground, is the usual stop.
+- **After the result.** An agent that has sent its result but stays alive gets 30 seconds, then the watchdog kills what's left and the call keeps its result, with a `leftovers_stopped` event. A Claude Code result sent while a background command still runs isn't final: the CLI waits for the command, then opens a new turn. So that wait gets the full limit, and a stop after it keeps the latest result too.
+- **Raise it** when agents run quiet commands longer than 15 minutes, say a long build that prints nothing. Keep it above 10.
+
 ## Rules for every agent — `agent_rules`
 
 `agent_rules` in `adws/adw_sssf_config/repo.yaml`, not in the roster, lists rules every agent gets, whatever its role or roster. SSSF appends them to each agent's system prompt under `## This repo's rules`, so the saved `prompts/system.md` shows what the agent read. Putting a rule here instead of in each prompt file keeps the prompts unchanged, so updates don't flag every one for review.

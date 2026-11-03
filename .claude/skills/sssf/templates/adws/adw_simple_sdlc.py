@@ -87,7 +87,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     with run.phase(PhaseParams(name="plan", kind="agent", owner="planner",
                                description="Turn the request into an implementable plan")) as ph:
         plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
-                                 gates=[gates.artifacts_exist, gates.files_non_empty]))
+                                 gates=gates.PLAN))
 
     with run.phase(PhaseParams(name="commit_plan", kind="code", owner="git",
                                description="Put the spec on record before any code exists to blur it")) as ph:

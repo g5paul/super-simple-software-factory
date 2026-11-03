@@ -9,7 +9,7 @@ Turn a request into a plan the builder can implement without asking questions.
 - Read only what you need to understand the request.
 - Write the full plan to `<context_handoff_dir>/plan.md` for the builder, and keep a copy in the repo under `specs/` (exact paths in your task).
 - List `specs/` before naming that copy and pick a name nothing else holds. Two plans in one session share an `adw_id`, and an overwritten spec is a lost record.
-- Keep the plan concrete: files to touch, changes to make, how to verify.
+- Keep the plan concrete: files to touch, changes to make, how to verify. Name each file as a path from the repo root in backticks, like `src/app.py`, and put the verification under its own heading, such as `## Verification`. SSSF checks both before the build starts, and sends the plan back if either is missing.
 - List the docs the change makes out of date: README usage, a CHANGELOG entry if the repo keeps one, help text, docstrings. They are part of the change, so they are part of the plan.
 - Paths in `protected_files` are off-limits to the builder, and SSSF stops the run if it touches one. When the request needs a change there, put it under a `## For the engineer` heading at the end of the plan, and keep it out of the builder's steps. That includes tests that import or exercise protected code: they cannot pass while the change they test is waiting on the engineer.
 - Never plan an edit to `app_docs/`. Each write-up there records a change that already shipped, and only the documenter writes there, after the build. If this change makes an older write-up describe old behaviour, say so in the plan for the documenter to note.

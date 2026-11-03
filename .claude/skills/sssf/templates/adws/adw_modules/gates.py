@@ -6,11 +6,13 @@ session as a correction. Every check is recorded either way, so a green gate
 says WHAT it verified instead of only that it passed.
 
 Gates check what is mechanically checkable; plan quality is a reviewer's job.
+`plan_well_formed` checks a plan's form, not whether it's a good plan.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from . import sandbox
@@ -65,6 +67,62 @@ def diff_matches_claims(envelope: EnvelopeBase, run) -> GateReport:
         p = Path(f)
         found = sandbox.current().exists(p)
         report.check(f, found, f"exists, {_size(p)}" if found else "claimed changed file does not exist")
+    return report
+
+
+# A heading on how to prove the change works: "Verification", "Testing",
+# "How to verify", "Acceptance criteria", "Checks".
+VERIFY_HEADING = re.compile(r"^#+ .*(verif|validat|test|check|accept)", re.IGNORECASE | re.MULTILINE)
+# A backticked token that looks like a path: `src/app.py`, `src/app.py:12`, `src/`.
+PATH_TOKEN = re.compile(r"`([^`\s]*[/.][^`\s]*)`")
+
+
+def _names_a_real_file(text: str) -> str:
+    """The first backticked path that exists, or that would go in a folder
+    that exists. A new file at the root doesn't count on its own: `v1.2` and
+    `newthing.py` look the same."""
+    for token in PATH_TOKEN.findall(text):
+        path = Path(token.split(":")[0].rstrip("/") or ".")
+        if str(path) in (".", "..") or path.is_absolute():
+            continue
+        if sandbox.current().exists(path):
+            return token
+        if str(path.parent) != "." and sandbox.current().exists(path.parent):
+            return token
+    return ""
+
+
+def plan_well_formed(envelope: EnvelopeBase, run) -> GateReport:
+    """What the planner's prompt asks for, as far as code can see: the
+    builder's copy and the spec, the same text, a spec that overwrites no
+    earlier one, a way to verify, and a real file named. Each failure goes
+    back to the planner, so a malformed plan costs one turn, not a build."""
+    report = GateReport()
+    handoff = [a for a in envelope.artifacts if Path(a).name == "plan.md"]
+    specs = [a for a in envelope.artifacts if Path(a).parts[:1] == ("specs",)]
+    if not handoff or not specs:
+        missing = "plan.md in context_handoff_dir" if not handoff else "no copy under specs/"
+        return report.check("copies", False, f"declare both copies in artifacts: {missing}")
+    box = sandbox.current()
+    if not (box.is_file(Path(handoff[0])) and box.is_file(Path(specs[0]))):
+        return report.check("copies", False, "a declared copy is missing; artifacts_exist names it")
+    text = box.read_text(Path(handoff[0]))
+    same = box.read_text(Path(specs[0])) == text
+    report.check("copies", same, "plan.md and the spec match" if same else
+                 f"{specs[0]} differs from plan.md: copy the file, don't retype it")
+    tracked = box.run(["git", "ls-files", "--error-unmatch", "--", specs[0]],
+                      cwd=getattr(run, "repo_root", None)).returncode == 0
+    report.check("spec", not tracked, "a new spec" if not tracked else
+                 f"{specs[0]} is an earlier, committed spec; restore it with git checkout and "
+                 "use the next free name, _v2, _v3")
+    verify = VERIFY_HEADING.search(text)
+    report.check("verify", bool(verify), f"has {verify.group(0).strip()!r}" if verify else
+                 "no section on how to verify: add a heading such as '## Verification' with the "
+                 "commands that prove the change works")
+    named = _names_a_real_file(text)
+    report.check("files", bool(named), f"names {named}" if named else
+                 "names no file or folder that exists in the repo: name each file to touch, "
+                 "in backticks, as a path from the repo root")
     return report
 
 
@@ -128,6 +186,10 @@ def panel_complete(labels: list[str]):
 
     gate.__name__ = "panel_complete"
     return gate
+
+
+# Every planner call takes these.
+PLAN = [artifacts_exist, files_non_empty, plan_well_formed]
 
 
 def tests_pass(command: str):

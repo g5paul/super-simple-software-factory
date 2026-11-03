@@ -31,7 +31,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     with run.phase(PhaseParams(name="plan", kind="agent", owner="planner",
                                description="Turn the request into an implementable plan")) as ph:
         ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
-                          gates=[gates.artifacts_exist, gates.files_non_empty]))
+                          gates=gates.PLAN))
 
     return run.finish()
 

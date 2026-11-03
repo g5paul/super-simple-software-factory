@@ -5,6 +5,7 @@
 - **Set up once per clone:** `git config core.hooksPath .githooks`. Git doesn't run a repo's tracked hooks on its own, so a fresh clone has to opt in.
 - **gitleaks** 8.30.1 or later. On this machine it's in `~/.local/bin`, installed from its GitHub release after checking the release's SHA-256.
 - **Tested** by running the hook as git does, with ref lines on stdin. A clean commit and a clean new branch pass. A planted fake GitHub token is refused on an existing branch and on a new one. With gitleaks missing from `PATH`, the hook refuses.
+- **Private names.** The hook also refuses a push whose commits name a private project, in a message or a change, when `.git/sssf-private-names` lists it. In the hub, that keeps the records of private installs out of this public fork. [projects.md](projects.md#private-projects) says where they go.
 - **To push anyway,** `git push --no-verify` skips the hook. Use it only knowing nothing was scanned.
 
 ## Where it comes from

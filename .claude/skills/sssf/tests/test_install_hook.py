@@ -170,3 +170,45 @@ def test_a_push_with_a_secret_is_refused_and_says_where(pushed, new_branch):
     output = result.stdout + result.stderr
     assert "leak.env" in output
     assert token not in output
+
+
+# Private project names, listed in .git/sssf-private-names, never leave in a push.
+
+def names(clone: Path, text: str) -> None:
+    (clone / ".git" / "sssf-private-names").write_text(text)
+
+
+@pytest.mark.skipif(not GITLEAKS, reason="gitleaks isn't installed")
+@pytest.mark.parametrize("new_branch", [False, True])
+def test_a_push_naming_a_private_project_in_a_file_is_refused(pushed, new_branch):
+    names(pushed, "# private projects\nsecret-ledger\n\n")
+    commit(pushed, "notes.md", "Installed SSSF in Secret-Ledger today.\n")
+    result = push(pushed, new_branch=new_branch)
+    assert result.returncode == 1
+    assert "names a private project (secret-ledger" in result.stderr.lower()
+    assert git(pushed, "rev-parse", "--short", "HEAD") in result.stderr
+
+
+@pytest.mark.skipif(not GITLEAKS, reason="gitleaks isn't installed")
+def test_a_push_naming_a_private_project_in_a_message_is_refused(pushed):
+    names(pushed, "secret-ledger\n")
+    (pushed / "a.txt").write_text("fine\n")
+    git(pushed, "add", "a.txt")
+    git(pushed, "commit", "-qm", "Fix the watchdog, seen in secret-ledger")
+    assert push(pushed).returncode == 1
+
+
+@pytest.mark.skipif(not GITLEAKS, reason="gitleaks isn't installed")
+@pytest.mark.parametrize("listed", [None, "", "# only a comment\n\n"])
+def test_no_names_checks_nothing(pushed, listed):
+    if listed is not None:
+        names(pushed, listed)
+    commit(pushed, "a.txt", "anything at all\n")
+    assert push(pushed).returncode == 0
+
+
+@pytest.mark.skipif(not GITLEAKS, reason="gitleaks isn't installed")
+def test_a_push_without_the_names_passes(pushed):
+    names(pushed, "secret-ledger\nother-thing\n")
+    commit(pushed, "a.txt", "a public change\n")
+    assert push(pushed).returncode == 0

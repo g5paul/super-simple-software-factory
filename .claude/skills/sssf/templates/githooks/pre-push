@@ -9,6 +9,11 @@
 # git config core.hooksPath .githooks
 # It needs gitleaks 8.30.1 or later on PATH: https://github.com/gitleaks/gitleaks
 # More in SSSF's cookbooks/install.md, "Secret scan before every push".
+#
+# It also refuses a push whose commits name a private project, when the
+# clone lists them in .git/sssf-private-names, one per line, # for comments.
+# The list lives in .git, so it's never committed. Without it, nothing is
+# checked. Case is ignored.
 set -uo pipefail
 zero=0000000000000000000000000000000000000000
 if [ -n "${SSSF_ADW_ID:-}" ]; then
@@ -19,10 +24,23 @@ if ! command -v gitleaks >/dev/null; then
   echo "pre-push: gitleaks isn't installed, so this push is refused. Install gitleaks 8.30.1 or later (https://github.com/gitleaks/gitleaks), or push with --no-verify knowing nothing was scanned." >&2
   exit 1
 fi
+# The names, or nothing. An empty list would match every line.
+names_file="$(git rev-parse --git-common-dir)/sssf-private-names"
+names=""
+[ -f "$names_file" ] && names="$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$names_file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 found=0
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
   if [ "$remote_sha" = "$zero" ]; then range="$local_sha --not --remotes=$1"; else range="$remote_sha..$local_sha"; fi
+  if [ -n "$names" ]; then
+    for commit in $(git rev-list $range); do
+      hits="$(git show --format='%B' --patch "$commit" | grep -o -i -F -f <(printf '%s\n' "$names") | sort -fu | paste -sd, -)"
+      if [ -n "$hits" ]; then
+        echo "pre-push: commit $(git rev-parse --short "$commit") names a private project ($hits), in its message or its changes, so $local_ref wasn't pushed to $1. The names are listed in $names_file." >&2
+        found=1
+      fi
+    done
+  fi
   if ! gitleaks git --no-banner --redact --verbose --log-level warn --log-opts="$range" .; then
     echo "pre-push: gitleaks found a secret in what $local_ref would send to $1 $remote_ref. Nothing was pushed. Remove it from those commits, then push again." >&2
     found=1

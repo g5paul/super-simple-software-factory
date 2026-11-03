@@ -9,6 +9,10 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 | fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 47b7621 (97385d6) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
 | sssf-sandbox | `master` | 47b7621 (aa70c9b) | The hub's own test bed. None |
 
+## Private projects
+
+A private repo's install is recorded in a separate private repo, `sssf-private`, never here. In this repo's files and commit messages, a private project is "a private project", fixes it turns up included: their tests and comments describe the bug without naming it. Each private name goes in the hub clone's `.git/sssf-private-names`, and the pre-push hook refuses a push that names one ([secret-scan.md](secret-scan.md)). A private install keeps `sandbox: none`, so its code goes to a remote VM only when the engineer asks.
+
 ## Open items
 
 None as of 2026-11-03.

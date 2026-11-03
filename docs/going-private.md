@@ -36,6 +36,16 @@ On 2026-11-03 the hub's full history and the three project repos' (every branch)
 - **The global git email** is still the Gmail address, so a new repo on this machine commits with it until it gets its own setting.
 - **Not secret, but public once pushed:** the hub's docs name the project repos and describe their agent rules, run IDs and VM names.
 
+## What stops a leak
+
+Since 2026-11-03 the hub has a `pre-push` hook, `.githooks/pre-push`, which runs gitleaks over the commits a push would send. For a branch the remote already has, that's the commits past its copy. For a new branch, it's the commits on none of the remote's branches. A find refuses the push, and gitleaks prints it redacted. Without gitleaks the hook refuses too, so a missing scanner can't let a push through unscanned.
+
+- **Set up once per clone:** `git config core.hooksPath .githooks`. Git doesn't run a repo's tracked hooks on its own, so a fresh clone has to opt in. This checkout has.
+- **gitleaks** is 8.30.1, in `~/.local/bin`, installed from its GitHub release after checking the release's SHA-256. Its default rules found nothing in the hub's full history.
+- **Tested** by running the hook as git does, since the deny rules block test pushes. A clean commit and a clean new branch passed. A planted fake GitHub token was refused on an existing branch and on a new one. With gitleaks missing from `PATH`, the hook refused.
+- **To push anyway,** `git push --no-verify` skips the hook. Use it only knowing nothing was scanned.
+- **The project repos** don't have it yet. Each one's session would add the same hook.
+
 ## What can't be undone
 
 - **A fork of a public repo can't be made private.** GitHub locks its visibility while it's in the parent's fork network.

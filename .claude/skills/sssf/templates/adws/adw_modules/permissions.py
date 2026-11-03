@@ -175,6 +175,21 @@ exit ${failed:-0}
 """
 
 
+# Prints each path with its parent resolved physically, NUL-separated, or an
+# empty field where the parent doesn't exist yet.
+_REAL = """for p in "$@"; do
+  d=${p%/*}; b=${p##*/}
+  if [ "$b" = .. ] || [ "$b" = . ]; then d=$p; b=; fi
+  if r=$(cd -P "${d:-/}" 2>/dev/null && pwd -P); then
+    if [ -n "$b" ]; then r="${r%/}/$b"; fi
+    printf "%s\\0" "$r"
+  else
+    printf "\\0"
+  fi
+done
+"""
+
+
 def _sh(script: str, *args: str):
     return sandbox.current().run(["sh", "-c", script, "sh", *args])
 
@@ -227,12 +242,23 @@ def _watched(run) -> list[str]:
     if home:
         paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git/config",
                   f"{home[1]}/git/attributes", f"{home[1]}/git/ignore"]
-    # Normal form, with no "..": tar renames a member whose path has one, and the
-    # restore would then delete the file and fail to put it back.
+    # The physical path, as git resolves it: tar renames a member with ".." in
+    # its path, and won't extract under a parent that is an absolute symlink,
+    # so the restore would delete such a file and fail to put it back. Each
+    # parent is resolved with cd -P where it exists, lexically where it doesn't.
     import posixpath
-    paths = ["/" + posixpath.normpath(p).lstrip("/") for p in paths if p.startswith("/")]
-    return [p for p in dict.fromkeys(paths)
-            if p != "/" and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
+    paths = [p for p in dict.fromkeys(paths)
+             if p.startswith("/") and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
+    real = _sh(_REAL, *paths).stdout.split("\0")
+    resolved = []
+    for p, r in zip(paths, real):
+        r = r if r.startswith("/") else "/" + posixpath.normpath(p).lstrip("/")
+        if r == "/" or posixpath.dirname(r) == r:
+            raise PermissionBreach(f"A git path resolves to the filesystem root ({p}), "
+                                   "which the git guard can't save, so the agent did not run. "
+                                   "Check core.hooksPath and include.path.")
+        resolved.append(r)
+    return list(dict.fromkeys(resolved))
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:

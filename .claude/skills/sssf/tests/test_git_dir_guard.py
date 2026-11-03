@@ -405,3 +405,41 @@ def test_an_include_through_dotdot_is_watched_and_kept(repo, include):
     with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
         permissions.restore_git_dir(run, guard)
     assert target.read_text() == "[user]\n\tname = t\n"
+
+
+def test_a_symlinked_home_keeps_its_gitconfig(repo, tmp_path, monkeypatch):
+    """bypass-reviewer, sixth pass: with HOME an absolute symlink, tar would not
+    extract under it, so the restore deleted ~/.gitconfig."""
+    real = tmp_path / "realhome"
+    real.mkdir()
+    (real / ".gitconfig").write_text("[user]\n\tname = t\n")
+    link = tmp_path / "linkhome"
+    link.symlink_to(real)
+    monkeypatch.setenv("HOME", str(link))
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    plant_hook(repo / ".git" / "hooks")
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert (real / ".gitconfig").read_text() == "[user]\n\tname = t\n"
+
+
+def test_an_include_through_a_symlinked_parent_is_watched(repo, tmp_path):
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    evil = tmp_path / "a" / "evil.inc"
+    evil.write_text("")
+    (repo / ".git" / "lnk").symlink_to(tmp_path / "a" / "b")
+    git(repo, "config", "--add", "include.path", "lnk/../evil.inc")
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    evil.write_text("[core]\n\tfsmonitor = touch FSMON\n")
+    with pytest.raises(permissions.PermissionBreach, match="evil.inc"):
+        permissions.restore_git_dir(run, guard)
+    assert evil.read_text() == ""
+
+
+@pytest.mark.parametrize("hooks_path", ["/", "/."])
+def test_a_hooks_path_at_the_root_refuses_the_run(repo, hooks_path):
+    git(repo, "config", "core.hooksPath", hooks_path)
+    with pytest.raises(permissions.PermissionBreach, match="filesystem root"):
+        permissions.guard_git_dir(SimpleNamespace(repo_root=repo))

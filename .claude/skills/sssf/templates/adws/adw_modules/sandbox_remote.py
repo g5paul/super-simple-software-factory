@@ -38,7 +38,7 @@ from pathlib import Path
 from .sandbox import SandboxFailed
 
 TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"
-PASSED = ("SSSF_", "OBS_")          # the only host variables a VM command gets
+PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with UV_PYTHON
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
 COMMAND_SECONDS = 60                # what a command with no timeout may need: git, a read
 MARGIN_SECONDS = 30
@@ -84,6 +84,26 @@ def _host_git(*args: str, cwd: Path) -> str:
     if done.returncode != 0:
         raise SandboxFailed(f"git {' '.join(args)} failed on the host: {done.stderr.strip()}")
     return done.stdout.strip()
+
+
+def _host_python(tree: Path) -> str:
+    """The Python, as major.minor, that the host's uv picks in the tree.
+
+    The VM's uv would pick its own: a `.python-version` is often untracked,
+    so the clone doesn't have it, and the VM's image has another Python. A
+    repo's tests can depend on the version, as argparse's help text does.
+    "" when the host has no uv or no Python."""
+    try:
+        found = subprocess.run(["uv", "python", "find"], cwd=tree, capture_output=True,
+                               text=True, timeout=60)
+        if found.returncode != 0:
+            return ""
+        version = subprocess.run([found.stdout.strip(), "-c",
+                                  "import sys; print('%d.%d' % sys.version_info[:2])"],
+                                 capture_output=True, text=True, timeout=60)
+        return version.stdout.strip() if version.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 
 def _tar(folder: Path) -> bytes:
@@ -142,6 +162,7 @@ class Remote:
         self.refreshes = 0
         self.processes = 0
         self.synced = ""
+        self.python = ""
         self._token = ""
         self._created = 0.0
         self._session = 0.0
@@ -165,12 +186,13 @@ class Remote:
         """Make the VM and put the run's branch in it. Raises SandboxFailed."""
         credentials(self.keys)
         self._token = _token()
+        self.python = _host_python(self.tree)
         try:
             self.sandbox = self._create()
             self.vm = self.sandbox.name
             self._created = self._session = time.monotonic()
             self._log("sandbox", {"provider": self.name, "vm": self.vm,
-                                  "session_minutes": self.limit / 60})
+                                  "session_minutes": self.limit / 60, "python": self.python})
             self._clone()
             self.handoff_in()
         except self.errors as error:
@@ -321,7 +343,8 @@ class Remote:
 
     def _env(self, env) -> dict[str, str]:
         source = os.environ if env is None else env
-        return {k: v for k, v in source.items() if k.startswith(PASSED)}
+        passed = {k: v for k, v in source.items() if k.startswith(PASSED)}
+        return {"UV_PYTHON": self.python, **passed} if self.python else passed
 
     def _cwd(self, cwd) -> str:
         return str(Path(cwd).resolve()) if cwd else os.getcwd()

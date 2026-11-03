@@ -306,6 +306,23 @@ def test_checks_get_no_token_and_agents_get_only_the_token_and_sssf_variables(bo
     assert process.pid < 0
 
 
+def test_vm_commands_use_the_python_the_hosts_uv_picks(box, tmp_path):
+    # An untracked .python-version reaches the host worktree from the main
+    # checkout above it, but not the clone, so the VM's uv would pick its own.
+    from adw_modules import sandbox_remote
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".python-version").write_text("3.12\n")
+    if subprocess.run(["uv", "python", "find", "3.12"], capture_output=True).returncode:
+        pytest.skip("this machine's uv has no Python 3.12")
+    assert sandbox_remote._host_python(project) == "3.12"
+    box.python = "3.12"
+    assert "UV_PYTHON=3.12" in box.run(["sh", "-c", "env"]).stdout
+    process = box.start(["sh", "-c", "env"])
+    assert "UV_PYTHON=3.12\n" in list(process.stdout)
+    process.wait()
+
+
 def test_an_agent_writes_the_handoff_folder_and_the_host_gets_it_back(box):
     process = box.start(["sh", "-c", f"echo done > {box.handoff}/build.md; echo ok"])
     assert list(process.stdout) == ["ok\n"]

@@ -21,7 +21,7 @@ Each repo has the hub's gitleaks hook in `.githooks/pre-push` (`docs/going-priva
 |---|---|---|
 | yt-summarizer | f911645 on `sssf-run`; also refuses pushes from SSSF agents | yes |
 | pi-agent-observability | d5d958a on `main` | yes |
-| fusion-harness | 54ac5d8 on `main`, merged into `sssf-run` as beaca9b | not yet |
+| fusion-harness | 54ac5d8 on `main`, merged into `sssf-run` as beaca9b | yes |
 | sssf-sandbox | none: it has no remote | n/a |
 
 ## Checks on the next real runs

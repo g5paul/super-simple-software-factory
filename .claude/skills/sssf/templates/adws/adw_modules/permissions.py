@@ -216,7 +216,7 @@ def _watched(run) -> list[str]:
         source = absolute(origin[5:], f"{root}/x")
         paths.append(source)
         key, _, value = entry.partition("\n")
-        if key.lower() == "core.excludesfile":
+        if key.lower() in ("core.excludesfile", "core.attributesfile"):
             paths.append(absolute(value, source))
         if key.lower() == "include.path" or (key.lower().startswith("includeif.")
                                              and key.lower().endswith(".path")):
@@ -227,8 +227,12 @@ def _watched(run) -> list[str]:
     if home:
         paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git/config",
                   f"{home[1]}/git/attributes", f"{home[1]}/git/ignore"]
+    # Normal form, with no "..": tar renames a member whose path has one, and the
+    # restore would then delete the file and fail to put it back.
+    import posixpath
+    paths = ["/" + posixpath.normpath(p).lstrip("/") for p in paths if p.startswith("/")]
     return [p for p in dict.fromkeys(paths)
-            if p.startswith("/") and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
+            if p != "/" and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:

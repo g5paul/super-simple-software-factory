@@ -387,3 +387,21 @@ def test_a_change_seen_before_the_gates_sticks(repo):
     hook.unlink()
     with pytest.raises(permissions.PermissionBreach, match="changed back"):
         permissions.restore_git_dir(run, guard)
+
+
+@pytest.mark.parametrize("include", ["../.gitconfig", "../../outside.inc"])
+def test_an_include_through_dotdot_is_watched_and_kept(repo, include):
+    """bypass-reviewer, fifth pass: tar renamed a member with ".." in its path,
+    so the file went unwatched, and any restore deleted it."""
+    target = (repo / ".git" / include).resolve()
+    target.write_text("[user]\n\tname = t\n")
+    git(repo, "config", "--add", "include.path", include)
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    assert str(target) in guard["paths"]
+    with open(target, "a") as f:
+        f.write("[core]\n\tfsmonitor = touch FSMON_RAN\n")
+    (repo / ".git" / "hooks" / "post-commit").write_text("")
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert target.read_text() == "[user]\n\tname = t\n"

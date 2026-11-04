@@ -152,13 +152,20 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
 # SSSF, so a determined one could still get past it, for example by killing
 # the chain before the check runs. --sandbox and --container isolate.
 
+# sssf-private-names lists the projects the pre-push hook refuses to name, so
+# an agent that empties or deletes it turns that check off for the engineer's
+# next push. The file is optional, and one the agent creates counts as a
+# change too.
+#
 # info/refs is left out: git gc and repack rewrite it, and it runs nothing.
 GIT_WATCHED = ("hooks", "info/exclude", "info/attributes", "info/sparse-checkout",
-               "info/grafts", "config", "config.worktree", "commondir")
+               "info/grafts", "config", "config.worktree", "commondir",
+               "sssf-private-names")
 
 # Packs the watched paths that exist, relative to /. With "h", follows
 # symlinks, so a write through a linked ~/.gitconfig shows; that pack is only
-# compared, never unpacked, and a dangling link in it is not an error.
+# compared, never unpacked, and a dangling link in it is not an error. It
+# still stops at the cap, and one that reaches the cap can't be checked.
 _PACK = """h=$1; shift
 n=$#
 for p in "$@"; do
@@ -168,15 +175,16 @@ shift $n
 [ $# = 0 ] && exit 0
 cd / || exit 1
 if [ "$h" = h ]; then
-  tar -chf - "$@" 2>/dev/null | head -c $PACK_CAP | base64
+  tar -chf - "$@" 2>/dev/null | head -c $((PACK_CAP + 1)) | base64
 else
   { tar -cf - "$@" || echo "tar failed" >&2; } | head -c $((PACK_CAP + 1)) | base64
 fi
 """
 
 # A symlink to / in hooks would have the follow pack read the whole disk.
-# Each pack stops at this size; a plain pack over it can't be saved whole, so
-# the agent doesn't run, and a follow pack is compared as far as it goes.
+# Each pack stops at this size. A pack of either kind that is over it can't be
+# checked: before the agent, that stops the run before the agent runs; after
+# it, it counts as a change.
 PACK_CAP = 16 * 1024 * 1024
 
 # Puts back the changed paths, and only those. Each is a physical path with no
@@ -318,6 +326,10 @@ def _pack(paths: list[str], *, follow: bool) -> str | None:
         return None
     if not follow and len(done.stdout) * 3 // 4 > PACK_CAP + 3:
         return None
+    if follow:
+        import base64
+        if len(base64.b64decode(done.stdout)) > PACK_CAP:    # cut at the cap
+            return None
     return done.stdout
 
 
@@ -338,12 +350,14 @@ def _members(packed: str) -> dict[str, tuple]:
 
 
 def _differs(guard: dict) -> list[str] | None:
-    """The watched paths that differ from the saved packs, or None if packing failed."""
+    """The watched paths that differ from the saved packs, plus TOO_LARGE if the
+    follow pack is now over the cap, or None if the plain pack failed."""
     every = guard.get("links", []) + guard["paths"]
     plain, followed = _pack(every, follow=False), _pack(guard["paths"], follow=True)
     if plain is None:
         return None
-    now = (_members(plain), _members(followed or ""))
+    # A follow pack over the cap is never compared; only the plain packs are.
+    now = (_members(plain),) + (() if followed is None else (_members(followed),))
     then = (_members(guard["plain"]), _members(guard["followed"]))
 
     def under(members: dict, path: str) -> dict:
@@ -361,8 +375,9 @@ def _differs(guard: dict) -> list[str] | None:
         before = guard.get("parents", "").split("\0")
         after = _sh(_REAL, *links).stdout.split("\0")
         moved += [q for q, b, a in zip(links, before, after) if b != a and q not in moved]
-    return moved + [p for p in guard["paths"]
-                    if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
+    found = moved + [p for p in guard["paths"]
+                     if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
+    return found + ([TOO_LARGE] if followed is None else [])
 
 
 def guard_git_dir(run) -> dict | None:
@@ -374,8 +389,18 @@ def guard_git_dir(run) -> dict | None:
     if plain is None:
         raise PermissionBreach("Could not save the git directory and git config "
                                "before the agent ran, so it did not run.")
+    followed = _pack(paths, follow=True)
+    if followed is None:
+        raise PermissionBreach(
+            "The git paths SSSF watches are too large to check: read through their "
+            f"symlinks they come to more than {PACK_CAP / 1048576:g} MB, or could not be "
+            "read, so the agent did not run, and no run will until that changes. A "
+            "symlink among them, such as .git/hooks, .git/sssf-private-names, a linked "
+            "~/.gitconfig or an included config file, points at a large file or tree. "
+            "Point it at something smaller, or replace it with the file it stands for, "
+            "then run again.")
     return {"links": links, "paths": paths, "plain": plain,
-            "followed": _pack(paths, follow=True) or "",
+            "followed": followed,
             "parents": _sh(_REAL, *links).stdout, "done": False}
 
 
@@ -394,6 +419,8 @@ def git_dir_changed(guard: dict | None) -> bool:
 
 
 SEEN = "(a watched path, changed while the agent ran and changed back since)"
+TOO_LARGE = ("(the watched paths, read through their symlinks, now too large to "
+             "check: a link among them points at a large file or tree)")
 
 
 def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str]:
@@ -439,7 +466,9 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
         if made.returncode == 0 and held.startswith("/"):
             box.write_text(held, guard["plain"])
             _sh(_UNPACK, held, *paths)
-        restored = _differs(guard) == []
+        left = _differs(guard)
+        restored = left == []
+        changed += [p for p in (left or []) if p not in changed]
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]
     if changed and (breach or not restored):

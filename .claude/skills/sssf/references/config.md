@@ -187,7 +187,9 @@ SSSF's own git never runs an fsmonitor, and its undo and rollback run no
 hooks. Two gaps it shares with a run without this check: an ignore file the
 agent changed through a link can hide one of its own new files from the
 rollback, and an agent that stops git ignoring your `.env` or `node_modules`
-makes them look like its own new files, which the rollback deletes.
+makes them look like its own new files, which the rollback deletes. That
+includes a file whose name isn't valid UTF-8, which used to crash the rollback
+before it deleted anything.
 
 Two costs. An edit you make to your git config while an agent runs is put back
 too. And a tool that writes git config or hooks on install, like husky's
@@ -199,6 +201,8 @@ a determined one could still get past it, for example by killing the chain
 before the check runs, or by leaving a process behind that writes later. It
 also doesn't watch a submodule's git directory, the index's
 `--skip-worktree` flag, or the other name of a hard-linked `~/.gitconfig`.
+A new file with a non-ASCII name, under git's default `core.quotePath`, is
+named in the breach but not deleted.
 `--sandbox` and `--container` isolate the run.
 
 The run stops there, so the agent's permitted changes are never verified,

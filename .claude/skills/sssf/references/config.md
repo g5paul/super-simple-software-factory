@@ -269,6 +269,14 @@ also doesn't watch a submodule's git directory, the index's
 `--skip-worktree` flag, or the other name of a hard-linked `~/.gitconfig`.
 It reads the config once before each agent, so a config that turns unreadable
 partway through that read isn't caught.
+It watches the config git loads on the current branch. A file an
+`includeIf.onbranch:` for another branch names is watched, but an include or
+a `core.hooksPath` set inside that file isn't. An agent can plant a hook
+there, and it runs once someone switches to that branch.
+If the agent moves one of your files onto a watched path that didn't exist
+before the run, the put-back deletes it, as it deletes any new file there.
+And it trusts `pwd -P`: one that fails but still prints a path gives SSSF
+the wrong directory. dash and bash don't do that.
 A new file with a non-ASCII name, under git's default `core.quotePath`, is
 named in the breach but not deleted.
 `--sandbox` and `--container` isolate the run.

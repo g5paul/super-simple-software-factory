@@ -8,8 +8,7 @@ A line in .git/info/exclude would hide a new file from enforce itself.
 guard_git_dir copies hooks/, info/, config, config.worktree and sssf-private-names aside before
 each agent, and restore_git_dir puts them back after it. A pack over the cap
 can't be checked, so it stops the run.
-A watched path with `..` after a directory that doesn't exist yet, or can't be
-entered, stops the run first.
+A watched path with `..` that doesn't fully resolve stops the run first.
 A shared config file's breach (one outside the repo's git directory and work tree, like ~/.gitconfig) lists the
 changed keys, never a value.
 
@@ -1364,7 +1363,7 @@ def test_the_home_gitconfig_is_still_shared(repo, home):
     assert guard["kinds"][str((home / ".gitconfig").resolve())] == "config"
 
 
-# ── a ".." after a missing directory ──
+# ── a ".." in a path that doesn't resolve ──
 
 def _dotdot_setup(repo: Path, tmp_path: Path) -> Path:
     out = tmp_path / "out"
@@ -1376,11 +1375,13 @@ def _dotdot_setup(repo: Path, tmp_path: Path) -> Path:
 def _dotdot_values(repo: Path) -> list[str]:
     return [f"{repo}/lnk/missing/../../x.inc",
             f"{repo}/missing/../lnk2/../x.inc",
-            f"{repo}/lnk/missing/../../rl/x.inc"]
+            f"{repo}/lnk/missing/../../rl/x.inc",
+            f"{repo}/lnk/../missing/x.inc",
+            f"{repo}/lnk/../missing/deeper/x.inc"]
 
 
-@pytest.mark.parametrize("shape", [0, 1, 2])
-def test_a_dotdot_after_a_missing_dir_stops_the_run_first(repo, home, tmp_path, shape):
+@pytest.mark.parametrize("shape", [0, 1, 2, 3, 4])
+def test_a_dotdot_path_that_does_not_resolve_stops_the_run_first(repo, home, tmp_path, shape):
     out = _dotdot_setup(repo, tmp_path)
     (repo / "lnk2").symlink_to(out / "a")
     (out / "rl").symlink_to(repo)
@@ -1396,6 +1397,7 @@ def test_a_dotdot_after_a_missing_dir_stops_the_run_first(repo, home, tmp_path, 
         assert part in msg
     assert not (out / "a" / "missing").exists()
     assert not (repo / "missing").exists()
+    assert not (out / "missing").exists()
     assert state(repo) == before
     assert (home / ".gitconfig").read_text() == saved
 
@@ -1414,6 +1416,21 @@ def test_once_the_missing_dir_exists_the_real_file_is_watched(repo, tmp_path):
     assert str((out / "x.inc").resolve()) in guard["paths"]
 
 
+def test_the_mirror_case_once_the_dir_exists_watches_the_real_file(repo, tmp_path):
+    out = _dotdot_setup(repo, tmp_path)
+    git(repo, "config", "--add", "include.path", f"{repo}/lnk/../missing/x.inc")
+    run = shipped(repo)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.guard_git_dir(run)
+    (out / "missing").mkdir()
+    (out / "missing" / "x.inc").write_text(FSMONITOR)
+    shown = git(repo, "config", "--show-origin", "--get", "core.fsmonitor")
+    assert "pwned" in shown
+    guard = permissions.guard_git_dir(run)
+    assert str((out / "missing" / "x.inc").resolve()) in guard["paths"]
+    assert f"{repo}/missing/x.inc" not in guard["paths"]
+
+
 def test_an_include_if_dotdot_after_a_missing_dir_names_its_key(repo, tmp_path):
     _dotdot_setup(repo, tmp_path)
     value = f"{repo}/lnk/missing/../../x.inc"
@@ -1423,10 +1440,10 @@ def test_an_include_if_dotdot_after_a_missing_dir_names_its_key(repo, tmp_path):
     assert "includeif.onbranch:main.path" in str(caught.value) and value in str(caught.value)
 
 
-@pytest.mark.parametrize("shape", ["missing", "lnk-dotdot"])
-def test_a_missing_dir_without_dotdot_after_it_is_unchanged(repo, tmp_path, shape):
+@pytest.mark.parametrize("value", ["{repo}/missing/x.inc", "{repo}/missing/deeper/x.inc"])
+def test_a_missing_dir_without_dotdot_is_unchanged(repo, tmp_path, value):
     _dotdot_setup(repo, tmp_path)
-    value = {"missing": f"{repo}/missing/x.inc", "lnk-dotdot": f"{repo}/lnk/../missing/x.inc"}[shape]
+    value = value.format(repo=repo)
     git(repo, "config", "--add", "include.path", value)
     run = shipped(repo)
     guard = permissions.guard_git_dir(run)
@@ -1434,29 +1451,44 @@ def test_a_missing_dir_without_dotdot_after_it_is_unchanged(repo, tmp_path, shap
     assert permissions.restore_git_dir(run, guard) == []
 
 
-def test_a_path_without_dotdot_is_never_checked(repo, monkeypatch):
-    monkeypatch.setattr(permissions, "_LOOSE_DOTDOT", 'printf "%s\\0" "$@"')
-    permissions.guard_git_dir(shipped(repo))
+def test_a_dotdot_path_that_resolves_is_unchanged(repo, tmp_path):
+    out = _dotdot_setup(repo, tmp_path)
+    git(repo, "config", "--add", "include.path", f"{repo}/lnk/../x.inc")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    assert str(out.resolve() / "x.inc") in guard["paths"]
+    assert permissions.restore_git_dir(run, guard) == []
 
 
-def test_an_excludes_file_dotdot_after_a_missing_dir_is_refused(repo):
-    git(repo, "config", "core.excludesFile", f"{repo}/missing/../x.ignore")
+@pytest.mark.parametrize("value", ["{repo}/missing/../x.ignore", "{repo}/lnk/../missing/x.ignore"])
+def test_an_excludes_file_dotdot_that_does_not_resolve_is_refused(repo, tmp_path, value):
+    _dotdot_setup(repo, tmp_path)
+    value = value.format(repo=repo)
+    git(repo, "config", "core.excludesFile", value)
     with pytest.raises(permissions.PermissionBreach) as caught:
         permissions.guard_git_dir(shipped(repo))
-    assert "core.excludesfile" in str(caught.value)
+    assert "core.excludesfile" in str(caught.value) and value in str(caught.value)
+
+
+def test_an_attributes_file_dotdot_that_does_not_resolve_is_refused(repo, tmp_path):
+    _dotdot_setup(repo, tmp_path)
+    value = f"{repo}/lnk/../missing/x.attr"
+    git(repo, "config", "core.attributesFile", value)
+    with pytest.raises(permissions.PermissionBreach) as caught:
+        permissions.guard_git_dir(shipped(repo))
+    assert "core.attributesfile" in str(caught.value) and value in str(caught.value)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores search permission")
-def test_a_dotdot_after_an_unsearchable_dir_is_flagged(repo, tmp_path):
+def test_a_dotdot_after_an_unsearchable_dir_does_not_resolve(repo, tmp_path):
     # git itself fails on `config --list` once an include can't be read, so such
     # an include never reaches _watched; the shipped script is checked directly.
     out = _dotdot_setup(repo, tmp_path)
     value = f"{repo}/lnk/../x.inc"
     os.chmod(out / "a", 0o600)
     try:
-        flagged = permissions._sh(permissions._LOOSE_DOTDOT, value).stdout.split("\0")
-        assert value in flagged
+        assert permissions._sh(permissions._REAL, value).stdout.split("\0")[0] == ""
         assert stat.S_IMODE((out / "a").stat().st_mode) == 0o600
     finally:
         os.chmod(out / "a", 0o755)
-    assert permissions._sh(permissions._LOOSE_DOTDOT, value).stdout == ""
+    assert permissions._sh(permissions._REAL, value).stdout.split("\0")[0] == str(out.resolve() / "x.inc")

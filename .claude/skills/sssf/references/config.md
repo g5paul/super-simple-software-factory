@@ -194,15 +194,18 @@ file, points at a large file or tree. Point it at something smaller, or
 replace it with the file it stands for. If they pass 16 MB during an agent
 call, that's a change, and the run stops with "NOT all put back".
 
-An include path, or another git path SSSF watches, that has `..` after a
-directory that doesn't exist yet, or that can't be entered, can't be
-checked. Once that directory is made or opened up, git resolves `..`
-through it, maybe through a symlink, and reads a different file from the
-one SSSF watches. So the run stops before the next agent with a breach
-naming the key, the config file and the path. Write the path without `..`,
-or create the missing directory first. A path with a missing directory and
-no `..` after it is watched as before. If the agent makes that directory a
-symlink, the run stops with "NOT all put back".
+An include path, or another git path SSSF watches, that has `..` in it and
+a directory on the way that doesn't exist yet, or that can't be entered,
+can't be checked. Once that directory is made or opened up, git resolves
+`..` through the real directories, maybe through a symlink, and reads a
+different file from the one SSSF watches. So the run stops before the next
+agent with a breach naming the key, the config file and the path. That
+includes a relative include such as `../team/x.inc` in `.git/config` while
+`team/` doesn't exist. Write the path without `..`, or create the missing
+directory first. A path with `..` whose directories all exist, and a path
+with no `..` at all, are watched as before. If the agent makes a missing
+directory in a path without `..` a symlink, the run stops with "NOT all put
+back".
 
 SSSF's own git never runs an fsmonitor, and its undo and rollback run no
 hooks. Two gaps it shares with a run without this check: an ignore file the

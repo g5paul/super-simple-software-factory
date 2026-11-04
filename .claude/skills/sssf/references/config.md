@@ -185,6 +185,15 @@ since writing there could land in a folder the agent chose. The breach says
 git command in the repo. No agent has a reason to write there: SSSF does the
 committing.
 
+SSSF reads the watched paths through their symlinks too, so a write through
+a linked `~/.gitconfig` shows, and it reads at most 16 MB. If they come to
+more, it can't check them, so the run stops before the first agent with a
+breach saying they're too large to check. That happens when a link among
+them, such as `.git/hooks`, `.git/sssf-private-names` or a linked git config
+file, points at a large file or tree. Point it at something smaller, or
+replace it with the file it stands for. If they pass 16 MB during an agent
+call, that's a change, and the run stops with "NOT all put back".
+
 SSSF's own git never runs an fsmonitor, and its undo and rollback run no
 hooks. Two gaps it shares with a run without this check: an ignore file the
 agent changed through a link can hide one of its own new files from the

@@ -6,7 +6,8 @@ see an agent write there. bypass-reviewer found the cost: a hook planted in
 core.fsmonitor or filter line in .git/config runs on ordinary git commands.
 A line in .git/info/exclude would hide a new file from enforce itself.
 guard_git_dir copies hooks/, info/, config, config.worktree and sssf-private-names aside before
-each agent, and restore_git_dir puts them back after it.
+each agent, and restore_git_dir puts them back after it. A pack over the cap
+can't be checked, so it stops the run.
 
 Run from the skill root:
     uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests
@@ -25,7 +26,7 @@ import pytest
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import git_helper, permissions
+from adw_modules import agents, git_helper, permissions
 from adw_modules.data_types import AgentConfig, ConfigDefaults, PromptEngineering, SSSFConfig
 
 
@@ -982,3 +983,113 @@ def test_the_hook_reads_the_watched_file():
     hook = (SKILL / "templates" / "githooks" / "pre-push").read_text()
     assert '--git-common-dir)/sssf-private-names"' in hook
     assert "sssf-private-names" in permissions.GIT_WATCHED
+
+
+# ── the pack cap ──
+
+FSMONITOR = "[core]\n\tfsmonitor = touch /nonexistent/pwned\n"
+
+
+def shipped(repo: Path) -> SimpleNamespace:
+    return SimpleNamespace(cfg=agents.load_config(str(SKILL / "templates" / "sssf.config.yaml")),
+                           repo_root=repo)
+
+
+def linked_gitconfig(home: Path, tmp_path: Path) -> Path:
+    dotfiles = tmp_path / "dotfiles"
+    dotfiles.mkdir()
+    (dotfiles / "gitconfig").write_text((home / ".gitconfig").read_text())
+    (home / ".gitconfig").unlink()
+    (home / ".gitconfig").symlink_to(dotfiles / "gitconfig")
+    return dotfiles / "gitconfig"
+
+
+def test_a_names_link_over_the_cap_stops_the_run_first(repo, home, tmp_path):
+    big = tmp_path / "big"
+    with big.open("wb") as f:
+        f.truncate(17 * 1024 * 1024)
+    names = repo / ".git" / "sssf-private-names"
+    names.symlink_to(big)
+    dotfile = linked_gitconfig(home, tmp_path)
+    original = dotfile.read_text()
+    run = shipped(repo)
+    with pytest.raises(permissions.PermissionBreach, match="too large to check") as err:
+        permissions.guard_git_dir(run)
+    assert "did not run" in str(err.value) and "smaller" in str(err.value)
+    assert names.is_symlink() and names.resolve() == big.resolve()
+    assert big.stat().st_size == 17 * 1024 * 1024
+    assert dotfile.read_text() == original
+    with dotfile.open("a") as f:
+        f.write(FSMONITOR)
+    with pytest.raises(permissions.PermissionBreach, match="too large to check"):
+        permissions.guard_git_dir(run)
+
+
+def test_a_hooks_link_to_a_big_tree_stops_the_run_first(repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
+    big = tmp_path / "big"
+    big.mkdir()
+    (big / "blob").write_bytes(os.urandom(1024 * 1024))
+    (repo / ".git" / "hooks" / "zz").symlink_to(big)
+    with pytest.raises(permissions.PermissionBreach, match="too large to check"):
+        permissions.guard_git_dir(shipped(repo))
+    assert (repo / ".git" / "hooks" / "zz").is_symlink()
+
+
+def test_a_names_link_grown_past_the_cap_is_a_breach(repo, home, tmp_path, monkeypatch):
+    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
+    target = tmp_path / "names"
+    target.write_text(PRIVATE)
+    names = repo / ".git" / "sssf-private-names"
+    names.symlink_to(target)
+    dotfile = linked_gitconfig(home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    target.write_bytes(os.urandom(1024 * 1024))
+    with dotfile.open("a") as f:
+        f.write(FSMONITOR)
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as err:
+        permissions.restore_git_dir(run, guard)
+    assert permissions.TOO_LARGE in str(err.value)
+    assert names.is_symlink()
+    assert FSMONITOR in dotfile.read_text()
+
+
+def test_a_names_file_swapped_for_a_big_link_names_the_gitconfig(repo, home, tmp_path, monkeypatch):
+    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
+    names = write_private(repo)
+    dotfile = linked_gitconfig(home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    big = tmp_path / "big"
+    big.write_bytes(os.urandom(1024 * 1024))
+    names.unlink()
+    names.symlink_to(big)
+    with dotfile.open("a") as f:
+        f.write(FSMONITOR)
+    with pytest.raises(permissions.PermissionBreach) as err:
+        permissions.restore_git_dir(run, guard)
+    message = str(err.value)
+    assert ".git/sssf-private-names" in message
+    assert ".gitconfig" in message
+    assert "NOT all put back" in message
+    assert "secret-ledger" not in message
+    assert not names.is_symlink() and names.read_text() == PRIVATE
+
+
+def test_a_link_under_the_cap_is_still_checked(repo, home, tmp_path, monkeypatch):
+    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
+    small = tmp_path / "small"
+    small.write_bytes(b"x" * 4096)
+    (repo / ".git" / "sssf-private-names").symlink_to(small)
+    dotfile = linked_gitconfig(home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    assert permissions.restore_git_dir(run, guard) == []
+    guard = permissions.guard_git_dir(run)
+    with dotfile.open("a") as f:
+        f.write(FSMONITOR)
+    with pytest.raises(permissions.PermissionBreach, match=r"\.gitconfig") as err:
+        permissions.restore_git_dir(run, guard)
+    assert permissions.TOO_LARGE not in str(err.value)

@@ -176,11 +176,14 @@ change-set. Emptying or deleting `sssf-private-names` would turn off the
 pre-push hook's private-names check for your next push, and one the agent
 creates is a change too. A breach here doesn't skip the other checks: an agent's own commit
 is still undone and its other writes still rolled back, and the breach names
-both. An agent that fails is put back the same way. SSSF also notices
-when a symlink on the way to one of these paths, such as a symlinked
-`~/.config`, `HOME` or `.git`, now points somewhere else. That includes a
-symlink a later `..` in the path cancels, such as `lnk` in an include path
-`~/lnk/../x.inc`: git follows `lnk` before it takes the parent. It reports a change
+both. An agent that fails is put back the same way. SSSF also records
+where every directory on the way to one of these paths resolves, walking the
+path as git and the kernel do, `..` included. So it notices a symlink on the
+way that now points somewhere else, such as a symlinked `~/.config`, `HOME`
+or `.git`, or `lnk` in an include path `~/lnk/../x.inc`. It also notices a
+real directory on the way that the agent swapped for a symlink, and a
+directory a link points at that was swapped in turn. Nothing is written
+through such a directory. It reports a change
 made through or to a symlink and stops the run, but never writes it back,
 since writing there could land in a folder the agent chose. The breach says
 "NOT all put back" and names the path, so check it by hand before your next

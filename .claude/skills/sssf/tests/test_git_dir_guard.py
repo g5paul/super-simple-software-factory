@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import shutil
 import stat
 import subprocess
 import sys
@@ -1518,7 +1519,7 @@ def test_a_link_before_dotdot_in_the_gitconfig_is_recorded_and_seen(repo, home, 
     git(repo, "config", "--global", "--add", "include.path", f"{home}/lnk/../x.inc")
     run = shipped(repo)
     guard = permissions.guard_git_dir(run)
-    assert str(home / "lnk") in guard["links"]
+    assert str(home / "lnk") in guard["where"]
     assert str((out / "x.inc").resolve()) in guard["paths"]
     evil = _evil(tmp_path)
     (home / "lnk").unlink()
@@ -1540,7 +1541,7 @@ def test_a_link_before_dotdot_is_recorded_for_every_key(repo, tmp_path, key):
     git(repo, "config", key, f"{repo}/lnk/../x.inc")
     run = shipped(repo)
     guard = permissions.guard_git_dir(run)
-    assert str(repo / "lnk") in guard["links"]
+    assert str(repo / "lnk") in guard["where"]
     evil = _evil(tmp_path)
     (repo / "lnk").unlink()
     (repo / "lnk").symlink_to(evil / "a")
@@ -1558,8 +1559,8 @@ def test_a_link_after_dotdot_is_recorded_where_the_kernel_goes(repo, home, tmp_p
     git(repo, "config", "--global", "--add", "include.path", f"{home}/lnk/../l3/x.inc")
     run = shipped(repo)
     guard = permissions.guard_git_dir(run)
-    assert str(home / "lnk") in guard["links"]
-    assert str(out.resolve() / "l3") in guard["links"]
+    assert str(home / "lnk") in guard["where"]
+    assert f"{home}/lnk/../l3" in guard["where"]
     assert str((out / "c" / "x.inc").resolve()) in guard["paths"]
     evil = tmp_path / "evil"
     (evil / "c").mkdir(parents=True)
@@ -1577,7 +1578,10 @@ def test_a_link_after_dotdot_is_recorded_where_the_kernel_goes(repo, home, tmp_p
         permissions.restore_git_dir(run, guard)
 
 
-def test_a_dotdot_path_keeps_the_baseline_links_and_adds_the_kernels(repo, home, tmp_path):
+@pytest.mark.parametrize("which", ["lnk", "out_l3"])
+def test_a_dotdot_path_keeps_the_baseline_links_and_adds_the_kernels(repo, home, tmp_path, which):
+    # home/l3 is dangling and git never reads through it (the kernel goes via
+    # lnk/..), so retargeting it is an allowed narrowing and is not tested here.
     out = _link_out(tmp_path)
     (out / "c").mkdir()
     (out / "c" / "x.inc").write_text("")
@@ -1587,18 +1591,22 @@ def test_a_dotdot_path_keeps_the_baseline_links_and_adds_the_kernels(repo, home,
     git(repo, "config", "--global", "--add", "include.path", f"{home}//./lnk/../l3/x.inc")
     run = shipped(repo)
     guard = permissions.guard_git_dir(run)
-    for link in (home / "lnk", out.resolve() / "l3", home / "l3"):
-        assert str(link) in guard["links"]
     assert permissions.restore_git_dir(run, guard) == []
+    guard = permissions.guard_git_dir(run)
+    link = {"lnk": home / "lnk", "out_l3": out.resolve() / "l3"}[which]
+    other = tmp_path / "fresh"
+    other.mkdir()
+    link.unlink()
+    link.symlink_to(other)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
 
 
-@pytest.mark.parametrize("value, linked, extra", [("{home}/lnk/x.inc", "a", 1),
-                                                  ("{home}/lnk/../x.inc", "a", 2)])
-def test_a_path_without_dotdot_makes_no_extra_shell_call(repo, home, tmp_path, monkeypatch,
-                                                         value, linked, extra):
+@pytest.mark.parametrize("value", ["{home}/lnk/x.inc", "{home}/lnk/../x.inc"])
+def test_the_prefixes_are_walked_in_one_shell_call(repo, home, tmp_path, monkeypatch, value):
     out = _link_out(tmp_path)
     (out / "a" / "x.inc").write_text("")
-    (home / "lnk").symlink_to(out / linked)
+    (home / "lnk").symlink_to(out / "a")
     git(repo, "config", "--global", "--add", "include.path", value.format(home=home))
     scripts = []
     real = permissions._sh
@@ -1610,10 +1618,279 @@ def test_a_path_without_dotdot_makes_no_extra_shell_call(repo, home, tmp_path, m
     monkeypatch.setattr(permissions, "_sh", counting)
     run = shipped(repo)
     guard = permissions.guard_git_dir(run)
-    assert scripts.count(permissions._LINKS) == extra
-    assert scripts.count(permissions._REAL) == (3 if extra == 1 else 4)
-    assert str(home / "lnk") in guard["links"]
+    assert scripts.count(permissions._WHERE) == 1
+    assert scripts.count(permissions._REAL) == 2
+    assert str(home / "lnk") in guard["where"]
     assert permissions.restore_git_dir(run, guard) == []
+
+
+# ── every prefix of a watched path ──
+
+def _hole1(repo, home, tmp_path):
+    (home / "d").mkdir()
+    (home / "x.inc").write_text("")
+    git(repo, "config", "--global", "--add", "include.path", f"{home}/d/../x.inc")
+
+
+def _hole2(repo, home, tmp_path):
+    git(repo, "config", "include.path", "../shared.inc")
+    (repo / "shared.inc").write_text("")
+
+
+def _hole3(repo, home, tmp_path):
+    out = _link_out(tmp_path)
+    (home / "lnk").symlink_to(out / "a")
+    git(repo, "config", "--global", "--add", "include.path", f"{home}/lnk/../x.inc")
+
+
+def _swap_d(home, tmp_path):
+    evil = _evil(tmp_path)
+    (home / "d").rmdir()
+    (home / "d").symlink_to(evil / "a")
+    return evil
+
+
+def test_a_real_dir_before_dotdot_swapped_for_a_link_is_seen(repo, home, tmp_path):
+    _hole1(repo, home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    evil = _swap_d(home, tmp_path)
+    assert "pwned" in git(repo, "config", "--show-origin", "--get", "core.fsmonitor")
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert str(home / "d") in str(caught.value)
+    assert os.readlink(home / "d") == str(evil / "a")
+    assert (evil / "x.inc").read_text() == FSMONITOR
+    assert (home / "x.inc").read_text() == ""
+
+
+def test_a_moved_dot_git_with_a_relative_include_is_seen(repo, home, tmp_path):
+    _hole2(repo, home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evil"
+    evil.mkdir()
+    (repo / ".git").rename(evil / "g")
+    (repo / ".git").symlink_to(evil / "g")
+    (evil / "shared.inc").write_text(FSMONITOR)
+    assert "pwned" in git(repo, "config", "--show-origin", "--get", "core.fsmonitor")
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert ".git" in str(caught.value)
+    assert os.readlink(repo / ".git") == str(evil / "g")
+    assert (repo / "shared.inc").read_text() == ""
+    assert sorted(p.name for p in evil.iterdir()) == ["g", "shared.inc"]
+
+
+def test_a_dir_a_link_points_at_swapped_for_a_link_is_seen(repo, home, tmp_path):
+    _hole3(repo, home, tmp_path)
+    out = tmp_path / "out"
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    (out / "a").rmdir()
+    evil = _evil(tmp_path)
+    (out / "a").symlink_to(evil / "a")
+    assert "pwned" in git(repo, "config", "--show-origin", "--get", "core.fsmonitor")
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert str(home / "lnk") in str(caught.value)
+    assert os.readlink(out / "a") == str(evil / "a")
+    assert (out / "x.inc").read_text() == ""
+
+
+def test_a_missing_dir_created_as_a_real_dir_is_still_put_back(repo, home, tmp_path):
+    if tmp_path.resolve() != tmp_path:
+        pytest.skip("needs a physical tmp_path")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    (home / ".config" / "git").mkdir(parents=True)
+    (home / ".config" / "git" / "config").write_text(FSMONITOR)
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert not (home / ".config" / "git" / "config").exists()
+
+
+def test_a_removed_real_dir_on_the_way_is_put_back(repo, home, tmp_path):
+    (home / "d").mkdir()
+    (home / "d" / "x.inc").write_text("")
+    git(repo, "config", "--global", "--add", "include.path", f"{home}/d/x.inc")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    shutil.rmtree(home / "d")
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert (home / "d" / "x.inc").read_text() == ""
+
+
+def test_a_removed_link_on_the_way_is_still_reported(repo, home, tmp_path):
+    _hole3(repo, home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    (home / "lnk").unlink()
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert str(home / "lnk") in str(caught.value)
+
+
+@pytest.mark.parametrize("setup", [_hole1, _hole2, _hole3])
+def test_unchanged_prefixes_change_nothing(repo, home, tmp_path, setup):
+    setup(repo, home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    assert permissions.restore_git_dir(run, guard) == []
+
+
+def test_a_real_dir_swapped_for_a_dangling_link_writes_nothing_through_it(repo, home, tmp_path):
+    (home / "d").mkdir()
+    (home / "d" / "x.inc").write_text("[user]\n")
+    git(repo, "config", "--global", "--add", "include.path", f"{home}/d/x.inc")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    shutil.rmtree(home / "d")
+    (home / "d").symlink_to(tmp_path / "evil" / "a")
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert str(home / "d") in str(caught.value)
+    assert os.readlink(home / "d") == str(tmp_path / "evil" / "a")
+    assert not (tmp_path / "evil").exists()
+
+
+def test_a_hooks_dir_swapped_for_a_link_is_still_put_back(repo, home, tmp_path):
+    plant_hook(tmp_path / "evilhooks")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    shutil.rmtree(repo / ".git" / "hooks")
+    (repo / ".git" / "hooks").symlink_to(tmp_path / "evilhooks")
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.restore_git_dir(run, guard)
+    assert not (repo / ".git" / "hooks").is_symlink()
+    assert commit_runs_no_hook(repo)
+
+
+def _twin(path: Path) -> Path:
+    """A directory named like `path` plus a trailing newline."""
+    twin = Path(str(path) + "\n")
+    twin.mkdir(parents=True)
+    return twin
+
+
+def test_a_link_retargeted_to_a_newline_twin_dir_is_seen(repo, home, tmp_path):
+    store = tmp_path / "store"
+    (store / "dots").mkdir(parents=True)
+    (store / "dots" / "x.inc").write_text("")
+    (home / "dots").symlink_to(store / "dots")
+    git(repo, "config", "--global", "--add", "include.path", f"{home}/dots/x.inc")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    twin = _twin(store / "dots")
+    (twin / "x.inc").write_text(FSMONITOR)
+    (home / "dots").unlink()
+    (home / "dots").symlink_to(twin)
+    assert "pwned" in git(repo, "config", "--show-origin", "--get", "core.fsmonitor")
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    assert (twin / "x.inc").read_text() == FSMONITOR
+
+
+def test_a_home_link_retargeted_to_a_newline_twin_is_seen(repo, tmp_path, monkeypatch):
+    real = tmp_path / "realhome"
+    real.mkdir()
+    (real / ".gitconfig").write_text("[user]\n\tname = t\n")
+    link = tmp_path / "linkhome"
+    link.symlink_to(real)
+    monkeypatch.setenv("HOME", str(link))
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    twin = _twin(real)
+    (twin / ".gitconfig").write_text(FSMONITOR)
+    link.unlink()
+    link.symlink_to(twin)
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    assert (twin / ".gitconfig").read_text() == FSMONITOR
+
+
+def test_a_dot_git_link_retargeted_to_a_newline_twin_is_seen(repo, tmp_path):
+    store = tmp_path / "store"
+    store.mkdir()
+    (repo / ".git").rename(store / "g")
+    (repo / ".git").symlink_to(store / "g")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    twin = tmp_path / "store" / "g\n"
+    shutil.copytree(store / "g", twin)
+    with open(twin / "config", "a") as f:
+        f.write("[core]\n\tfsmonitor = echo pwned\n")
+    (repo / ".git").unlink()
+    (repo / ".git").symlink_to(twin)
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    assert os.readlink(repo / ".git") == str(twin)
+
+
+def test_nothing_is_deleted_through_a_link_to_a_newline_twin(repo, home, tmp_path):
+    store = tmp_path / "store"
+    (store / "dots").mkdir(parents=True)
+    (store / "dots" / "x.inc").write_text("")
+    (home / "dots").symlink_to(store / "dots")
+    git(repo, "config", "--global", "--add", "include.path", f"{home}/dots/x.inc")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    twin = _twin(store / "dots")
+    (twin / "x.inc").write_text("[user]\n")
+    shutil.rmtree(store / "dots")
+    (store / "dots").symlink_to(twin)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    assert (twin / "x.inc").read_text() == "[user]\n"
+
+
+def test_a_moved_dotdot_prefix_still_puts_back_the_gitconfig(repo, home, tmp_path):
+    (home / "d").mkdir()
+    (home / "x.inc").write_text("")
+    (home / ".gitconfig").write_text(f"[include]\n\tpath = {home}/d/../x.inc\n")
+    before = (home / ".gitconfig").read_text()
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    evil = _swap_d(home, tmp_path)
+    with open(home / ".gitconfig", "a") as f:
+        f.write(FSMONITOR)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert str(home / "d") in str(caught.value)
+    assert ".gitconfig" in str(caught.value)
+    assert (home / ".gitconfig").read_text() == before
+    assert os.readlink(home / "d") == str(evil / "a")
+
+
+def test_a_retargeted_home_link_still_puts_back_the_physical_gitconfig(repo, tmp_path, monkeypatch):
+    real = tmp_path / "realhome"
+    real.mkdir()
+    (real / ".gitconfig").write_text("[user]\n\tname = t\n")
+    link = tmp_path / "linkhome"
+    link.symlink_to(real)
+    monkeypatch.setenv("HOME", str(link))
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    evil = tmp_path / "evilhome"
+    evil.mkdir()
+    (evil / ".gitconfig").write_text("[core]\n\thooksPath = /evil\n")
+    with open(real / ".gitconfig", "a") as f:
+        f.write(FSMONITOR)
+    link.unlink()
+    link.symlink_to(evil)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back"):
+        permissions.restore_git_dir(run, guard)
+    assert (real / ".gitconfig").read_text() == "[user]\n\tname = t\n"
+    assert os.readlink(link) == str(evil)
+    assert (evil / ".gitconfig").read_text() == "[core]\n\thooksPath = /evil\n"
 
 
 # ── a git config git can't read ──

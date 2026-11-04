@@ -56,19 +56,6 @@ class PermissionBreach(RuntimeError):
 _SAFE = ["-c", "core.fsmonitor="]     # empty: off on every git; "false" runs `false` before 2.36
 _NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
 
-# Every file git ignored before the agent ran, one by one. An agent that
-# changes what git ignores makes the engineer's .env or node_modules look new;
-# the rollback must not delete them. Taken before the agent, so it can't add to
-# it. No folder entries: a folder can't vouch for a file the agent adds to it.
-# Past EXISTED_CAP bytes the list is dropped and the rollback deletes as before.
-_EXISTED: frozenset[str] = frozenset()
-EXISTED_CAP = 64 * 1024 * 1024
-
-
-def _existed(path: str) -> bool:
-    return path in _EXISTED
-
-
 def _gitargv(args: list[str], *, writes: bool = False) -> list[str]:
     return ["git", *_SAFE, *(_NO_HOOKS if writes else []), *args]
 
@@ -380,11 +367,6 @@ def _differs(guard: dict) -> list[str] | None:
 
 def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs. None outside a git repo."""
-    global _EXISTED
-    listed = _git(["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
-                  run.repo_root)
-    _EXISTED = frozenset(p for p in listed.split("\0") if p) \
-        if len(listed) <= EXISTED_CAP else frozenset()
     links, paths = _watched(run)
     if not paths:
         return None
@@ -566,9 +548,6 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
         return "REVERTED-BY-AGENT (uncommitted work lost, cannot restore)" \
             if path not in after else "left as-is (was already modified)"
     if after.get(path) == "untracked":
-        if _existed(path):
-            return ("left in place: git ignored it before the agent ran, so it is "
-                    "not the agent's; what git ignores has changed since")
         try:
             sandbox.current().remove(Path(run.repo_root) / path)
             return "deleted"

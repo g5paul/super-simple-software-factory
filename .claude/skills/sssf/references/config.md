@@ -184,12 +184,10 @@ git command in the repo. No agent has a reason to write there: SSSF does the
 committing.
 
 SSSF's own git never runs an fsmonitor, and its undo and rollback run no
-hooks. Before each agent, SSSF also lists what git ignores. If the agent
-changes what git ignores, your ignored `.env` or `node_modules` would look
-like files it added, so the rollback never deletes a file on that list; it
-names it instead. An ignore file the agent changed through a link can still
-hide one of its own new files from the rollback, as it can on a run without
-this check.
+hooks. Two gaps it shares with a run without this check: an ignore file the
+agent changed through a link can hide one of its own new files from the
+rollback, and an agent that stops git ignoring your `.env` or `node_modules`
+makes them look like its own new files, which the rollback deletes.
 
 Two costs. An edit you make to your git config while an agent runs is put back
 too. And a tool that writes git config or hooks on install, like husky's

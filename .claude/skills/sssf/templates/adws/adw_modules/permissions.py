@@ -206,15 +206,23 @@ exit ${failed:-0}
 
 
 # Prints each path with its parent resolved physically, NUL-separated, or an
-# empty field where the parent doesn't exist yet. The x sentinel keeps a
-# trailing newline in a directory's name, so `d` and `d\n` stay different.
+# empty field where the parent doesn't exist yet or can't be entered. It prints
+# `?` where cd -P enters the parent but pwd -P can't name it (a physical path
+# over the system limit under a directory that can't be read; dash's pwd -P
+# exits 0 then, so the output must start with /). Callers treat any field not
+# starting with / as not resolving. The restore writes only under "", never
+# under `?`, since nothing can check where the links on the way to `?` now
+# point. The x sentinel keeps a trailing newline in a directory's name, so `d`
+# and `d\n` stay different.
 _REAL = """for p in "$@"; do
   d=${p%/*}; b=${p##*/}
   if [ "$b" = .. ] || [ "$b" = . ]; then d=$p; b=; fi
-  if r=$(cd -P "${d:-/}" 2>/dev/null && { pwd -P; echo x; }); then
+  if r=$(cd -P "${d:-/}" 2>/dev/null && { pwd -P 2>/dev/null && echo x || :; }); then
     r=${r%x}; r=${r%?}
-    if [ -n "$b" ]; then r="${r%/}/$b"; fi
-    printf "%s\\0" "$r"
+    case $r in
+      /*) if [ -n "$b" ]; then r="${r%/}/$b"; fi; printf "%s\\0" "$r" ;;
+      *) printf "?\\0" ;;
+    esac
   else
     printf "\\0"
   fi
@@ -224,7 +232,8 @@ done
 
 # Prints, NUL-separated, a triple for every prefix of each path as written,
 # the kernel's way: the prefix, the directory it resolves to (cd -P; empty if
-# it isn't a directory that can be entered), and L if it is a symlink, else -.
+# it isn't a directory that can be entered, or whose physical path pwd -P
+# can't name), and L if it is a symlink, else -.
 # Empty components are skipped; . and .. are kept, as the kernel takes them.
 _WHERE = """for p in "$@"; do
   rest=${p#/}; q=
@@ -233,8 +242,9 @@ _WHERE = """for p in "$@"; do
     case $rest in */*) rest=${rest#*/};; *) rest=;; esac
     [ -z "$c" ] && continue
     q="$q/$c"
-    r=$(cd -P "$q" 2>/dev/null && { pwd -P; echo x; }) || r=
+    r=$(cd -P "$q" 2>/dev/null && pwd -P 2>/dev/null && echo x) || r=
     if [ -n "$r" ]; then r=${r%x}; r=${r%?}; fi
+    case $r in /*) ;; *) r= ;; esac
     if [ -L "$q" ]; then l=L; else l=-; fi
     printf "%s\\0%s\\0%s\\0" "$q" "$r" "$l"
   done
@@ -318,7 +328,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     `guard_git_dir` records where each of their prefixes resolves.
 
     A watched path with `..` that doesn't fully resolve, because a part of it
-    doesn't exist yet or can't be entered, stops the run with
+    doesn't exist yet, can't be entered, or can't be named by `pwd -P`, stops the run with
     `PermissionBreach`, since the guard can't know which file git will read.
 
     A failed `rev-parse` in a repo (the root has a `.git`), or one that fails
@@ -405,7 +415,8 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     real = _sh(_REAL, *paths).stdout.split("\0")
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
-    # A path with ".." that cd -P can't resolve would take the lexical fallback
+    # A path with ".." that cd -P can't resolve, or whose parent pwd -P can't
+    # name (the "?" field), would take the lexical fallback
     # below, but the kernel resolves ".." physically, maybe through a link, once
     # the missing part exists, so git can read a file the guard doesn't watch.
     loose = [p for p, r in zip(paths, real) if not r.startswith("/") and ".." in p.split("/")]
@@ -415,7 +426,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
             return (f"  - {_shown_key(key)} in {source}: {p}" if key else f"  - {p}")
         raise PermissionBreach(
             "A git path SSSF watches has `..` after a directory that doesn't exist yet, "
-            "or that can't be entered. Once that changes, git resolves `..` through it and "
+            "that can't be entered, or whose real path can't be read. Once that changes, git resolves `..` through it and "
             "can read a different file from the one SSSF watches, so the agent did not run, "
             "and no run will until the path is fixed:\n"
             + "\n".join(which(p) for p in loose) + "\n\n"

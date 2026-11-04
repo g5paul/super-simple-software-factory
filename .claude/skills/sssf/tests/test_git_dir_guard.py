@@ -13,6 +13,7 @@ A symlink a later `..` cancels on a watched path is recorded like any other link
 A repo whose git config git can't read stops the run first, with git's error.
 A shared config file's breach (one outside the repo's git directory and work tree, like ~/.gitconfig) lists the
 changed keys, never a value.
+A directory on the way that `pwd -P` can't name reads as not resolving.
 A directory on the way to a watched path that resolved before the agent and no longer resolves stops the run.
 
 Run from the skill root:
@@ -2054,3 +2055,131 @@ def test_a_readable_repo_runs_no_extra_command(repo, monkeypatch):
     monkeypatch.setattr(permissions, "_sh", counting)
     assert permissions.guard_git_dir(shipped(repo))
     assert '[ -e "$1" ] || [ -L "$1" ]' not in scripts
+
+
+# ── a directory pwd -P can't name ──
+
+class Unnameable:
+    def __init__(self, base: Path):
+        self.base = base
+        self.n = "a" * 200
+        self.inc = f"{base}/A/B/x.inc"
+        self.physical = f"{base}/long/" + "/".join([self.n] * 22) + "/x.inc"
+
+    def lock(self):
+        os.chmod(self.base / "long", 0o311)
+
+    def unlock(self):
+        os.chmod(self.base / "long", 0o755)
+
+
+@pytest.fixture
+def unnameable(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root can read through mode 311 directories")
+    u = Unnameable(Path(os.path.realpath(tmp_path)))
+    n = u.n
+    (u.base / "long").mkdir()
+    fd = os.open(u.base / "long", os.O_RDONLY | os.O_DIRECTORY)
+    fd11 = None
+    try:
+        for i in range(22):
+            os.mkdir(n, dir_fd=fd)
+            nxt = os.open(n, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+            if i == 10:
+                fd11 = os.dup(fd)
+        out = os.open("x.inc", os.O_WRONLY | os.O_CREAT, 0o644, dir_fd=fd)
+        os.write(out, b"[user]\n\tname = t\n")
+        os.close(out)
+        os.symlink("long/" + "/".join([n] * 11), u.base / "A")
+        os.symlink("/".join([n] * 11), "B", dir_fd=fd11)
+    finally:
+        os.close(fd)
+        if fd11 is not None:
+            os.close(fd11)
+    try:
+        yield u
+    finally:
+        u.unlock()
+
+
+def require_unnameable(u: Unnameable) -> None:
+    out = permissions._sh('cd -P "$1" && pwd -P', f"{u.base}/A/B").stdout
+    if out.startswith("/"):
+        pytest.skip("this filesystem can still name the path")
+
+
+@pytest.mark.parametrize("fake", ["pwd() { return 1; }", "pwd() { echo; }", "pwd() { echo rel; }"])
+def test_a_failed_pwd_reads_as_not_resolving(tmp_path, fake):
+    d = tmp_path / "d"
+    d.mkdir()
+    real = permissions._sh(fake + "\n" + permissions._REAL, f"{d}/x", f"{tmp_path}/missing/x").stdout
+    assert real.split("\0")[:2] == ["?", ""]
+    where = permissions._sh(fake + "\n" + permissions._WHERE, f"{d}/x").stdout.split("\0")
+    where.pop()
+    assert where[1::3] and all(f == "" for f in where[1::3])
+    control = permissions._sh(permissions._REAL, f"{d}/x").stdout.split("\0")[0]
+    assert control == f"{os.path.realpath(d)}/x"
+
+
+def _real(path: str) -> str:
+    return permissions._sh(permissions._REAL, path).stdout.split("\0")[0]
+
+
+def test_real_of_an_unnameable_dir_is_marked(unnameable):
+    u = unnameable
+    u.lock()
+    require_unnameable(u)
+    assert _real(u.inc) == "?"
+    where = permissions._where([u.inc])
+    assert where[f"{u.base}/A/B"][0] == ""
+    assert where[f"{u.base}/A"][0].startswith("/")
+    u.unlock()
+    assert _real(u.inc) == u.physical
+
+
+def test_an_include_under_an_unnameable_dir_is_watched_and_caught(repo, unnameable):
+    u = unnameable
+    u.lock()
+    require_unnameable(u)
+    git(repo, "config", "--add", "include.path", u.inc)
+    guard = permissions.guard_git_dir(shipped(repo))
+    assert "/x.inc" not in guard["paths"]
+    assert u.inc in guard["paths"]
+    git(repo, "config", "-f", u.inc, "core.hooksPath", str(repo / "evil"))
+    ino = os.stat(u.inc).st_ino
+    data = Path(u.inc).read_bytes()
+    assert permissions.git_dir_changed(guard)
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as err:
+        permissions.restore_git_dir(SimpleNamespace(repo_root=repo), guard)
+    assert u.inc in str(err.value)
+    assert os.stat(u.inc).st_ino == ino
+    assert Path(u.inc).read_bytes() == data
+
+
+def test_a_dotdot_include_under_an_unnameable_dir_stops_the_run_first(repo, unnameable):
+    u = unnameable
+    u.lock()
+    require_unnameable(u)
+    value = f"{u.base}/A/B/../B/x.inc"
+    git(repo, "config", "--add", "include.path", value)
+    before = state(repo)
+    with pytest.raises(permissions.PermissionBreach) as err:
+        permissions.guard_git_dir(shipped(repo))
+    msg = str(err.value)
+    for part in ("include.path", value, "did not run", "without `..`", "whose real path can't be read"):
+        assert part in msg
+    assert state(repo) == before
+
+
+def test_a_prefix_that_becomes_unnameable_has_moved(unnameable):
+    u = unnameable
+    walked = [u.inc]
+    guard = {"walked": walked, "where": permissions._where(walked)}
+    assert guard["where"][f"{u.base}/A/B"][0].startswith("/")
+    u.lock()
+    require_unnameable(u)
+    assert f"{u.base}/A/B" in permissions._moved(guard)
+    assert f"{u.base}/A/B" in permissions._moved(guard, gone=False)

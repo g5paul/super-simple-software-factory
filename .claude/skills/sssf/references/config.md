@@ -178,7 +178,9 @@ creates is a change too. A breach here doesn't skip the other checks: an agent's
 is still undone and its other writes still rolled back, and the breach names
 both. An agent that fails is put back the same way. SSSF also notices
 when a symlink on the way to one of these paths, such as a symlinked
-`~/.config`, `HOME` or `.git`, now points somewhere else. It reports a change
+`~/.config`, `HOME` or `.git`, now points somewhere else. That includes a
+symlink a later `..` in the path cancels, such as `lnk` in an include path
+`~/lnk/../x.inc`: git follows `lnk` before it takes the parent. It reports a change
 made through or to a symlink and stops the run, but never writes it back,
 since writing there could land in a folder the agent chose. The breach says
 "NOT all put back" and names the path, so check it by hand before your next

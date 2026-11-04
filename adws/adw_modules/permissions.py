@@ -264,6 +264,10 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     the engineer runs. A file in the work tree is the agent's to edit, so
     it isn't one, however its path was written.
 
+    The first value is every symlink on the way to a watched path, as `_LINKS`
+    finds it on the normalized path and, for a path with `..`, on the path as
+    written, named by its physical parent.
+
     A watched path with `..` that doesn't fully resolve, because a part of it
     doesn't exist yet or can't be entered, stops the run with
     `PermissionBreach`, since the guard can't know which file git will read.
@@ -346,9 +350,17 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
         logical.append(absolute(hooks_value, f"{root}/x"))
     paths = [p for p in dict.fromkeys(paths)
              if p.startswith("/") and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
-    logical = ["/" + posixpath.normpath(p).lstrip("/")
-               for p in dict.fromkeys(logical + paths) if p.startswith("/")]
+    written = [p for p in dict.fromkeys(logical + paths) if p.startswith("/")]
+    logical = ["/" + posixpath.normpath(p).lstrip("/") for p in written]
     links = [q for q in _sh(_LINKS, *logical).stdout.split("\0") if q]
+    # normpath drops lnk/.. before _LINKS sees lnk, but the kernel follows lnk
+    # first. So a path with `..` is walked again as written: [ -L ] on each
+    # written prefix is the kernel's own answer, and _REAL names each link it
+    # finds by its physical parent, so lnk/../l3 is recorded as <out>/l3.
+    dotted = [p for p in written if ".." in p.split("/")]
+    found = [q for q in _sh(_LINKS, *dotted).stdout.split("\0") if q] if dotted else []
+    if found:
+        links += [r for r in _sh(_REAL, *found).stdout.split("\0") if r.startswith("/")]
     real = _sh(_REAL, *paths).stdout.split("\0")
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")

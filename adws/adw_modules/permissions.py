@@ -206,15 +206,23 @@ exit ${failed:-0}
 
 
 # Prints each path with its parent resolved physically, NUL-separated, or an
-# empty field where the parent doesn't exist yet. The x sentinel keeps a
-# trailing newline in a directory's name, so `d` and `d\n` stay different.
+# empty field where the parent doesn't exist yet or can't be entered. It prints
+# `?` where cd -P enters the parent but pwd -P can't name it (a physical path
+# over the system limit under a directory that can't be read; dash's pwd -P
+# exits 0 then, so the output must start with /). Callers treat any field not
+# starting with / as not resolving. The restore writes only under "", never
+# under `?`, since nothing can check where the links on the way to `?` now
+# point. The x sentinel keeps a trailing newline in a directory's name, so `d`
+# and `d\n` stay different.
 _REAL = """for p in "$@"; do
   d=${p%/*}; b=${p##*/}
   if [ "$b" = .. ] || [ "$b" = . ]; then d=$p; b=; fi
-  if r=$(cd -P "${d:-/}" 2>/dev/null && { pwd -P; echo x; }); then
+  if r=$(cd -P "${d:-/}" 2>/dev/null && { pwd -P 2>/dev/null && echo x || :; }); then
     r=${r%x}; r=${r%?}
-    if [ -n "$b" ]; then r="${r%/}/$b"; fi
-    printf "%s\\0" "$r"
+    case $r in
+      /*) if [ -n "$b" ]; then r="${r%/}/$b"; fi; printf "%s\\0" "$r" ;;
+      *) printf "?\\0" ;;
+    esac
   else
     printf "\\0"
   fi
@@ -224,7 +232,8 @@ done
 
 # Prints, NUL-separated, a triple for every prefix of each path as written,
 # the kernel's way: the prefix, the directory it resolves to (cd -P; empty if
-# it isn't a directory that can be entered), and L if it is a symlink, else -.
+# it isn't a directory that can be entered, or whose physical path pwd -P
+# can't name), and L if it is a symlink, else -.
 # Empty components are skipped; . and .. are kept, as the kernel takes them.
 _WHERE = """for p in "$@"; do
   rest=${p#/}; q=
@@ -233,8 +242,9 @@ _WHERE = """for p in "$@"; do
     case $rest in */*) rest=${rest#*/};; *) rest=;; esac
     [ -z "$c" ] && continue
     q="$q/$c"
-    r=$(cd -P "$q" 2>/dev/null && { pwd -P; echo x; }) || r=
+    r=$(cd -P "$q" 2>/dev/null && pwd -P 2>/dev/null && echo x) || r=
     if [ -n "$r" ]; then r=${r%x}; r=${r%?}; fi
+    case $r in /*) ;; *) r= ;; esac
     if [ -L "$q" ]; then l=L; else l=-; fi
     printf "%s\\0%s\\0%s\\0" "$q" "$r" "$l"
   done
@@ -258,25 +268,29 @@ def _where(walked: list[str]) -> dict[str, list[str]] | None:
     return found
 
 
-def _moved(guard: dict) -> list[str] | None:
-    """The recorded prefixes that now resolve somewhere else, or None if they
-    could not be walked again."""
+def _moved(guard: dict, *, gone: bool = True) -> list[str] | None:
+    """The recorded prefixes that resolved before the agent and now resolve
+    somewhere else or nowhere, or None if they could not be walked again.
+    With gone=False, only those the restore must not write under: ones that
+    resolve somewhere else, or that resolve nowhere and were or are a symlink.
+    """
     then = guard.get("where", {})
     if not then:
         return []
     now = _where(guard.get("walked", []))
     if now is None:
         return None
-    gone = ["", "-"]
-    # A prefix that did not resolve before is never compared; today's path packs
-    # cover it (missing, not a directory, or not searchable). One that resolved
-    # before and now resolves to a different directory has moved. One that now
-    # resolves nowhere has moved only if it was a symlink or is one now: a
-    # removed link, or a real directory swapped for a dangling link. A removed
-    # real directory is left to the path packs, which put its files back.
+    none = ["", "-"]
+    # A prefix that did not resolve before is never compared; the path packs
+    # cover it. One that resolved before and now resolves anywhere else, or
+    # nowhere (missing, a regular file, unsearchable, a dangling link), has
+    # moved. With gone=False, a real directory that now resolves nowhere and
+    # isn't a link is left out: when the restore puts back a watched file under
+    # it, tar remakes it as a real directory, so writing there is as safe as
+    # at the baseline.
     return [q for q, (r, l) in then.items()
-            if r and now.get(q, gone)[0] != r
-            and (now.get(q, gone)[0] or l == "L" or now.get(q, gone)[1] == "L")]
+            if r and now.get(q, none)[0] != r
+            and (gone or now.get(q, none)[0] or l == "L" or now.get(q, none)[1] == "L")]
 
 
 def _sh(script: str, *args: str, timeout: float | None = None):
@@ -314,7 +328,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     `guard_git_dir` records where each of their prefixes resolves.
 
     A watched path with `..` that doesn't fully resolve, because a part of it
-    doesn't exist yet or can't be entered, stops the run with
+    doesn't exist yet, can't be entered, or can't be named by `pwd -P`, stops the run with
     `PermissionBreach`, since the guard can't know which file git will read.
 
     A failed `rev-parse` in a repo (the root has a `.git`), or one that fails
@@ -401,7 +415,8 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     real = _sh(_REAL, *paths).stdout.split("\0")
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
-    # A path with ".." that cd -P can't resolve would take the lexical fallback
+    # A path with ".." that cd -P can't resolve, or whose parent pwd -P can't
+    # name (the "?" field), would take the lexical fallback
     # below, but the kernel resolves ".." physically, maybe through a link, once
     # the missing part exists, so git can read a file the guard doesn't watch.
     loose = [p for p, r in zip(paths, real) if not r.startswith("/") and ".." in p.split("/")]
@@ -411,7 +426,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
             return (f"  - {_shown_key(key)} in {source}: {p}" if key else f"  - {p}")
         raise PermissionBreach(
             "A git path SSSF watches has `..` after a directory that doesn't exist yet, "
-            "or that can't be entered. Once that changes, git resolves `..` through it and "
+            "that can't be entered, or whose real path can't be read. Once that changes, git resolves `..` through it and "
             "can read a different file from the one SSSF watches, so the agent did not run, "
             "and no run will until the path is fixed:\n"
             + "\n".join(which(p) for p in loose) + "\n\n"
@@ -487,7 +502,8 @@ def _differs(guard: dict) -> list[str] | None:
         return {k: v for k, v in members.items() if k == rel or k.startswith(rel + "/")}
 
     # Resolving every prefix (_moved) fully covers a parent swapped under a
-    # link with a relative target.
+    # link with a relative target. A directory on the way that no longer
+    # resolves is reported too.
     found = moved + [p for p in guard["paths"] if p not in moved
                      and any(under(a, p) != under(b, p) for a, b in zip(now, then))]
     return found + ([TOO_LARGE] if followed is None else [])
@@ -685,13 +701,17 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     paths = [p for p in guard["paths"] if p in changed]
     if paths:
         now = _sh(_REAL, *paths).stdout.split("\0")[:len(paths)]
-        moved = _moved(guard)
+        moved = _moved(guard, gone=False)
         where = guard.get("where", {})
         # A prefix that moved roots the paths under it, by the prefix as written
         # and, unless it ends in . or .., by where it resolved before: $HOME/d/..
         # resolved to $HOME, which hasn't moved. Only a path whose parent no
         # longer resolves ("") is skipped there: tar would write through a
         # dangling link. A path whose _REAL is unchanged is safe, as today.
+        # A real directory that now resolves nowhere is reported (through
+        # _differs) but isn't a root: tar remakes it as a real directory, and
+        # the check after the restore sees whether it resolves to the same
+        # place again.
         roots = [] if moved is None else [
             s for q in moved
             for s in ([q] + ([where[q][0]] if q.rsplit("/", 1)[-1] not in (".", "..") else []))]

@@ -188,6 +188,8 @@ fi
 # checked: before the agent, that stops the run before the agent runs; after
 # it, it counts as a change.
 PACK_CAP = 16 * 1024 * 1024
+# git's own words when a directory isn't in any repo, in the C locale.
+NOT_A_REPO = "fatal: not a git repository"
 
 # Puts back the changed paths, and only those. Each is a physical path with no
 # symlink in it, checked just before this runs, so rm -rf and tar act where
@@ -231,25 +233,6 @@ done
 """
 
 
-# Prints, NUL-separated, each path with a ".." right after a part that cd
-# can't enter yet: missing, a dangling link, not a directory, or not
-# searchable. cd -P can't resolve such a path. Once the agent makes that part
-# usable, the kernel resolves ".." through it, maybe into a link, so git reads
-# a file the guard doesn't watch. Nothing is created, changed or written.
-_LOOSE_DOTDOT = """for p in "$@"; do
-  q=; rest=${p#/}
-  while [ -n "$rest" ]; do
-    c=${rest%%/*}
-    case $rest in */*) rest=${rest#*/} ;; *) rest= ;; esac
-    if [ "$c" = .. ] && { [ ! -d "${q:-/}" ] || [ ! -x "${q:-/}" ]; }; then
-      printf "%s\\0" "$p"; break
-    fi
-    q=$q/$c
-  done
-done
-"""
-
-
 def _sh(script: str, *args: str, timeout: float | None = None):
     """Run a guard script. Output is decoded leniently: a Latin-1 name in a
     path must not stop the run."""
@@ -281,15 +264,28 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     the engineer runs. A file in the work tree is the agent's to edit, so
     it isn't one, however its path was written.
 
-    A watched path with `..` after a directory that doesn't exist yet, or
-    can't be entered, stops the run with `PermissionBreach`, since the guard
-    can't know which file git will read.
+    A watched path with `..` that doesn't fully resolve, because a part of it
+    doesn't exist yet or can't be entered, stops the run with
+    `PermissionBreach`, since the guard can't know which file git will read.
+
+    A failed `rev-parse` in a repo (the root has a `.git`), or one that fails
+    with any error but not-a-repo, raises `PermissionBreach` with git's error.
+    The empty result means only "not a git repo".
     """
     root = str(run.repo_root).rstrip("/")
-    out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
+    found = sandbox.current().run(
+        ["env", "LC_ALL=C", *_gitargv(["rev-parse", "--path-format=absolute",
+                                       "--git-common-dir", "--git-dir"])],
+        cwd=root, text=False)
+    out, err = found.stdout, found.stderr
+    out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+    err = err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or "")
     dirs = list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
-    if not dirs:
-        return [], [], {}
+    if found.returncode != 0 or not dirs:
+        dot_git = _sh('[ -e "$1" ] || [ -L "$1" ]', f"{root}/.git").returncode == 0
+        if not dot_git and err.lstrip().startswith(NOT_A_REPO):
+            return [], [], {}
+        raise PermissionBreach(_unreadable(err, found.returncode))
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
     kind: dict[str, str] = {}
     named: dict[str, tuple[str, str]] = {}
@@ -343,8 +339,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     # its path, and won't extract under a parent that is an absolute symlink,
     # so the restore would delete such a file and fail to put it back. Each
     # parent is resolved with cd -P where it exists, lexically where it doesn't,
-    # except that a `..` after a part cd can't enter refuses the run (see
-    # _LOOSE_DOTDOT).
+    # except that a path with `..` that doesn't resolve refuses the run.
     import posixpath
     hooks_value = _git(["config", "core.hooksPath"], root).strip()
     if hooks_value:
@@ -357,8 +352,10 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     real = _sh(_REAL, *paths).stdout.split("\0")
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
-    dotted = [p for p in paths if ".." in p.split("/")]
-    loose = [q for q in _sh(_LOOSE_DOTDOT, *dotted).stdout.split("\0") if q] if dotted else []
+    # A path with ".." that cd -P can't resolve would take the lexical fallback
+    # below, but the kernel resolves ".." physically, maybe through a link, once
+    # the missing part exists, so git can read a file the guard doesn't watch.
+    loose = [p for p, r in zip(paths, real) if not r.startswith("/") and ".." in p.split("/")]
     if loose:
         def which(p: str) -> str:
             key, source = named.get(p, ("", ""))
@@ -456,7 +453,9 @@ def _differs(guard: dict) -> list[str] | None:
 
 
 def guard_git_dir(run) -> dict | None:
-    """Pack the watched paths, before an agent runs. None outside a git repo."""
+    """Pack the watched paths, before an agent runs.
+    None only when the repo root has no .git and git says it isn't a repo; a
+    repo whose config git can't read raises PermissionBreach."""
     links, paths, kinds = _watched(run)
     if not paths:
         return None
@@ -544,6 +543,18 @@ def _entries(source: str, path: str):
     if done.returncode != 0:
         return None
     return Counter(tuple(e.partition("\n")[::2]) for e in done.stdout.split("\0") if e)
+
+
+def _unreadable(err: str, code: int) -> str:
+    """The breach for a repo whose git config git can't read."""
+    lines = [l for l in err.strip().splitlines() if l.strip()][:20]
+    said = "\n".join("  " + "".join(c if c.isprintable() else "?" for c in l)[:300]
+                     for l in lines) or f"  (git printed no error; exit code {code})"
+    return ("git couldn't read the repo's git config, so SSSF can't tell which git "
+            "files to watch. The agent did not run, and no run will until git can "
+            "read it. git said:\n" + said + "\n\n"
+            "Fix the config file or include path git names above, for example a "
+            "symlink loop or a directory git can't enter, then run again.")
 
 
 def _shown_key(key: str) -> str:

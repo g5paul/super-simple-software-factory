@@ -145,6 +145,6 @@ bypass-reviewer agent" to "run guard changes through `adw_guard_change`".
 2. Who decides that a fix "adds a mechanism": the reviewer alone, or the
    reviewer plus a check on the diff, such as new module-level state?
 
-3. The post-mortem proposes answers to two first-draft questions, for the
-   engineer to confirm: keep the bound at 3 rounds, with a new mechanism as a
-   second stop, and start `no_false_positive` on.
+The engineer settled two first-draft questions on 2026-11-03: the bound is
+3 rounds, with a new mechanism as a second stop, and `no_false_positive`
+starts on.

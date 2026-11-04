@@ -258,25 +258,29 @@ def _where(walked: list[str]) -> dict[str, list[str]] | None:
     return found
 
 
-def _moved(guard: dict) -> list[str] | None:
-    """The recorded prefixes that now resolve somewhere else, or None if they
-    could not be walked again."""
+def _moved(guard: dict, *, gone: bool = True) -> list[str] | None:
+    """The recorded prefixes that resolved before the agent and now resolve
+    somewhere else or nowhere, or None if they could not be walked again.
+    With gone=False, only those the restore must not write under: ones that
+    resolve somewhere else, or that resolve nowhere and were or are a symlink.
+    """
     then = guard.get("where", {})
     if not then:
         return []
     now = _where(guard.get("walked", []))
     if now is None:
         return None
-    gone = ["", "-"]
-    # A prefix that did not resolve before is never compared; today's path packs
-    # cover it (missing, not a directory, or not searchable). One that resolved
-    # before and now resolves to a different directory has moved. One that now
-    # resolves nowhere has moved only if it was a symlink or is one now: a
-    # removed link, or a real directory swapped for a dangling link. A removed
-    # real directory is left to the path packs, which put its files back.
+    none = ["", "-"]
+    # A prefix that did not resolve before is never compared; the path packs
+    # cover it. One that resolved before and now resolves anywhere else, or
+    # nowhere (missing, a regular file, unsearchable, a dangling link), has
+    # moved. With gone=False, a real directory that now resolves nowhere and
+    # isn't a link is left out: when the restore puts back a watched file under
+    # it, tar remakes it as a real directory, so writing there is as safe as
+    # at the baseline.
     return [q for q, (r, l) in then.items()
-            if r and now.get(q, gone)[0] != r
-            and (now.get(q, gone)[0] or l == "L" or now.get(q, gone)[1] == "L")]
+            if r and now.get(q, none)[0] != r
+            and (gone or now.get(q, none)[0] or l == "L" or now.get(q, none)[1] == "L")]
 
 
 def _sh(script: str, *args: str, timeout: float | None = None):
@@ -487,7 +491,8 @@ def _differs(guard: dict) -> list[str] | None:
         return {k: v for k, v in members.items() if k == rel or k.startswith(rel + "/")}
 
     # Resolving every prefix (_moved) fully covers a parent swapped under a
-    # link with a relative target.
+    # link with a relative target. A directory on the way that no longer
+    # resolves is reported too.
     found = moved + [p for p in guard["paths"] if p not in moved
                      and any(under(a, p) != under(b, p) for a, b in zip(now, then))]
     return found + ([TOO_LARGE] if followed is None else [])
@@ -685,13 +690,17 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     paths = [p for p in guard["paths"] if p in changed]
     if paths:
         now = _sh(_REAL, *paths).stdout.split("\0")[:len(paths)]
-        moved = _moved(guard)
+        moved = _moved(guard, gone=False)
         where = guard.get("where", {})
         # A prefix that moved roots the paths under it, by the prefix as written
         # and, unless it ends in . or .., by where it resolved before: $HOME/d/..
         # resolved to $HOME, which hasn't moved. Only a path whose parent no
         # longer resolves ("") is skipped there: tar would write through a
         # dangling link. A path whose _REAL is unchanged is safe, as today.
+        # A real directory that now resolves nowhere is reported (through
+        # _differs) but isn't a root: tar remakes it as a real directory, and
+        # the check after the restore sees whether it resolves to the same
+        # place again.
         roots = [] if moved is None else [
             s for q in moved
             for s in ([q] + ([where[q][0]] if q.rsplit("/", 1)[-1] not in (".", "..") else []))]

@@ -13,6 +13,7 @@ A symlink a later `..` cancels on a watched path is recorded like any other link
 A repo whose git config git can't read stops the run first, with git's error.
 A shared config file's breach (one outside the repo's git directory and work tree, like ~/.gitconfig) lists the
 changed keys, never a value.
+A directory on the way to a watched path that resolved before the agent and no longer resolves stops the run.
 
 Run from the skill root:
     uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests
@@ -1757,6 +1758,77 @@ def test_a_real_dir_swapped_for_a_dangling_link_writes_nothing_through_it(repo, 
     assert str(home / "d") in str(caught.value)
     assert os.readlink(home / "d") == str(tmp_path / "evil" / "a")
     assert not (tmp_path / "evil").exists()
+
+
+# ── a prefix that no longer resolves ──
+
+@pytest.mark.parametrize("how", ["removed", "file", "locked"])
+def test_a_dir_before_dotdot_that_no_longer_resolves_is_seen(repo, home, tmp_path, how):
+    if how == "locked" and os.geteuid() == 0:
+        pytest.skip("root can enter a mode 0 directory")
+    _hole1(repo, home, tmp_path)
+    (home / "x.inc").write_text("[core]\n\thooksPath = /dev/null\n")
+    assert git(repo, "config", "core.hooksPath") == "/dev/null"
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    try:
+        if how == "locked":
+            (home / "d").chmod(0)
+        else:
+            (home / "d").rmdir()
+            if how == "file":
+                (home / "d").write_text("agent\n")
+            assert "hookspath=/dev/null" not in git(repo, "config", "--list").lower()
+        assert permissions.git_dir_changed(guard)
+        with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+            permissions.restore_git_dir(run, guard)
+        assert f"  - {home / 'd'}" in str(caught.value).splitlines()
+        if how == "removed":
+            assert not (home / "d").exists()
+        if how == "file":
+            assert (home / "d").read_text() == "agent\n"
+        assert (home / "x.inc").read_text() == "[core]\n\thooksPath = /dev/null\n"
+    finally:
+        if how == "locked":
+            (home / "d").chmod(0o755)
+
+
+def test_a_removed_empty_dir_on_the_way_stops_the_run(repo, home, tmp_path):
+    (home / ".config").mkdir()
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    (home / ".config").rmdir()
+    with pytest.raises(permissions.PermissionBreach, match="NOT all put back") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert f"  - {home / '.config'}" in str(caught.value).splitlines()
+    assert not (home / ".config").exists()
+
+
+def test_a_removed_hooks_dir_is_put_back(repo, home, tmp_path):
+    (repo / ".git" / "hooks" / "keep").write_text("")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    shutil.rmtree(repo / ".git" / "hooks")
+    with pytest.raises(permissions.PermissionBreach, match="put back as they were"):
+        permissions.restore_git_dir(run, guard)
+    assert (repo / ".git" / "hooks" / "keep").exists()
+
+
+def test_a_prefix_that_never_resolved_is_not_compared(repo, home, tmp_path):
+    assert not (home / ".config").exists()
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    (home / ".config").write_text("agent\n")
+    assert permissions.restore_git_dir(run, guard) == []
+
+
+def test_moved_without_gone_matches_the_baseline_roots(repo, home, tmp_path):
+    _hole1(repo, home, tmp_path)
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    (home / "d").rmdir()
+    assert str(home / "d") in permissions._moved(guard)
+    assert str(home / "d") not in permissions._moved(guard, gone=False)
 
 
 def test_a_hooks_dir_swapped_for_a_link_is_still_put_back(repo, home, tmp_path):

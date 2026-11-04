@@ -204,7 +204,14 @@ before it deleted anything.
 
 Two costs. An edit you make to your git config, or to
 `.git/sssf-private-names`, while an agent runs is put back too; edit them
-between runs. And a tool that writes git config or hooks on install, like husky's
+between runs. A git config or ignore file outside the repo is shared with everything you
+run, so the breach marks it as maybe not the agent's change. For a config
+file it lists the keys added (`+`), removed (`-`) or given a new value
+(`~`), at most 10 per file and 30 in all, and never a value. For an ignore
+or attributes file it says how many lines were added and removed. If the
+change is yours, make it again with the command you used, such as
+`gh auth setup-git`. The run stopped either way. Key names are shown as written, apart from the userinfo of a
+`://` URL, so a secret in any other part of a key name is shown. And a tool that writes git config or hooks on install, like husky's
 `prepare` script on `npm install` or `pre-commit install`, stops a run if an
 agent runs it; run those in `worktree_setup`, which runs before the agents.
 

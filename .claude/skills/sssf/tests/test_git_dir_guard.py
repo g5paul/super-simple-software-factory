@@ -8,6 +8,8 @@ A line in .git/info/exclude would hide a new file from enforce itself.
 guard_git_dir copies hooks/, info/, config, config.worktree and sssf-private-names aside before
 each agent, and restore_git_dir puts them back after it. A pack over the cap
 can't be checked, so it stops the run.
+A shared config file's breach (one outside the repo, like ~/.gitconfig) lists the
+changed keys, never a value.
 
 Run from the skill root:
     uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests
@@ -1093,3 +1095,166 @@ def test_a_link_under_the_cap_is_still_checked(repo, home, tmp_path, monkeypatch
     with pytest.raises(permissions.PermissionBreach, match=r"\.gitconfig") as err:
         permissions.restore_git_dir(run, guard)
     assert permissions.TOO_LARGE not in str(err.value)
+
+
+# ── shared git config files: the breach names the keys, never a value ─────────
+
+def _breach(run, guard) -> str:
+    with pytest.raises(permissions.PermissionBreach) as err:
+        permissions.restore_git_dir(run, guard)
+    return str(err.value)
+
+
+def _guarded(repo):
+    run = SimpleNamespace(repo_root=repo)
+    return run, permissions.guard_git_dir(run)
+
+
+def test_a_shared_config_change_names_its_keys(repo, home):
+    run, guard = _guarded(repo)
+    saved = (home / ".gitconfig").read_bytes()
+    git(repo, "config", "--global", "credential.https://github.com.helper", "!gh auth git-credential")
+    msg = _breach(run, guard)
+    assert "+ credential.https://github.com.helper" in msg
+    assert "may have come from outside the agent" in msg
+    assert ".gitconfig" in msg and "gh auth setup-git" in msg
+    assert "git-credential" not in msg
+    assert (home / ".gitconfig").read_bytes() == saved
+
+
+def test_removed_and_revalued_keys_are_named_without_values(repo, home):
+    (home / ".gitconfig").write_text("[user]\n\tname = t\n[core]\n\thooksPath = /before-path\n")
+    run, guard = _guarded(repo)
+    git(repo, "config", "--global", "--unset", "user.name")
+    git(repo, "config", "--global", "core.hooksPath", "/after-path")
+    git(repo, "config", "--global", "core.fsmonitor", "touch PLANTED")
+    msg = _breach(run, guard)
+    assert "- user.name" in msg and "~ core.hookspath" in msg and "+ core.fsmonitor" in msg
+    for value in ("before-path", "after-path", "PLANTED"):
+        assert value not in msg
+
+
+def test_keys_are_capped_per_file(repo, home):
+    run, guard = _guarded(repo)
+    with open(home / ".gitconfig", "a") as f:
+        f.write("[alias]\n" + "".join(f"\tk{i:02d} = v\n" for i in range(40)))
+    msg = _breach(run, guard)
+    assert sum(l.startswith("      + alias.k") for l in msg.splitlines()) == 10
+    assert "(30 more key(s) left out)" in msg
+
+
+def test_keys_are_capped_in_all(repo, home, monkeypatch):
+    monkeypatch.setattr(permissions, "KEYS_IN_ALL", 12)
+    run, guard = _guarded(repo)
+    block = "[alias]\n" + "".join(f"\tk{i:02d} = v\n" for i in range(10))
+    with open(home / ".gitconfig", "a") as f:
+        f.write(block)
+    (home / ".config" / "git").mkdir(parents=True)
+    (home / ".config" / "git" / "config").write_text(block)
+    msg = _breach(run, guard)
+    assert sum(l.startswith("      + ") for l in msg.splitlines()) == 12
+    assert "(8 more key(s) left out)" in msg
+
+
+def test_a_shared_ignore_change_counts_lines(repo, home):
+    ignore = home / ".config" / "git" / "ignore"
+    ignore.parent.mkdir(parents=True)
+    ignore.write_text("keep\nold\n")
+    run, guard = _guarded(repo)
+    ignore.write_text("keep\nadws/evil.py\nnew2\n")
+    msg = _breach(run, guard)
+    assert "2 line(s) added, 1 removed" in msg and str(ignore) in msg
+    assert "evil" not in msg
+    assert ignore.read_text() == "keep\nold\n"
+
+
+def test_a_repo_config_change_keeps_todays_message(repo):
+    run, guard = _guarded(repo)
+    with open(repo / ".git" / "config", "a") as f:
+        f.write("[core]\n\tfsmonitor = touch X\n")
+    msg = _breach(run, guard)
+    assert msg.startswith("The agent changed the git directory")
+    assert "outside the agent" not in msg and "+ core" not in msg
+
+
+def test_a_token_in_a_key_name_is_masked(repo):
+    run, guard = _guarded(repo)
+    git(repo, "config", "--global", "url.https://x-access-token:SECRETTOKEN@github.com/.insteadOf",
+        "https://github.com/")
+    msg = _breach(run, guard)
+    assert "SECRETTOKEN" not in msg
+    assert "url.https://***@github.com/.insteadof" in msg
+
+
+def test_an_unreadable_config_still_restores(repo, home):
+    run, guard = _guarded(repo)
+    saved = (home / ".gitconfig").read_bytes()
+    (home / ".gitconfig").write_text("[bad\n")
+    assert "could not be listed" in _breach(run, guard)
+    assert (home / ".gitconfig").read_bytes() == saved
+
+
+def test_a_stalled_listing_still_restores(repo, home, monkeypatch):
+    import time
+    run, guard = _guarded(repo)
+    saved = (home / ".gitconfig").read_bytes()
+    monkeypatch.setattr(permissions, "_KEYS", "sleep 30")
+    monkeypatch.setattr(permissions, "KEYS_SECONDS", 1)
+    (home / ".gitconfig").write_text("[user]\n\tname = other\n")
+    start = time.monotonic()
+    msg = _breach(run, guard)
+    assert time.monotonic() - start < 15
+    assert "could not be listed" in msg
+    assert (home / ".gitconfig").read_bytes() == saved
+
+
+def test_a_comment_only_change_says_so(repo, home):
+    run, guard = _guarded(repo)
+    with open(home / ".gitconfig", "a") as f:
+        f.write("# note\n")
+    assert "comment, layout or order change" in _breach(run, guard)
+
+
+def test_a_long_key_is_cut(repo, home):
+    run, guard = _guarded(repo)
+    with open(home / ".gitconfig", "a") as f:
+        f.write(f'[alias "{"x" * 500}"]\n\tk = v\n')
+    msg = _breach(run, guard)
+    assert max(len(l) for l in msg.splitlines() if l.startswith("      ")) <= permissions.KEY_WIDTH + 10
+    assert any(l.endswith("…") for l in msg.splitlines())
+
+
+def test_naming_keys_writes_no_file(repo, home, tmp_path, monkeypatch):
+    tmp = tmp_path / "t"
+    tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    run, guard = _guarded(repo)
+    before = sorted(str(p) for p in home.rglob("*"))
+    git(repo, "config", "--global", "credential.https://github.com.helper", "!gh auth git-credential")
+    _breach(run, guard)
+    assert list(tmp.iterdir()) == []
+    assert sorted(str(p) for p in home.rglob("*")) == before
+
+
+def test_listing_keys_loads_no_global_config(repo, home, tmp_path):
+    """A trace2 line the agent planted in ~/.gitconfig must not make SSSF's git
+    write a file or append to an engineer file."""
+    bashrc = home / ".bashrc"
+    bashrc.write_text("# mine\n")
+    run, guard = _guarded(repo)
+    loot, made = tmp_path / "loot", tmp_path / "made"
+    with open(home / ".gitconfig", "a") as f:
+        f.write(f"[trace2]\n\tnormalTarget = {bashrc}\n\tenvVars = HOME\n"
+                f"[trace2]\n\tnormalTarget = {made}\n[alias]\n\tx = y\n")
+    monkey_env = os.environ.copy()
+    _breach(run, guard)
+    assert bashrc.read_text() == "# mine\n"
+    assert not made.exists() and not loot.exists()
+    assert os.environ == monkey_env
+
+
+def test_a_value_added_to_an_existing_key_is_marked_changed(repo, home):
+    run, guard = _guarded(repo)
+    with open(home / ".gitconfig", "a") as f:
+        f.write("[user]\n\tname = other\n")
+    assert "~ user.name" in _breach(run, guard)

@@ -231,6 +231,25 @@ done
 """
 
 
+# Prints, NUL-separated, each path with a ".." right after a part that cd
+# can't enter yet: missing, a dangling link, not a directory, or not
+# searchable. cd -P can't resolve such a path. Once the agent makes that part
+# usable, the kernel resolves ".." through it, maybe into a link, so git reads
+# a file the guard doesn't watch. Nothing is created, changed or written.
+_LOOSE_DOTDOT = """for p in "$@"; do
+  q=; rest=${p#/}
+  while [ -n "$rest" ]; do
+    c=${rest%%/*}
+    case $rest in */*) rest=${rest#*/} ;; *) rest= ;; esac
+    if [ "$c" = .. ] && { [ ! -d "${q:-/}" ] || [ ! -x "${q:-/}" ]; }; then
+      printf "%s\\0" "$p"; break
+    fi
+    q=$q/$c
+  done
+done
+"""
+
+
 def _sh(script: str, *args: str, timeout: float | None = None):
     """Run a guard script. Output is decoded leniently: a Latin-1 name in a
     path must not stop the run."""
@@ -261,6 +280,10 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     (the run's own, in a worktree run): files shared with everything else
     the engineer runs. A file in the work tree is the agent's to edit, so
     it isn't one, however its path was written.
+
+    A watched path with `..` after a directory that doesn't exist yet, or
+    can't be entered, stops the run with `PermissionBreach`, since the guard
+    can't know which file git will read.
     """
     root = str(run.repo_root).rstrip("/")
     out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
@@ -269,6 +292,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
         return [], [], {}
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
     kind: dict[str, str] = {}
+    named: dict[str, tuple[str, str]] = {}
 
     def mark(path: str, what: str) -> None:
         if kind.get(path) != "config":      # "config" wins over "lines"
@@ -298,10 +322,12 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
         key, _, value = entry.partition("\n")
         if key.lower() in ("core.excludesfile", "core.attributesfile"):
             paths.append(absolute(value, source))
+            named.setdefault(paths[-1], (key, source))
             mark(paths[-1], "lines")
         if key.lower() == "include.path" or (key.lower().startswith("includeif.")
                                              and key.lower().endswith(".path")):
             paths.append(absolute(value, source))
+            named.setdefault(paths[-1], (key, source))
             mark(paths[-1], "config")
     hooks = _git(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], root).strip()
     if hooks.startswith("/"):
@@ -316,7 +342,9 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     # The physical path, as git resolves it: tar renames a member with ".." in
     # its path, and won't extract under a parent that is an absolute symlink,
     # so the restore would delete such a file and fail to put it back. Each
-    # parent is resolved with cd -P where it exists, lexically where it doesn't.
+    # parent is resolved with cd -P where it exists, lexically where it doesn't,
+    # except that a `..` after a part cd can't enter refuses the run (see
+    # _LOOSE_DOTDOT).
     import posixpath
     hooks_value = _git(["config", "core.hooksPath"], root).strip()
     if hooks_value:
@@ -329,6 +357,19 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     real = _sh(_REAL, *paths).stdout.split("\0")
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
+    dotted = [p for p in paths if ".." in p.split("/")]
+    loose = [q for q in _sh(_LOOSE_DOTDOT, *dotted).stdout.split("\0") if q] if dotted else []
+    if loose:
+        def which(p: str) -> str:
+            key, source = named.get(p, ("", ""))
+            return (f"  - {_shown_key(key)} in {source}: {p}" if key else f"  - {p}")
+        raise PermissionBreach(
+            "A git path SSSF watches has `..` after a directory that doesn't exist yet, "
+            "or that can't be entered. Once that changes, git resolves `..` through it and "
+            "can read a different file from the one SSSF watches, so the agent did not run, "
+            "and no run will until the path is fixed:\n"
+            + "\n".join(which(p) for p in loose) + "\n\n"
+            "Write the path without `..`, or create the missing directory first, then run again.")
     resolved = []
     kinds: dict[str, str] = {}
     tree = _sh(_REAL, f"{root}/.").stdout.split("\0")[0]

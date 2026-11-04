@@ -1,0 +1,552 @@
+"""Config loading/validation and agent execution.
+
+Every ADW validates its agents before running (fail fast, nothing spawns
+against a half-valid config). Every agent call parses against a concrete
+output type; parse failures and gate violations re-prompt the SAME session
+with a correction — context intact, bounded retries. Agent proposes, code
+disposes.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+from . import (account, agent_cc, agent_pi, budget, permissions, prices, prompts, repo_settings,
+               rules, silence)
+from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
+                         EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
+                         SSSFConfig, UsageBreakdown)
+from .utils import new_id
+
+JSON_FIX_ATTEMPTS = 2      # continue-with-correction attempts for malformed JSON
+
+
+class GateFailure(RuntimeError):
+    pass
+
+
+class AgentFailed(RuntimeError):
+    """The agent itself reported status fail or blocked. Its summary says why."""
+
+
+# ── config ───────────────────────────────────────────────────────────────────
+
+def load_config(path: str = "adws/adw_sssf_config/sssf.config.yaml") -> SSSFConfig:
+    raw = yaml.safe_load(Path(path).read_text()) or {}
+    defaults = raw.get("defaults", {}) or {}
+    for agent in raw.get("agents", []) or []:
+        for key in ("coding_agent", "model", "thinking", "color", "tools", "writes", "max_call_cost"):
+            if key in defaults:
+                agent.setdefault(key, defaults[key])
+        agent.setdefault("harness_engineering", defaults.get("harness_engineering", []))
+    return SSSFConfig(**raw)
+
+
+def resolve(cfg: SSSFConfig, name: str) -> AgentConfig:
+    for agent in cfg.agents:
+        if agent.name == name:
+            return agent
+    raise SystemExit(f"agent {name!r} is not defined in the config — "
+                     f"available: {[a.name for a in cfg.agents]}")
+
+
+def validate(cfg: SSSFConfig, required: list[str]) -> None:
+    """Fail fast: every required name must resolve to a usable agent."""
+    problems = []
+    for name in required:
+        try:
+            agent = resolve(cfg, name)
+        except SystemExit as e:
+            problems.append(str(e))
+            continue
+        for label, ref in (("system", agent.prompt_engineering.system),
+                           ("user", agent.prompt_engineering.user)):
+            if not Path(ref).is_file():
+                problems.append(f"agent {name!r}: {label} prompt not found: {ref}")
+        if agent.coding_agent == "claude_code":
+            problems += [f"agent {name!r}: {p}" for p in _claude_code_problems(agent)]
+            continue
+        try:
+            agent_pi.resolve_model(agent.model)
+        except ValueError as e:
+            problems.append(f"agent {name!r}: {e}")
+    if problems:
+        raise SystemExit("config validation failed:\n- " + "\n- ".join(problems))
+
+
+def _claude_code_problems(agent: AgentConfig) -> list[str]:
+    """What pi accepts but claude cannot run. The model is checked for shape
+    only: claude has no offline catalog, so an unknown id fails at its run."""
+    problems = []
+    for check in (lambda: agent_cc.model_id(agent.model),
+                  lambda: agent_cc.map_tools(agent.tools)):
+        try:
+            check()
+        except ValueError as e:
+            problems.append(str(e))
+    if agent.harness_engineering:
+        problems.append(f"harness_engineering {agent.harness_engineering} are pi "
+                        "extensions; claude_code cannot load them, so remove them "
+                        "(and the tools they register) from this agent")
+    return problems
+
+
+def _interface(agent: AgentConfig):
+    """The module that runs this agent: agent_pi or agent_cc, same contract."""
+    return agent_cc if agent.coding_agent == "claude_code" else agent_pi
+
+
+# ── execution ────────────────────────────────────────────────────────────────
+
+def prompt_variables(run, phase: Phase, call: AgentCall) -> dict[str, str]:
+    """The {{placeholders}} every prompt can use. phase_name tells a repeated
+    phase (review_1, review_2) which round it is, so it can name its files."""
+    return {
+        "prompt": call.prompt,
+        "previous_envelope": call.previous.model_dump_json(indent=2) if call.previous else "(none)",
+        "context_handoff_dir": str(run.context_handoff_dir),
+        "phase_name": phase.params.name,
+        "protected_files": "\n".join(f"- `{p}`" for p in run.cfg.defaults.protected_files)
+                           or "(none)",
+    }
+
+
+_unlisted_warned: set[tuple[str, str]] = set()
+
+
+def warn_unlisted(run, phase: Phase, agent_name: str, models: list[str]) -> None:
+    """Once per run and model: a Claude model the price table doesn't list. The
+    call itself reported its cost; the warning is for the next one SSSF kills."""
+    for model in models:
+        if prices.listed(model) or (run.adw_id, model) in _unlisted_warned:
+            continue
+        _unlisted_warned.add((run.adw_id, model))
+        run.console.advise(prices.unlisted_warning(model))
+        run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                     type="log", name="unlisted_model",
+                                     payload={"agent": agent_name, "model": model,
+                                              "message": prices.unlisted_warning(model)}))
+
+
+def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
+    """One agent call: render prompts -> coding agent run -> typed parse -> gates -> envelope."""
+    agent = resolve(run.cfg, phase.params.owner)
+    if agent.coding_agent == "claude_code":
+        try:
+            agent_cc.check_login()
+        except agent_cc.NotLoggedIn as stop:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="not_logged_in",
+                                         payload={"agent": agent.name, "error": str(stop)}))
+            raise
+        try:
+            account.check(run.cfg.defaults.rate_limit_stop)
+        except account.RateLimitStop as stop:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rate_limit_stop",
+                                         payload={"agent": agent.name, "error": str(stop),
+                                                  "sample": account.latest()}))
+            raise
+    agent_dir = run.session_dir / agent.name
+    agent_dir.mkdir(parents=True, exist_ok=True)
+
+    variables = prompt_variables(run, phase, call)
+    system_text = repo_settings.with_agent_rules(
+        prompts.render(agent.prompt_engineering.system, variables), Path.cwd())
+    enforced = repo_settings.load(Path.cwd()).agent_rules
+    user_text = prompts.render(agent.prompt_engineering.user, variables)
+    prompts.save(agent_dir / "prompts", "system.md", system_text)
+    prompts.save(agent_dir / "prompts", "user.md", user_text)
+
+    session_key = f"{agent.name}:{call.session}" if call.session else agent.name
+    session_id = _agent_session_id(run, agent, session_key)
+    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                 type="agent_start", name=agent.name,
+                                 payload={"model": agent.model, "thinking": agent.thinking,
+                                          "color": agent.color,
+                                          "session_id": session_id,
+                                          "coding_agent": agent.coding_agent,
+                                          "purpose": agent.purpose,
+                                          "tools": agent.tools,  # None = all tools
+                                          "harness_engineering": agent.harness_engineering}))
+    run.console.agent_started(agent.name, agent.model, session_id)
+
+    # Parse retries and gate corrections re-enter the SAME session, so the
+    # last send is the one whose context occupancy is current — while spend is
+    # the opposite: every send costs, so usage accumulates across all of them.
+    latest: AgentResult | None = None
+    spent = UsageBreakdown()
+    interface = _interface(agent)
+
+    quiet = repo_settings.load(run.repo_root).max_silence_minutes
+    silent_after = quiet * 60 if quiet else None
+
+    def count_partial(stop) -> None:
+        """A call killed mid-turn sent no final usage. What its turns reported,
+        priced by the interface, still counts."""
+        if stop.partial:
+            run.add_usage(stop.partial.tokens, stop.partial.cost)
+            spent.merge(stop.partial.usage)
+
+    def send(prompt_text: str) -> AgentResult:
+        nonlocal latest
+        # Before every send, not once per agent: retries spend too.
+        budget.check_run(run, agent.name, phase.phase_id)
+        budget.check_live(run, agent.name, phase.phase_id)
+        budget.check_daily(run, agent.name, phase.phase_id)
+        budget.check_machine(run, agent.name, phase.phase_id)
+        request = AgentRequest(
+            prompt=prompt_text,
+            system_prompt=system_text,
+            agent_name=agent.name,
+            adw_id=run.adw_id,
+            model=agent.model,
+            thinking=agent.thinking,
+            session_id=session_id,
+            # absolute: these are read by the subprocess, which runs in repo_root
+            session_dir=str((agent_dir / f"{agent.coding_agent}_sessions").resolve()),
+            raw_output_path=str((agent_dir / "raw_output.jsonl").resolve()),
+            tools=agent.tools,
+            extensions=agent.harness_engineering,
+            cwd=str(run.repo_root),
+            max_cost=agent.max_call_cost,
+            stop_on_usage_credits=run.cfg.defaults.rate_limit_stop is not None,
+            refuse_rules=rules.refusing(enforced),
+            max_silence_seconds=silent_after,
+        )
+        forward = _event_forwarder(run, phase, agent.name, interface, enforced)
+        try:
+            result = interface.run(
+                request,
+                on_event=forward,
+                on_spawn=lambda pid: run.tracer.process_start(
+                    run.adw_id, "agent", agent.name, pid,
+                    f"{agent.coding_agent} {agent.name} {agent.model}"),
+                on_exit=lambda pid: run.tracer.process_end(run.adw_id, pid))
+        except budget.CallBudgetStop as stop:
+            spent.merge(stop.result.usage)
+            raise budget.record_call_stop(run, agent.name, phase.phase_id,
+                                          agent.max_call_cost, stop) from None
+        except rules.RuleBreach as breach:
+            count_partial(breach)
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rule_breach",
+                                         payload={"agent": agent.name, "error": str(breach),
+                                                  "rule": breach.rule, "pattern": breach.pattern,
+                                                  "command": breach.command,
+                                                  "refusals": breach.refusals,
+                                                  "spent": breach.partial.cost if breach.partial else 0.0,
+                                                  "cost_reported": bool(breach.partial and breach.partial.cost_reported)}))
+            raise
+        except account.RateLimitStop as stop:
+            # Killed mid-call when the plan moved onto usage credits.
+            count_partial(stop)
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rate_limit_stop",
+                                         payload={"agent": agent.name, "error": str(stop),
+                                                  "usage_credits": True,
+                                                  "spent": stop.partial.cost if stop.partial else 0.0,
+                                                  "sample": account.latest()}))
+            raise
+        except silence.SilentStop as stop:
+            count_partial(stop)
+            stop.running = forward.tracker.running()
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="agent_silent",
+                                         payload={"agent": agent.name, "error": str(stop),
+                                                  "minutes": stop.minutes,
+                                                  "running": stop.running.get("label", ""),
+                                                  "running_since": stop.running.get("started_at", ""),
+                                                  "spent": stop.partial.cost if stop.partial else 0.0}))
+            raise
+        except agent_pi.UsageLimitStop as stop:
+            # Named like Claude's usage stop, so the trace and the dashboard
+            # read both the same way; `provider` tells them apart.
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="rate_limit_stop",
+                                         payload={"agent": agent.name, "provider": "openai",
+                                                  "error": str(stop)}))
+            raise
+        if result.leftovers_stopped:
+            # Not a failure: the agent had answered. Logged so the trace says
+            # why a background command it started never finished.
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="leftovers_stopped",
+                                         payload={"agent": agent.name, "minutes": quiet}))
+        run.add_usage(result.tokens, result.cost)
+        spent.merge(result.usage)
+        warn_unlisted(run, phase, agent.name, result.models)
+        latest = result
+        return result
+
+    git_before = None
+    try:
+        # What the tree looked like before this agent got its hands on it. Every
+        # send in this phase — first prompt, JSON retries, gate corrections — is
+        # measured against this one baseline.
+        tree_before = permissions.snapshot(run)
+        head_before = permissions.head(run)
+        git_before = permissions.guard_git_dir(run)
+
+        result = send(user_text)
+        envelope, attempt = _parse_with_retries(run, phase, call, result, send)
+
+        # claim gates — violations flow back into the SAME session as corrections
+        for gate_attempt in range(1, max(1, phase.params.retries + 1) + 1):
+            # Gates run git, and git would run a hook or fsmonitor the agent
+            # planted. A changed git directory skips the gates; the check below
+            # puts it back and stops the run.
+            try:
+                if permissions.git_dir_changed(git_before):
+                    break
+            except Exception:
+                break                       # the check below reports it
+            violations = []
+            for gate in call.gates:
+                report = _as_report(gate(envelope, run))
+                found = report.violations
+                run.tracer.gate_row(phase, gate.__name__, report, gate_attempt)
+                run.tracer.event(EventRecord(
+                    adw_id=run.adw_id, phase_id=phase.phase_id,
+                    type="gate_fail" if found else "gate_pass", name=gate.__name__,
+                    payload={"attempt": gate_attempt, "violations": found,
+                             "checks": [c.model_dump() for c in report.checks]}))
+                run.console.gate_result(gate.__name__, report)
+                violations.extend(found)
+            if not violations:
+                break
+            if gate_attempt > phase.params.retries:
+                raise GateFailure(f"{agent.name} failed gates after {gate_attempt} attempt(s):\n- "
+                                  + "\n- ".join(violations))
+            phase.attempt = gate_attempt
+            run.console.retry(agent.name, gate_attempt, phase.params.retries,
+                              f"{len(violations)} gate violation(s)")
+            correction = ("Your previous response failed validation:\n- "
+                          + "\n- ".join(violations)
+                          + "\n\nFix these problems, then re-emit ONLY your Report JSON.")
+            result = send(correction)
+            envelope, attempt = _parse_with_retries(run, phase, call, result, send)
+
+        # Permission is checked after every send is done, and before the envelope is
+        # accepted: an agent does not get to report success on a phase in which it
+        # wrote somewhere it was not allowed to.
+        # An agent's own commit would hide its changes from enforce, so it is
+        # undone first and its changes go back in the tree, unstaged.
+        # All three checks run, whatever the first finds: a git-directory
+        # breach must not skip the commit undo or the rollback, or an agent
+        # could touch .git to keep its other changes.
+        try:
+            git_breach = None
+            try:
+                permissions.restore_git_dir(run, git_before)
+            except permissions.PermissionBreach as found:
+                git_breach = found
+            except Exception as failed:     # any guard error still gets undo and enforce
+                git_breach = permissions.PermissionBreach(
+                    f"Could not check or put back the git directory and git config: {failed!r}. "
+                    "Check them by hand before the next git command in this repo.")
+            try:
+                undone = permissions.undo_commits(run, head_before)
+                if undone:
+                    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                                 type="log", name="agent_committed",
+                                                 payload={"agent": agent.name, "undone": undone}))
+                    run.console.note(f"{agent.name} committed {len(undone)} time(s) itself "
+                                     f"({', '.join(undone)}). Undid the commits and kept the changes.")
+                touched = permissions.enforce(run, phase, agent, tree_before)
+            except permissions.PermissionBreach as found:
+                if git_breach:
+                    raise permissions.PermissionBreach(f"{git_breach}\n{found}") from found
+                raise
+            except Exception as failed:     # a crash in the undo or rollback keeps the git breach
+                raise permissions.PermissionBreach(
+                    (f"{git_breach}\n" if git_breach else "")
+                    + f"Could not undo the agent's commits or roll back its writes: {failed!r}. "
+                    "Check the tree by hand.") from failed
+            if git_breach:
+                raise git_breach
+        except permissions.PermissionBreach as breach:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="permission_breach",
+                                         payload={"agent": agent.name, "error": str(breach),
+                                                  "writes": agent.writes,
+                                                  "protected_files": run.cfg.defaults.protected_files}))
+            raise
+        if touched:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="paths_touched",
+                                         payload={"agent": agent.name, "paths": touched}))
+
+        _persist_envelope(run, phase, agent.name, call, envelope, attempt, valid=True)
+        run.console.envelope_summary(envelope)
+        context = latest or result
+        run.tracer.agent_session_row(run.adw_id, agent, session_id,
+                                     context_tokens=context.context_tokens,
+                                     context_window=context.context_window)
+        run.save_agent_map(session_key, {"session_id": session_id, "model": agent.model,
+                                        "coding_agent": agent.coding_agent})
+        run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                     type="handoff", name=agent.name,
+                                     payload={"artifacts": envelope.artifacts,
+                                              "summary": envelope.summary}))
+    except BaseException:
+        # A failed agent may still have planted a hook. Put the git directory
+        # back, so nothing it left there runs on the engineer's next commit.
+        try:
+            put_back = permissions.restore_git_dir(run, git_before, breach=False)
+            if put_back:
+                run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                             type="error", name="git_dir_restored",
+                                             payload={"agent": agent.name, "paths": put_back}))
+        except Exception as failed:
+            # The restore itself failed. Say so loudly: the engineer's next git
+            # command in this repo could run what the agent left.
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="git_dir_restore_failed",
+                                         payload={"agent": agent.name, "error": str(failed)}))
+            run.console.note(str(failed))
+        # A failed phase spent too. The caps and the dashboard total agent_end
+        # events, so without one here its spend would vanish from both.
+        if spent.total_tokens or spent.total_cost:
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="agent_end", name=agent.name,
+                                         tokens=spent.total_tokens,
+                                         payload={"cost": spent.total_cost,
+                                                  "usage": spent.model_dump(),
+                                                  "stopped": True}))
+        raise
+    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                 type="agent_end", name=agent.name,
+                                 # Phase totals, not the last send's: a retried
+                                 # phase paid for every attempt.
+                                 tokens=spent.total_tokens,
+                                 payload={"cost": spent.total_cost,
+                                          "usage": spent.model_dump(),
+                                          "context_tokens": context.context_tokens,
+                                          "context_window": context.context_window}))
+    run.console.agent_finished(agent.name, spent.total_tokens, spent.total_cost)
+    if envelope.status != "success":
+        raise AgentFailed(f"{agent.name} reported status={envelope.status!r}: {envelope.summary}")
+    return envelope
+
+
+# ── internals ────────────────────────────────────────────────────────────────
+
+def _as_report(result) -> GateReport:
+    """Accept a GateReport, or a legacy gate that returned a violations list."""
+    if isinstance(result, GateReport):
+        return result
+    return GateReport(checks=[GateCheck(item=str(v), ok=False) for v in (result or [])])
+
+
+def _agent_session_id(run, agent: AgentConfig, key: str) -> str:
+    entry = run.agent_map.get(key)
+    if (entry and entry.get("model") == agent.model
+            and entry.get("coding_agent", "pi") == agent.coding_agent):
+        return entry["session_id"]           # rejoin the existing context window
+    if agent.coding_agent == "claude_code":
+        return str(uuid.uuid4())             # claude accepts only a UUID
+    return f"sssf-{run.adw_id}-{agent.name}-{new_id(4)}"
+
+
+def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: list = (),
+                     can_refuse: bool = True):
+    """One tool_call event per real tool call, with its exact args and result.
+    Raises RuleBreach the moment a call breaks a forbid rule; the interface
+    then kills the agent before the call can finish.
+
+    A refuse rule waits for the call's result instead: sssf_rules.ts refuses
+    for pi, sssf_refuse.py for Claude Code. SSSF's refusal there
+    means nothing ran, and the run goes on; any other result means it ran."""
+    tracker = interface.ToolCallTracker()
+    pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
+    refusals = 0
+
+    def forward(event: dict) -> None:
+        nonlocal refusals
+        for call_id, command in rules.calls(event):
+            found = rules.breach(list(enforced), command)
+            if found and can_refuse and found[0].on_match == "refuse":
+                pending.setdefault(call_id, (*found, command))
+            elif found:
+                raise rules.RuleBreach(agent_name, *found, command)
+        for call_id, text in rules.results(event):
+            if call_id not in pending:
+                continue
+            rule, pattern, command = pending.pop(call_id)
+            if not rules.refused(text):
+                raise rules.RuleBreach(agent_name, rule, pattern, command)
+            refusals += 1
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="rule_refused",
+                                         payload={"agent": agent_name, "rule": rule.rule,
+                                                  "pattern": pattern, "command": command,
+                                                  "refusals": refusals}))
+            run.console.advise(f"refused {agent_name}: `{command[:200]}` ({rule.rule})")
+            if refusals >= rules.MAX_REFUSALS:
+                raise rules.RuleBreach(agent_name, rule, pattern, command, refusals=refusals)
+        # The call's span rides the columns; duration_ms stays in the payload as
+        # the interface's own number.
+        for record in tracker.observe(event):
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="tool_call", name=record.pop("label"),
+                                         started_at=record.pop("started_at", None),
+                                         ended_at=record.pop("ended_at", None),
+                                         payload={**record, "agent": agent_name}))
+    forward.tracker = tracker      # a silent stop asks it what was running
+    return forward
+
+
+def _extract_json(text: str) -> dict:
+    candidate = text
+    if "```" in text:
+        for block in text.split("```")[1::2]:
+            block = block.removeprefix("json").strip()
+            if block.startswith("{"):
+                candidate = block
+                break
+    start, end = candidate.find("{"), candidate.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError("no JSON object found in the response")
+    return json.loads(candidate[start:end + 1])
+
+
+def _parse_with_retries(run, phase: Phase, call: AgentCall, result, send):
+    """Parse the final response against the declared output type; on failure,
+    continue the SAME session with a correction (bounded)."""
+    for attempt in range(1, JSON_FIX_ATTEMPTS + 2):
+        try:
+            payload = _extract_json(result.text)
+            return call.output_type.model_validate(payload), attempt
+        except Exception as error:
+            _persist_envelope(run, phase, phase.params.owner, call, None, attempt,
+                              valid=False, raw=result.text)
+            if attempt > JSON_FIX_ATTEMPTS:
+                raise RuntimeError(
+                    f"{phase.params.owner} never produced valid "
+                    f"{call.output_type.__name__} JSON: {error}") from error
+            run.console.retry(phase.params.owner, attempt, JSON_FIX_ATTEMPTS,
+                              f"invalid {call.output_type.__name__} JSON: {error}")
+            fields = ", ".join(call.output_type.model_fields.keys())
+            result = send(
+                f"Your response was not valid JSON for the required structure "
+                f"({error}). Respond again with ONLY a JSON object with these "
+                f"fields: {fields}. No prose, no code fences.")
+
+
+def _persist_envelope(run, phase: Phase, agent_name: str, call: AgentCall,
+                      envelope: Optional[EnvelopeBase], attempt: int,
+                      valid: bool, raw: str = "") -> None:
+    payload_json = envelope.model_dump_json(indent=2) if envelope else json.dumps({"raw": raw[-2000:]})
+    run.tracer.envelope_row(phase, agent_name, call.output_type.__name__,
+                            payload_json, valid, attempt)
+    if envelope:
+        record = {"agent_name": agent_name, "purpose": resolve(run.cfg, agent_name).purpose,
+                  "output_type": call.output_type.__name__, "attempt": attempt,
+                  **envelope.model_dump()}
+        (run.session_dir / agent_name / "envelope.json").write_text(json.dumps(record, indent=2))

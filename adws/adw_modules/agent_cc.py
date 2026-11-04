@@ -1,0 +1,384 @@
+"""Claude Code coding agent interface.
+
+Runs `claude -p --output-format stream-json` and tails its JSONL stdout line
+by line, forwarding each event to a callback WHILE the agent works, exactly
+like agent_pi. Two things differ from pi and shape everything below:
+
+- A session is created with `--session-id <uuid>` and continued with
+  `--resume <uuid>`; pi's one create-or-continue flag has no equivalent. The
+  first send records the session in a small ledger under `session_dir`, and
+  every later send (JSON retries, gate corrections, a rejoining phase) finds
+  it there and resumes.
+- `total_cost_usd` in the final `result` event is CUMULATIVE over a resumed
+  session, while its `usage` covers only the current send. The ledger keeps
+  the last running total so each send is billed only its own difference.
+
+Agents run isolated from the operator's own Claude Code setup: `--safe-mode`
+drops their CLAUDE.md, skills, plugins, hooks, and MCP servers, so a factory
+agent sees its system.md and nothing else. Safe mode keeps environment
+variables, so a repo's refuse rules reach the agent as a shell prefix,
+sssf_refuse.py, not as a hook. Auth stays on the operator's
+subscription login unless SSSF_CLAUDE_AUTH=api_key.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+from typing import Callable, Optional
+
+from . import account, budget, prices, rules, sandbox, silence
+from .agent_pi import ToolCallTracker as _PiToolCallTracker
+from .data_types import AgentRequest, AgentResult, UsageBreakdown
+from .utils import mark_agent, operator_env
+
+CLAUDE_PATH = os.environ.get("CLAUDE_CODE_PATH", "claude")
+# subscription: strip API keys from the child so the operator's login pays,
+# and refuse a run that would bill the API anyway. api_key: pass them through.
+AUTH = os.environ.get("SSSF_CLAUDE_AUTH", "subscription")
+API_KEY_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+# The roster speaks pi's tool names. Claude has no LS tool (it drops the name
+# silently), so both of pi's listing tools land on Glob.
+TOOL_NAMES = {"read": "Read", "bash": "Bash", "edit": "Edit", "write": "Write",
+              "grep": "Grep", "find": "Glob", "ls": "Glob"}
+# Claude's --effort has no off switch; the lowest it goes is low.
+EFFORT = {"off": "low", "minimal": "low", "low": "low", "medium": "medium",
+          "high": "high", "xhigh": "xhigh", "max": "max"}
+
+
+def model_id(model: str) -> str:
+    """`anthropic/claude-opus-5-5` -> `claude-opus-5-5`. Claude serves only
+    Anthropic models, so any other provider is a config error."""
+    if "/" not in model:
+        return model
+    provider, name = model.split("/", 1)
+    if provider != "anthropic":
+        raise ValueError(f"model {model!r}: claude_code runs anthropic/* models only, "
+                         f"not {provider!r}")
+    return name
+
+
+def map_tools(tools: Optional[list[str]]) -> Optional[list[str]]:
+    """Translate a roster tool list to Claude's names. None stays None (the
+    default set). A capitalized name is already Claude's and passes through."""
+    if tools is None:
+        return None
+    mapped = []
+    for tool in tools:
+        name = TOOL_NAMES.get(tool) or (tool if tool[:1].isupper() else None)
+        if name is None:
+            raise ValueError(f"tool {tool!r} has no Claude Code equivalent "
+                             f"(known: {sorted(TOOL_NAMES)}, or a Claude tool name)")
+        if name not in mapped:
+            mapped.append(name)
+    return mapped
+
+
+class NotLoggedIn(RuntimeError):
+    pass
+
+
+_logged_in = False
+
+
+def check_login() -> None:
+    """Stop before the first agent when claude has no login it can use.
+
+    In the operator container, the session signed in from its token but the
+    shell that launched the ADW did not have it, and the planner ended "Not
+    logged in" (sssf-sandbox a03e7b00). The check runs with the agents' own
+    environment, once per process.
+    """
+    global _logged_in
+    if _logged_in:
+        return
+    result = subprocess.run([CLAUDE_PATH, "auth", "status"], capture_output=True,
+                            text=True, check=False, env=child_env())
+    try:
+        status = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        status = {}
+    if not status.get("loggedIn"):
+        raise NotLoggedIn(
+            "claude has no login the agents can use (claude auth status: "
+            f"{status.get('authMethod', 'no answer')}). Log in with `claude`, or, "
+            "with a token, export CLAUDE_CODE_OAUTH_TOKEN where the ADW is "
+            "launched; a Claude Code session does not pass its own token to "
+            "the shells it runs.")
+    _logged_in = True
+
+
+def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
+    env = mark_agent(operator_env(), agent_name, adw_id)
+    if AUTH == "subscription":
+        for var in API_KEY_VARS:
+            env.pop(var, None)
+    return env
+
+
+# SSSF's refusing shell for agent_rules marked `on_match: refuse` (rules.py).
+REFUSE_SHELL = Path(__file__).with_name("sssf_refuse.py")
+
+
+def _with_refusals(env: dict[str, str], refuse_rules: list[dict], tree) -> dict[str, str]:
+    """Run every Bash call through sssf_refuse.py when the repo has refuse rules.
+    Claude Code takes the prefix as one path, not a command line, and a prefix
+    it can't run fails every call, so the tree installs it first. An
+    operator's own prefix still runs after SSSF's on this machine."""
+    if not refuse_rules:
+        return env
+    tree.install(REFUSE_SHELL)
+    env["SSSF_REFUSE_RULES"] = json.dumps(refuse_rules)
+    previous = env.get("CLAUDE_CODE_SHELL_PREFIX")
+    if previous and tree is sandbox.LOCAL:
+        env["SSSF_NEXT_SHELL_PREFIX"] = previous
+    env["CLAUDE_CODE_SHELL_PREFIX"] = str(REFUSE_SHELL)
+    return env
+
+
+def _text_of(content) -> str:
+    """Tool result content is a string, or a list of blocks like a message."""
+    if isinstance(content, str):
+        return content
+    return "".join(part.get("text", "") for part in content or []
+                   if isinstance(part, dict) and part.get("type") == "text")
+
+
+class ToolCallTracker(_PiToolCallTracker):
+    """Folds Claude's stream into ONE normalized record per completed call.
+
+    Claude announces a call as a `tool_use` block in an `assistant` event and
+    answers it with a `tool_result` block in a `user` event, joined by id. The
+    record is the same shape agent_pi emits, so the tracer and UI need nothing.
+    """
+
+    # Glob and Grep send both a pattern and a path; the pattern is the call.
+    primary_args = ("command", "pattern", "file_path", "path", "query", "url")
+
+    def observe(self, event: dict) -> list[dict]:
+        etype = event.get("type", "")
+        blocks = [b for b in (event.get("message", {}) or {}).get("content", []) or []
+                  if isinstance(b, dict)]
+        if etype == "assistant":
+            for block in blocks:
+                if block.get("type") == "tool_use":
+                    self._announce(block.get("id"), block.get("name"), block.get("input"))
+            return []
+        if etype != "user":
+            return []
+        return [self._finish(block.get("tool_use_id"), None, None,
+                             not block.get("is_error", False),
+                             _text_of(block.get("content")))
+                for block in blocks if block.get("type") == "tool_result"]
+
+
+def _ledger(request: AgentRequest) -> Path:
+    return Path(request.session_dir) / f"{request.session_id}.json"
+
+
+def _command(request: AgentRequest, resume: bool) -> list[str]:
+    cmd = [
+        CLAUDE_PATH, "-p", request.prompt,
+        "--output-format", "stream-json", "--verbose",
+        # For each message's final output count, in message_delta: the usage
+        # on an assistant event is a snapshot from the message's start.
+        "--include-partial-messages",
+        "--model", model_id(request.model),
+        "--effort", EFFORT.get(request.thinking, "medium"),
+        "--resume" if resume else "--session-id", request.session_id,
+        # Appended, not replaced: Claude Code's own prompt carries its tool
+        # guidance; system.md adds the agent's identity on top.
+        "--append-system-prompt", request.system_prompt,
+        # Nobody is there to answer a permission prompt. What an agent may
+        # change is enforced after the call by permissions.py, not here.
+        "--permission-mode", "bypassPermissions",
+        "--safe-mode", "--disable-slash-commands",
+    ]
+    tools = map_tools(request.tools)
+    if tools is not None:
+        cmd += ["--tools", ",".join(tools)]
+    if request.max_cost is not None:
+        cmd += ["--max-budget-usd", str(request.max_cost)]
+    return cmd
+
+
+def _context_tokens(usage: dict) -> int:
+    return int(sum(usage.get(part) or 0 for part in
+                   ("input_tokens", "cache_creation_input_tokens",
+                    "cache_read_input_tokens", "output_tokens")))
+
+
+def _usage(usage: dict, cost: float) -> UsageBreakdown:
+    """One send's usage. Claude reports only a total cost, so the
+    per-component cost fields stay zero."""
+    return UsageBreakdown(
+        input_tokens=usage.get("input_tokens") or 0,
+        output_tokens=usage.get("output_tokens") or 0,
+        cache_read_tokens=usage.get("cache_read_input_tokens") or 0,
+        cache_write_tokens=usage.get("cache_creation_input_tokens") or 0,
+        reasoning_tokens=(usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0,
+        total_tokens=_context_tokens(usage),
+        total_cost=cost,
+    )
+
+
+def _partial(turns: dict[str, dict], output: dict[str, int]) -> AgentResult:
+    """What a killed call used, from its messages' usage. Claude prices a call
+    only in its final result, which a killed call never sends, so SSSF prices
+    the tokens at list price (prices.py). A model the table doesn't list adds
+    its tokens and no cost."""
+    usage = UsageBreakdown()
+    for message_id, message in turns.items():
+        tokens = dict(message["usage"])
+        tokens["output_tokens"] = max(tokens.get("output_tokens") or 0, output.get(message_id, 0))
+        priced = prices.cost(str(message.get("model") or ""), tokens)
+        usage.merge(_usage(tokens, priced or 0.0))
+    return AgentResult(tokens=usage.total_tokens, cost=usage.total_cost, usage=usage,
+                       cost_reported=False)
+
+
+def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None,
+        on_spawn: Optional[Callable[[int], None]] = None,
+        on_exit: Optional[Callable[[int], None]] = None) -> AgentResult:
+    """Run one non-interactive claude turn. Same contract as agent_pi.run."""
+    ledger = _ledger(request)
+    resume = ledger.is_file()
+    prior_cost = json.loads(ledger.read_text()).get("cost", 0.0) if resume else 0.0
+    cmd = _command(request, resume)
+
+    raw_path = Path(request.raw_output_path)
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+
+    result = AgentResult(session_id=request.session_id)
+    final: dict = {}
+    turns: dict[str, dict] = {}     # message id -> the message, for a call killed mid-turn
+    output: dict[str, int] = {}     # message id -> its output tokens so far, from message_delta
+    streaming: dict = {}            # parent_tool_use_id -> the message id now streaming
+    background = 0                  # Claude Code's background tasks still running
+    # sandbox.start gives the child a DEVNULL stdin, for the reason agent_pi gives.
+    tree = sandbox.current()
+    process = tree.start(cmd, cwd=request.cwd,
+                         env=_with_refusals(child_env(request.agent_name, request.adw_id),
+                                            request.refuse_rules, tree))
+    if on_spawn:
+        on_spawn(process.pid)
+    with silence.watch(process, request.max_silence_seconds) as dog:
+        try:
+            with raw_path.open("a") as raw:
+                assert process.stdout is not None
+                for line in process.stdout:
+                    dog.touch()
+                    try:
+                        event = json.loads(line) if line.strip() else None
+                    except json.JSONDecodeError:
+                        event = None
+                    if isinstance(event, dict) and event.get("type") == "stream_event":
+                        # Partial messages: only their usage is read. The rest is
+                        # the text token by token, kept out of the raw log.
+                        inner = event.get("event") or {}
+                        stream = event.get("parent_tool_use_id")
+                        if inner.get("type") == "message_start":
+                            streaming[stream] = (inner.get("message") or {}).get("id")
+                        elif inner.get("type") == "message_delta" and streaming.get(stream):
+                            output[streaming[stream]] = (inner.get("usage") or {}).get("output_tokens") or 0
+                            raw.write(line)
+                            raw.flush()
+                        continue
+                    raw.write(line)
+                    raw.flush()
+                    if not isinstance(event, dict):
+                        continue
+                    etype = event.get("type")
+                    if etype == "system" and event.get("subtype") == "background_tasks_changed":
+                        background = len(event.get("tasks") or [])
+                    if etype == "system" and event.get("subtype") == "init":
+                        dog.reopen()
+                        source = event.get("apiKeySource")
+                        if AUTH == "subscription" and source not in (None, "none"):
+                            process.kill()
+                            raise RuntimeError(
+                                f"claude would bill the API (apiKeySource={source!r}) on a "
+                                "subscription run; remove that key source or set "
+                                "SSSF_CLAUDE_AUTH=api_key")
+                        if not resume:
+                            # The session exists from here on, so a send that dies
+                            # mid-turn is still resumed next time, never re-created.
+                            ledger.write_text(json.dumps({"cost": 0.0}))
+                    if etype == "assistant":
+                        # Per message, subagents' too: a killed call never sends the
+                        # result event that totals them.
+                        message = event.get("message") or {}
+                        if message.get("id") and message.get("usage"):
+                            turns[message["id"]] = message
+                    if etype == "assistant" and not event.get("parent_tool_use_id"):
+                        # One API message streams as one event per content block,
+                        # each repeating the same usage: read occupancy, never sum it.
+                        turn = _context_tokens(event.get("message", {}).get("usage") or {})
+                        if turn:
+                            result.context_tokens = turn
+                    elif etype == "rate_limit_event" and event.get("rate_limit_info"):
+                        account.record(event["rate_limit_info"], source=request.cwd)
+                        if (AUTH == "subscription" and request.stop_on_usage_credits
+                                and account.on_credits(event["rate_limit_info"])):
+                            process.stop_tree()
+                            stop = account.RateLimitStop(account.CREDITS)
+                            stop.partial = _partial(turns, output)
+                            raise stop
+                    elif etype == "result":
+                        final = event
+                        dog.finished(waiting=background > 0)
+                    if on_event:
+                        try:
+                            on_event(event)
+                        except Exception as error:
+                            # A forbidden command (rules.RuleBreach), or a tracer
+                            # failure: either way the agent must not run on unwatched.
+                            process.stop_tree()
+                            if isinstance(error, rules.RuleBreach):
+                                error.partial = _partial(turns, output)
+                            raise
+        except BaseException:
+            # Leaving mid-call, by a stop or by `just kill`: the agent must not
+            # run on. On the host the kill reaches it too, but in a sandbox VM
+            # nothing else does, and the wait below would last until it finished.
+            process.stop_tree()
+            raise
+        finally:
+            stderr = process.stderr.read() if process.stderr else ""
+            result.returncode = process.wait()
+            if on_exit:
+                on_exit(process.pid)
+
+    if dog.hung:
+        stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
+        stop.partial = _partial(turns, output)
+        raise stop
+    result.leftovers_stopped = dog.fired
+    if not final:
+        raise RuntimeError(f"claude exited {result.returncode} without a result: "
+                           f"{stderr.strip()[-800:]}")
+    cumulative = float(final.get("total_cost_usd") or 0.0)
+    ledger.write_text(json.dumps({"cost": cumulative}))
+    result.usage = _usage(final.get("usage") or {}, max(0.0, cumulative - prior_cost))
+    result.tokens = result.usage.total_tokens
+    result.cost = result.usage.total_cost
+    models = final.get("modelUsage") or {}
+    result.models = sorted(models)
+    entry = models.get(model_id(request.model)) or max(
+        models.values(), key=lambda m: m.get("contextWindow") or 0, default={})
+    result.context_window = int(entry.get("contextWindow") or 0)
+    if final.get("subtype") == "error_max_budget_usd":
+        # Not a crash: the call ended itself at its cap. It is never retried,
+        # and what it spent still counts, so the result travels with it.
+        raise budget.CallBudgetStop(
+            f"the call reached its max_call_cost: {'; '.join(final.get('errors') or [])}.",
+            result=result)
+    if final.get("is_error"):
+        raise RuntimeError(f"claude ended {final.get('subtype')!r}: "
+                           f"{str(final.get('result') or stderr.strip())[-800:]}")
+    result.text = str(final.get("result") or "")
+    return result

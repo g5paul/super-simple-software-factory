@@ -1,0 +1,312 @@
+{
+  "files": {
+    ".env.sample": {
+      "sha256": "953284ddaaf8b1b8da11da1743ec4c9ee6d83e45b073e64574277df3ac4d4b3a",
+      "source": "env.sample"
+    },
+    ".githooks/pre-push": {
+      "sha256": "a447ac1c9492723387c03aa35b9db519e2b52615e9e34fee525a3ece299cddaa",
+      "source": "githooks/pre-push"
+    },
+    "adws/adw_build.py": {
+      "sha256": "d6be4a09e536b1556beb724971e48aca1192e6d13d173a86452e209a8a891c17",
+      "source": "adws/adw_build.py"
+    },
+    "adws/adw_build_review.py": {
+      "sha256": "42bd52b07c79c67dca45c8c2a23a7e09c860e83895b53838cef9adc3ddc13bcd",
+      "source": "adws/adw_build_review.py"
+    },
+    "adws/adw_build_test.py": {
+      "sha256": "daca1befd7e0c6bccaa21cba1869831d1510b2f9aff9523682f69404ab43dbe7",
+      "source": "adws/adw_build_test.py"
+    },
+    "adws/adw_data/harness_engineering/subagents.ts": {
+      "sha256": "6f5a01145cde8f1d3a31d0c65da53aa06da54ce382ccc97d5d9685f05740ed17",
+      "source": "harness_engineering/subagents.ts"
+    },
+    "adws/adw_data/harness_engineering/themeMap.ts": {
+      "sha256": "827dfc100c7ce666d650b31542e03c047deee6543a2979f071ddc78d4531cd8b",
+      "source": "harness_engineering/themeMap.ts"
+    },
+    "adws/adw_data/prompt_engineering/builder/system.md": {
+      "sha256": "dca7f56937cf1bb599d1344b7c94ffdedb11f4d2c33cc2a41b92249afbd67832",
+      "source": "prompt_engineering/builder/system.md"
+    },
+    "adws/adw_data/prompt_engineering/builder/user.md": {
+      "sha256": "a72492dbf093df5d4690e468beee733b48ae843f05e9a40170e79126792151a7",
+      "source": "prompt_engineering/builder/user.md"
+    },
+    "adws/adw_data/prompt_engineering/documenter/system.md": {
+      "sha256": "d7935e79cb1f60ba5c2c5409cebcc78559440e5a9b1480587c61581d2f56e3d0",
+      "source": "prompt_engineering/documenter/system.md"
+    },
+    "adws/adw_data/prompt_engineering/documenter/user.md": {
+      "sha256": "c18b6766262ae0534df17be01480602e5338655eb71220fcc13f8606c5c32b93",
+      "source": "prompt_engineering/documenter/user.md"
+    },
+    "adws/adw_data/prompt_engineering/planner/system.md": {
+      "sha256": "8cf5a6747b73b626146f275045c57d8920c5508776597bd4ecc6fa7ef646347f",
+      "source": "prompt_engineering/planner/system.md"
+    },
+    "adws/adw_data/prompt_engineering/planner/user.md": {
+      "sha256": "41718d1c2e8af2f77b293c9446329e1fce1faf8b07dd6d159d9d65a39780507d",
+      "source": "prompt_engineering/planner/user.md"
+    },
+    "adws/adw_data/prompt_engineering/referee/system.md": {
+      "sha256": "0075d4df071c7e4b277c84d04ef34b16b32043b49e8673871bcdeb84f50091f9",
+      "source": "prompt_engineering/referee/system.md"
+    },
+    "adws/adw_data/prompt_engineering/referee/user.md": {
+      "sha256": "cb9293b66c530841573a8e814656c74ae59ee2191b5ad88191e96985bb947610",
+      "source": "prompt_engineering/referee/user.md"
+    },
+    "adws/adw_data/prompt_engineering/reviewer/system.md": {
+      "sha256": "eeba036153d091d2e029de9047ab0ddb863b9b9c9ec5e5b47f451e0ff4fe185f",
+      "source": "prompt_engineering/reviewer/system.md"
+    },
+    "adws/adw_data/prompt_engineering/reviewer/user.md": {
+      "sha256": "48dcd9d641a48e47c2b6b508193bfc29cf439a6ab1bc03ed67f8cfba28355b50",
+      "source": "prompt_engineering/reviewer/user.md"
+    },
+    "adws/adw_data/prompt_engineering/scout/system.md": {
+      "sha256": "6dfca04244785e9e392e15b7ea85490ceb4b3758144f6f3422ad1e7c3d267cb5",
+      "source": "prompt_engineering/scout/system.md"
+    },
+    "adws/adw_data/prompt_engineering/scout/user.md": {
+      "sha256": "54d7114b9ee00e4cf8b8495a2b52a2e7840625653adab27d0d38e4c75c439063",
+      "source": "prompt_engineering/scout/user.md"
+    },
+    "adws/adw_data/prompt_engineering/spec_reviewer/system.md": {
+      "sha256": "7b1e7a4ab2008914a6c89d072033774167bc20d8fc017e34fec5b4d7ba20b83c",
+      "source": "prompt_engineering/spec_reviewer/system.md"
+    },
+    "adws/adw_data/prompt_engineering/spec_reviewer/user.md": {
+      "sha256": "1e0ecc52c8d500e4282871a5add0f5d2a8adffb88980773b974bb07b8ea0eeed",
+      "source": "prompt_engineering/spec_reviewer/user.md"
+    },
+    "adws/adw_data/prompt_engineering/standards_reviewer/system.md": {
+      "sha256": "2ae4719f865825a133b78e1e1c801b522d608189e4d561429723202b2be797d9",
+      "source": "prompt_engineering/standards_reviewer/system.md"
+    },
+    "adws/adw_data/prompt_engineering/standards_reviewer/user.md": {
+      "sha256": "a846fde74ff1b20893f9403b95d0788ddad51f2e0f132deeef4432b95f4ba039",
+      "source": "prompt_engineering/standards_reviewer/user.md"
+    },
+    "adws/adw_data/prompt_engineering/ticket_builder/system.md": {
+      "sha256": "ffeff230ecc8163bc804704a3e5d49f2fcd625230d665910275465603994109d",
+      "source": "prompt_engineering/ticket_builder/system.md"
+    },
+    "adws/adw_data/prompt_engineering/ticket_builder/user.md": {
+      "sha256": "55818d5278403aff4bd5adf8752dcebf7eb88274442ed29bf173607cbe81c747",
+      "source": "prompt_engineering/ticket_builder/user.md"
+    },
+    "adws/adw_document.py": {
+      "sha256": "cf21da895125678aff2bbde3333156b6d228293e7e54f91c1a01bf4d6593bfa2",
+      "source": "adws/adw_document.py"
+    },
+    "adws/adw_kill.py": {
+      "sha256": "c8dc4d5f5dee43189197142b24c6a5a84b26adbff40394dc61e7f8f8bebb6c92",
+      "source": "adws/adw_kill.py"
+    },
+    "adws/adw_modules/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source": "adws/adw_modules/__init__.py"
+    },
+    "adws/adw_modules/account.py": {
+      "sha256": "8f7f0b0337973fbf670fb58d641acdfb28e487ac0ace37e115e754b04b3db3dc",
+      "source": "adws/adw_modules/account.py"
+    },
+    "adws/adw_modules/agent_cc.py": {
+      "sha256": "13a87951407af5f4a2ebf6b17358d682a9a5d7f1c0b5ca07028d7f9de8db634f",
+      "source": "adws/adw_modules/agent_cc.py"
+    },
+    "adws/adw_modules/agent_pi.py": {
+      "sha256": "10fe1759cea46ae0213fcb8a9138a5574b218e970fdd572f0551230e860e3ccf",
+      "source": "adws/adw_modules/agent_pi.py"
+    },
+    "adws/adw_modules/agents.py": {
+      "sha256": "20339ac74b79acc29d630ac0fb9e965d5377f59fc7802a10693e7ea23ae8286c",
+      "source": "adws/adw_modules/agents.py"
+    },
+    "adws/adw_modules/budget.py": {
+      "sha256": "ffcfe4d87a9435691ca4ae870c38d79f50691fcfd9eb6ad423dce99bb0ea1673",
+      "source": "adws/adw_modules/budget.py"
+    },
+    "adws/adw_modules/changes.py": {
+      "sha256": "b8056c7a637015751ae8f87594aeb834ef8efe6d584bf82f77ef3c7600374375",
+      "source": "adws/adw_modules/changes.py"
+    },
+    "adws/adw_modules/console.py": {
+      "sha256": "e9666d93224bbc3162fdcd8645dea0ab1bcb824a1796fd1bedaf1f3fb0e53224",
+      "source": "adws/adw_modules/console.py"
+    },
+    "adws/adw_modules/data_types.py": {
+      "sha256": "57bfc6693fff3f940adc1a324ca61368f31e3083f3402bff7d041ba02153e993",
+      "source": "adws/adw_modules/data_types.py"
+    },
+    "adws/adw_modules/gates.py": {
+      "sha256": "fe36a3efba852d526207af44d11c12353faa92dea85e6adefc2dcd95ca5006aa",
+      "source": "adws/adw_modules/gates.py"
+    },
+    "adws/adw_modules/git_helper.py": {
+      "sha256": "dfd89c559f7ae4c0baedfeeedb3c27d893d9a4b2cbea66be38f2d915b1e663ed",
+      "source": "adws/adw_modules/git_helper.py"
+    },
+    "adws/adw_modules/kill.py": {
+      "sha256": "418194808099f98ef633a144ade19da9c92603f551dfebd4323330b12dced449",
+      "source": "adws/adw_modules/kill.py"
+    },
+    "adws/adw_modules/permissions.py": {
+      "sha256": "486cd8ae95e6193e53d7b28ea88d14e09b7c4a112410b444fb9bb0e7d971ee99",
+      "source": "adws/adw_modules/permissions.py"
+    },
+    "adws/adw_modules/plan_checks.py": {
+      "sha256": "279e4bf03a1a21e793db50a510981826fc9800448a5302db3c52e6951d48c1e4",
+      "source": "adws/adw_modules/plan_checks.py"
+    },
+    "adws/adw_modules/prices.json": {
+      "sha256": "cc1b1c8c89af634daf0d896e5b53d8cd4d27de1cb879eba9be0c1c702403a369",
+      "source": "adws/adw_modules/prices.json"
+    },
+    "adws/adw_modules/prices.py": {
+      "sha256": "44d55b570f0f5c7cf7462e415824059bb6608feb2e04a11c47cf5f02a309c21c",
+      "source": "adws/adw_modules/prices.py"
+    },
+    "adws/adw_modules/prompts.py": {
+      "sha256": "443f5065b36971ca7da05a85c3c8d989702b3cbe79829126b85881099dcd40b3",
+      "source": "adws/adw_modules/prompts.py"
+    },
+    "adws/adw_modules/quality.py": {
+      "sha256": "ab03b29aab9eeeb5b615d0b6af25ac6e4e8e0f8d33a536efba349a734c21e09d",
+      "source": "adws/adw_modules/quality.py"
+    },
+    "adws/adw_modules/repo_settings.py": {
+      "sha256": "bb35ab65980de0ddfb70ebc9889b1f174ef956c023ae19cdb476b1cee3860cac",
+      "source": "adws/adw_modules/repo_settings.py"
+    },
+    "adws/adw_modules/rules.py": {
+      "sha256": "059564512e666fd3affc1199cc52b97705af47cadf13819b248dd924828c29b4",
+      "source": "adws/adw_modules/rules.py"
+    },
+    "adws/adw_modules/runner.py": {
+      "sha256": "9511b9071f2a2b6c4584cbc406dd3528a5583e151d93a4ecebcbd47464b06209",
+      "source": "adws/adw_modules/runner.py"
+    },
+    "adws/adw_modules/sandbox.py": {
+      "sha256": "14f315ce684600772183e4cf48c7116b03d47685fae35e618efb91cbf2cf2a83",
+      "source": "adws/adw_modules/sandbox.py"
+    },
+    "adws/adw_modules/sandbox_e2b.py": {
+      "sha256": "cc617b8d42043b408174bd78ba5cf5d2d5cece6b3e4e7e9bfe8505a04542ed3f",
+      "source": "adws/adw_modules/sandbox_e2b.py"
+    },
+    "adws/adw_modules/sandbox_remote.py": {
+      "sha256": "5db288beaf1c9c4d256fb9566aa50560506eb504093483ed13ba3b674aed0405",
+      "source": "adws/adw_modules/sandbox_remote.py"
+    },
+    "adws/adw_modules/sandbox_usage.py": {
+      "sha256": "5a8af79d83c380dc1d026f9b0c7c264241757b093406901f7d96f9b87cc59111",
+      "source": "adws/adw_modules/sandbox_usage.py"
+    },
+    "adws/adw_modules/sandbox_vercel.py": {
+      "sha256": "957755d7ac8308bc54286f0310b5bbc6ce86fdbca672dd80c947ea43bc9c91c0",
+      "source": "adws/adw_modules/sandbox_vercel.py"
+    },
+    "adws/adw_modules/session.py": {
+      "sha256": "ff3e22b7df771a9394528044a50c6e7cdfa33d1030482bc6ac833eec286d077d",
+      "source": "adws/adw_modules/session.py"
+    },
+    "adws/adw_modules/silence.py": {
+      "sha256": "a859bbf383f2a864036c19e8cb5bbf6476747caccc677c5aeed6cc5650ac328a",
+      "source": "adws/adw_modules/silence.py"
+    },
+    "adws/adw_modules/sssf_refuse.py": {
+      "sha256": "94983822da7f53c554e7ff81eb475a9d81e4b284656bc0bef44202a22ba1cb15",
+      "source": "adws/adw_modules/sssf_refuse.py"
+    },
+    "adws/adw_modules/sssf_rules.ts": {
+      "sha256": "f535adaf29d9df67792a831f041baf67a0af02969704f13c67c926bb85d2c68e",
+      "source": "adws/adw_modules/sssf_rules.ts"
+    },
+    "adws/adw_modules/tickets.py": {
+      "sha256": "efb832816b759a6c4af5999c9e86a9984f06b6b9e0abaa2e1d3593833425fa7c",
+      "source": "adws/adw_modules/tickets.py"
+    },
+    "adws/adw_modules/tracer.py": {
+      "sha256": "9f0b47d702be753fe103d45d4cf888e23ed48cde1d2a2950d216c934684d027b",
+      "source": "adws/adw_modules/tracer.py"
+    },
+    "adws/adw_modules/trial.py": {
+      "sha256": "be9dd3f263fe0e4c790a181bf9968432acde6dc1168fea682779c81617bdedf7",
+      "source": "adws/adw_modules/trial.py"
+    },
+    "adws/adw_modules/utils.py": {
+      "sha256": "7713109d4a249bf0e0021249ab2c419378847a432c73a7cbdb08eff3753fc2dd",
+      "source": "adws/adw_modules/utils.py"
+    },
+    "adws/adw_modules/worktree.py": {
+      "sha256": "ed29c94d5a38f1dae1cbe07ed242cf69a5e0a5fc47d9f3ade2b2e348288b8a04",
+      "source": "adws/adw_modules/worktree.py"
+    },
+    "adws/adw_plan.py": {
+      "sha256": "a9bbb286232a4f3c81c59c5ad65058d99a78e77866ec247edc0c5d41d7a46fcf",
+      "source": "adws/adw_plan.py"
+    },
+    "adws/adw_plan_build.py": {
+      "sha256": "57b6d026a1a2bf3ea8f715d328158f17bdcbf8e1ddf1f81ed2f48c006f539955",
+      "source": "adws/adw_plan_build.py"
+    },
+    "adws/adw_plan_build_test.py": {
+      "sha256": "9b96f688a6129c1b4fbefc5c9ee3389fd447ecaf93a5ba595ac8a1df7a385e9e",
+      "source": "adws/adw_plan_build_test.py"
+    },
+    "adws/adw_plan_build_test_quality.py": {
+      "sha256": "ffe093b68ad5ec668914abbf373892f8e070c51e0bf791796f3d7e8291f40f0e",
+      "source": "adws/adw_plan_build_test_quality.py"
+    },
+    "adws/adw_prompt.py": {
+      "sha256": "590111efaf8012c5e5bbc4b641df124842dcfb6002b0495801d48198d25da202",
+      "source": "adws/adw_prompt.py"
+    },
+    "adws/adw_quality.py": {
+      "sha256": "898da05b3491cb09bf220ddf2aac837f69a38753bfe00b09091c733ca3a81f14",
+      "source": "adws/adw_quality.py"
+    },
+    "adws/adw_sandbox_usage.py": {
+      "sha256": "063162be077b8d08fd0b1e678243c01613df2de2f8f3799ca6ebf7c6c5e8fdb1",
+      "source": "adws/adw_sandbox_usage.py"
+    },
+    "adws/adw_scout.py": {
+      "sha256": "1e32c8026af8a8ac7bd3ca39b265d217ecc6d7177e392f2a7ef58942187e5059",
+      "source": "adws/adw_scout.py"
+    },
+    "adws/adw_simple_sdlc.py": {
+      "sha256": "9151a5b4fd41bec232caf9d215d6825f787c1d1b4b606d9875138be2e76aedb4",
+      "source": "adws/adw_simple_sdlc.py"
+    },
+    "adws/adw_sssf_config/repo.yaml": {
+      "sha256": "98c4ef83ac4fc906d108f8cfa897b81a4e7cc62162d7d4fcd23a96a7829966d9",
+      "source": "repo.yaml"
+    },
+    "adws/adw_sssf_config/sssf.config.yaml": {
+      "sha256": "94f61c5a109c3298d6dc9fafb3c71c1dd3968b52a6cb7b2b3fd69dc9f7e6e8e7",
+      "source": "sssf.config.claude_code.yaml"
+    },
+    "adws/adw_tickets.py": {
+      "sha256": "4e6c1bf7bf64ed8851378c0e6ebceb25e8169defecc03674b8b345c8dfbfd90b",
+      "source": "adws/adw_tickets.py"
+    },
+    "adws/adw_trial.py": {
+      "sha256": "c72caa7493fab3fcec5b105609569c0a2f704ef758e40678516a3602dbe4f59c",
+      "source": "adws/adw_trial.py"
+    },
+    "adws/adw_worktree.py": {
+      "sha256": "8c6a510eaa6731c4631e8a4d98e3896b816266073e23de661c606e66db474370",
+      "source": "adws/adw_worktree.py"
+    },
+    "justfile": {
+      "sha256": "38a1e53e712b79fc2b37856501b4cea937dcc720ddaee2c7c44b53a92279b216",
+      "source": "justfile"
+    }
+  }
+}

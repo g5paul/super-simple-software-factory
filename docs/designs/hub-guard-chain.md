@@ -1,7 +1,7 @@
 # A guard-change chain in the hub
 
-Status: approved, 2026-11-03, after a revision from the git-directory guard
-post-mortem. Nothing is built.
+Status: built, 2026-11-03, as `adws/adw_guard_change.py`. The build differs
+from this design in the four ways under "As built".
 
 ## Why
 
@@ -62,7 +62,8 @@ engineer(request) -> planner -> spec_reviewer -> git(commit_plan)
   re-enters verify, and the reviewer runs again on the new head. Two things
   stop the loop and hand the run to the engineer with the findings so far:
   - a fourth round
-- a diff check that finds new module-level state or a new `global` statement in a guard module
+  - a diff check that finds new module-level state or a new `global`
+    statement in a guard module
   - a fix that adds a mechanism rather than narrowing one: new state, a new
     mode, a new list of exceptions. The reviewer flags this, using the field
     below. The git-directory guard added four such mechanisms (link
@@ -138,6 +139,22 @@ bypass-reviewer agent" to "run guard changes through `adw_guard_change`".
 - Non-guard hub changes (docs, cookbooks). They can use `adw_simple_sdlc`
   once SSSF is in the hub; nothing here requires it.
 - Sending updates to the project repos. That stays a hand-off.
+
+## As built
+
+- **Head is a snapshot commit.** The build stays uncommitted until the end,
+  so the chain commits the working tree through a throwaway index before
+  each round, and the reviewer unpacks that commit. The tree, the index and
+  the refs stay as they were.
+- **`no_bypass` and `no_false_positive` are loop decisions, not gates.** An
+  SSSF gate sends its correction back to the same agent, and a bypass is the
+  builder's to fix, not the reviewer's. The reviewer's report has a gate of
+  its own, `review_well_formed`.
+- **The spec reviewer is its own role,** `guard_spec_reviewer`. The existing
+  `spec_reviewer` prompt reviews a diff against its spec, and a role has one
+  prompt.
+- **The chain runs the suite, not the reviewer.** Verify has already run it
+  on head, so the reviewer's brief carries the result.
 
 ## Settled questions
 

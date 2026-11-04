@@ -146,6 +146,18 @@ def test(run) -> QualityCheckResult:
     ), run)
 
 
+def chain_test(run) -> QualityCheckResult:
+    """The hub's guard-change chain: adws/adw_guard_change.py and its tests."""
+    return _run(QualityCheckSpec(
+        name="chain_test",
+        area="backend",
+        operation="build",
+        argv=["uv", "run", "--with", "pytest", "--with", "pydantic", "--with", "pyyaml",
+              "--with", "python-dotenv", "--with", "rich",
+              "pytest", "adws/tests", "-q", "-p", "no:cacheprovider"],
+    ), run)
+
+
 def run_tests(run) -> QualityResult:
     """The test suite alone, as a QualityResult — the deterministic test phase.
 
@@ -190,10 +202,11 @@ def run_quality(run) -> QualityResult:
     The runner did its job; the CODE is what failed. Hand this result to the
     builder and let the bounded repair loop decide the run's fate.
     """
-    # The hub has no lint, format, typecheck or build step, so the suite is
-    # the one block.
+    # The hub has no lint, format, typecheck or build step: the skill's suite
+    # and the chain's tests are the checks.
     blocks: list[Callable] = [
         test,
+        chain_test,
     ]
     checks = [block(run) for block in blocks]
     # A failure is the command, its exit code, and what it actually printed —

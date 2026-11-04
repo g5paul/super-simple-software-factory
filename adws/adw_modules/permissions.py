@@ -206,11 +206,13 @@ exit ${failed:-0}
 
 
 # Prints each path with its parent resolved physically, NUL-separated, or an
-# empty field where the parent doesn't exist yet.
+# empty field where the parent doesn't exist yet. The x sentinel keeps a
+# trailing newline in a directory's name, so `d` and `d\n` stay different.
 _REAL = """for p in "$@"; do
   d=${p%/*}; b=${p##*/}
   if [ "$b" = .. ] || [ "$b" = . ]; then d=$p; b=; fi
-  if r=$(cd -P "${d:-/}" 2>/dev/null && pwd -P); then
+  if r=$(cd -P "${d:-/}" 2>/dev/null && { pwd -P; echo x; }); then
+    r=${r%x}; r=${r%?}
     if [ -n "$b" ]; then r="${r%/}/$b"; fi
     printf "%s\\0" "$r"
   else
@@ -220,17 +222,61 @@ done
 """
 
 
-# Prints, NUL-separated, every symlink each path passes through: the path
-# itself and each parent. The guard keeps these links too, so an agent that
-# points one somewhere else is seen, and the restore puts it back first.
-_LINKS = """for p in "$@"; do
-  q=$p
-  while [ -n "$q" ] && [ "$q" != / ]; do
-    if [ -L "$q" ]; then printf "%s\\0" "$q"; fi
-    q=${q%/*}
+# Prints, NUL-separated, a triple for every prefix of each path as written,
+# the kernel's way: the prefix, the directory it resolves to (cd -P; empty if
+# it isn't a directory that can be entered), and L if it is a symlink, else -.
+# Empty components are skipped; . and .. are kept, as the kernel takes them.
+_WHERE = """for p in "$@"; do
+  rest=${p#/}; q=
+  while [ -n "$rest" ]; do
+    c=${rest%%/*}
+    case $rest in */*) rest=${rest#*/};; *) rest=;; esac
+    [ -z "$c" ] && continue
+    q="$q/$c"
+    r=$(cd -P "$q" 2>/dev/null && { pwd -P; echo x; }) || r=
+    if [ -n "$r" ]; then r=${r%x}; r=${r%?}; fi
+    if [ -L "$q" ]; then l=L; else l=-; fi
+    printf "%s\\0%s\\0%s\\0" "$q" "$r" "$l"
   done
 done
 """
+
+
+def _where(walked: list[str]) -> dict[str, list[str]] | None:
+    """Where each prefix of `walked` resolves: {prefix: [dir or "", "L" or "-"]},
+    or None if the output can't be read."""
+    if not walked:
+        return {}
+    fields = _sh(_WHERE, *walked).stdout.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 3:
+        return None
+    found: dict[str, list[str]] = {}
+    for i in range(0, len(fields), 3):
+        found.setdefault(fields[i], [fields[i + 1], fields[i + 2]])
+    return found
+
+
+def _moved(guard: dict) -> list[str] | None:
+    """The recorded prefixes that now resolve somewhere else, or None if they
+    could not be walked again."""
+    then = guard.get("where", {})
+    if not then:
+        return []
+    now = _where(guard.get("walked", []))
+    if now is None:
+        return None
+    gone = ["", "-"]
+    # A prefix that did not resolve before is never compared; today's path packs
+    # cover it (missing, not a directory, or not searchable). One that resolved
+    # before and now resolves to a different directory has moved. One that now
+    # resolves nowhere has moved only if it was a symlink or is one now: a
+    # removed link, or a real directory swapped for a dangling link. A removed
+    # real directory is left to the path packs, which put its files back.
+    return [q for q, (r, l) in then.items()
+            if r and now.get(q, gone)[0] != r
+            and (now.get(q, gone)[0] or l == "L" or now.get(q, gone)[1] == "L")]
 
 
 def _sh(script: str, *args: str, timeout: float | None = None):
@@ -264,9 +310,8 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     the engineer runs. A file in the work tree is the agent's to edit, so
     it isn't one, however its path was written.
 
-    The first value is every symlink on the way to a watched path, as `_LINKS`
-    finds it on the normalized path and, for a path with `..`, on the path as
-    written, named by its physical parent.
+    The first value is every watched path as written plus its normalized form;
+    `guard_git_dir` records where each of their prefixes resolves.
 
     A watched path with `..` that doesn't fully resolve, because a part of it
     doesn't exist yet or can't be entered, stops the run with
@@ -352,15 +397,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
              if p.startswith("/") and p.rsplit("/", 1)[-1] != "credentials" and "\n" not in p]
     written = [p for p in dict.fromkeys(logical + paths) if p.startswith("/")]
     logical = ["/" + posixpath.normpath(p).lstrip("/") for p in written]
-    links = [q for q in _sh(_LINKS, *logical).stdout.split("\0") if q]
-    # normpath drops lnk/.. before _LINKS sees lnk, but the kernel follows lnk
-    # first. So a path with `..` is walked again as written: [ -L ] on each
-    # written prefix is the kernel's own answer, and _REAL names each link it
-    # finds by its physical parent, so lnk/../l3 is recorded as <out>/l3.
-    dotted = [p for p in written if ".." in p.split("/")]
-    found = [q for q in _sh(_LINKS, *dotted).stdout.split("\0") if q] if dotted else []
-    if found:
-        links += [r for r in _sh(_REAL, *found).stdout.split("\0") if r.startswith("/")]
+    walked = list(dict.fromkeys(written + logical))
     real = _sh(_REAL, *paths).stdout.split("\0")
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
@@ -400,8 +437,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
                 kinds[r] = kind[p]
     resolved = list(dict.fromkeys(resolved))
     kinds = {r: k for r, k in kinds.items() if r in resolved}
-    links = [q for q in dict.fromkeys(links) if q not in resolved and q != "/"]
-    return links, resolved, kinds
+    return walked, resolved, kinds
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:
@@ -436,9 +472,11 @@ def _members(packed: str) -> dict[str, tuple]:
 def _differs(guard: dict) -> list[str] | None:
     """The watched paths that differ from the saved packs, plus TOO_LARGE if the
     follow pack is now over the cap, or None if the plain pack failed."""
-    every = guard.get("links", []) + guard["paths"]
-    plain, followed = _pack(every, follow=False), _pack(guard["paths"], follow=True)
+    plain, followed = _pack(guard["paths"], follow=False), _pack(guard["paths"], follow=True)
     if plain is None:
+        return None
+    moved = _moved(guard)
+    if moved is None:
         return None
     # A follow pack over the cap is never compared; only the plain packs are.
     now = (_members(plain),) + (() if followed is None else (_members(followed),))
@@ -448,19 +486,10 @@ def _differs(guard: dict) -> list[str] | None:
         rel = path.lstrip("/")
         return {k: v for k, v in members.items() if k == rel or k.startswith(rel + "/")}
 
-    def exact(members: dict, path: str) -> object:
-        return members.get(path.lstrip("/"))   # a link: the link itself, never what it holds
-
-    links = guard.get("links", [])
-    moved = [q for q in links if exact(now[0], q) != exact(then[0], q)]
-    # A parent swapped under a link with a relative target keeps the link's
-    # text the same; where the link sits physically shows it.
-    if links and _sh(_REAL, *links).stdout != guard.get("parents", ""):
-        before = guard.get("parents", "").split("\0")
-        after = _sh(_REAL, *links).stdout.split("\0")
-        moved += [q for q, b, a in zip(links, before, after) if b != a and q not in moved]
-    found = moved + [p for p in guard["paths"]
-                     if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
+    # Resolving every prefix (_moved) fully covers a parent swapped under a
+    # link with a relative target.
+    found = moved + [p for p in guard["paths"] if p not in moved
+                     and any(under(a, p) != under(b, p) for a, b in zip(now, then))]
     return found + ([TOO_LARGE] if followed is None else [])
 
 
@@ -468,10 +497,10 @@ def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs.
     None only when the repo root has no .git and git says it isn't a repo; a
     repo whose config git can't read raises PermissionBreach."""
-    links, paths, kinds = _watched(run)
+    walked, paths, kinds = _watched(run)
     if not paths:
         return None
-    plain = _pack(links + paths, follow=False)
+    plain = _pack(paths, follow=False)
     if plain is None:
         raise PermissionBreach("Could not save the git directory and git config "
                                "before the agent ran, so it did not run.")
@@ -485,9 +514,11 @@ def guard_git_dir(run) -> dict | None:
             "~/.gitconfig or an included config file, points at a large file or tree. "
             "Point it at something smaller, or replace it with the file it stands for, "
             "then run again.")
-    return {"links": links, "paths": paths, "plain": plain,
-            "followed": followed,
-            "parents": _sh(_REAL, *links).stdout, "kinds": kinds, "done": False}
+    where = _where(walked)
+    if where is None:
+        raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
+    return {"walked": walked, "where": where, "paths": paths, "plain": plain,
+            "followed": followed, "kinds": kinds, "done": False}
 
 
 def git_dir_changed(guard: dict | None) -> bool:
@@ -642,18 +673,32 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     guard["done"] = True
     changed = _differs(guard)
     if changed is None:
-        changed = guard.get("links", []) + list(guard["paths"])   # could not compare
+        changed = list(dict.fromkeys((_moved(guard) or []) + list(guard["paths"])))   # could not compare
     if not changed and guard.get("seen"):
         changed = [SEEN]
     restored = True
     # Narrow on purpose: a change that went through a symlink is reported and
     # stops the run, but nothing is written through or to a link. Writing
     # there can land in a folder the agent chose. Only physical paths that
-    # still resolve to themselves are put back.
+    # still resolve to themselves are put back, and nothing whose parent no
+    # longer resolves is put back under a prefix that moved.
     paths = [p for p in guard["paths"] if p in changed]
     if paths:
         now = _sh(_REAL, *paths).stdout.split("\0")[:len(paths)]
-        paths = [p for p, r in zip(paths, now) if r in ("", p)]
+        moved = _moved(guard)
+        where = guard.get("where", {})
+        # A prefix that moved roots the paths under it, by the prefix as written
+        # and, unless it ends in . or .., by where it resolved before: $HOME/d/..
+        # resolved to $HOME, which hasn't moved. Only a path whose parent no
+        # longer resolves ("") is skipped there: tar would write through a
+        # dangling link. A path whose _REAL is unchanged is safe, as today.
+        roots = [] if moved is None else [
+            s for q in moved
+            for s in ([q] + ([where[q][0]] if q.rsplit("/", 1)[-1] not in (".", "..") else []))]
+
+        def under(p: str) -> bool:
+            return moved is None or any(p.startswith(s.rstrip("/") + "/") for s in roots)
+        paths = [p for p, r in zip(paths, now) if r == p or (r == "" and not under(p))]
     sentinel = changed == [SEEN]
     if changed and not paths and not sentinel:
         restored = False

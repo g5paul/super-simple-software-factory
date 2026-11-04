@@ -256,8 +256,11 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     would copy tokens.
 
     The third value maps a resolved path to "config" or "lines" for each
-    config, ignore or attributes file outside the repo's git directories:
-    files shared with everything else the engineer runs.
+    config, ignore or attributes file whose physical path is outside the
+    repo's git directories and outside the work tree at `run.repo_root`
+    (the run's own, in a worktree run): files shared with everything else
+    the engineer runs. A file in the work tree is the agent's to edit, so
+    it isn't one, however its path was written.
     """
     root = str(run.repo_root).rstrip("/")
     out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
@@ -328,7 +331,13 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
     resolved = []
     kinds: dict[str, str] = {}
-    inside = [d.rstrip("/") + "/" for d in dirs]
+    tree = _sh(_REAL, f"{root}/.").stdout.split("\0")[0]
+    tree = tree if tree.startswith("/") else "/" + posixpath.normpath(root).lstrip("/")
+    tree = tree.rstrip("/") or "/"
+    outside = [d.rstrip("/") for d in dirs] + [tree]
+
+    def within(path: str) -> bool:
+        return any(path == d or path.startswith(d + "/") for d in outside)
     for p, r in zip(paths, real):
         r = r if r.startswith("/") else "/" + posixpath.normpath(p).lstrip("/")
         if r == "/" or posixpath.dirname(r) == r:
@@ -336,8 +345,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
                                    "which the git guard can't save, so the agent did not run. "
                                    "Check core.hooksPath and include.path.")
         resolved.append(r)
-        if p in kind and not any(x.startswith(d) for d in inside for x in (p, r)) \
-                and p.rstrip("/") + "/" not in inside and r.rstrip("/") + "/" not in inside:
+        if p in kind and not within(r):
             if kinds.get(r) != "config":
                 kinds[r] = kind[p]
     resolved = list(dict.fromkeys(resolved))
@@ -449,8 +457,8 @@ TOO_LARGE = ("(the watched paths, read through their symlinks, now too large to 
              "check: a link among them points at a large file or tree)")
 
 
-# A git config file outside the repo's git directory is shared with everything
-# else the engineer runs, so a change there may be theirs, made in another
+# A git config file outside the repo, meaning both its git directory and its
+# work tree, is shared with everything else the engineer runs, so a change there may be theirs, made in another
 # terminal while the agent ran. The guard can't tell, so it still puts the file
 # back and stops the run, but it names the keys that changed, never a value,
 # so the engineer can make their own change again. Git reads the keys, under a

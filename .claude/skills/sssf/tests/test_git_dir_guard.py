@@ -8,7 +8,7 @@ A line in .git/info/exclude would hide a new file from enforce itself.
 guard_git_dir copies hooks/, info/, config, config.worktree and sssf-private-names aside before
 each agent, and restore_git_dir puts them back after it. A pack over the cap
 can't be checked, so it stops the run.
-A shared config file's breach (one outside the repo, like ~/.gitconfig) lists the
+A shared config file's breach (one outside the repo's git directory and work tree, like ~/.gitconfig) lists the
 changed keys, never a value.
 
 Run from the skill root:
@@ -1258,3 +1258,103 @@ def test_a_value_added_to_an_existing_key_is_marked_changed(repo, home):
     with open(home / ".gitconfig", "a") as f:
         f.write("[user]\n\tname = other\n")
     assert "~ user.name" in _breach(run, guard)
+
+
+PLAIN = "The agent changed the git directory or the git config"
+ALIAS = "[alias]\n\tz = y\n"
+
+
+def _assert_plain_include(run, guard, target: Path, saved: bytes) -> None:
+    key = str(target.resolve())
+    assert key not in guard["kinds"] and key in guard["paths"]
+    with open(target, "a") as f:
+        f.write(ALIAS)
+    msg = _breach(run, guard)
+    assert msg.startswith(PLAIN)
+    assert "outside the agent" not in msg
+    assert "Files marked as shared" not in msg
+    assert "alias.z" not in msg
+    assert "team.gitconfig" in msg and "put back as they were" in msg
+    assert target.read_bytes() == saved
+
+
+def test_a_work_tree_include_is_not_labelled_shared(repo):
+    target = repo / "team.gitconfig"
+    target.write_text("[user]\n\tname = t\n")
+    saved = target.read_bytes()
+    git(repo, "config", "include.path", str(target))
+    run = shipped(repo)
+    _assert_plain_include(run, permissions.guard_git_dir(run), target, saved)
+
+
+def test_a_work_tree_ignore_file_is_not_labelled_shared(repo):
+    target = repo / ".myignore"
+    target.write_text("keep\n")
+    git(repo, "config", "core.excludesFile", str(target))
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    with open(target, "a") as f:
+        f.write("evil\n")
+    msg = _breach(run, guard)
+    assert msg.startswith(PLAIN)
+    assert "line(s) added" not in msg and "outside the agent" not in msg
+    assert ".myignore" in msg
+    assert target.read_text() == "keep\n"
+
+
+def test_a_work_tree_include_through_a_symlinked_root_is_not_shared(repo, tmp_path):
+    link = tmp_path / "linkrepo"
+    link.symlink_to(repo)
+    target = repo / "team.gitconfig"
+    target.write_text("[user]\n\tname = t\n")
+    saved = target.read_bytes()
+    git(repo, "config", "include.path", f"{link}/team.gitconfig")
+    run = shipped(link)
+    _assert_plain_include(run, permissions.guard_git_dir(run), target, saved)
+
+
+def test_a_dotdot_include_into_the_work_tree_is_not_shared(repo):
+    target = repo / "team.gitconfig"
+    target.write_text("[user]\n\tname = t\n")
+    saved = target.read_bytes()
+    git(repo, "config", "include.path", "../team.gitconfig")
+    run = shipped(repo)
+    _assert_plain_include(run, permissions.guard_git_dir(run), target, saved)
+
+
+def test_a_dotdot_include_outside_the_repo_is_still_shared(repo):
+    target = (repo / ".git" / "../../outside.inc").resolve()
+    target.write_text("[user]\n\tname = t\n")
+    saved = target.read_bytes()
+    git(repo, "config", "--add", "include.path", "../../outside.inc")
+    run = shipped(repo)
+    guard = permissions.guard_git_dir(run)
+    with open(target, "a") as f:
+        f.write(ALIAS)
+    msg = _breach(run, guard)
+    assert "outside the agent" in msg and "+ alias.z" in msg
+    assert msg.startswith("A git config or ignore file outside the repo changed")
+    assert target.read_bytes() == saved
+
+
+def test_a_worktree_run_leaves_out_its_own_tree_only(repo, tmp_path):
+    tree = tmp_path / "tree"
+    git(repo, "worktree", "add", "-q", "-b", "run", str(tree))
+    own, main = tree / "own.gitconfig", repo / "main.gitconfig"
+    for f in (own, main):
+        f.write_text("[user]\n\tname = t\n")
+        git(repo, "config", "--add", "include.path", str(f))
+    run = shipped(tree)
+    guard = permissions.guard_git_dir(run)
+    assert str(own.resolve()) not in guard["kinds"]
+    assert guard["kinds"].get(str(main.resolve())) == "config"
+    with open(own, "a") as f:
+        f.write(ALIAS)
+    msg = _breach(run, guard)
+    assert msg.startswith(PLAIN) and "outside the agent" not in msg
+    assert own.read_text() == main.read_text() == "[user]\n\tname = t\n"
+
+
+def test_the_home_gitconfig_is_still_shared(repo, home):
+    guard = permissions.guard_git_dir(shipped(repo))
+    assert guard["kinds"][str((home / ".gitconfig").resolve())] == "config"

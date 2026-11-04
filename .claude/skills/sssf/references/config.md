@@ -204,8 +204,12 @@ before it deleted anything.
 
 Two costs. An edit you make to your git config, or to
 `.git/sssf-private-names`, while an agent runs is put back too; edit them
-between runs. A git config or ignore file outside the repo is shared with everything you
-run, so the breach marks it as maybe not the agent's change. For a config
+between runs. A git config or ignore file outside the repo, meaning outside both its git
+directory and its working tree, is shared with everything you run, so the
+breach marks it as maybe not the agent's change. A file in the working
+tree, such as one an `include.path` or `core.excludesFile` names there, is
+the agent's to edit, so it gets no mark, however its path is written. In a
+worktree run that's the run's own worktree. For a config
 file it lists the keys added (`+`), removed (`-`) or given a new value
 (`~`), at most 10 per file and 30 in all, and never a value. For an ignore
 or attributes file it says how many lines were added and removed. If the

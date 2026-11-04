@@ -14,6 +14,7 @@ A repo whose git config git can't read stops the run first, with git's error.
 A shared config file's breach (one outside the repo's git directory and work tree, like ~/.gitconfig) lists the
 changed keys, never a value.
 A directory on the way that `pwd -P` can't name reads as not resolving.
+A git hooks directory git can't name stops the run first, with git's error.
 A directory on the way to a watched path that resolved before the agent and no longer resolves stops the run.
 
 Run from the skill root:
@@ -2183,3 +2184,71 @@ def test_a_prefix_that_becomes_unnameable_has_moved(unnameable):
     require_unnameable(u)
     assert f"{u.base}/A/B" in permissions._moved(guard)
     assert f"{u.base}/A/B" in permissions._moved(guard, gone=False)
+
+
+# ── a hooks directory git can't name ──
+
+
+def _hooks_unnameable(repo: Path) -> None:
+    done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+                          cwd=repo, capture_output=True)
+    if done.returncode == 0:
+        pytest.skip("git can still name this hooks path here")
+
+
+def test_a_hooks_path_git_cannot_name_stops_the_run_first(repo, home, unnameable):
+    hooks = f"{unnameable.base}/A/B/hooks"
+    git(repo, "config", "core.hooksPath", hooks)
+    _hooks_unnameable(repo)
+    before = state(repo)
+    saved = (home / ".gitconfig").read_text()
+    with pytest.raises(permissions.PermissionBreach) as caught:
+        permissions.guard_git_dir(shipped(repo))
+    msg = str(caught.value)
+    for word in ("couldn't name the hooks directory", "Invalid path", "core.hooksPath",
+                 "shorter path", "did not run", "run again"):
+        assert word in msg
+    assert all(len(l) <= 302 for l in msg.splitlines())
+    assert state(repo) == before
+    assert (home / ".gitconfig").read_text() == saved
+    assert not os.path.lexists(f"{unnameable.physical.rsplit('/', 1)[0]}/hooks")
+
+
+def test_a_hooks_path_git_can_name_again_is_watched(repo, unnameable):
+    git(repo, "config", "core.hooksPath", f"{unnameable.base}/A/B/hooks")
+    _hooks_unnameable(repo)
+    with pytest.raises(permissions.PermissionBreach):
+        permissions.guard_git_dir(shipped(repo))
+    git(repo, "config", "core.hooksPath", f"{unnameable.base}/A")
+    guard = permissions.guard_git_dir(shipped(repo))
+    assert os.path.realpath(f"{unnameable.base}/A") in guard["paths"]
+    assert permissions.restore_git_dir(SimpleNamespace(repo_root=repo), guard) == []
+
+
+@pytest.mark.parametrize("err", [b"fatal: boom\n", b""])
+def test_a_failed_hooks_rev_parse_stops_the_run(repo, monkeypatch, err):
+    box = permissions.sandbox.current()
+    real = box.run
+
+    def spy(command, *a, **k):
+        if "--git-path" in command and "hooks" in command:
+            return subprocess.CompletedProcess(command, 128, b"", err)
+        return real(command, *a, **k)
+
+    monkeypatch.setattr(box, "run", spy)
+    before = state(repo)
+    with pytest.raises(permissions.PermissionBreach) as caught:
+        permissions.guard_git_dir(shipped(repo))
+    msg = str(caught.value)
+    assert "couldn't name the hooks directory" in msg
+    assert "fatal: boom" in msg or "(git printed no error; exit code 128)" in msg
+    assert state(repo) == before
+
+
+def test_unreadable_keeps_its_message():
+    assert permissions._unreadable("fatal: x\n", 128) == (
+        "git couldn't read the repo's git config, so SSSF can't tell which git "
+        "files to watch. The agent did not run, and no run will until git can "
+        "read it. git said:\n  fatal: x\n\n"
+        "Fix the config file or include path git names above, for example a "
+        "symlink loop or a directory git can't enter, then run again.")

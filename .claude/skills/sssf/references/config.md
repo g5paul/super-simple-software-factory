@@ -256,6 +256,12 @@ whenever git fails for any reason other than "not a git repository", which
 includes a broken `~/.gitconfig`. Before, SSSF treated such a repo as no
 repo and ran the agent with no git-directory check.
 
+If git can't name the hooks directory, for example because `core.hooksPath`
+leads through symlinks to a real path longer than the system limit, SSSF can't
+watch the hooks git will run. So the run stops before the next agent with a
+breach that gives git's error. Point `core.hooksPath` at a shorter path, then
+run again. Before, SSSF ran the agent without watching any hooks directory.
+
 The check catches mistakes and casual attempts. An agent runs as your user, so
 a determined one could still get past it, for example by killing the chain
 before the check runs, or by leaving a process behind that writes later. It

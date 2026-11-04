@@ -333,7 +333,10 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
 
     A failed `rev-parse` in a repo (the root has a `.git`), or one that fails
     with any error but not-a-repo, raises `PermissionBreach` with git's error.
-    The empty result means only "not a git repo".
+    The empty result means only "not a git repo". A `rev-parse --git-path hooks`
+    that fails, for example because `core.hooksPath` resolves to a path longer
+    than the system limit, raises `PermissionBreach` with git's error, since no
+    hooks would be watched.
     """
     root = str(run.repo_root).rstrip("/")
     found = sandbox.current().run(
@@ -388,7 +391,16 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
             paths.append(absolute(value, source))
             named.setdefault(paths[-1], (key, source))
             mark(paths[-1], "config")
-    hooks = _git(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], root).strip()
+    named_hooks = sandbox.current().run(
+        _gitargv(["rev-parse", "--path-format=absolute", "--git-path", "hooks"]),
+        cwd=root, text=False)
+    if named_hooks.returncode != 0:
+        err = named_hooks.stderr
+        err = err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or "")
+        raise PermissionBreach(_no_hooks_dir(err, named_hooks.returncode))
+    hooks = named_hooks.stdout
+    hooks = (hooks.decode("utf-8", "surrogateescape") if isinstance(hooks, bytes)
+             else (hooks or "")).strip()
     if hooks.startswith("/"):
         paths.append(hooks)
     if home:
@@ -512,7 +524,8 @@ def _differs(guard: dict) -> list[str] | None:
 def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs.
     None only when the repo root has no .git and git says it isn't a repo; a
-    repo whose config git can't read raises PermissionBreach."""
+    repo whose config git can't read, or whose hooks directory git can't name,
+    raises PermissionBreach."""
     walked, paths, kinds = _watched(run)
     if not paths:
         return None
@@ -604,16 +617,30 @@ def _entries(source: str, path: str):
     return Counter(tuple(e.partition("\n")[::2]) for e in done.stdout.split("\0") if e)
 
 
+def _said(err: str, code: int) -> str:
+    """git's error as a breach quotes it: at most 20 lines of 300 characters,
+    non-printables as ?."""
+    lines = [l for l in err.strip().splitlines() if l.strip()][:20]
+    return "\n".join("  " + "".join(c if c.isprintable() else "?" for c in l)[:300]
+                     for l in lines) or f"  (git printed no error; exit code {code})"
+
+
 def _unreadable(err: str, code: int) -> str:
     """The breach for a repo whose git config git can't read."""
-    lines = [l for l in err.strip().splitlines() if l.strip()][:20]
-    said = "\n".join("  " + "".join(c if c.isprintable() else "?" for c in l)[:300]
-                     for l in lines) or f"  (git printed no error; exit code {code})"
     return ("git couldn't read the repo's git config, so SSSF can't tell which git "
             "files to watch. The agent did not run, and no run will until git can "
-            "read it. git said:\n" + said + "\n\n"
+            "read it. git said:\n" + _said(err, code) + "\n\n"
             "Fix the config file or include path git names above, for example a "
             "symlink loop or a directory git can't enter, then run again.")
+
+
+def _no_hooks_dir(err: str, code: int) -> str:
+    """The breach for a repo where git can't name its hooks directory."""
+    return ("git couldn't name the hooks directory, so SSSF can't watch the hooks "
+            "git will run. The agent did not run, and no run will until git can "
+            "name it. git said:\n" + _said(err, code) + "\n\n"
+            "Point core.hooksPath at a shorter path, one whose real path, with its "
+            "symlinks resolved, is under the system's path length limit, then run again.")
 
 
 def _shown_key(key: str) -> str:

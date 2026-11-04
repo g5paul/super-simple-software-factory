@@ -136,8 +136,11 @@ This session is the hub's operator for guard changes. It writes the ADW
 prompt from your request, launches the chain, watches the trace and reports,
 the way the project sessions do. The `bypass-reviewer` subagent stays, for a
 quick check outside a run. The CLAUDE.md rule now sends guard changes through
-`adw_guard_change`. Until the chain finishes its first live run, it also asks
-for a subagent review before a merge.
+`adw_guard_change`. It first also asked for a subagent review before every
+merge. The first live run, cdd093fe, passed the chain and the subagent then
+found a bypass, so the rule became three clean runs in a row. f11ed7c0,
+d6fb947e and d071d025 met it, and the engineer dropped the step on
+2026-11-03. A bypass the subagent finds after a passing run brings it back.
 
 ## Out of scope
 

@@ -182,17 +182,18 @@ path as git and the kernel do, `..` included. So it notices a symlink on the
 way that now points somewhere else, such as a symlinked `~/.config`, `HOME`
 or `.git`, or `lnk` in an include path `~/lnk/../x.inc`. It also notices a
 real directory on the way that the agent swapped for a symlink, and a
-directory a link points at that was swapped in turn. It also notices a directory on the way that the agent
-removed, replaced with a file, or made impossible to enter. Git would silently
-skip an include through it, such as `~/d` in `~/d/../x.inc`. The run stops with
-"NOT all put back" and names the directory. A watched file under such a
-directory is still put back. If that remakes the directory, the breach says
-"put back as they were". Nothing is written
-through such a directory. It reports a change
-made through or to a symlink and stops the run, but never writes it back,
-since writing there could land in a folder the agent chose. The breach says
-"NOT all put back" and names the path, so check it by hand before your next
-git command in the repo. No agent has a reason to write there: SSSF does the
+directory a link points at that was swapped in turn. Nothing is written
+through a symlink that changed or a directory swapped for one: SSSF reports
+the change and stops the run, but never writes it back, since writing there
+could land in a folder the agent chose. The breach says "NOT all put back"
+and names the path, so check it by hand before your next git command in the
+repo.
+
+SSSF also notices a directory on the way that the agent removed, replaced
+with a file, or made impossible to enter. Git would silently skip an include
+through it, such as `~/d` in `~/d/../x.inc`. The run stops with "NOT all put
+back" and names the directory. A watched file under it is still put back, and
+if that remakes the directory, the breach says "put back as they were". No agent has a reason to write there: SSSF does the
 committing.
 
 SSSF reads the watched paths through their symlinks too, so a write through

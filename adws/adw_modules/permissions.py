@@ -145,7 +145,9 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
 # core.hooksPath` points every commit at the agent's hooks. So these paths
 # are packed before each agent, as a tar stream held in this process where
 # the agent can't edit it, and unpacked over the live paths after it if they
-# changed. A change stops the run. No agent has a reason to write them: SSSF
+# changed. A change stops the run. A change to a shared config file
+# outside the repo also stops it. The breach lists the changed keys, since the
+# change may be the engineer's own. No agent has a reason to write them: SSSF
 # does the committing.
 #
 # It catches mistakes and casual attempts. An agent runs as the same user as
@@ -229,11 +231,12 @@ done
 """
 
 
-def _sh(script: str, *args: str):
+def _sh(script: str, *args: str, timeout: float | None = None):
     """Run a guard script. Output is decoded leniently: a Latin-1 name in a
     path must not stop the run."""
     import subprocess
-    done = sandbox.current().run(["sh", "-c", script, "sh", *args], text=False)
+    done = sandbox.current().run(["sh", "-c", script, "sh", *args], text=False,
+                                    timeout=timeout)
     out, err = done.stdout, done.stderr
     if isinstance(out, bytes):
         out = out.decode("utf-8", "surrogateescape")
@@ -242,7 +245,7 @@ def _sh(script: str, *args: str):
     return subprocess.CompletedProcess(done.args, done.returncode, out, err)
 
 
-def _watched(run) -> tuple[list[str], list[str]]:
+def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     """Every path the guard covers.
 
     The repo's git directories (the shared one and a worktree's own) and a
@@ -251,13 +254,22 @@ def _watched(run) -> tuple[list[str], list[str]]:
     directory `core.hooksPath` points at. And the global config's usual
     homes, even before they exist. Never the credential store: copying it
     would copy tokens.
+
+    The third value maps a resolved path to "config" or "lines" for each
+    config, ignore or attributes file outside the repo's git directories:
+    files shared with everything else the engineer runs.
     """
     root = str(run.repo_root).rstrip("/")
     out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
     dirs = list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
     if not dirs:
-        return [], []
+        return [], [], {}
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
+    kind: dict[str, str] = {}
+
+    def mark(path: str, what: str) -> None:
+        if kind.get(path) != "config":      # "config" wins over "lines"
+            kind[path] = what
     logical = [f"{root}/.git"]            # a symlinked .git is a link on the way
     if sandbox.current().is_file(f"{root}/.git"):
         paths.append(f"{root}/.git")
@@ -279,18 +291,25 @@ def _watched(run) -> tuple[list[str], list[str]]:
             continue
         source = absolute(origin[5:], f"{root}/x")
         paths.append(source)
+        mark(source, "config")
         key, _, value = entry.partition("\n")
         if key.lower() in ("core.excludesfile", "core.attributesfile"):
             paths.append(absolute(value, source))
+            mark(paths[-1], "lines")
         if key.lower() == "include.path" or (key.lower().startswith("includeif.")
                                              and key.lower().endswith(".path")):
             paths.append(absolute(value, source))
+            mark(paths[-1], "config")
     hooks = _git(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], root).strip()
     if hooks.startswith("/"):
         paths.append(hooks)
     if home:
         paths += [f"{home[0]}/.gitconfig", f"{home[1]}/git/config",
                   f"{home[1]}/git/attributes", f"{home[1]}/git/ignore"]
+        mark(f"{home[0]}/.gitconfig", "config")
+        mark(f"{home[1]}/git/config", "config")
+        mark(f"{home[1]}/git/attributes", "lines")
+        mark(f"{home[1]}/git/ignore", "lines")
     # The physical path, as git resolves it: tar renames a member with ".." in
     # its path, and won't extract under a parent that is an absolute symlink,
     # so the restore would delete such a file and fail to put it back. Each
@@ -308,6 +327,8 @@ def _watched(run) -> tuple[list[str], list[str]]:
     if len(real) != len(paths) + 1:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
     resolved = []
+    kinds: dict[str, str] = {}
+    inside = [d.rstrip("/") + "/" for d in dirs]
     for p, r in zip(paths, real):
         r = r if r.startswith("/") else "/" + posixpath.normpath(p).lstrip("/")
         if r == "/" or posixpath.dirname(r) == r:
@@ -315,9 +336,14 @@ def _watched(run) -> tuple[list[str], list[str]]:
                                    "which the git guard can't save, so the agent did not run. "
                                    "Check core.hooksPath and include.path.")
         resolved.append(r)
+        if p in kind and not any(x.startswith(d) for d in inside for x in (p, r)) \
+                and p.rstrip("/") + "/" not in inside and r.rstrip("/") + "/" not in inside:
+            if kinds.get(r) != "config":
+                kinds[r] = kind[p]
     resolved = list(dict.fromkeys(resolved))
+    kinds = {r: k for r, k in kinds.items() if r in resolved}
     links = [q for q in dict.fromkeys(links) if q not in resolved and q != "/"]
-    return links, resolved
+    return links, resolved, kinds
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:
@@ -382,7 +408,7 @@ def _differs(guard: dict) -> list[str] | None:
 
 def guard_git_dir(run) -> dict | None:
     """Pack the watched paths, before an agent runs. None outside a git repo."""
-    links, paths = _watched(run)
+    links, paths, kinds = _watched(run)
     if not paths:
         return None
     plain = _pack(links + paths, follow=False)
@@ -401,7 +427,7 @@ def guard_git_dir(run) -> dict | None:
             "then run again.")
     return {"links": links, "paths": paths, "plain": plain,
             "followed": followed,
-            "parents": _sh(_REAL, *links).stdout, "done": False}
+            "parents": _sh(_REAL, *links).stdout, "kinds": kinds, "done": False}
 
 
 def git_dir_changed(guard: dict | None) -> bool:
@@ -423,12 +449,121 @@ TOO_LARGE = ("(the watched paths, read through their symlinks, now too large to 
              "check: a link among them points at a large file or tree)")
 
 
+# A git config file outside the repo's git directory is shared with everything
+# else the engineer runs, so a change there may be theirs, made in another
+# terminal while the agent ran. The guard can't tell, so it still puts the file
+# back and stops the run, but it names the keys that changed, never a value,
+# so the engineer can make their own change again. Git reads the keys, under a
+# time limit; Python never parses the file.
+KEYS_PER_FILE = 10
+KEYS_IN_ALL = 30
+KEYS_SECONDS = 10
+KEY_WIDTH = 120
+SHARED = ("(outside the repo and shared with everything you run, so the change "
+          "may have come from outside the agent)")
+UNLISTED = f"(its keys could not be listed: git could not read a version of it as config within {KEYS_SECONDS} s)"
+
+# Lists the entries in one version of a watched config file, "key\nvalue"
+# NUL-separated: the saved version from the pack file $1, or the live one when
+# $1 is "-". Nothing is written. A watchdog kills git after $3 seconds; its own
+# output goes to /dev/null, so it doesn't hold the pipe open. Git loads no
+# global or system config (the agent may have written ~/.gitconfig: a trace2
+# line there would make this git write files), and follows no include.
+_KEYS = """f=$1; rel=${2#/}; t=$3
+cd / || exit 1
+{ if [ "$f" = - ]; then tar -cf - "$rel"; else base64 -d < "$f"; fi; } 2>/dev/null |
+  tar -xOf - "$rel" 2>/dev/null |
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c core.fsmonitor= config --file - --no-includes --list -z &
+pid=$!
+( sleep "$t"; kill "$pid" ) >/dev/null 2>&1 &
+w=$!
+wait "$pid"; s=$?
+kill "$w" 2>/dev/null
+exit $s
+"""
+
+
+def _entries(source: str, path: str):
+    """Counter of (key, value) git reads in one version of `path`, or None if
+    git couldn't read it as config in time."""
+    import subprocess
+    from collections import Counter
+    try:
+        done = _sh(_KEYS, source, path, str(KEYS_SECONDS), timeout=KEYS_SECONDS + 5)
+    except subprocess.TimeoutExpired:
+        return None
+    if done.returncode != 0:
+        return None
+    return Counter(tuple(e.partition("\n")[::2]) for e in done.stdout.split("\0") if e)
+
+
+def _shown_key(key: str) -> str:
+    """A key as the breach shows it: URL userinfo masked, non-printables as ?,
+    at most KEY_WIDTH characters."""
+    scheme, sep, rest = key.partition("://")
+    if sep and "@" in rest:
+        key = f"{scheme}://***@{rest.rpartition('@')[2]}"
+    key = "".join(c if c.isprintable() else "?" for c in key)
+    return key if len(key) <= KEY_WIDTH else key[:KEY_WIDTH - 1] + "…"
+
+
+def _shared(guard: dict, paths: list[str], held: str) -> dict[str, list[str]]:
+    """Detail lines for each shared file in `paths`, which are about to be put
+    back from the pack file `held`. Keys only, never a value or a line."""
+    import tarfile
+    from collections import Counter
+    kinds = guard.get("kinds", {})
+    shared = [p for p in paths if p in kinds]
+    if not shared:
+        return {}
+    then = _members(guard["plain"])
+    fresh = _pack(shared, follow=False)
+    if fresh is None:
+        return {p: [UNLISTED] for p in shared}
+    now = _members(fresh)
+    budget = KEYS_IN_ALL
+    found: dict[str, list[str]] = {}
+    for p in shared:
+        rel = p.lstrip("/")
+        b, a = then.get(rel), now.get(rel)
+        if any(m is not None and m[0] not in (tarfile.REGTYPE, tarfile.AREGTYPE) for m in (b, a)):
+            found[p] = ["(not a regular file before or after, so nothing in it is listed)"]
+        elif kinds[p] == "lines":
+            old = Counter(b[3].splitlines()) if b else Counter()
+            new = Counter(a[3].splitlines()) if a else Counter()
+            found[p] = [f"{sum((new - old).values())} line(s) added, {sum((old - new).values())} removed"]
+        else:
+            old = Counter() if b is None else _entries(held, p)
+            new = Counter() if a is None else _entries("-", p)
+            if old is None or new is None:
+                found[p] = [UNLISTED]
+                continue
+            added = {k for k, _ in new - old}
+            removed = {k for k, _ in old - new}
+            had = {k for k, _ in old}
+            has = {k for k, _ in new}
+            marks = sorted([("~" if k in removed or k in had else "+", k) for k in added]
+                           + [("~" if k in has else "-", k) for k in removed - added],
+                           key=lambda m: m[1])
+            if not marks:
+                found[p] = ["(no key added, removed or given a new value: a comment, layout or order change)"]
+                continue
+            shown = marks[:max(0, min(KEYS_PER_FILE, budget))]
+            budget -= len(shown)
+            found[p] = [f"{m} {_shown_key(k)}" for m, k in shown]
+            if len(marks) > len(shown):
+                found[p].append(f"({len(marks) - len(shown)} more key(s) left out)")
+    return found
+
+
 def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str]:
     """Put the watched paths back if the agent changed them.
 
     Returns the paths that changed. With `breach`, a change raises
     PermissionBreach after the restore; without it, as on an agent that
-    already failed, it only restores, and raises only if that failed.
+    already failed, it only restores, and raises only if that failed. For a
+    shared config file outside the repo the breach lists the keys that
+    changed, and never a value.
     """
     if not guard or guard["done"]:
         return []
@@ -450,6 +585,7 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     sentinel = changed == [SEEN]
     if changed and not paths and not sentinel:
         restored = False
+    details: dict[str, list[str]] = {}
     if paths:
         box = sandbox.current()
         made = box.run(["mktemp"])
@@ -465,9 +601,14 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
             held = made.stdout.strip() if ok else ""
         if made.returncode == 0 and held.startswith("/"):
             box.write_text(held, guard["plain"])
+            try:
+                details = _shared(guard, paths, held)
+            except Exception:      # naming keys must never stop the put-back
+                details = {p: [UNLISTED] for p in paths if p in guard.get("kinds", {})}
             _sh(_UNPACK, held, *paths)
         left = _differs(guard)
         restored = left == []
+        details = {} if left is None else {p: d for p, d in details.items() if p not in left}
         changed += [p for p in (left or []) if p not in changed]
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]
@@ -477,10 +618,26 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
                    "NOT all put back. A change through a symlink is reported, never "
                    "written back; a path SSSF couldn't read or write is left as it is. "
                    "Check these by hand before the next git command in this repo")
+        lead = ("The agent changed the git directory or the git config, which no agent may "
+                "write: hooks and config there run code on later git commands. ")
+        if not details:
+            raise PermissionBreach(
+                lead + f"{len(changed)} path(s), {outcome}:\n" + "\n".join(f"  - {p}" for p in shown))
+        if all(p in details for p in changed):
+            lead = ("A git config or ignore file outside the repo changed while the agent ran, "
+                    "and no agent may write one: config there runs code on later git commands. ")
+        lines = []
+        for p, s in zip(changed, shown):
+            lines.append(f"  - {s}" + (f" {SHARED}" if p in details else ""))
+            lines += [f"      {d}" for d in details.get(p, [])]
         raise PermissionBreach(
-            "The agent changed the git directory or the git config, which no agent may "
-            "write: hooks and config there run code on later git commands. "
-            f"{len(changed)} path(s), {outcome}:\n" + "\n".join(f"  - {p}" for p in shown))
+            lead + f"{len(changed)} path(s), {outcome}:\n" + "\n".join(lines) + "\n\n"
+            "Files marked as shared are used by everything else you run, so another terminal "
+            "or session, such as `gh auth setup-git`, may have made the change, not the agent. "
+            "SSSF can't tell which, so it put them back and stopped the run either way: an "
+            "agent's line there would run on your next git command. Keys are marked + added, "
+            "- removed or ~ given a new value; no value or line is ever shown. If a change is "
+            "yours, make it again with the command you used.")
     return shown
 
 

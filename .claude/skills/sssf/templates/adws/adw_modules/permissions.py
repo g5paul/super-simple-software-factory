@@ -152,9 +152,15 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
 # SSSF, so a determined one could still get past it, for example by killing
 # the chain before the check runs. --sandbox and --container isolate.
 
+# sssf-private-names lists the projects the pre-push hook refuses to name, so
+# an agent that empties or deletes it turns that check off for the engineer's
+# next push. The file is optional, and one the agent creates counts as a
+# change too.
+#
 # info/refs is left out: git gc and repack rewrite it, and it runs nothing.
 GIT_WATCHED = ("hooks", "info/exclude", "info/attributes", "info/sparse-checkout",
-               "info/grafts", "config", "config.worktree", "commondir")
+               "info/grafts", "config", "config.worktree", "commondir",
+               "sssf-private-names")
 
 # Packs the watched paths that exist, relative to /. With "h", follows
 # symlinks, so a write through a linked ~/.gitconfig shows; that pack is only

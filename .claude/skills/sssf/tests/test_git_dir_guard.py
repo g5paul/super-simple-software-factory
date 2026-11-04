@@ -5,7 +5,7 @@ see an agent write there. bypass-reviewer found the cost: a hook planted in
 .git/hooks runs on the chain's own commit, outside every agent rule, and a
 core.fsmonitor or filter line in .git/config runs on ordinary git commands.
 A line in .git/info/exclude would hide a new file from enforce itself.
-guard_git_dir copies hooks/, info/, config and config.worktree aside before
+guard_git_dir copies hooks/, info/, config, config.worktree and sssf-private-names aside before
 each agent, and restore_git_dir puts them back after it.
 
 Run from the skill root:
@@ -883,3 +883,102 @@ def test_a_file_planted_while_ignored_is_deleted_once_unignored(repo):
     permissions.restore_git_dir(run, guard)
     with pytest.raises(permissions.PermissionBreach, match="ship.md — deleted"):
         permissions.enforce(run, None, reviewer(), tree)
+
+
+# ── the private-names file ──────────────────────────────────────────────────
+
+PRIVATE = "# private\nsecret-ledger\n"
+
+
+def write_private(root: Path, text: str = PRIVATE) -> Path:
+    path = root / ".git" / "sssf-private-names"
+    path.write_text(text)
+    path.chmod(0o600)
+    return path
+
+
+@pytest.mark.parametrize("change", ["empty", "edit", "delete", "chmod", "symlink"])
+def test_the_private_names_file_is_put_back(repo, tmp_path, change):
+    path = write_private(repo)
+    data, mode = path.read_bytes(), path.stat().st_mode
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    if change == "empty":
+        path.write_text("")
+    elif change == "edit":
+        path.write_text("# private\nother-name\n")
+    elif change == "delete":
+        path.unlink()
+    elif change == "chmod":
+        path.chmod(0o644)
+    else:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.write_text("")
+        path.unlink()
+        path.symlink_to(elsewhere)
+    with pytest.raises(permissions.PermissionBreach, match="git directory") as caught:
+        permissions.restore_git_dir(run, guard)
+    assert ".git/sssf-private-names" in str(caught.value)
+    assert "secret-ledger" not in str(caught.value)
+    assert not path.is_symlink() and path.is_file()
+    assert path.read_bytes() == data and path.stat().st_mode == mode
+
+
+def test_a_created_private_names_file_is_removed(repo):
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    path = repo / ".git" / "sssf-private-names"
+    path.write_text("\n")
+    with pytest.raises(permissions.PermissionBreach) as caught:
+        permissions.restore_git_dir(run, guard)
+    assert ".git/sssf-private-names" in str(caught.value)
+    assert not path.exists()
+
+
+def test_an_engineer_edit_during_a_call_is_put_back(repo):
+    path = write_private(repo)
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    path.write_text("# private\nsecret-ledger\nsecret-ledger-two\n")
+    with pytest.raises(permissions.PermissionBreach, match="git directory"):
+        permissions.restore_git_dir(run, guard)
+    assert path.read_text() == PRIVATE
+    # outside a call, the engineer's edit is never touched
+    path.write_text("# private\nsecret-ledger-three\n")
+    guard = permissions.guard_git_dir(run)
+    assert permissions.restore_git_dir(run, guard) == []
+    assert path.read_text() == "# private\nsecret-ledger-three\n"
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_an_untouched_private_names_file_is_no_breach(repo, present):
+    path = repo / ".git" / "sssf-private-names"
+    if present:
+        write_private(repo)
+    run = SimpleNamespace(repo_root=repo)
+    guard = permissions.guard_git_dir(run)
+    assert permissions.restore_git_dir(run, guard) == []
+    assert path.exists() is present
+    if present:
+        assert path.read_text() == PRIVATE
+
+
+def test_a_worktree_guards_the_shared_private_names_file(repo, tmp_path):
+    common = write_private(repo)
+    tree = tmp_path / "tree"
+    git(repo, "worktree", "add", "-q", "-b", "run", str(tree))
+    run = SimpleNamespace(repo_root=tree)
+    guard = permissions.guard_git_dir(run)
+    resolved = str(common.resolve())
+    assert resolved in guard["paths"]
+    common.unlink()
+    with pytest.raises(permissions.PermissionBreach) as caught:
+        permissions.restore_git_dir(run, guard)
+    assert resolved in str(caught.value)
+    assert common.read_text() == PRIVATE
+
+
+def test_the_hook_reads_the_watched_file():
+    hook = (SKILL / "templates" / "githooks" / "pre-push").read_text()
+    assert '--git-common-dir)/sssf-private-names"' in hook
+    assert "sssf-private-names" in permissions.GIT_WATCHED

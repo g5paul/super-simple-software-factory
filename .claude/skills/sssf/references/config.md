@@ -158,8 +158,8 @@ redo; a write has already happened, so re-prompting fixes nothing. Instead:
 
 The git directory is outside every agent's `writes`, and outside the
 change-set too, since `git status` never shows it. So it gets its own check.
-Before each agent, SSSF saves `hooks/`, `info/`, `config`, `config.worktree`
-and `commondir` in the repo's git directory, and in a worktree run the shared
+Before each agent, SSSF saves `hooks/`, `info/`, `config`, `config.worktree`,
+`commondir` and `sssf-private-names` in the repo's git directory, and in a worktree run the shared
 one's too. It also saves every git config file git loads in the repo, any file
 an `include` names, the directory `core.hooksPath` points at, and
 `~/.gitconfig`, `~/.config/git/config` and the global ignore files even
@@ -172,7 +172,9 @@ back and stops the run with a breach naming the paths. A hook would run on the
 chain's own commit, a `core.fsmonitor` or `filter` line runs on ordinary git
 commands, `git config --global core.hooksPath` points every commit at the
 agent's hooks, and a line in `info/exclude` would hide a new file from the
-change-set. A breach here doesn't skip the other checks: an agent's own commit
+change-set. Emptying or deleting `sssf-private-names` would turn off the
+pre-push hook's private-names check for your next push, and one the agent
+creates is a change too. A breach here doesn't skip the other checks: an agent's own commit
 is still undone and its other writes still rolled back, and the breach names
 both. An agent that fails is put back the same way. SSSF also notices
 when a symlink on the way to one of these paths, such as a symlinked
@@ -191,8 +193,9 @@ makes them look like its own new files, which the rollback deletes. That
 includes a file whose name isn't valid UTF-8, which used to crash the rollback
 before it deleted anything.
 
-Two costs. An edit you make to your git config while an agent runs is put back
-too. And a tool that writes git config or hooks on install, like husky's
+Two costs. An edit you make to your git config, or to
+`.git/sssf-private-names`, while an agent runs is put back too; edit them
+between runs. And a tool that writes git config or hooks on install, like husky's
 `prepare` script on `npm install` or `pre-commit install`, stops a run if an
 agent runs it; run those in `worktree_setup`, which runs before the agents.
 

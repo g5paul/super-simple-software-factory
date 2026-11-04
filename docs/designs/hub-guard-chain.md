@@ -1,7 +1,7 @@
 # A guard-change chain in the hub
 
-Status: built, 2026-11-03, as `adws/adw_guard_change.py`. The build differs
-from this design in the four ways under "As built".
+Status: built, 2026-11-03, as `adws/adw_guard_change.py`. "As built" lists
+where the build differs from this design.
 
 ## Why
 
@@ -53,9 +53,10 @@ engineer(request) -> planner -> spec_reviewer -> git(commit_plan)
   protected all of `adws/`.
 - **verify** is `quality.py` over the hub suite (`pytest tests` from the skill
   root). Code, not an agent.
-- **bypass_reviewer** is a new roster agent. Its prompt is today's
-  `.claude/agents/bypass-reviewer.md`, steps and report unchanged, moved into
-  the hub's `adws/` prompt folder. It writes only under its scratch directory.
+- **bypass_reviewer** is a new roster agent. Its prompt starts from
+  `.claude/agents/bypass-reviewer.md`, in the hub's `adws/` prompt folder,
+  with the finding classes and a JSON report added. It writes only under its
+  scratch directory.
 - **bypass_reviewer** is briefed with the spec, not with the operator's
   latest summary, so the bar can't drift between rounds.
 - **The loop.** A blocking finding goes back to the builder as a fix,
@@ -116,23 +117,27 @@ The hub becomes a project like the others, with these differences:
 
 - **Branch.** `main` is the hub's working line, so SSSF's stamped files go on
   `main` itself, not on an `sssf-run` branch. Runs cut their own branches.
-- **`quality.py`** has one block, the hub suite. Its argv is the command in
-  each test file's docstring.
-- **`protected_files`** covers `adws/` (the guard the chain runs under),
-  `.claude/agents/`, `CLAUDE.md` and `docs/projects.md`.
-- **`agent_rules`** adds the hub's push rules: no `git push`, no `gh pr`.
-- **Roster.** planner and builder as in the other Claude repos;
-  bypass_reviewer on opus.
+- **`quality.py`** has two blocks: the skill's suite, with the command in
+  each test file's docstring, and the chain's own tests in `adws/tests/`.
+- **`protected_files`** adds `.claude/agents/`, `CLAUDE.md`,
+  `CLAUDE.local.md`, `docs/projects.md` and `adws/tests/` to the shipped
+  list, which already covers `adws/` (the guard the chain runs under).
+- **`agent_rules`** adds the hub's push rules, as a refuse rule: no
+  `git push`, and none of the `gh` commands that write to GitHub.
+- **Roster.** The Claude Code roster as shipped, plus `guard_spec_reviewer`
+  and `bypass_reviewer`, both on Opus. `max_run_cost` is $20, for three
+  Opus reviews, and `max_worktree_runs` is 1.
 - **Listed.** The hub is public, so its row goes in `docs/projects.md` like
   sssf-sandbox's.
 
 ## What changes for this session
 
-This session becomes the hub's operator for guard changes. It writes the ADW
+This session is the hub's operator for guard changes. It writes the ADW
 prompt from your request, launches the chain, watches the trace and reports,
 the way the project sessions do. The `bypass-reviewer` subagent stays, for a
-quick check outside a run. The CLAUDE.md rule changes from "run the
-bypass-reviewer agent" to "run guard changes through `adw_guard_change`".
+quick check outside a run. The CLAUDE.md rule now sends guard changes through
+`adw_guard_change`. Until the chain finishes its first live run, it also asks
+for a subagent review before a merge.
 
 ## Out of scope
 
@@ -155,6 +160,16 @@ bypass-reviewer agent" to "run guard changes through `adw_guard_change`".
   prompt.
 - **The chain runs the suite, not the reviewer.** Verify has already run it
   on head, so the reviewer's brief carries the result.
+
+Smaller choices the design left open:
+
+- The state check covers `sssf_rules.ts` too: a new top-level `let` or `var`
+  counts. It runs on the first build as well, but there it only reports;
+  only state added by a fix stops the run.
+- A rejected spec goes back to the planner once. A second rejection stops
+  the run before any code.
+- `--base` sets the baseline, `main` by default, and the chain refuses to
+  start on `main` itself.
 
 ## Settled questions
 

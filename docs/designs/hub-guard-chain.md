@@ -1,14 +1,21 @@
 # A guard-change chain in the hub
 
-Status: proposed, 2026-11-03. Nothing is built.
+Status: proposed, 2026-11-03, revised the same day after the git-directory
+guard post-mortem. Nothing is built.
 
 ## Why
 
 Hub work happens outside SSSF. This session plans a change, edits the files,
 runs the suite, starts the bypass reviewer, reads its report and merges, and
-none of it lands in a trace. The git-directory guard took seven review rounds
+none of it lands in a trace. The git-directory guard took 17 review rounds
 on one branch. The only record of them is commit messages and this session's
 chat, and one round stopped after three seconds without anyone seeing why.
+
+The rounds also showed what the work lacked besides a trace.
+`docs/postmortems/git-dir-guard.md` has the account. In short, there was no
+spec stating the bar, no design review, and no rule for when to stop, and
+fixes kept adding mechanisms that the next round broke. The chain below adds
+those steps.
 
 A run records exactly what was missing: each phase, its agent, cost, gate
 verdicts and stalls. So guard changes in the hub should go through a chain,
@@ -18,25 +25,52 @@ repo.
 ## The chain: `adw_guard_change.py`
 
 ```
-engineer(request) -> planner -> git(commit_plan)
+engineer(request) -> planner -> spec_reviewer -> git(commit_plan)
   -> builder -> code(verify: the hub suite) [-> builder(fix) ... bounded]
-  -> bypass_reviewer [-> builder(fix bypass) -> code(verify) -> bypass_reviewer ... bounded]
+  -> bypass_reviewer [-> builder(fix) -> code(verify) -> bypass_reviewer ... at most 3 rounds]
   -> git(commit_build)
 ```
 
 - **planner** writes the spec, as in `adw_simple_sdlc`. It reads the guard
-  module, `references/config.md` and the tests.
+  module, `references/config.md` and the tests. The spec has four required
+  sections:
+  - **Threat model:** what the agent can do, and what this guard can't stop
+    at its level, since the agent runs as the engineer's user.
+  - **Baseline:** the ref the change is judged against, `main` by default.
+  - **Bar:** what the change must do and must never do against the
+    baseline. The default is the one the git-directory guard merged on: no
+    agent file kept, no agent code run, and no engineer file deleted or
+    overwritten, where the baseline does otherwise.
+  - **Out of scope:** the holes the change won't close, so the reviewer
+    files them as old holes rather than blockers.
+- **spec_reviewer** checks the spec before any code. It checks the four
+  sections are present and concrete, and asks whether a smaller design meets
+  the same bar. It is the existing spec_reviewer role, briefed for guard
+  work.
 - **builder** changes the guard code and adds a test for each case it fixes.
+  A guard test builds its config from the `sssf.config.yaml` SSSF ships,
+  never a test-only one. A round-13 bypass hid behind a test config that
+  protected all of `adws/`.
 - **verify** is `quality.py` over the hub suite (`pytest tests` from the skill
   root). Code, not an agent.
 - **bypass_reviewer** is a new roster agent. Its prompt is today's
   `.claude/agents/bypass-reviewer.md`, steps and report unchanged, moved into
   the hub's `adws/` prompt folder. It writes only under its scratch directory.
-- **The loop.** A bypass goes back to the builder as a fix, re-enters verify,
-  and the reviewer runs again on the new head. That is the rule in the hub's
-  CLAUDE.md ("fixed, with a test for it, and a second run is clean"), written
-  as code. The bound is 3 rounds; past it the run stops and the engineer
-  decides.
+- **bypass_reviewer** is briefed with the spec, not with the operator's
+  latest summary, so the bar can't drift between rounds.
+- **The loop.** A blocking finding goes back to the builder as a fix,
+  re-enters verify, and the reviewer runs again on the new head. Two things
+  stop the loop and hand the run to the engineer with the findings so far:
+  - a fourth round
+  - a fix that adds a mechanism rather than narrowing one: new state, a new
+    mode, a new list of exceptions. The reviewer flags this, using the field
+    below. The git-directory guard added four such mechanisms (link
+    restoring, a config pin, a keep mode, an ignored-file shelter), and the
+    merged design removed all four.
+
+  This replaces the CLAUDE.md rule's "a second run is clean". An adversarial
+  reviewer of same-user guard code always finds one more case, so "clean" is
+  not a reachable exit.
 - **No merge.** The run leaves the branch with its commits. Merging to `main`
   stays the engineer's step, the same as in every project.
 
@@ -47,15 +81,19 @@ A new type, `BypassReview`:
 | Field | Meaning |
 |---|---|
 | `bypasses` | each one: the candidate as a string literal, the check it passes, base and head verdicts, the diff line |
-| `old_holes` | the same shape; reported, never blocking |
+| `harms` | the same shape: head deletes, overwrites or runs what the baseline doesn't |
+| `broken_promises` | the change misses something its spec says, with neither a bypass nor a harm against the baseline |
+| `old_holes` | the same shape; holes the baseline shares, or the spec puts out of scope |
 | `false_positives` | harmless input head stops |
+| `adds_mechanism` | true when the fix under review added state, a mode or an exception list, with a line saying which |
 | `candidates`, `checks`, `suite` | the counts |
 
-A gate, `no_bypass`, passes when `bypasses` is empty. `old_holes` and
-`false_positives` go into the run's write-up and the trace, so the engineer
-reads them without them stopping the run. A new false positive that blocks
-ordinary agent work is worth a stop too; that is the second gate,
-`no_false_positive`, off by default.
+A gate, `no_bypass`, passes when `bypasses` and `harms` are both empty. Those
+two are judged against the spec's baseline and bar. `broken_promises`,
+`old_holes` and `false_positives` go into the run's write-up and the trace,
+so the engineer reads them without them stopping the run. A new false
+positive that blocks ordinary agent work is worth a stop too; that is the
+second gate, `no_false_positive`, on by default.
 
 ## Which guard runs the chain
 
@@ -102,8 +140,10 @@ bypass-reviewer agent" to "run guard changes through `adw_guard_change`".
 
 ## Open questions
 
-1. Is 3 the right bound on review rounds? The git-directory guard needed 7,
-   but four of those found harms rather than bypasses.
-2. Should a reported old hole open a follow-up ticket automatically, or only
+1. Should a reported old hole open a follow-up ticket automatically, or only
    appear in the write-up?
-3. Should `no_false_positive` start on?
+2. Who decides that a fix "adds a mechanism": the reviewer alone, or the
+   reviewer plus a check on the diff, such as new module-level state?
+
+Settled since the first draft, from the post-mortem: the bound is 3 rounds,
+with a new mechanism as a second stop, and `no_false_positive` starts on.

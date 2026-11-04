@@ -1,7 +1,7 @@
 # A guard-change chain in the hub
 
-Status: proposed, 2026-11-03, revised the same day after the git-directory
-guard post-mortem. Nothing is built.
+Status: approved, 2026-11-03, after a revision from the git-directory guard
+post-mortem. Nothing is built.
 
 ## Why
 
@@ -62,6 +62,7 @@ engineer(request) -> planner -> spec_reviewer -> git(commit_plan)
   re-enters verify, and the reviewer runs again on the new head. Two things
   stop the loop and hand the run to the engineer with the findings so far:
   - a fourth round
+- a diff check that finds new module-level state or a new `global` statement in a guard module
   - a fix that adds a mechanism rather than narrowing one: new state, a new
     mode, a new list of exceptions. The reviewer flags this, using the field
     below. The git-directory guard added four such mechanisms (link
@@ -83,7 +84,7 @@ A new type, `BypassReview`:
 | `bypasses` | each one: the candidate as a string literal, the check it passes, base and head verdicts, the diff line |
 | `harms` | the same shape: head deletes, overwrites or runs what the baseline doesn't |
 | `broken_promises` | the change misses something its spec says, with neither a bypass nor a harm against the baseline |
-| `old_holes` | the same shape; holes the baseline shares, or the spec puts out of scope |
+| `old_holes` | the same shape; holes the baseline shares, or the spec puts out of scope. Each says whether it is new to the known limits in `references/config.md` |
 | `false_positives` | harmless input head stops |
 | `adds_mechanism` | true when the fix under review added state, a mode or an exception list, with a line saying which |
 | `candidates`, `checks`, `suite` | the counts |
@@ -138,13 +139,22 @@ bypass-reviewer agent" to "run guard changes through `adw_guard_change`".
   once SSSF is in the hub; nothing here requires it.
 - Sending updates to the project repos. That stays a hand-off.
 
-## Open questions
+## Settled questions
 
-1. Should a reported old hole open a follow-up ticket automatically, or only
-   appear in the write-up?
-2. Who decides that a fix "adds a mechanism": the reviewer alone, or the
-   reviewer plus a check on the diff, such as new module-level state?
+The engineer settled these on 2026-11-03.
 
-The engineer settled two first-draft questions on 2026-11-03: the bound is
-3 rounds, with a new mechanism as a second stop, and `no_false_positive`
-starts on.
+1. **Old holes open no tickets.** They go in the write-up and the trace. The
+   reviewer compares each one with the known limits in
+   `references/config.md`'s git-directory section and marks those missing
+   from it as new to the list. The engineer decides which become tickets or
+   doc lines. The same holes came back in nearly every round of the
+   git-directory guard, so automatic tickets would file each one many times.
+2. **Two signals mark a new mechanism, and either one stops the loop.** One
+   is the reviewer's `adds_mechanism`. The other is a code check on the
+   diff: new module-level state, or a new `global` statement, in a guard
+   module. The check would have caught three of the git-directory guard's
+   four mechanisms (`_PIN`, `_UNSURE`, `_EXISTED`). It would have missed link
+   restoring, which was new shell code, so the reviewer's judgement stays. A
+   false stop costs the engineer one question.
+3. **The bound is 3 rounds,** with a new mechanism as a second stop.
+4. **`no_false_positive` starts on.**

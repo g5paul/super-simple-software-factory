@@ -9,6 +9,7 @@ guard_git_dir copies hooks/, info/, config, config.worktree and sssf-private-nam
 each agent, and restore_git_dir puts them back after it. A pack over the cap
 can't be checked, so it stops the run.
 A watched path with `..` that doesn't fully resolve stops the run first.
+A repo whose git config git can't read stops the run first, with git's error.
 A shared config file's breach (one outside the repo's git directory and work tree, like ~/.gitconfig) lists the
 changed keys, never a value.
 
@@ -1481,8 +1482,8 @@ def test_an_attributes_file_dotdot_that_does_not_resolve_is_refused(repo, tmp_pa
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores search permission")
 def test_a_dotdot_after_an_unsearchable_dir_does_not_resolve(repo, tmp_path):
-    # git itself fails on `config --list` once an include can't be read, so such
-    # an include never reaches _watched; the shipped script is checked directly.
+    # git fails on `rev-parse` once an include can't be read, which now stops
+    # the run (see the section below), so _REAL is checked directly here.
     out = _dotdot_setup(repo, tmp_path)
     value = f"{repo}/lnk/../x.inc"
     os.chmod(out / "a", 0o600)
@@ -1492,3 +1493,94 @@ def test_a_dotdot_after_an_unsearchable_dir_does_not_resolve(repo, tmp_path):
     finally:
         os.chmod(out / "a", 0o755)
     assert permissions._sh(permissions._REAL, value).stdout.split("\0")[0] == str(out.resolve() / "x.inc")
+
+
+# ── a git config git can't read ──
+
+
+def test_a_symlink_loop_in_an_include_stops_the_run_first(repo, home):
+    git(repo, "config", "--add", "include.path", f"{repo}/loop/x.inc")
+    before = state(repo)
+    saved = (home / ".gitconfig").read_text()
+    (repo / "loop").symlink_to("loop")
+    with pytest.raises(permissions.PermissionBreach) as caught:
+        permissions.guard_git_dir(shipped(repo))
+    text = str(caught.value)
+    for part in ("couldn't read the repo's git config", "Too many levels of symbolic links",
+                 f"{repo}/loop/x.inc", "did not run", "run again"):
+        assert part in text
+    assert state(repo) == before
+    assert (home / ".gitconfig").read_text() == saved
+    assert os.path.islink(repo / "loop")
+    (repo / "loop").unlink()
+    guard = permissions.guard_git_dir(shipped(repo))
+    assert f"{repo}/.git/hooks" in guard["paths"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores search permission")
+def test_an_unsearchable_dir_before_dotdot_stops_the_run_first(repo, tmp_path):
+    out = _dotdot_setup(repo, tmp_path)
+    git(repo, "config", "--add", "include.path", f"{repo}/lnk/../x.inc")
+    (out / "x.inc").write_text("")
+    os.chmod(out / "a", 0o600)
+    try:
+        with pytest.raises(permissions.PermissionBreach) as caught:
+            permissions.guard_git_dir(shipped(repo))
+        assert "couldn't read the repo's git config" in str(caught.value)
+        assert "Permission denied" in str(caught.value)
+        assert stat.S_IMODE((out / "a").stat().st_mode) == 0o600
+        assert (out / "x.inc").read_text() == ""
+    finally:
+        os.chmod(out / "a", 0o755)
+
+
+def test_a_dot_git_git_cannot_read_stops_the_run(tmp_path):
+    root = tmp_path / "r"
+    root.mkdir()
+    (root / ".git").write_text("gitdir: /nonexistent/sssf-missing\n")
+    os.environ.pop("GIT_DIR", None)
+    with pytest.raises(permissions.PermissionBreach, match="couldn't read the repo's git config"):
+        permissions.guard_git_dir(shipped(root))
+
+
+def test_a_broken_global_config_outside_a_repo_stops_the_run(tmp_path, home):
+    (home / ".gitconfig").write_text(f"[include]\n\tpath = {tmp_path}/gloop/x.inc\n")
+    (tmp_path / "gloop").symlink_to("gloop")
+    nr = tmp_path / "nr"
+    nr.mkdir()
+    os.environ.pop("GIT_DIR", None)
+    with pytest.raises(permissions.PermissionBreach, match="Too many levels of symbolic links"):
+        permissions.guard_git_dir(shipped(nr))
+
+
+def test_outside_a_repo_in_another_locale_is_still_nothing_to_guard(tmp_path, monkeypatch):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setenv("LC_ALL", "fr_FR.UTF-8")
+    monkeypatch.setenv("LANGUAGE", "fr")
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    box = permissions.sandbox.current()
+    original = box.run
+    seen = []
+
+    def spy(command, *args, **kwargs):
+        seen.append(list(command))
+        return original(command, *args, **kwargs)
+
+    monkeypatch.setattr(box, "run", spy)
+    assert permissions.guard_git_dir(shipped(plain)) is None
+    probes = [c for c in seen if "--git-common-dir" in c]
+    assert probes and all(c[:3] == ["env", "LC_ALL=C", "git"] for c in probes)
+
+
+def test_a_readable_repo_runs_no_extra_command(repo, monkeypatch):
+    scripts = []
+    real = permissions._sh
+
+    def counting(script, *args, **kwargs):
+        scripts.append(script)
+        return real(script, *args, **kwargs)
+
+    monkeypatch.setattr(permissions, "_sh", counting)
+    assert permissions.guard_git_dir(shipped(repo))
+    assert '[ -e "$1" ] || [ -L "$1" ]' not in scripts

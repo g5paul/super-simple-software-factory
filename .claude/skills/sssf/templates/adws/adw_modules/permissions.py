@@ -188,6 +188,8 @@ fi
 # checked: before the agent, that stops the run before the agent runs; after
 # it, it counts as a change.
 PACK_CAP = 16 * 1024 * 1024
+# git's own words when a directory isn't in any repo, in the C locale.
+NOT_A_REPO = "fatal: not a git repository"
 
 # Puts back the changed paths, and only those. Each is a physical path with no
 # symlink in it, checked just before this runs, so rm -rf and tar act where
@@ -265,12 +267,25 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     A watched path with `..` that doesn't fully resolve, because a part of it
     doesn't exist yet or can't be entered, stops the run with
     `PermissionBreach`, since the guard can't know which file git will read.
+
+    A failed `rev-parse` in a repo (the root has a `.git`), or one that fails
+    with any error but not-a-repo, raises `PermissionBreach` with git's error.
+    The empty result means only "not a git repo".
     """
     root = str(run.repo_root).rstrip("/")
-    out = _git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], root)
+    found = sandbox.current().run(
+        ["env", "LC_ALL=C", *_gitargv(["rev-parse", "--path-format=absolute",
+                                       "--git-common-dir", "--git-dir"])],
+        cwd=root, text=False)
+    out, err = found.stdout, found.stderr
+    out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+    err = err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or "")
     dirs = list(dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()))
-    if not dirs:
-        return [], [], {}
+    if found.returncode != 0 or not dirs:
+        dot_git = _sh('[ -e "$1" ] || [ -L "$1" ]', f"{root}/.git").returncode == 0
+        if not dot_git and err.lstrip().startswith(NOT_A_REPO):
+            return [], [], {}
+        raise PermissionBreach(_unreadable(err, found.returncode))
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
     kind: dict[str, str] = {}
     named: dict[str, tuple[str, str]] = {}
@@ -438,7 +453,9 @@ def _differs(guard: dict) -> list[str] | None:
 
 
 def guard_git_dir(run) -> dict | None:
-    """Pack the watched paths, before an agent runs. None outside a git repo."""
+    """Pack the watched paths, before an agent runs.
+    None only when the repo root has no .git and git says it isn't a repo; a
+    repo whose config git can't read raises PermissionBreach."""
     links, paths, kinds = _watched(run)
     if not paths:
         return None
@@ -526,6 +543,18 @@ def _entries(source: str, path: str):
     if done.returncode != 0:
         return None
     return Counter(tuple(e.partition("\n")[::2]) for e in done.stdout.split("\0") if e)
+
+
+def _unreadable(err: str, code: int) -> str:
+    """The breach for a repo whose git config git can't read."""
+    lines = [l for l in err.strip().splitlines() if l.strip()][:20]
+    said = "\n".join("  " + "".join(c if c.isprintable() else "?" for c in l)[:300]
+                     for l in lines) or f"  (git printed no error; exit code {code})"
+    return ("git couldn't read the repo's git config, so SSSF can't tell which git "
+            "files to watch. The agent did not run, and no run will until git can "
+            "read it. git said:\n" + said + "\n\n"
+            "Fix the config file or include path git names above, for example a "
+            "symlink loop or a directory git can't enter, then run again.")
 
 
 def _shown_key(key: str) -> str:

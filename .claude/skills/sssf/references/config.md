@@ -232,11 +232,22 @@ change is yours, make it again with the command you used, such as
 `prepare` script on `npm install` or `pre-commit install`, stops a run if an
 agent runs it; run those in `worktree_setup`, which runs before the agents.
 
+If git can't read the repo's git config at all, for example because an
+include path runs into a symlink loop or a directory git can't enter, SSSF
+can't ask git which files to watch. So the run stops before the next agent
+with a breach that gives git's error. Fix the config file or path git names,
+then run again. This applies whenever the repo root has a `.git`, and
+whenever git fails for any reason other than "not a git repository", which
+includes a broken `~/.gitconfig`. Before, SSSF treated such a repo as no
+repo and ran the agent with no git-directory check.
+
 The check catches mistakes and casual attempts. An agent runs as your user, so
 a determined one could still get past it, for example by killing the chain
 before the check runs, or by leaving a process behind that writes later. It
 also doesn't watch a submodule's git directory, the index's
 `--skip-worktree` flag, or the other name of a hard-linked `~/.gitconfig`.
+It reads the config once before each agent, so a config that turns unreadable
+partway through that read isn't caught.
 A new file with a non-ASCII name, under git's default `core.quotePath`, is
 named in the breach but not deleted.
 `--sandbox` and `--container` isolate the run.

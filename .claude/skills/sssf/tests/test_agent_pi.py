@@ -13,8 +13,11 @@ Run from the skill root:
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import socket
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -253,6 +256,83 @@ def test_a_stored_login_check(tmp_path):
     path.write_text("not json")
     with pytest.raises(sandbox.SandboxFailed, match="can't read"):
         agent_pi.check_stored_login(path)
+
+
+def test_the_auth_path_follows_pi_and_ignores_PI_AUTH_PATH(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PI_AUTH_PATH", "/nonexistent/auth.json")
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    assert agent_pi._pi_auth_json() == tmp_path / ".pi/agent/auth.json"
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "x"))
+    assert agent_pi._pi_auth_json() == tmp_path / "x/auth.json"
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "~/y")
+    assert agent_pi._pi_auth_json() == tmp_path / "y/auth.json"
+    assert "PI_AUTH_PATH" not in Path(agent_pi.__file__).read_text()
+
+
+def test_a_relative_agent_dir_stops():
+    with pytest.raises(sandbox.SandboxFailed, match="absolute"):
+        agent_pi.check_stored_login(Path("rel/auth.json"))
+
+
+@pytest.mark.parametrize("kind", ["fifo", "fifo_link", "dir", "socket", "device_link"])
+def test_a_non_regular_auth_json_stops_without_blocking(tmp_path, kind):
+    tmp = Path(tempfile.mkdtemp(dir="/tmp"))
+    fifo = tmp / "fifo"
+    sock = None
+    path = tmp / "auth.json"
+    try:
+        if kind == "fifo":
+            os.mkfifo(path)
+            fifo = path
+        elif kind == "fifo_link":
+            os.mkfifo(fifo)
+            os.symlink(fifo, path)
+        elif kind == "dir":
+            path.mkdir()
+        elif kind == "socket":
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.bind(str(path))
+        else:
+            os.symlink("/dev/null", path)
+        outcome = []
+
+        def run():
+            try:
+                agent_pi.check_stored_login(path)
+                outcome.append(None)
+            except BaseException as e:      # noqa: BLE001 - reported below
+                outcome.append(e)
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        finished = not worker.is_alive()
+        if not finished and kind in ("fifo", "fifo_link"):
+            try:
+                os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+        assert finished, "check_stored_login blocked"
+        assert isinstance(outcome[0], sandbox.SandboxFailed)
+        assert str(path) in str(outcome[0])
+    finally:
+        if sock:
+            sock.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_symlinked_auth_json_is_read_like_pi_reads_it(tmp_path):
+    real = tmp_path / "real.json"
+    link = tmp_path / "auth.json"
+    link.symlink_to(real)
+    agent_pi.check_stored_login(link)                       # dangling: passes
+    real.write_text('{"openai": {"access": "SECRET"}}')
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi.check_stored_login(link)
+    assert "SECRET" not in str(stop.value)
+    real.write_text('{"anthropic": {}}')
+    agent_pi.check_stored_login(link)
 
 
 @pytest.mark.parametrize("fault", ["error", "login"])

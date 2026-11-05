@@ -429,11 +429,21 @@ In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agen
 
 ### pi in the operator container
 
-In the operator container (`container/run.sh`), `SSSF_PI_TOKEN_SOCKET` names a socket to the host's `pi_token_broker.py`. Before each pi agent call on a local tree, SSSF asks it for a one-hour token and sets `OPENAI_API_KEY` to it. The host keeps the sign-in. If the broker errors or doesn't answer, the call stops before pi starts.
+In the operator container (`container/run.sh`), `SSSF_PI_TOKEN_SOCKET` names a socket to the host's `pi_token_broker.py`. Before each pi agent call on a local tree, SSSF asks it for a one-hour token and sets `OPENAI_API_KEY` to it. The host keeps the sign-in. If the broker errors or doesn't answer, the call stops before pi starts. `run.sh` removes a socket left at the broker's path, waits until the new broker answers, and exits 1 if it doesn't.
 
-Each `harness_engineering` path must be inside the repo, committed or not, or the run stops before it starts. An `openai` entry in the container's `~/.pi/agent/auth.json` also stops the run, because pi would use it instead of the host's sign-in. obs works as on the host: no `OBS_DISABLE`, and `OBS_AUTH_TOKEN` is kept.
+Each `harness_engineering` path must be inside the repo, committed or not, or the run stops before it starts. An `openai` entry in the `auth.json` pi reads in the container (`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json` when that is set) also stops the run, because pi would use it instead of the host's sign-in. So does anything at that path that isn't a regular file, or a relative `PI_CODING_AGENT_DIR`. obs works as on the host: no `OBS_DISABLE`, and `OBS_AUTH_TOKEN` is kept.
 
 **Known limit:** any process in the container can get a one-hour token from the socket while the session is open, because everything there runs as one user.
+
+**Known limit:** the stored-login check looks for an `openai` entry only. Other stored logins pi keeps are not checked.
+
+**Known limit:** the check and pi read `auth.json` at different moments, so a file swapped between them can pass the check and still reach pi.
+
+**Known limit:** an extension path inside the repo that is a symlink to a file outside it passes the launch check, and imports aren't followed.
+
+**Known limit:** each connection to the socket starts one host `pi` process, with no cap, so a process in the container can load the host.
+
+**Known limit:** `--sandbox vercel|e2b` launched from inside the container mints its VM tokens with the container's own pi, not through the broker.
 
 **Known limit:** as in a VM, an agent can edit an extension in the repo, and the edited one loads for the next agent call.
 

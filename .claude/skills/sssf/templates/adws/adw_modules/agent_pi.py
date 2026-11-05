@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import stat
 import subprocess
 import time
 from functools import lru_cache
@@ -255,8 +256,20 @@ VM_TOKEN_MINUTES = 35
 # In the operator container (container/run.sh), the host's pi_token_broker.py
 # hands out the token through the socket this variable names.
 CONTAINER_SOCKET_VAR = "SSSF_PI_TOKEN_SOCKET"
-PI_AUTH_JSON = Path(os.environ.get("PI_AUTH_PATH",
-                                   str(Path.home() / ".pi" / "agent" / "auth.json")))
+
+
+def _pi_auth_json() -> Path:
+    """Where pi reads its stored logins: auth.json in PI_CODING_AGENT_DIR when the
+    operator's environment sets it, else ~/.pi/agent/auth.json. This is pi's own
+    getAgentDir (dist/config.js in pi 1.4.0), which expands a leading ~ in the
+    variable. No other override: the check must read what pi reads."""
+    agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
+    if agent_dir:
+        return Path(os.path.expanduser(agent_dir)) / "auth.json"
+    return Path.home() / ".pi" / "agent" / "auth.json"
+
+
+PI_AUTH_JSON = _pi_auth_json()   # tests monkeypatch this
 BROKER_TIMEOUT = 150            # more than the broker's own 120 s pi timeout
 
 
@@ -281,16 +294,49 @@ def vm_token() -> str:
     return token
 
 
+def _read_regular(path: Path) -> bytes:
+    """The whole of the regular file at path. O_NONBLOCK keeps a FIFO swapped in
+    after the stat from holding the open, and fstat refuses anything but a
+    regular file, which a read can't block on."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        with os.fdopen(os.dup(fd), "rb") as f:
+            return f.read()
+    finally:
+        os.close(fd)
+
+
 def check_stored_login(path: Path = None) -> None:
     """Stop if the container's pi auth.json holds an openai login: pi would use
-    it instead of the host's sign-in. Reads key names only; never a value."""
+    it instead of the host's sign-in. Reads key names only; never a value.
+
+    Never blocks. The path is stat'ed first (following a symlink, as pi does),
+    so a FIFO, socket, device or directory there stops the run without being
+    opened. That stat stays even though _read_regular checks again, because
+    opening a device can have effects of its own. A missing file passes."""
     path = path or PI_AUTH_JSON
-    if not path.exists():
-        return
+    if not path.is_absolute():
+        raise sandbox.SandboxFailed(
+            f"PI_CODING_AGENT_DIR puts pi's auth.json at {path}, a relative path, so SSSF "
+            "can't tell which file pi will read; set it to an absolute path.")
     try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        data = None
+        info = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    except OSError:
+        info = None
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        raise sandbox.SandboxFailed(
+            f"{path} is not a regular file, so SSSF can't check it for a stored ChatGPT "
+            "login; remove it and start again.")
+    data = None
+    if info is not None:
+        try:
+            data = json.loads(_read_regular(path).decode("utf-8"))
+        except (OSError, ValueError):
+            data = None
     if not isinstance(data, dict):
         raise sandbox.SandboxFailed(f"SSSF can't read {path} to check it for a stored ChatGPT "
                                     "login; fix or remove it.")

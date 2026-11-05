@@ -10,7 +10,9 @@ line and closes:
     ERR <message>\\n    on failure (one line, never a token)
 
 Installs no signal handlers and doesn't unlink its socket on exit: run.sh's
-trap only kills it, and the next start replaces a socket nothing answers on.
+trap only kills it, run.sh removes a socket left at the path before the next
+start, and the broker itself still replaces a socket nothing answers on when it
+is started some other way.
 Never prints or logs a token. Stdlib only; works on Python 3.10.
 """
 

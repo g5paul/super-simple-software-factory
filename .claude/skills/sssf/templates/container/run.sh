@@ -29,16 +29,30 @@ have=$(podman image inspect --format '{{ index .Labels "sssf.containerfile.sha25
 # starts whether or not the host is signed in to pi (decision 11).
 runtime=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set; rootless podman needs it}
 sock="$runtime/sssf-pi-$(basename "$repo").sock"
+# A socket left by an earlier session would pass a file test even with this
+# broker dead, so remove it first, and wait for a connection, not the file.
+# Only a socket goes: a symlink or any other file there is left, and the
+# broker refuses to start on it.
+if [ -S "$sock" ] && [ ! -L "$sock" ]; then
+    rm -f -- "$sock"
+fi
 python3 "$here/pi_token_broker.py" "$sock" &
 broker=$!
 trap 'kill "$broker" 2>/dev/null' EXIT
+answered=""
 for _ in $(seq 50); do
-    [ -S "$sock" ] && break
     kill -0 "$broker" 2>/dev/null || break
+    if python3 -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(1)
+s.connect(sys.argv[1])' "$sock" 2>/dev/null; then
+        answered=1
+        break
+    fi
     sleep 0.1
 done
-if [ ! -S "$sock" ] || ! kill -0 "$broker" 2>/dev/null; then
-    echo "the pi token broker didn't start; see the message above" >&2
+if [ -z "$answered" ]; then
+    echo "the pi token broker at $sock didn't answer; see the message above" >&2
     exit 1
 fi
 mkdir -p "$HOME/.config/sssf"

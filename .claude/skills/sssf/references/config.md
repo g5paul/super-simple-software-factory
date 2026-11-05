@@ -254,7 +254,10 @@ with a breach that gives git's error. Fix the config file or path git names,
 then run again. This applies whenever the repo root has a `.git`, and
 whenever git fails for any reason other than "not a git repository", which
 includes a broken `~/.gitconfig`. Before, SSSF treated such a repo as no
-repo and ran the agent with no git-directory check.
+repo and ran the agent with no git-directory check. The breach quotes git's
+error, and git quotes paths as written, so an include path the agent chose
+can put text of its choosing there, even a false reason. Trust the stop, and
+check the path git names by hand.
 
 If git can't name the hooks directory, for example because `core.hooksPath`
 leads through symlinks to a real path longer than the system limit, SSSF can't

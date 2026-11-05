@@ -161,6 +161,7 @@ The versions go into the trace as a `sandbox_tools` event and into the `sandbox`
 ## Open
 
 - **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in, and rosters with `harness_engineering` extensions until decisions 20 to 27 are built. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
+- **Obs events from a VM run.** Decision 23 turns them off. A relay would take the extension's posts in the VM, buffer them, and replay them to the host's obs server after each agent call, so the obs token never enters the VM either.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on one project), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.
 - **`--sandbox` for tickets and trials** was built after the dashboard; see "As built: tickets and trials".

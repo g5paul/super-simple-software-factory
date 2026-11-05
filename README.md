@@ -60,7 +60,7 @@ Copy `.claude/skills/sssf/` into the target repo and type `/sssf install` inside
 
 ### Manual Install
 
-**Prereqs:** [`uv`](https://docs.astral.sh/uv/), `sqlite3`, and one of three ways to run agents:
+**Prereqs:** [`uv`](https://docs.astral.sh/uv/), `sqlite3`, git 2.32 or later, and one of three ways to run agents:
 
 - a Claude subscription, with [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and logged in (`claude auth status`). No API key.
 - a ChatGPT subscription, with [`pi`](https://github.com/mariozechner/pi-coding-agent) signed into it (`/login` inside Pi, then pick `openai`). No API key.

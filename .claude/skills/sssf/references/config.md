@@ -269,6 +269,11 @@ also doesn't watch a submodule's git directory, the index's
 `--skip-worktree` flag, or the other name of a hard-linked `~/.gitconfig`.
 It reads the config once before each agent, so a config that turns unreadable
 partway through that read isn't caught.
+It needs git 2.32 or later. To list a changed config's keys, it runs git with
+`GIT_CONFIG_GLOBAL=/dev/null` so your `~/.gitconfig` isn't loaded. Older git
+ignores that variable and loads it, `trace2` settings included, so an agent
+that set `trace2.normalTarget` there could make that git write to a file of
+its choosing.
 It watches the config git loads on the current branch. A file an
 `includeIf.onbranch:` for another branch names is watched, but an include or
 a `core.hooksPath` set inside that file isn't. An agent can plant a hook

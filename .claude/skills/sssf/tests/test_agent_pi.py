@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
+import re
 import shutil
 import socket
 import sys
@@ -273,6 +275,147 @@ def test_the_auth_path_follows_pi_and_ignores_PI_AUTH_PATH(tmp_path, monkeypatch
 def test_a_relative_agent_dir_stops():
     with pytest.raises(sandbox.SandboxFailed, match="absolute"):
         agent_pi.check_stored_login(Path("rel/auth.json"))
+
+
+# The expected values below are pi 1.4.0's real output: join(getAgentDir(), "auth.json")
+# run under node v24.11.1 with HOME=/h ("<h>" stands for HOME here).
+@pytest.mark.parametrize("value, expected", [
+    (None, "<h>/.pi/agent/auth.json"),
+    ("", "<h>/.pi/agent/auth.json"),
+    ("~", "<h>/auth.json"),
+    ("~/", "<h>/auth.json"),
+    ("~/y", "<h>/y/auth.json"),
+    ("~/a/../b", "<h>/b/auth.json"),
+    ("/a/./b//c/", "/a/b/c/auth.json"),
+    ("/..", "/auth.json"),
+    ("file:///a/b", "/a/b/auth.json"),
+    ("file:///a/b/../c", "/a/c/auth.json"),
+    ("file:///", "/auth.json"),
+])
+def test_the_agent_dir_is_worked_out_as_pi_does(tmp_path, monkeypatch, value, expected):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    if value is None:
+        monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    else:
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", value)
+    assert str(agent_pi._pi_auth_json()) == expected.replace("<h>", str(tmp_path))
+
+
+def test_a_home_ending_in_a_slash_doubles_nothing(monkeypatch):
+    monkeypatch.setenv("HOME", "/h/")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "~/y")
+    assert str(agent_pi._pi_auth_json()) == "/h/y/auth.json"
+
+
+@pytest.mark.parametrize("value, home, shown", [
+    ("~root/x", "/h", "~root/x/auth.json"),
+    ("~nosuchuser/x", "/h", "~nosuchuser/x/auth.json"),
+    ("rel/x", "/h", "rel/x/auth.json"),
+    ("file:/a", "/h", "file:/a/auth.json"),
+    ("FILE:///a", "/h", "FILE:/a/auth.json"),
+    ("./x", "/h", "x/auth.json"),
+    ("~", "", "auth.json"),
+    (None, "", ".pi/agent/auth.json"),
+])
+def test_a_relative_agent_dir_stops_with_todays_message(tmp_path, monkeypatch, value, home, shown):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "~root/x").mkdir(parents=True)
+    (tmp_path / "~root/x/auth.json").write_text('{"openai": {}}')
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", None)
+    monkeypatch.setenv("HOME", home)
+    if value is None:
+        monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    else:
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", value)
+    with pytest.raises(sandbox.SandboxFailed, match="a relative path") as stop:
+        agent_pi.check_stored_login()
+    assert f"at {shown}," in str(stop.value)
+
+
+@pytest.mark.parametrize("value", [
+    "file://localhost/x", "file://host/x", "file:///a%20b", "file:///a?q#f", "file:////a",
+    "file:///a//../b", "file:///C:/../x", "file://", "file:///a\nb", "file:///a b",
+])
+def test_a_file_url_sssf_cant_match_stops(monkeypatch, value):
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", None)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", value)
+    with pytest.raises(sandbox.SandboxFailed, match="file:// URL"):
+        agent_pi.check_stored_login()
+
+
+@pytest.mark.parametrize("name, body", [
+    ("auth.json", '{"openai": {"access": "x"}}'),
+    ("models.json", '{"providers": {"openai": {"apiKey": "sk-x"}}}'),
+])
+def test_a_symlink_before_dotdot_is_read_as_pi_reads_it(tmp_path, monkeypatch, name, body):
+    for d in ("real/b", "other/b", "other/sub", "real"):
+        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+    os.symlink(tmp_path / "other/sub", tmp_path / "real/link")
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", None)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", f"{tmp_path}/real/link/../b")
+    # pi folds the text to real/b; the kernel would go to other/b
+    (tmp_path / "real/b" / name).write_text(body)
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi.check_stored_login()
+    assert str(tmp_path / "real/b" / name) in str(stop.value)
+    # roles swapped: the login sits where only the kernel would look
+    (tmp_path / "real/b" / name).unlink()
+    (tmp_path / "other/b" / name).write_text(body)
+    agent_pi.check_stored_login()
+
+
+def test_a_file_url_agent_dir_is_checked(tmp_path, monkeypatch):
+    assert re.fullmatch(f"/(?:{agent_pi._URL_SEGMENT}/?)*", str(tmp_path))
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d/auth.json").write_text('{"openai": {}}')
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", None)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", f"file://{tmp_path}/d")
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi.check_stored_login()
+    assert str(stop.value).startswith(f"{tmp_path}/d/auth.json has")
+
+
+@pytest.mark.parametrize("var", ["PI_CODING_AGENT_DIR", "HOME"])
+def test_bad_utf8_stops(monkeypatch, var):
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", None)
+    if var == "HOME":
+        monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.setenv(var, "/tmp/\udcff")
+    with pytest.raises(sandbox.SandboxFailed, match="UTF-8"):
+        agent_pi.check_stored_login()
+
+
+def test_no_home_uses_the_passwd_entry(monkeypatch):
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "~/z")
+    home = pwd.getpwuid(os.geteuid()).pw_dir
+    assert agent_pi._pi_auth_json() == Path(agent_pi._node_join(home, "z/auth.json"))
+    def nobody(uid):
+        raise KeyError(uid)
+    monkeypatch.setattr(agent_pi.pwd, "getpwuid", nobody)
+    with pytest.raises(sandbox.SandboxFailed, match="HOME"):
+        agent_pi._pi_auth_json()
+
+
+def test_the_agent_dir_is_read_per_call(tmp_path, monkeypatch):
+    (tmp_path / "A").mkdir()
+    (tmp_path / "B").mkdir()
+    (tmp_path / "B/auth.json").write_text('{"openai": {}}')
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", None)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "A"))
+    agent_pi.check_stored_login()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "B"))
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi.check_stored_login()
+    assert str(tmp_path / "B/auth.json") in str(stop.value)
+
+
+def test_a_host_run_never_works_out_the_agent_dir(monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "file://host/x")
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+    assert agent_pi._in_container({"A": "1"}, sandbox.LOCAL) == {"A": "1"}
+    monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", "/nonexistent.sock")
+    assert agent_pi._in_container({"A": "1"}, object()) == {"A": "1"}
 
 
 @pytest.mark.parametrize("name", ["auth.json", "models.json"])

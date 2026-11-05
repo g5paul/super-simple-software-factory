@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import re
 import socket
 import stat
@@ -266,18 +267,92 @@ VM_TOKEN_MINUTES = 35
 CONTAINER_SOCKET_VAR = "SSSF_PI_TOKEN_SOCKET"
 
 
+def _node_join(*parts: str) -> str:
+    """Node's path.posix.join: drop empty parts, join with /, then fold ., ..
+    and repeated / as text, the way normalize does. A .. at the root of an
+    absolute path stays at the root; a relative path keeps a leading .. it
+    can't pop. posixpath.normpath differs (it keeps a leading //)."""
+    joined = "/".join(p for p in parts if p)
+    if not joined:
+        return "."
+    absolute = joined.startswith("/")
+    out: list[str] = []
+    for seg in joined.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if out and out[-1] != "..":
+                out.pop()
+            elif not absolute:
+                out.append("..")
+            continue
+        out.append(seg)
+    body = "/".join(out)
+    return "/" + body if absolute else (body or ".")
+
+
+# The file:// URLs whose fileURLToPath SSSF can match exactly: no host, no
+# %-escape, ?, #, \, :, | or empty segment, only characters the URL parser
+# leaves as they are. On these, URL dot-segment folding then join is the
+# same as join alone.
+_URL_SEGMENT = r"[A-Za-z0-9._~!$&'()*+,;=@-]+"
+_PLAIN_FILE_URL = re.compile(rf"file://(/(?:{_URL_SEGMENT}(?:/{_URL_SEGMENT})*/?)?)")
+
+
+def _utf8(value: str, name: str) -> str:
+    """value, if Node would read the same bytes. Node decodes the environment as
+    UTF-8 and turns a bad byte into U+FFFD, a different path."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise sandbox.SandboxFailed(
+            f"{name} isn't valid UTF-8, so SSSF can't tell which dir pi reads its "
+            "logins from; set it to a plain absolute path.") from None
+    return value
+
+
+def _node_homedir() -> str:
+    """Node's os.homedir() (libuv uv_os_homedir): $HOME whenever HOME is set,
+    even empty, else the passwd entry for the effective uid."""
+    if "HOME" in os.environ:
+        return _utf8(os.environ["HOME"], "HOME")
+    try:
+        return _utf8(pwd.getpwuid(os.geteuid()).pw_dir, "the passwd home dir")
+    except KeyError:
+        raise sandbox.SandboxFailed(
+            "HOME isn't set and there's no passwd entry for this user, so SSSF can't "
+            "tell where pi reads its logins; set HOME.") from None
+
+
 def _pi_auth_json() -> Path:
-    """Where pi reads its stored logins: auth.json in PI_CODING_AGENT_DIR when the
-    operator's environment sets it, else ~/.pi/agent/auth.json. This is pi's own
-    getAgentDir (dist/config.js in pi 1.4.0), which expands a leading ~ in the
-    variable. No other override: the check must read what pi reads."""
+    """Where pi reads its stored logins, worked out as pi 1.4.0 does:
+    join(getAgentDir(), "auth.json"). getAgentDir (dist/config.js) is
+    normalizePath(PI_CODING_AGENT_DIR) when that's set and non-empty
+    (dist/utils/paths.js: "~" is the home dir, "~/rest" is join(home, rest), a
+    file:// URL goes through fileURLToPath, anything else is as written; ~user
+    is not expanded), else join(homedir(), ".pi", "agent"). Any value SSSF
+    can't match exactly raises SandboxFailed. A relative result is returned as
+    is, for check_stored_login to stop on. No other override: the check must
+    read what pi reads."""
     agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
-    if agent_dir:
-        return Path(os.path.expanduser(agent_dir)) / "auth.json"
-    return Path.home() / ".pi" / "agent" / "auth.json"
+    if not agent_dir:
+        return Path(_node_join(_node_homedir(), ".pi", "agent", "auth.json"))
+    agent_dir = _utf8(agent_dir, "PI_CODING_AGENT_DIR")
+    if agent_dir == "~":
+        return Path(_node_join(_node_homedir(), "auth.json"))
+    if agent_dir.startswith("~/"):
+        return Path(_node_join(_node_homedir(), agent_dir[2:], "auth.json"))
+    if agent_dir.startswith("file://"):
+        url = _PLAIN_FILE_URL.fullmatch(agent_dir)
+        if not url:
+            raise sandbox.SandboxFailed(
+                f"PI_CODING_AGENT_DIR is a file:// URL ({agent_dir!r}) that SSSF can't turn "
+                "into a path exactly as pi does; write it as a plain absolute path.")
+        return Path(_node_join(url.group(1), "auth.json"))
+    return Path(_node_join(agent_dir, "auth.json"))
 
 
-PI_AUTH_JSON = _pi_auth_json()   # tests monkeypatch this
+PI_AUTH_JSON: Optional[Path] = None   # tests monkeypatch this; None works it out per call
 BROKER_TIMEOUT = 150            # more than the broker's own 120 s pi timeout
 
 
@@ -398,9 +473,11 @@ def check_stored_login(path: Path = None) -> None:
     headers at the provider, model and modelOverrides level. Reads key names
     only; never a value.
 
+    The dir is pi's own, worked out by _pi_auth_json.
+
     Never blocks, for either file (see _load_agent_json). A missing file passes;
     an unreadable one stops the run."""
-    path = path or PI_AUTH_JSON
+    path = path or PI_AUTH_JSON or _pi_auth_json()
     if not path.is_absolute():
         raise sandbox.SandboxFailed(
             f"PI_CODING_AGENT_DIR puts pi's auth.json at {path}, a relative path, so SSSF "

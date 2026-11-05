@@ -17,6 +17,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import types
 from pathlib import Path
 
@@ -685,3 +687,63 @@ def test_a_host_command_still_gets_the_obs_token(tmp_path, monkeypatch):
     monkeypatch.setenv("OBS_AUTH_TOKEN", "secret-obs")
     done = sandbox.LOCAL.run(["sh", "-c", "env"], cwd=tmp_path)
     assert "OBS_AUTH_TOKEN=secret-obs" in done.stdout
+
+
+# --- a call the provider never answers (run 80481cd6) --------------------------
+
+@pytest.fixture
+def hang(box, monkeypatch):
+    """Short deadlines, and a call that blocks until the test ends, as one
+    on a dropped connection does."""
+    from adw_modules import sandbox_remote
+    monkeypatch.setattr(sandbox_remote, "CALL_SECONDS", 0.3, raising=False)
+    monkeypatch.setattr(sandbox_remote, "COMMAND_SECONDS", 0.2)
+    gone = threading.Event()
+
+    def stuck(*a, **k):
+        gone.wait(30)
+    yield stuck
+    gone.set()
+
+
+def test_a_command_the_vm_never_answers_fails_by_its_deadline(box, hang, monkeypatch):
+    monkeypatch.setattr(box.sandbox, "run_process", hang)
+    started = time.monotonic()
+    with pytest.raises(OSError, match="no answer in"):
+        box.run(["true"], timeout=0.2)
+    assert time.monotonic() - started < 5
+
+
+def test_close_with_a_vm_that_never_answers_still_ends_and_says_so(box, hang, monkeypatch):
+    monkeypatch.setattr(box.sandbox, "run_process", hang)
+    monkeypatch.setattr(box.sandbox, "destroy", hang)
+    started = time.monotonic()
+    box.close()
+    assert time.monotonic() - started < 10
+    end = [p for n, p in box.events if n == "sandbox_end"]
+    assert end and end[-1]["deleted"] is False
+    assert any("no answer in" in p["error"] for n, p in box.events if n == "sandbox_error")
+
+
+def test_an_agent_wait_is_bounded_by_the_session(box, hang):
+    process = box.start(["sleep", "30"])
+    box.limit = 0.2
+    try:
+        with pytest.raises(OSError, match="no answer in"):
+            process.wait()
+    finally:
+        process.kill()
+
+
+def test_sdk_errors_become_oserror_and_others_pass_through(box, monkeypatch):
+    def sdk(*a, **k):
+        raise box.errors[0]("boom")
+
+    def other(*a, **k):
+        raise ValueError("ours")
+    monkeypatch.setattr(box.sandbox, "run_process", sdk)
+    with pytest.raises(OSError, match="boom"):
+        box.run(["true"])
+    monkeypatch.setattr(box.sandbox, "run_process", other)
+    with pytest.raises(ValueError, match="ours"):
+        box.run(["true"])

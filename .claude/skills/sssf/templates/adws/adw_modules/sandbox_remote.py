@@ -33,6 +33,7 @@ import socket
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -45,6 +46,10 @@ HELD = ("OBS_AUTH_TOKEN",)          # named variables no VM command gets, whatev
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
 COMMAND_SECONDS = 60                # what a command with no timeout may need: git, a read
 MARGIN_SECONDS = 30
+# How long an SDK call may run past the time its command asked for. The
+# SDKs wait on a running command with no timeout of their own, so a dropped
+# connection held run 80481cd6 for 15.7 minutes, until the host's TCP gave up.
+CALL_SECONDS = 120
 # The tools a VM must have, by what the roster runs (docs/designs/remote-sandboxes.md,
 # "As built: the tool check"). `min` is the oldest version SSSF has run on, or
 # the tool's own floor; a VM below it fails before any agent starts. `tested`
@@ -182,7 +187,8 @@ class RemoteProcess:
         self._done = False
 
     def wait(self) -> int:
-        code = self._process.wait()
+        # Past the session's end the provider has stopped the VM, agent and all.
+        code = self._box._call(self._process.wait, deadline=self._box.limit + CALL_SECONDS)
         if not self._done:
             self._done = True
             self._box.handoff_out()
@@ -193,8 +199,8 @@ class RemoteProcess:
 
     def stop_tree(self) -> None:
         # Started under setsid, so the agent and everything it ran share its session.
-        self._box.sandbox.run_process(
-            "sh", ["-c", f'pkill -KILL -s "$(cat {self._sid_file})"'], capture_output=True)
+        self._box._call(self._box.sandbox.run_process,
+                        "sh", ["-c", f'pkill -KILL -s "$(cat {self._sid_file})"'], capture_output=True)
 
 
 class Remote:
@@ -310,8 +316,8 @@ class Remote:
         patch = ""
         try:
             self.commits_out()
-            done = self.sandbox.run_process(
-                "sh", ["-c", "git add -A && git diff --cached --binary HEAD"],
+            done = self._call(
+                self.sandbox.run_process, "sh", ["-c", "git add -A && git diff --cached --binary HEAD"],
                 cwd=str(self.tree), capture_output=True)
             if done.returncode == 0 and (done.stdout or "").strip():
                 path = self.run_.session_dir / "sandbox-uncommitted.patch"
@@ -322,7 +328,7 @@ class Remote:
         self._cpu_add()
         seconds = round(time.monotonic() - self._created, 1)
         try:
-            self._delete()
+            self._call(self._delete)
             deleted = True
         except Exception as error:
             deleted = False
@@ -344,7 +350,8 @@ class Remote:
         self._refresh(timeout or COMMAND_SECONDS)
         started = time.monotonic()
         done = self._call(self.sandbox.run_process, argv[0], argv[1:], cwd=self._cwd(cwd),
-                          env=self._env(env), capture_output=True, kill_after=timeout)
+                          env=self._env(env), capture_output=True, kill_after=timeout,
+                          deadline=(timeout or COMMAND_SECONDS) + CALL_SECONDS)
         out, err = done.stdout or "", done.stderr or ""
         if timeout and done.returncode != 0 and time.monotonic() - started >= timeout - 1:
             raise subprocess.TimeoutExpired(command, timeout, output=out, stderr=err)
@@ -459,7 +466,7 @@ class Remote:
         nice, system, irq, softirq and steal, summed over its vCPUs. Waiting
         is left out, as Vercel leaves it out of active CPU. None if unread."""
         try:
-            done = self.sandbox.run_process("sh", ["-c", CPU_READ], capture_output=True)
+            done = self._call(self.sandbox.run_process, "sh", ["-c", CPU_READ], capture_output=True)
             return float(done.stdout.strip()) if done.returncode == 0 else None
         except Exception:
             return None
@@ -505,12 +512,31 @@ class Remote:
                                 f"{(done.stderr or done.stdout or '').strip()[-500:]}")
         return done.stdout or ""
 
-    def _call(self, method, *args, **kwargs):
-        """An SDK call, with its errors as OSError, as a subprocess's would be."""
-        try:
-            return method(*args, **kwargs)
-        except self.errors as error:
-            raise OSError(f"{self.name} sandbox {self.vm}: {error}") from error
+    def _call(self, method, *args, deadline: float | None = None, **kwargs):
+        """An SDK call, with its errors as OSError, as a subprocess's would be.
+        One with no answer by `deadline` seconds raises OSError too. Its thread
+        is left blocked on the dead connection; it is a daemon, so it never
+        holds the ADW open."""
+        deadline = COMMAND_SECONDS + CALL_SECONDS if deadline is None else deadline
+        out: dict = {}
+
+        def call() -> None:
+            try:
+                out["value"] = method(*args, **kwargs)
+            except BaseException as error:
+                out["error"] = error
+
+        worker = threading.Thread(target=call, name=f"sssf-{self.name}-call", daemon=True)
+        worker.start()
+        worker.join(deadline)
+        if worker.is_alive():
+            what = getattr(method, "__name__", "call")
+            raise OSError(f"{self.name} sandbox {self.vm}: {what} had no answer in {deadline:.0f}s")
+        if "error" in out:
+            if isinstance(out["error"], self.errors):
+                raise OSError(f"{self.name} sandbox {self.vm}: {out['error']}") from out["error"]
+            raise out["error"]
+        return out.get("value")
 
     def _log(self, name: str, payload: dict) -> None:
         from .data_types import EventRecord

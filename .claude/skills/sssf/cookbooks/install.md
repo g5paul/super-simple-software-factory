@@ -143,7 +143,7 @@ Run the update the way the repo takes any change: on a short branch cut from `ma
 
 On the host, Claude Code's auto mode blocks the command that launches a chain, so the engineer approves each launch. `--container` stamps a Podman setup that runs the operator session with `--dangerously-skip-permissions` instead. Inside it, the session can reach only the repo and `~/.config/sssf`, both mounted at their host paths, so the trace and `just obs-all` on the host see every run. It covers the operator session and every agent it starts. It does not give each run its own branch: a run still commits to the branch that is checked out.
 
-It needs Podman and a Claude Code roster. The image has no Pi.
+It needs Podman. A pi roster also needs the host signed in to pi (`pi`, then `/login`, `openai`): the host keeps the sign-in, and each pi agent gets a one-hour token from it. A session needs Podman with pasta, the rootless default from Podman 5. Obs events from the container show on the host dashboard, because `127.0.0.1:43190` is forwarded. A pi extension must be inside the repo. If a run stops on a stored ChatGPT login, delete the `openai` entry from `~/.pi/agent/auth.json` inside the container.
 
 ```bash
 uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code --container   # new install
@@ -152,9 +152,10 @@ uv run .claude/skills/sssf/scripts/install.py --container                       
 
 | File | What it does |
 |---|---|
-| `container/Containerfile` | The image: Ubuntu, git, sqlite3, uv, just, Claude Code, a C compiler with Python headers, and tzdata. **The repo's to edit**: add the tools `quality.py` runs, such as bun or node. An update keeps your edits, like `quality.py` |
+| `container/Containerfile` | The image: Ubuntu, git, sqlite3, uv, just, Claude Code, node 24 and pi 1.4.0 (both pinned), a C compiler with Python headers, and tzdata. **The repo's to edit**: add the tools `quality.py` runs, such as bun. An update keeps your edits, like `quality.py` |
 | `container/build.sh` | Builds the image as `localhost/sssf-operator-<repo>`. Run it again after editing the Containerfile |
-| `container/run.sh` | Starts the session. Builds the image on first use |
+| `container/pi_token_broker.py` | `run.sh` runs it on the host. It hands each pi agent a one-hour ChatGPT token through a socket |
+| `container/run.sh` | Starts the session. Builds the image on first use, and rebuilds it when the Containerfile changed |
 
 Keep `container/` out of the repo's package builds, as with `adws/` and `.claude/`. A Python sdist includes it otherwise.
 

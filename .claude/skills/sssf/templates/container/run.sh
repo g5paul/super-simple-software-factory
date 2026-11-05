@@ -18,7 +18,29 @@ if [ ! -f "$token" ]; then
     echo "run 'claude setup-token' on the host, then save CLAUDE_CODE_OAUTH_TOKEN=<token> there (see cookbooks/install.md)" >&2
     exit 1
 fi
-podman image exists "$image" || "$here/build.sh"
+# An image built before the label, or before the Containerfile changed, is
+# rebuilt (decision 15).
+want=$(sha256sum "$here/Containerfile" | cut -d' ' -f1)
+have=$(podman image inspect --format '{{ index .Labels "sssf.containerfile.sha256" }}' "$image" 2>/dev/null || true)
+[ "$have" = "$want" ] || "$here/build.sh"
+
+# The host's pi sign-in stays on the host: the broker hands each pi agent a
+# one-hour token through a socket. A Claude Code agent never uses it, and it
+# starts whether or not the host is signed in to pi (decision 11).
+runtime=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set; rootless podman needs it}
+sock="$runtime/sssf-pi-$(basename "$repo").sock"
+python3 "$here/pi_token_broker.py" "$sock" &
+broker=$!
+trap 'kill "$broker" 2>/dev/null' EXIT
+for _ in $(seq 50); do
+    [ -S "$sock" ] && break
+    kill -0 "$broker" 2>/dev/null || break
+    sleep 0.1
+done
+if [ ! -S "$sock" ] || ! kill -0 "$broker" 2>/dev/null; then
+    echo "the pi token broker didn't start; see the message above" >&2
+    exit 1
+fi
 mkdir -p "$HOME/.config/sssf"
 quiet() { grep -v "is not a shared mount" >&2 || true; }
 
@@ -35,7 +57,10 @@ if not d.get("hasCompletedOnboarding"):
 
 # The hostname is fixed so the trace can tell this container's processes from
 # the host's: their pids live in different namespaces (see live_runs, kill).
-exec podman run --rm -it --userns=keep-id --name "sssf-operator-$(basename "$repo")" \
+# No exec: the EXIT trap has to run to stop the broker.
+# --network pasta:-T,43190: the container's 127.0.0.1:43190 reaches the host's
+# obs server (decision 13).
+podman run --rm -it --userns=keep-id --network pasta:-T,43190 --name "sssf-operator-$(basename "$repo")" \
     --hostname "sssf-operator-$(basename "$repo")" \
     --env-file "$token" \
     -e DISABLE_AUTOUPDATER=1 \
@@ -45,6 +70,8 @@ exec podman run --rm -it --userns=keep-id --name "sssf-operator-$(basename "$rep
     -v sssf-operator-home:"$HOME":U \
     -v "$repo:$repo" \
     -v "$HOME/.config/sssf:$HOME/.config/sssf" \
+    -v "$sock:/run/sssf/pi.sock" \
+    -e SSSF_PI_TOKEN_SOCKET=/run/sssf/pi.sock \
     -w "$repo" \
     "$image" \
     bash -c '

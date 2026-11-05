@@ -248,3 +248,66 @@ def test_a_vm_run_checks_extensions_before_the_vm_opens(repo, monkeypatch):
     with pytest.raises(SystemExit):
         session._open_sandbox(run_for(cfg), {"branch": "sssf/abc"}, "vercel", "vercel")
     assert calls == []
+
+
+# --- extensions_in_repo: the operator container mounts only the repo (decision 14) ---
+
+def test_in_repo_extensions_pass(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    cfg, _ = roster(SUBAGENTS, str(root / "x" / "y.ts"), "uncommitted/new.ts")
+    sandbox.extensions_in_repo(cfg, root)
+    cfg, _ = roster()
+    agent = next(a for a in cfg.agents if a.name == "builder")
+    agent.harness_engineering = [SUBAGENTS]
+    sandbox.extensions_in_repo(cfg, root)
+
+
+@pytest.mark.parametrize("path", ["/tmp/elsewhere/x.ts", "~/.pi/agent/extensions/x.ts", "../outside.ts"])
+def test_outside_extensions_stop_the_run(tmp_path, monkeypatch, path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    cfg, _ = roster(path)
+    with pytest.raises(SystemExit) as stop:
+        sandbox.extensions_in_repo(cfg, root)
+    assert "builder" in str(stop.value) and path in str(stop.value)
+
+
+def test_a_claude_code_roster_has_nothing_to_check(tmp_path):
+    cfg = agents.load_config(str(SKILL / "templates" / "sssf.config.claude_code.yaml"))
+    sandbox.extensions_in_repo(cfg, tmp_path)
+
+
+def _ensure(monkeypatch, tmp_path, cfg, **kwargs):
+    calls = []
+    monkeypatch.setattr(session.worktree, "main_checkout", lambda: tmp_path)
+    monkeypatch.setattr(sandbox, "extensions_in_repo", lambda c, r: calls.append(r))
+    monkeypatch.setattr(sandbox, "prepare", lambda *a: None)
+
+    def launching():
+        raise AssertionError("worktree.launching entered")
+    monkeypatch.setattr(session.worktree, "launching", launching)
+    with contextlib.suppress(AssertionError):
+        session.ensure(cfg, **kwargs)
+    return calls
+
+
+def test_ensure_checks_extensions_in_the_container_before_launching(monkeypatch, tmp_path):
+    monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", "/x")
+    cfg, _ = roster("/tmp/elsewhere/x.ts")
+    monkeypatch.setattr(session.worktree, "main_checkout", lambda: tmp_path)
+    monkeypatch.setattr(session.worktree, "launching",
+                        lambda: pytest.fail("worktree.launching entered"))
+    with pytest.raises(SystemExit):
+        session.ensure(cfg)
+
+
+def test_ensure_leaves_a_host_run_alone(monkeypatch, tmp_path):
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+    assert _ensure(monkeypatch, tmp_path, shipped()) == []
+
+
+def test_ensure_leaves_a_vm_run_alone(monkeypatch, tmp_path):
+    monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", "/x")
+    assert _ensure(monkeypatch, tmp_path, shipped(), sandbox_name="e2b") == []

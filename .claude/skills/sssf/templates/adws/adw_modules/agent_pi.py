@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import time
 from functools import lru_cache
@@ -251,6 +252,13 @@ REFUSE_EXTENSION = Path(__file__).with_name("sssf_rules.ts")
 # starts: a call may take AGENT_SECONDS (30 minutes), plus a margin.
 VM_TOKEN_MINUTES = 35
 
+# In the operator container (container/run.sh), the host's pi_token_broker.py
+# hands out the token through the socket this variable names.
+CONTAINER_SOCKET_VAR = "SSSF_PI_TOKEN_SOCKET"
+PI_AUTH_JSON = Path(os.environ.get("PI_AUTH_PATH",
+                                   str(Path.home() / ".pi" / "agent" / "auth.json")))
+BROKER_TIMEOUT = 150            # more than the broker's own 120 s pi timeout
+
 
 def vm_token() -> str:
     """A ChatGPT access token for one pi agent in a remote VM, from the host's
@@ -273,10 +281,74 @@ def vm_token() -> str:
     return token
 
 
+def check_stored_login(path: Path = None) -> None:
+    """Stop if the container's pi auth.json holds an openai login: pi would use
+    it instead of the host's sign-in. Reads key names only; never a value."""
+    path = path or PI_AUTH_JSON
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        raise sandbox.SandboxFailed(f"SSSF can't read {path} to check it for a stored ChatGPT "
+                                    "login; fix or remove it.")
+    if "openai" in data:
+        raise sandbox.SandboxFailed(
+            f"{path} has a ChatGPT login stored in the container (an openai entry). pi would use "
+            "it instead of the host's sign-in, so remove that entry (or the file) and start "
+            "again; the container gets its token from the host.")
+
+
+def container_token(socket_path: str) -> str:
+    """A ChatGPT access token from the host's broker (container/pi_token_broker.py:
+    one line, `OK <token>` or `ERR <message>`). Never put it in a message."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(BROKER_TIMEOUT)
+            conn.connect(socket_path)
+            data = b""
+            while len(data) < 65536:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+    except OSError as e:
+        raise sandbox.SandboxFailed(
+            f"the pi token broker at {socket_path} isn't answering ({type(e).__name__}); start "
+            "the session with container/run.sh, which runs it on the host.") from None
+    lines = data[:65536].decode("utf-8", "replace").splitlines()
+    line = lines[0] if lines else ""
+    if line.startswith("ERR "):
+        raise sandbox.SandboxFailed(line[4:])
+    token = line[3:].strip() if line.startswith("OK ") else ""
+    if not token:
+        raise sandbox.SandboxFailed(f"the pi token broker at {socket_path} gave no token.")
+    if token.startswith("sk-"):
+        raise sandbox.SandboxFailed(
+            "pi's openai credential is an API key, not the ChatGPT sign-in, and SSSF doesn't "
+            "put API keys in the container. Sign in to ChatGPT with `pi` on the host and /login.")
+    return token
+
+
+def _in_container(env: dict[str, str], tree) -> dict[str, str]:
+    """In the operator container (SSSF_PI_TOKEN_SOCKET set) on a local tree: a
+    fresh token from the host's broker as OPENAI_API_KEY. Otherwise unchanged.
+    obs stays on: the container reaches the host's obs server."""
+    socket_path = os.environ.get(CONTAINER_SOCKET_VAR)
+    if tree is not sandbox.LOCAL or not socket_path:
+        return env
+    check_stored_login()
+    env["OPENAI_API_KEY"] = container_token(socket_path)
+    return env
+
+
 def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict]) -> dict[str, str]:
     """On a remote tree: the ChatGPT token, renamed to OPENAI_API_KEY in the VM
     (sandbox_remote), SSSF's refuse extension copied in, and obs off: no events
-    come from a VM yet, and the obs server's token stays on the host."""
+    come from a VM yet, and the obs server's token stays on the host. In the
+    operator container the token comes through a socket instead (_in_container)."""
     if tree is sandbox.LOCAL:
         return env
     env["OBS_DISABLE"] = "1"            # no obs events from a VM yet (design decision 23)
@@ -364,7 +436,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     last_stop, last_error = None, ""
     tree = sandbox.current()
     env = _with_refusals(child_env(request.agent_name, request.adw_id), request.refuse_rules)
-    process = tree.start(cmd, cwd=request.cwd, env=_in_vm(env, tree, request.refuse_rules))
+    env = _in_vm(env, tree, request.refuse_rules)
+    env = _in_container(env, tree)
+    process = tree.start(cmd, cwd=request.cwd, env=env)
     if on_spawn:
         on_spawn(process.pid)
     with silence.watch(process, request.max_silence_seconds) as dog:

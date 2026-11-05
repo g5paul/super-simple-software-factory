@@ -427,6 +427,16 @@ In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agen
 
 **Known limit:** an agent can edit a committed extension in the VM, and the edited one loads for the next agent call. A host run has the same exposure, since an extension isn't a protected file. Nothing checks it.
 
+### pi in the operator container
+
+In the operator container (`container/run.sh`), `SSSF_PI_TOKEN_SOCKET` names a socket to the host's `pi_token_broker.py`. Before each pi agent call on a local tree, SSSF asks it for a one-hour token and sets `OPENAI_API_KEY` to it. The host keeps the sign-in. If the broker errors or doesn't answer, the call stops before pi starts.
+
+Each `harness_engineering` path must be inside the repo, committed or not, or the run stops before it starts. An `openai` entry in the container's `~/.pi/agent/auth.json` also stops the run, because pi would use it instead of the host's sign-in. obs works as on the host: no `OBS_DISABLE`, and `OBS_AUTH_TOKEN` is kept.
+
+**Known limit:** any process in the container can get a one-hour token from the socket while the session is open, because everything there runs as one user.
+
+**Known limit:** as in a VM, an agent can edit an extension in the repo, and the edited one loads for the next agent call.
+
 ## ChatGPT (Pi on a ChatGPT subscription)
 
 `install.py --chatgpt` (or `make_config.py --chatgpt`) stamps `templates/sssf.config.chatgpt.yaml`. The harness stays Pi, so every field above applies unchanged. Only the models differ: `openai/gpt-6.1-sol` for the planner, builders, and reviewers, and `openai/gpt-6.1-terra` for the scout and documenter, as tested on 2026-10-29. The reviewers share the builder's model, so they don't get a second model's view.

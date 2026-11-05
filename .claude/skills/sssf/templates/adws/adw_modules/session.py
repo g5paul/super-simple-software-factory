@@ -112,6 +112,8 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
     if sandbox_name:
         use_worktree = True
         sandbox.prepare(sandbox_name, cfg)
+    elif os.environ.get("SSSF_PI_TOKEN_SOCKET"):
+        sandbox.extensions_in_repo(cfg, worktree.main_checkout())   # the operator container (decision 14)
     try:
         # Held until this run's process and worktree rows are written, so two
         # launches at once can't both count the other runs before either counts.

@@ -3,8 +3,9 @@
 # that launches a chain; in here the session can reach only what run.sh mounts.
 #
 # This file is the repo's to edit: add the tools your quality.py blocks run
-# (bun, node, a compiler) the same way uv and just are added below. Rebuild
-# with container/build.sh after a change.
+# (bun, a compiler) the same way uv and just are added below. node and pi are
+# already here, for a pi roster. Rebuild with container/build.sh after a
+# change; run.sh rebuilds on its own when this file changed.
 FROM docker.io/library/ubuntu:22.04
 
 # build-essential and python3-dev: a dependency with no wheel for this
@@ -13,11 +14,22 @@ FROM docker.io/library/ubuntu:22.04
 # silently falls back to UTC, and date tests fail in here but not on the host.
 # A project's first container run hit both.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates curl git sqlite3 python3 python3-dev build-essential tzdata \
+      ca-certificates curl git sqlite3 python3 python3-dev build-essential tzdata xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+# node, for pi. To bump: change the version and rebuild (run.sh does it).
+ARG NODE_VERSION=24.11.1
+# pi, from npm. To bump: change the version and rebuild; keep it at or above
+# the tool check's minimum in sandbox_remote.py.
+ARG PI_VERSION=1.4.0
+RUN arch=$(dpkg --print-architecture) \
+    && case "$arch" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "unsupported arch $arch" >&2; exit 1 ;; esac \
+    && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.xz" \
+       | tar -xJ -C /usr/local --strip-components=1
+RUN npm install -g @earendil-works/pi-coding-agent@${PI_VERSION} && pi --version
 
 # The installer puts claude under root's home; copy the binary out so every
 # user can run it. Updates come from rebuilding the image.

@@ -13,7 +13,9 @@ Run from the skill root:
 from __future__ import annotations
 
 import json
+import socket
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -21,7 +23,7 @@ import pytest
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agent_pi
+from adw_modules import agent_pi, sandbox
 from adw_modules.data_types import AgentRequest
 
 KEYS = {"OPENAI_API_KEY": "sk-x", "ANTHROPIC_API_KEY": "sk-y", "OPENROUTER_API_KEY": "sk-z"}
@@ -163,3 +165,106 @@ def test_a_turn_that_recovers_after_the_limit_is_not_stopped(tmp_path, monkeypat
                        _turn("error", error="subscription_sharing_usage_limit_exceeded"),
                        _turn("stop", text='{"ok": true}'))
     assert agent_pi.run(request).text == '{"ok": true}'
+
+
+# --- the operator container: a token from the host's broker ---
+
+@pytest.fixture
+def broker(tmp_path, monkeypatch):
+    """A fake broker answering one line; set `answer` before connecting."""
+    import tempfile
+    d = tempfile.mkdtemp(dir="/tmp")
+    path = f"{d}/b.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(5)
+    state = {"answer": b"OK eyJ-tok\n"}
+
+    def serve():
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            conn.sendall(state["answer"])
+            conn.close()
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", path)
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", tmp_path / "auth.json")
+    yield state
+    server.close()
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_the_container_gets_the_brokers_token(broker):
+    env = agent_pi._in_container({"OBS_AUTH_TOKEN": "obs"}, sandbox.LOCAL)
+    assert env["OPENAI_API_KEY"] == "eyJ-tok"
+    assert env["OBS_AUTH_TOKEN"] == "obs" and "OBS_DISABLE" not in env
+
+
+def test_a_subscription_run_still_gets_the_brokers_token(broker, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-host")
+    monkeypatch.setenv("SSSF_PI_AUTH", "subscription")
+    env = agent_pi._in_container(agent_pi.child_env(), sandbox.LOCAL)
+    assert env["OPENAI_API_KEY"] == "eyJ-tok"
+
+
+def test_a_broker_error_stops_with_its_message(broker):
+    broker["answer"] = b"ERR no sign-in\n"
+    with pytest.raises(sandbox.SandboxFailed, match="no sign-in"):
+        agent_pi._in_container({}, sandbox.LOCAL)
+
+
+def test_a_missing_socket_stops(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", str(tmp_path / "none.sock"))
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", tmp_path / "auth.json")
+    with pytest.raises(sandbox.SandboxFailed, match="isn't answering"):
+        agent_pi._in_container({}, sandbox.LOCAL)
+
+
+def test_an_api_key_from_the_broker_is_refused_without_echoing_it(broker):
+    broker["answer"] = b"OK sk-x\n"
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi._in_container({}, sandbox.LOCAL)
+    assert "sk-x" not in str(stop.value)
+
+
+def test_a_host_run_is_unchanged(monkeypatch):
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+    env = {"A": "1"}
+    assert agent_pi._in_container(env, sandbox.LOCAL) == {"A": "1"}
+
+
+def test_a_remote_tree_is_untouched(broker):
+    env = {"A": "1"}
+    assert agent_pi._in_container(env, object()) == {"A": "1"}
+
+
+def test_a_stored_login_check(tmp_path):
+    path = tmp_path / "auth.json"
+    agent_pi.check_stored_login(path)                       # missing: passes
+    path.write_text('{"anthropic": {"key": "x"}}')
+    agent_pi.check_stored_login(path)
+    path.write_text('{"openai": {"access": "SECRET"}}')
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi.check_stored_login(path)
+    assert "SECRET" not in str(stop.value) and str(path) in str(stop.value)
+    path.write_text("not json")
+    with pytest.raises(sandbox.SandboxFailed, match="can't read"):
+        agent_pi.check_stored_login(path)
+
+
+@pytest.mark.parametrize("fault", ["error", "login"])
+def test_run_stops_before_pi_starts(broker, tmp_path, monkeypatch, fault):
+    request = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi"))
+    started = []
+    monkeypatch.setattr(agent_pi.sandbox, "current", lambda: sandbox.LOCAL)
+    monkeypatch.setattr(sandbox.LOCAL, "start", lambda *a, **k: started.append(1), raising=False)
+    if fault == "error":
+        broker["answer"] = b"ERR nope\n"
+    else:
+        (tmp_path / "auth.json").write_text('{"openai": {}}')
+    with pytest.raises(sandbox.SandboxFailed):
+        agent_pi.run(request)
+    assert started == []

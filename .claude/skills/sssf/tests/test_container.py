@@ -22,7 +22,8 @@ import pytest
 
 SKILL = Path(__file__).resolve().parent.parent
 STAMP = Path("adws/adw_sssf_config/stamp.json")
-FILES = ("container/Containerfile", "container/build.sh", "container/run.sh")
+FILES = ("container/Containerfile", "container/build.sh", "container/run.sh",
+         "container/pi_token_broker.py")
 
 
 def install(*args: str, ok: bool = True) -> subprocess.CompletedProcess:
@@ -49,7 +50,8 @@ def test_container_is_stamped_and_runnable(repo):
     out = install("--coding-agent", "claude_code", "--container").stdout
     for rel in FILES:
         assert Path(rel).is_file(), rel
-    assert os.access("container/run.sh", os.X_OK) and os.access("container/build.sh", os.X_OK)
+    assert all(os.access(f"container/{n}", os.X_OK)
+               for n in ("run.sh", "build.sh", "pi_token_broker.py"))
     assert set(FILES) <= set(json.loads(STAMP.read_text())["files"])
     assert "container/run.sh" in out
 
@@ -72,10 +74,32 @@ def test_an_update_keeps_the_container_current(repo):
     assert run.read_text() == (SKILL / "templates/container/run.sh").read_text()
 
 
-def test_a_pi_roster_cannot_have_the_container(repo):
-    result = install("--container", ok=False)
-    assert "Claude Code roster" in result.stderr
-    assert not Path("container").exists()
+def test_a_pi_roster_can_have_the_container(repo):
+    out = install("--container").stdout
+    assert all(Path(rel).is_file() for rel in FILES)
+    assert "signed in to pi" in out
+
+
+TEMPLATES = SKILL / "templates/container"
+
+
+def test_the_image_pins_node_and_pi():
+    text = (TEMPLATES / "Containerfile").read_text()
+    assert "PI_VERSION=1.4.0" in text and "NODE_VERSION=24." in text
+    assert "@earendil-works/pi-coding-agent@${PI_VERSION}" in text
+
+
+def test_the_scripts_rebuild_on_a_changed_containerfile_and_run_the_broker():
+    assert "sssf.containerfile.sha256" in (TEMPLATES / "build.sh").read_text()
+    run = (TEMPLATES / "run.sh").read_text()
+    for needle in ("pi_token_broker.py", "trap 'kill \"$broker\" 2>/dev/null' EXIT",
+                   "/run/sssf/pi.sock", "SSSF_PI_TOKEN_SOCKET=/run/sssf/pi.sock",
+                   "pasta:-T,43190", "sssf.containerfile.sha256"):
+        assert needle in run, needle
+    for banned in ("rm -f \"$sock\"", "rm \"$sock\"", "exec podman run", "OBS_DISABLE"):
+        assert banned not in run, banned
+    for script in ("run.sh", "build.sh"):
+        subprocess.run(["bash", "-n", str(TEMPLATES / script)], check=True)
 
 
 def test_adding_it_to_an_installed_repo_prints_only_its_own_steps(repo):

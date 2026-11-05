@@ -220,6 +220,29 @@ def extensions_in_clone(cfg, root: Path, commit: str, tree: Path) -> None:
         agent.harness_engineering = moved
 
 
+def extensions_in_repo(cfg, root: Path) -> None:
+    """For a run in the operator container, before it starts: every pi agent's
+    harness_engineering path must be inside the repo at `root`, the only code
+    the container mounts (decision 14 of docs/designs/container-operator.md).
+    Committed or not, existing or not: only the location is checked. Symlinks
+    and imports aren't followed, as in extensions_in_clone."""
+    for agent in cfg.agents:
+        if agent.coding_agent != "pi":
+            continue
+        for p in agent.harness_engineering or []:
+            expanded = os.path.expanduser(p)
+            full = Path(os.path.normpath(expanded if Path(expanded).is_absolute()
+                                         else root / expanded))
+            try:
+                full.relative_to(root)
+            except ValueError:
+                raise SystemExit(
+                    f"{agent.name}'s harness_engineering extension {p} is outside the repo "
+                    f"({root}), and the operator container mounts only the repo, so pi can't "
+                    "load it there. Move it into the repo, or start the session on the host."
+                ) from None
+
+
 def open_remote(provider: str, run, branch: str, project: str, live: set[str]):
     """The run's remote sandbox, not yet opened, after deleting this project's
     VMs left by runs that aren't live. Returns it and what was deleted."""

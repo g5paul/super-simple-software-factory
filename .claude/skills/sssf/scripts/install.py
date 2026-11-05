@@ -13,7 +13,7 @@ Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
 (the starter agents), adws/adw_sssf_config/sssf.config.yaml and repo.yaml, .env.sample,
 .githooks/pre-push (a secret scan before every push, which the engineer turns
 on with `git config core.hooksPath .githooks`), .gitignore entries. --container adds container/, to run the operator
-session in a Podman container (Claude Code rosters only); run it again with
+session in a Podman container; run it again with
 --container in an installed repo to add it later.
 Existing files are skipped unless --force. --add-roster stamps a second
 roster beside the repo's own, as sssf.config.<name>.yaml, for `just trial`.
@@ -523,7 +523,7 @@ def main() -> int:
                              f"repo's own, for `just trial`: {', '.join(sorted(STARTERS))}")
     parser.add_argument("--container", action="store_true",
                         help="also stamp container/, to run the operator session in a "
-                             "Podman container (Claude Code rosters only)")
+                             "Podman container")
     args = parser.parse_args()
     if (args.take or args.keep) and not args.update:
         parser.error("--take and --keep need --update")
@@ -543,13 +543,6 @@ def main() -> int:
 
     if args.container and args.update:
         parser.error("--container is an install option; run install.py --container to add it")
-    if args.container:
-        config = root / "adws/adw_sssf_config/sssf.config.yaml"
-        text = config.read_text() if config.is_file() else roster.read_text()
-        if "coding_agent: claude_code" not in text:
-            parser.error("--container needs a Claude Code roster: the image has no Pi. "
-                         "Install with --coding-agent claude_code")
-
     adding = args.container and (root / STAMP).is_file()
     code = install(root, roster, args.force, args.container)
     if adding:
@@ -558,6 +551,7 @@ def main() -> int:
         print("  keep container/ out of package builds, as with adws/ and .claude/")
         print("  claude setup-token, then save it as described in cookbooks/install.md;")
         print("     skip this if ~/.config/sssf-container/token.env exists: every repo shares it")
+        print("  a pi roster also needs the host signed in to pi: run `pi`, then /login (openai)")
         print("  container/run.sh          # builds the image on first use, then starts claude")
         return code
     # The recipes are `just demo` when SSSF's justfile is the repo's, and
@@ -594,6 +588,7 @@ def main() -> int:
     if (root / "container/run.sh").is_file():
         print("  container: the operator session can run in Podman, with no permission prompts")
         print("     claude setup-token, then save it as described in cookbooks/install.md")
+        print("     a pi roster also needs the host signed in to pi: run `pi`, then /login (openai)")
         print("     container/run.sh          # builds the image on first use, then starts claude")
     print("\n  no just? the raw form of step 2 is:")
     print("     uv run adws/adw_prompt.py \"say hello\" --agent scout")

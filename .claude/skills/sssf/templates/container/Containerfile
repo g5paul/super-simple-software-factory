@@ -32,6 +32,9 @@ RUN arch=$(dpkg --print-architecture) \
 RUN npm install -g @earendil-works/pi-coding-agent@${PI_VERSION} && pi --version
 
 # The installer puts claude under root's home; copy the binary out so every
-# user can run it. Updates come from rebuilding the image.
+# user can run it. Updates come from rebuilding the image. The installer runs
+# claude, which leaves a socket under /tmp; clearing /tmp in the same step
+# keeps it out of the image's layer.
 RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && cp -L /root/.local/bin/claude /usr/local/bin/claude
+    && cp -L /root/.local/bin/claude /usr/local/bin/claude \
+    && rm -rf /tmp/* /tmp/.[!.]*

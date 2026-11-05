@@ -443,6 +443,10 @@ Each `harness_engineering` path must be inside the repo, committed or not, or th
 
 **Known limit:** each connection to the socket starts one host `pi` process, with no cap, so a process in the container can load the host.
 
+**Known limit:** the check reads `auth.json` only when it is a regular file, but a regular file whose read never ends, such as one on a FUSE mount, still holds the operator. It has no size limit either.
+
+**Known limit:** `run.sh` removes an old socket before the broker binds its path, and another host process could bind it in between. Only the host user can write in `$XDG_RUNTIME_DIR`.
+
 **Known limit:** `--sandbox vercel|e2b` launched from inside the container mints its VM tokens with the container's own pi, not through the broker.
 
 **Known limit:** as in a VM, an agent can edit an extension in the repo, and the edited one loads for the next agent call.

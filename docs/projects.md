@@ -4,9 +4,9 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 | Repo | SSSF branch | Skill | Agent rules |
 |---|---|---|---|
-| pi-agent-observability | `main` | bcef944 (e71d874). Has the operator container, with bun added for its `quality.py`; its pi roster ran there with obs on, in run a97a2d4b. In a VM its extensions load with obs off | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
-| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | bcef944 (72b12cc) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
-| sssf-sandbox | `master` | bcef944 (635b81c). Has the operator container | The hub's own test bed. None |
+| pi-agent-observability | `main` | fe9fe4e (16cf58d). Has the operator container, with bun added for its `quality.py`; its pi roster ran there with obs on, in run a97a2d4b. In a VM its extensions load with obs off | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
+| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | fe9fe4e (529b0da) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
+| sssf-sandbox | `master` | fe9fe4e (c573032). Has the operator container | The hub's own test bed. None |
 | super-simple-software-factory | `main` | Stamped from the skill on `main`, see `docs/sssf.md` | The hub itself, for the guard-change chain. A `forbid` rule with `on_match: refuse` refuses `git push` and the `gh` commands that write to GitHub |
 
 ## Unlisted projects

@@ -257,7 +257,11 @@ includes a broken `~/.gitconfig`. Before, SSSF treated such a repo as no
 repo and ran the agent with no git-directory check. The breach quotes git's
 error, and git quotes paths as written, so an include path the agent chose
 can put text of its choosing there, even a false reason. Trust the stop, and
-check the path git names by hand.
+check the path git names by hand. The breach quotes at most 20 lines of
+git's error, and cuts a line over 300 characters in the middle, keeping its
+start and end. So a reason past line 20, in the middle of a long line, or
+longer than about 148 characters can be lost; run the git command again
+yourself to see it.
 
 If git can't name the hooks directory, for example because `core.hooksPath`
 leads through symlinks to a real path longer than the system limit, SSSF can't

@@ -275,9 +275,12 @@ def vm_token() -> str:
 
 def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict]) -> dict[str, str]:
     """On a remote tree: the ChatGPT token, renamed to OPENAI_API_KEY in the VM
-    (sandbox_remote), and SSSF's refuse extension copied in."""
+    (sandbox_remote), SSSF's refuse extension copied in, and obs off: no events
+    come from a VM yet, and the obs server's token stays on the host."""
     if tree is sandbox.LOCAL:
         return env
+    env["OBS_DISABLE"] = "1"            # no obs events from a VM yet (design decision 23)
+    env.pop("OBS_AUTH_TOKEN", None)     # the obs server's token stays on the host
     env["SSSF_PI_TOKEN"] = vm_token()
     if refuse_rules:
         tree.install(REFUSE_EXTENSION)
@@ -339,6 +342,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     for extension in request.extensions:
         cmd += ["-e", extension]
     if request.refuse_rules:
+        # Last, so it checks a command after every other extension has had its
+        # turn (design decision 24). A test pins this.
         cmd += ["-e", str(REFUSE_EXTENSION)]
     cmd.append(request.prompt)
 

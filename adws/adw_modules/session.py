@@ -164,6 +164,8 @@ def _open_sandbox(run: Run, place: dict, provider: str, asked: str | None) -> No
                          f"not in {asked}")
     if not asked:
         sandbox.prepare(provider, run.cfg)   # a resume without the flag
+    # Extensions come from the VM's clone, committed at the run's start (design decisions 21, 22).
+    sandbox.extensions_in_clone(run.cfg, worktree.main_checkout(), place.get("base", ""), Path.cwd())
     with run.phase(PhaseParams(name="sandbox", kind="code", owner="sandbox",
                                description=f"Make the run's {provider} VM and clone its branch in")) as ph:
         box, swept = sandbox.open_remote(provider, run, place["branch"],

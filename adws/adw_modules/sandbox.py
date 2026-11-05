@@ -16,6 +16,7 @@ subprocess.run does, and `start` returns a Process whose stdout yields lines.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import IO, Iterable, Optional, Protocol, Union
@@ -155,7 +156,7 @@ def prepare(provider: str, cfg) -> None:
 
 def check_roster(provider: str, cfg) -> None:
     """The provider is known and every agent in the roster can run in its VM.
-    A trial checks this for every roster without importing the SDK, which
+    pi extensions are checked at launch by `extensions_in_clone`. A trial checks this for every roster without importing the SDK, which
     would start the trial again under `uv run --with`."""
     if provider not in PROVIDERS:
         raise SystemExit(f"--sandbox {provider}: SSSF knows {', '.join(PROVIDERS)}")
@@ -165,10 +166,58 @@ def check_roster(provider: str, cfg) -> None:
         raise SystemExit(f"--sandbox runs pi agents on the ChatGPT sign-in only (openai/ models), "
                          f"and {', '.join(other)} use another provider, whose key would have to "
                          "go into the VM.")
-    extended = [a.name for a in pi if a.harness_engineering]
-    if extended:
-        raise SystemExit(f"--sandbox can't take pi extensions yet, and {', '.join(extended)} load "
-                         "harness_engineering ones. Run without them, or with --sandbox none.")
+
+
+def extensions_in_clone(cfg, root: Path, commit: str, tree: Path) -> None:
+    """For a VM run, before its VM opens: every pi agent's harness_engineering
+    path must be a file inside the repo at `root`, committed at `commit`, the
+    run's starting commit. Each is then anchored to `tree`, where the run's
+    branch is cloned in the VM, so pi loads it, and what it imports, from the
+    clone (design decisions 21, 22). Imports aren't followed. Anything else
+    stops the run, naming the agent and the path. Call it once per process:
+    `tree` is inside `root`."""
+    agents = [a for a in cfg.agents if a.coding_agent == "pi" and a.harness_engineering]
+    if not agents:
+        return
+    if not commit:
+        raise SystemExit("--sandbox can't check harness_engineering extensions: "
+                         "the run's starting commit isn't known.")
+    found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"],
+                           cwd=root, capture_output=True, text=True)
+    sha = found.stdout.strip()
+    if found.returncode != 0 or not sha:
+        raise SystemExit(f"--sandbox can't check harness_engineering extensions: "
+                         f"the run's starting commit {commit} can't be read.")
+    for agent in agents:
+        moved = []
+        for p in agent.harness_engineering:
+            full = Path(os.path.normpath(p if Path(p).is_absolute() else root / p))
+            try:
+                rel = full.relative_to(root)
+            except ValueError:
+                rel = Path(".")
+            if rel == Path("."):
+                raise SystemExit(f"--sandbox loads {agent.name}'s harness_engineering extension {p} "
+                                 f"from the VM's clone of the repo, and it is outside the repo ({root}). "
+                                 "Move it into the repo and commit it, or run with --sandbox none.")
+            parent = rel.parent.as_posix()
+            listing = subprocess.run(["git", "ls-tree", "-z", f"{sha}:{'' if parent == '.' else parent}"],
+                                     cwd=root, capture_output=True, text=True)
+            ok = False
+            if listing.returncode == 0:
+                for entry in listing.stdout.split("\0"):
+                    meta, _, name = entry.partition("\t")
+                    fields = meta.split()
+                    if (name == rel.name and len(fields) == 3 and fields[1] == "blob"
+                            and fields[0] in ("100644", "100755")):
+                        ok = True
+            if not ok:
+                raise SystemExit(f"--sandbox loads {agent.name}'s harness_engineering extension {p} "
+                                 f"from the VM's clone, and it is not a file committed at the run's "
+                                 f"starting commit ({sha[:12]}). Commit it before the run starts, "
+                                 "or run with --sandbox none.")
+            moved.append(str(tree / rel))
+        agent.harness_engineering = moved
 
 
 def open_remote(provider: str, run, branch: str, project: str, live: set[str]):

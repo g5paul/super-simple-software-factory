@@ -121,11 +121,11 @@
       "source": "adws/adw_modules/agent_cc.py"
     },
     "adws/adw_modules/agent_pi.py": {
-      "sha256": "2e626fc5265ddb30b9fddcbc1811936af6da99558d741ccdb605d151bcde9e68",
+      "sha256": "d62278d93d1d4fd33c6d4d2ecd64bb358258fad2916b63b0aaf0bd0db58a1fd3",
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
-      "sha256": "20339ac74b79acc29d630ac0fb9e965d5377f59fc7802a10693e7ea23ae8286c",
+      "sha256": "8a8a86e001f9719ba6011e587868fea3317a7bbc97c2a57dcf62f8d78fe2f7cf",
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/budget.py": {
@@ -237,7 +237,7 @@
       "source": "adws/adw_modules/tracer.py"
     },
     "adws/adw_modules/trial.py": {
-      "sha256": "be9dd3f263fe0e4c790a181bf9968432acde6dc1168fea682779c81617bdedf7",
+      "sha256": "59ea2af8b12c2b4a461928413fbeb844151cda0f1887cec9f7f395cc86f0977e",
       "source": "adws/adw_modules/trial.py"
     },
     "adws/adw_modules/utils.py": {

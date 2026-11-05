@@ -17,7 +17,7 @@ from typing import Optional
 import yaml
 
 from . import (account, agent_cc, agent_pi, budget, permissions, prices, prompts, repo_settings,
-               rules, silence)
+               rules, sandbox, silence)
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -75,6 +75,10 @@ def validate(cfg: SSSFConfig, required: list[str]) -> None:
             agent_pi.resolve_model(agent.model)
         except ValueError as e:
             problems.append(f"agent {name!r}: {e}")
+        except sandbox.SandboxFailed as e:
+            # The container's broker couldn't sign pi in: no pi agent can run,
+            # so stop now rather than ask it again for every agent.
+            raise SystemExit(f"config validation failed:\n- agent {name!r}: {e}") from None
     if problems:
         raise SystemExit("config validation failed:\n- " + "\n- ".join(problems))
 

@@ -157,7 +157,7 @@
       "source": "adws/adw_modules/kill.py"
     },
     "adws/adw_modules/permissions.py": {
-      "sha256": "78ac535ab5325a9a36665d60e600c8473fa5759b30f75bc96065cb1511dbfd68",
+      "sha256": "e97adcd6ab3e17e6237bc193698362f1686d23ec59134be726b3c5cd7203e14e",
       "source": "adws/adw_modules/permissions.py"
     },
     "adws/adw_modules/plan_checks.py": {

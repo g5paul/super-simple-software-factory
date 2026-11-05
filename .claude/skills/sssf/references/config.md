@@ -435,7 +435,7 @@ Each `harness_engineering` path must be inside the repo, committed or not, or th
 
 **Known limit:** any process in the container can get a one-hour token from the socket while the session is open, because everything there runs as one user.
 
-**Known limit:** the stored-login check looks for an `openai` entry only. Other stored logins pi keeps are not checked.
+**Known limit:** the stored-login check reads `auth.json` only, for an `openai` entry. Other stored logins pi keeps are not checked, and neither is `~/.pi/agent/models.json`: an `apiKey` for openai there, in the container's shared home volume, wins over the broker's token, so pi bills that key instead of the host's ChatGPT plan.
 
 **Known limit:** the check and pi read `auth.json` at different moments, so a file swapped between them can pass the check and still reach pi.
 

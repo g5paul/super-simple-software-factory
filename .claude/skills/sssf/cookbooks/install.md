@@ -169,7 +169,7 @@ The engineer sets it up once, in their own terminal:
    ```
 
    `SSSF_CONTAINER_TOKEN` points `run.sh` at another file. The token signs in to the subscription: keep it out of the repo and out of chat.
-2. Start the session: `container/run.sh`. It skips Claude's first-run login menu, since the token already signs it in. Answer yes to trusting the folder, and accept the bypass-permissions warning. A home volume, `sssf-operator-home`, remembers both.
+2. Start the session: `container/run.sh`, in a terminal of its own. It runs an interactive Claude Code session, so it can't run from a `!` command in another session, which has no terminal. It skips Claude's first-run login menu, since the token already signs it in. Answer yes to trusting the folder, and accept the bypass-permissions warning. A home volume, `sssf-operator-home`, remembers both.
 3. Check that the session's shells get the token: `! printenv | grep -c '^CLAUDE_CODE_OAUTH_TOKEN='` must print `1`. A Claude Code session does not pass its own login to the commands it runs, so `run.sh` exports the token through `CLAUDE_ENV_FILE`. Without it, every agent would end "Not logged in", and the run stops before the first agent with that advice.
 
 Then operate as usual. Each launch runs with no prompt, and the agents bill to the subscription: every agent's `apiKeySource` is `none`.

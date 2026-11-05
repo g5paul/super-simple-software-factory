@@ -164,10 +164,12 @@ def _open_sandbox(run: Run, place: dict, provider: str, asked: str | None) -> No
                          f"not in {asked}")
     if not asked:
         sandbox.prepare(provider, run.cfg)   # a resume without the flag
-    # Extensions come from the VM's clone, committed at the run's start (design decisions 21, 22).
-    sandbox.extensions_in_clone(run.cfg, worktree.main_checkout(), place.get("base", ""), Path.cwd())
     with run.phase(PhaseParams(name="sandbox", kind="code", owner="sandbox",
                                description=f"Make the run's {provider} VM and clone its branch in")) as ph:
+        # Extensions come from the VM's clone, committed at the run's start
+        # (design decisions 21, 22). Checked inside the phase, before the VM
+        # exists, so a stop here ends the run failed, as a VM that won't start does.
+        sandbox.extensions_in_clone(run.cfg, worktree.main_checkout(), place.get("base", ""), Path.cwd())
         box, swept = sandbox.open_remote(provider, run, place["branch"],
                                          worktree.main_checkout().name,
                                          set(worktree.live_runs(run.cfg.observability.db)))

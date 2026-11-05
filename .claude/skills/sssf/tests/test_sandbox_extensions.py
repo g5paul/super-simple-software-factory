@@ -218,9 +218,19 @@ def test_a_vm_run_checks_extensions_before_the_vm_opens(repo, monkeypatch):
     monkeypatch.setattr(session.worktree, "main_checkout", lambda: repo)
     monkeypatch.setattr(session.worktree, "live_runs", lambda db: [])
 
+    ended = []
+
+    @contextlib.contextmanager
+    def phase(params):
+        # A real phase ends the run failed on any exception, so a stop must come from inside it.
+        try:
+            yield SimpleNamespace(log=lambda **kw: None)
+        except BaseException as error:
+            ended.append((params.name, type(error)))
+            raise
+
     def run_for(cfg):
-        return SimpleNamespace(cfg=cfg, adw_id="abc",
-                               phase=lambda *a, **k: contextlib.nullcontext(SimpleNamespace(log=lambda **kw: None)))
+        return SimpleNamespace(cfg=cfg, adw_id="abc", phase=phase)
 
     place = {"branch": "sssf/abc", "base": start[:7]}
     cfg, agent = roster(MARKER)
@@ -230,8 +240,10 @@ def test_a_vm_run_checks_extensions_before_the_vm_opens(repo, monkeypatch):
 
     calls.clear()
     cfg, _ = roster(".pi/extensions/other.ts")
+    ended.clear()
     with pytest.raises(SystemExit):
         session._open_sandbox(run_for(cfg), place, "vercel", "vercel")
+    assert ended == [("sandbox", SystemExit)]
     cfg, _ = roster(MARKER)
     with pytest.raises(SystemExit):
         session._open_sandbox(run_for(cfg), {"branch": "sssf/abc"}, "vercel", "vercel")

@@ -252,14 +252,15 @@ class RemoteProcess:
 
     def _alive(self) -> bool | None:
         """Whether the agent's session still has a live process (a zombie
-        doesn't count); None for no answer."""
+        doesn't count), read from /proc so it needs no `ps`. None when the VM
+        doesn't answer. A probe that can't tell says alive: keep reading, and
+        the silence watchdog bounds it."""
         try:
-            done = self._box._call(self._box.sandbox.run_process, "sh",
-                                   ["-c", f'ps -o stat= -s "$(cat {self._sid_file})" | grep -qv "^Z"'],
+            done = self._box._call(self._box.sandbox.run_process, "sh", ["-c", _PROBE, self._sid_file],
                                    capture_output=True)
-        except OSError:
+        except Exception:
             return None
-        return done.returncode == 0
+        return (done.stdout or "").strip() != "gone"
 
     def _lose(self, why: str) -> None:
         self._abandoned = True
@@ -272,25 +273,24 @@ class RemoteProcess:
                 pass
 
     def wait(self) -> int:
-        if self._abandoned:
-            # The stream is dead, so the VM may be too: a short wait, and no
-            # error that would hide why the call failed.
-            try:
-                code = self._box._call(self._process.wait, deadline=CALL_SECONDS)
-            except Exception:
-                code = -1
-            if not self._done:
-                self._done = True
-                try:
-                    self._box.handoff_out()
-                except Exception:
-                    pass
-            return code
-        # Past the session's end the provider has stopped the VM, agent and all.
-        code = self._box._call(self._process.wait, deadline=self._box.limit + CALL_SECONDS)
+        # Once stopped, or with its stream dead, the agent is gone or the VM may
+        # be: a short wait, and no error of its own to hide why the call ended.
+        # Otherwise, past the session's end the provider has stopped the VM.
+        quick = self._abandoned or self._stopped.is_set()
+        try:
+            code = self._box._call(self._process.wait,
+                                   deadline=CALL_SECONDS if quick else self._box.limit + CALL_SECONDS)
+        except Exception:
+            if not quick:
+                raise
+            code = -1
         if not self._done:
             self._done = True
-            self._box.handoff_out()
+            try:
+                self._box.handoff_out()
+            except Exception:
+                if not (self._dog is not None and self._dog.hung):
+                    raise           # a call that keeps its result needs its handoff
         return code
 
     def kill(self) -> None:
@@ -303,15 +303,27 @@ class RemoteProcess:
                         "sh", ["-c", f'pkill -KILL -s "$(cat {self._sid_file})"'], capture_output=True)
 
 
+# Prints "alive" or "gone" for the session whose id is in the file $0 names.
+# /proc/<pid>/stat is "pid (comm) state ppid pgrp session ...", and comm can
+# hold spaces or parentheses, so the fields are read after its last ")".
+_PROBE = r"""sid=$(cat "$0") || exit 3
+for f in /proc/[0-9]*/stat; do
+  read -r line < "$f" 2>/dev/null || continue
+  set -- ${line##*) }
+  if [ "$4" = "$sid" ] && [ "$1" != Z ]; then echo alive; exit 0; fi
+done
+echo gone"""
+
+
 class _Stderr:
     """The agent's stderr. Read in full once its stdout has ended, as before;
-    after a dead stream, read with a deadline, and empty if it has none."""
+    after a stop or a dead stream, read with a deadline, and empty if it has none."""
 
     def __init__(self, process: RemoteProcess, source):
         self._process, self._source = process, source
 
     def read(self) -> str:
-        if not self._process._abandoned:
+        if not (self._process._abandoned or self._process._stopped.is_set()):
             return self._source.read()
         try:
             return self._process._box._call(self._source.read, deadline=DRAIN_SECONDS) or ""

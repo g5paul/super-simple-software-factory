@@ -844,3 +844,55 @@ def test_a_stream_that_ends_normally_is_unchanged(box, quick):
     assert [l.strip() for l in lines] == ["one"] and "two" in stderr
     assert code == 3 and not dog.fired
     assert not silence.SilentStop("builder", 15, "abc").lost
+
+
+def test_a_probe_that_cant_tell_keeps_reading(box, quick, monkeypatch):
+    from adw_modules import sandbox_remote
+    monkeypatch.setattr(sandbox_remote, "_PROBE", "exit 127")    # no shell tools, say
+    process = box.start(["sh", "-c", "echo one; sleep 1.5; echo two"])
+    lines, dog, _, code = _read(process)
+    assert [l.strip() for l in lines] == ["one", "two"] and code == 0 and not dog.lost
+
+
+def test_the_probe_sees_a_live_agent_and_a_gone_one(box):
+    process = box.start(["sh", "-c", "echo one; sleep 3"])
+    next(iter(process.stdout))
+    assert process._alive() is True
+    process.stop_tree()
+    time.sleep(0.3)
+    assert process._alive() is False
+
+
+def test_after_a_stop_stderr_and_wait_are_bounded(box, quick):
+    process = box.start(["sh", "-c", f"echo one; {HOLD}; sleep 6"])
+    next(iter(process.stdout))
+    process.stop_tree()                        # as the runner does, leaving by an error
+    started = time.monotonic()
+    process.stderr.read()
+    process.wait()
+    assert time.monotonic() - started < 3
+
+
+def test_a_result_kept_after_a_lost_stream_still_needs_its_handoff(box, quick, monkeypatch):
+    from adw_modules import silence
+    process = box.start(["sh", "-c", f"echo one; {HOLD}"])
+
+    def broken():
+        raise OSError("handoff failed")
+    monkeypatch.setattr(box, "handoff_out", broken)
+    with silence.watch(process, None) as dog:
+        for _ in process.stdout:
+            dog.finished()                     # the agent had answered
+        with pytest.raises(OSError, match="handoff failed"):
+            process.wait()
+    assert dog.lost and not dog.hung
+
+
+def test_a_lost_stream_ends_the_watchdog(box, quick):
+    process = box.start(["sh", "-c", f"echo one; {HOLD}"])
+    stops = []
+    real = process.stop_tree
+    process.stop_tree = lambda: (stops.append(1), real())
+    lines, dog, _, _ = _read(process, dog=1.5)
+    time.sleep(2)
+    assert dog.lost and stops == [1]

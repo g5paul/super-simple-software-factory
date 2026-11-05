@@ -58,6 +58,7 @@ class SilentStop(RuntimeError):
 
     def __init__(self, agent: str, minutes: float, adw_id: str = ""):
         dog = getattr(_recent, "dog", None)
+        _recent.dog = None        # read once, by the stop its own watch raised
         self.lost = bool(dog and dog.lost)
         if self.lost:
             resume = f" Resume with --adw-id {adw_id}." if adw_id else ""
@@ -124,6 +125,7 @@ class Watchdog:
         the agent's result the call fails, after it the result stands."""
         self.lost, self.lost_why = True, why
         self.fired = True
+        self._done.set()          # the reader has stopped the agent; no second stop
 
     @property
     def hung(self) -> bool:

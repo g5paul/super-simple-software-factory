@@ -260,6 +260,47 @@ def test_pi_loads_the_refusing_extension_only_for_refuse_rules(tmp_path, monkeyp
         assert (json.loads(env) == [{"rule": REFUSE.rule, "forbid": REFUSE.forbid}]) if expect else env == "none"
 
 
+def test_the_refuse_extension_loads_after_every_user_extension(tmp_path, monkeypatch):
+    from adw_modules import sandbox
+    seen = tmp_path / "seen"
+    script = tmp_path / "pi"
+    script.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {seen}\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    monkeypatch.setattr(agent_pi, "resolve_model", lambda model: ("openai", "gpt"))
+    monkeypatch.setattr(agent_pi, "context_window", lambda provider, model_id: 0)
+    req = request(tmp_path).model_copy(update={"refuse_rules": rules.refusing([REFUSE]),
+                                               "extensions": ["first.ts", "second.ts"]})
+    want = ["first.ts", "second.ts", str(agent_pi.REFUSE_EXTENSION)]
+
+    def loaded(argv):
+        return [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
+
+    try:
+        agent_pi.run(req)
+    except RuntimeError:
+        pass                        # the stand-in prints no turn
+    assert loaded(seen.read_text().splitlines()) == want
+
+    class Stop(Exception):
+        pass
+
+    got = {}
+
+    def start(command, env=None, **kw):
+        got["command"], got["env"] = command, env
+        raise Stop
+
+    vm = SimpleNamespace(install=lambda path: None, start=start, name="vercel")
+    monkeypatch.setattr(sandbox, "current", lambda: vm)
+    monkeypatch.setattr(agent_pi, "vm_token", lambda: "eyJ-access")
+    monkeypatch.setenv("OBS_AUTH_TOKEN", "secret")
+    with pytest.raises(Stop):
+        agent_pi.run(req)
+    assert loaded(got["command"]) == want
+    assert got["env"]["OBS_DISABLE"] == "1" and "OBS_AUTH_TOKEN" not in got["env"]
+
+
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun to load the pi extension")
 def test_the_pi_extension_blocks_a_matching_bash_call_with_the_rule(tmp_path):
     check = tmp_path / "check.ts"
@@ -388,11 +429,16 @@ def test_a_pi_agent_in_a_vm_gets_a_token_and_the_refuse_extension(tmp_path, monk
     installed = []
     vm = SimpleNamespace(install=installed.append)
     env = agent_pi._in_vm({}, vm, rules.refusing([REFUSE]))
-    assert env == {"SSSF_PI_TOKEN": "eyJ-access"} and installed == [agent_pi.REFUSE_EXTENSION]
+    assert env == {"SSSF_PI_TOKEN": "eyJ-access", "OBS_DISABLE": "1"} and installed == [agent_pi.REFUSE_EXTENSION]
     assert agent_pi._in_vm({}, sandbox.LOCAL, rules.refusing([REFUSE])) == {}
+    obs = {"OBS_AUTH_TOKEN": "secret", "OBS_NAME": "builder", "OBS_POOL": "p"}
+    in_vm = agent_pi._in_vm(dict(obs), vm, [])
+    assert "OBS_AUTH_TOKEN" not in in_vm
+    assert in_vm["OBS_NAME"] == "builder" and in_vm["OBS_POOL"] == "p" and in_vm["OBS_DISABLE"] == "1"
+    assert agent_pi._in_vm(dict(obs), sandbox.LOCAL, []) == obs
 
 
-def test_a_vm_refuses_pi_extensions_and_other_providers():
+def test_a_vm_refuses_other_providers_but_not_pi_extensions():
     from adw_modules import sandbox
     agent = lambda **kw: SimpleNamespace(name="builder", coding_agent="pi", model="openai/gpt-6.1-sol",
                                          harness_engineering=[], **{k: v for k, v in kw.items()})
@@ -402,7 +448,6 @@ def test_a_vm_refuses_pi_extensions_and_other_providers():
         sandbox.check_roster("vercel", SimpleNamespace(agents=[
             SimpleNamespace(name="b", coding_agent="pi", model="google/gemini-3.6-flash",
                             harness_engineering=[])]))
-    with pytest.raises(SystemExit, match="pi extensions"):
-        sandbox.check_roster("vercel", SimpleNamespace(agents=[
-            SimpleNamespace(name="b", coding_agent="pi", model="openai/gpt-6.1-sol",
-                            harness_engineering=["x.ts"])]))
+    sandbox.check_roster("vercel", SimpleNamespace(agents=[
+        SimpleNamespace(name="b", coding_agent="pi", model="openai/gpt-6.1-sol",
+                        harness_engineering=["x.ts"])]))

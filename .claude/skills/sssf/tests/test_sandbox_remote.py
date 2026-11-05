@@ -598,3 +598,14 @@ def test_a_commit_with_git_options_still_lands_on_the_host(box):
     assert box.run(["git", "-c", "core.fsmonitor=", "commit", "-qm", "b"]).returncode == 0
     assert (box.host_tree / "b.txt").read_text() == "b\n"
     assert "sandbox_commits" in dict(box.events)
+
+
+def test_a_pi_agents_obs_token_stays_on_the_host_and_obs_is_disabled(box, monkeypatch):
+    from adw_modules import agent_pi
+    monkeypatch.setattr(agent_pi, "vm_token", lambda: "eyJ-access")
+    env = agent_pi._in_vm({"OBS_AUTH_TOKEN": "secret", "OBS_NAME": "builder", "SSSF_ADW_ID": "x"}, box, [])
+    passed = box._env(env)
+    assert "OBS_AUTH_TOKEN" not in passed
+    assert passed["OBS_DISABLE"] == "1"
+    assert passed["OBS_NAME"] == "builder"
+    assert passed["OPENAI_API_KEY"] == "eyJ-access"

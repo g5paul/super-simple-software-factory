@@ -46,7 +46,7 @@ agents:
 | `model` | string | Model id. For Pi, any id registered in `~/.pi/agent/models.json`. Default `gemini-3.6-flash`. |
 | `thinking` | enum | Reasoning effort — see below. Default `medium`. |
 | `color` | hex string | Lane color for every agent that does not set its own. Default empty — the visualizer falls back to its own palette. |
-| `harness_engineering` | list[string] | Pi extension paths. Rejected on a `claude_code` agent. SSSF sets `OBS_NAME` to the agent's name for each Pi call, so an observability extension that reads it labels the session `builder` or `reviewer`. It also puts each run in its own pool, `OBS_POOL=sssf-<adw_id>`, unless you set `OBS_POOL` yourself, and adds the tags `sssf` and `adw-<adw_id>` to any `OBS_TAG` you set. |
+| `harness_engineering` | list[string] | Pi extension paths. Rejected on a `claude_code` agent. SSSF sets `OBS_NAME` to the agent's name for each Pi call, so an observability extension that reads it labels the session `builder` or `reviewer`. It also puts each run in its own pool, `OBS_POOL=sssf-<adw_id>`, unless you set `OBS_POOL` yourself, and adds the tags `sssf` and `adw-<adw_id>` to any `OBS_TAG` you set. Under `--sandbox vercel|e2b`, see [pi extensions in a VM](#pi-extensions-in-a-vm). |
 | `tools` | list[string] | Roster-wide tool allowlist. Every agent that omits its own `tools` inherits this. Unset = all tools usable. |
 | `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`: the same entry, or a path inside a protected directory. A broad glob such as `**/*.md` does not count. Default: `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py` — an agent must not be able to edit the machinery that decides whether its work passed — `specs/`, which is on record once `commit_plan` lands, and what Matt Pocock's skills write with the engineer: `.scratch/` (specs and tickets), `GLOSSARY.md`, `GLOSSARY-MAP.md`, and `docs/adr/`. |
 | `data_dir` | path | Runtime home. Sessions land at `{data_dir}/sessions/{adw_id}/{agent_name}/`. Default `adws/adw_data`. |
@@ -409,9 +409,21 @@ It reads shell commands only. A command another tool runs, such as a pi extensio
 
 ## Harness engineering
 
-`harness_engineering` entries are pi extension **file paths**, passed through as `pi -e <path>`, one flag per entry, scoped to that agent only. This is where per-agent harness changes live — e.g. an output-tightening extension for an agent that keeps wrapping its envelope in prose. The starter roster ships with none. Claude Code cannot load pi extensions, so validation rejects the field on a `claude_code` agent.
+`harness_engineering` entries are pi extension **file paths**, passed through as `pi -e <path>`, one flag per entry, scoped to that agent only. This is where per-agent harness changes live — e.g. an output-tightening extension for an agent that keeps wrapping its envelope in prose. The starter roster's `planner` and `scout` load `adws/adw_data/harness_engineering/subagents.ts`. Claude Code cannot load pi extensions, so validation rejects the field on a `claude_code` agent.
 
 **If the extension registers a tool, name that tool in the agent's `tools` list too** — `--tools` filters extension tools exactly like builtins, so an unnamed extension tool is silently unavailable no matter that the extension loaded fine. See [Extension tools must be named explicitly](#extension-tools-must-be-named-explicitly) above. Extensions that only shape output or add flags (no tool registration) need no `tools` change.
+
+### pi extensions in a VM
+
+Under `--sandbox vercel|e2b`, each `harness_engineering` path must be a file inside the repo, committed at the commit the run starts from. A file committed on the run's branch afterwards doesn't count. SSSF checks this before the VM opens, and if a path fails, it stops the run, naming the agent and the path.
+
+In the VM, pi loads the file from the run's clone, at the worktree path, so files it imports beside it come along. Imports aren't checked. A missing one fails when pi loads the extension, and the run stops with pi's error.
+
+`sssf_rules.ts` still loads last, after every listed extension.
+
+In the VM, pi agents get `OBS_DISABLE=1` and no `OBS_AUTH_TOKEN`, so an obs extension loads but posts nothing. SSSF's trace still records the run. Other `OBS_*` variables cross.
+
+**Known limit:** an agent can edit a committed extension in the VM, and the edited one loads for the next agent call. A host run has the same exposure, since an extension isn't a protected file. Nothing checks it.
 
 ## ChatGPT (Pi on a ChatGPT subscription)
 

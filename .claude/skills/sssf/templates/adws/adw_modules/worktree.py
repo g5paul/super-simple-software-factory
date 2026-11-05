@@ -79,6 +79,7 @@ def anchor(cfg: SSSFConfig, root: Path) -> None:
     which follow the process's working folder. A worktree run moves that
     folder, so they become absolute first. `data_dir` itself stays relative:
     permissions and budget use it as a pathspec inside whatever tree they check.
+    A VM run re-anchors pi extensions to its clone afterwards (`sandbox.extensions_in_clone`).
     """
     def pin(value: str) -> str:
         return value if not value or Path(value).is_absolute() else str(root / value)

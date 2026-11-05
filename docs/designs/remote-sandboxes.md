@@ -158,9 +158,20 @@ A tool that's missing, unreadable or below its minimum fails the `sandbox` phase
 
 The versions go into the trace as a `sandbox_tools` event and into the `sandbox` phase's log, and the dashboard's VM line shows them when you hover over it. The minimums are in `TOOLS` in `sandbox_remote.py`. Raise one when SSSF starts using a newer tool feature, and bump `tested` after a run on a new major.
 
+## As built: pi extensions
+
+What this build settled that decisions 20 to 27 left open:
+
+- The check is against the run's starting commit, the `base` the worktree record keeps, on a fresh run and on a resume alike. A file an agent committed on the run's branch doesn't pass.
+- The check requires a regular file: no symlink, no directory.
+- The check runs in `session._open_sandbox`, after the worktree exists.
+- A trial no longer pre-checks extensions. Each attempt checks at launch.
+- `OBS_AUTH_TOKEN` is held back for pi agents only.
+- Decision 27's VM proof is still to run.
+
 ## Open
 
-- **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in, and rosters with `harness_engineering` extensions until decisions 20 to 27 are built. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
+- **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
 - **Obs events from a VM run.** Decision 23 turns them off. A relay would take the extension's posts in the VM, buffer them, and replay them to the host's obs server after each agent call, so the obs token never enters the VM either.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on one project), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.

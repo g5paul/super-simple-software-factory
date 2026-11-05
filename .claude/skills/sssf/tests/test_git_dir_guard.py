@@ -15,6 +15,7 @@ A shared config file's breach (one outside the repo's git directory and work tre
 changed keys, never a value.
 A directory on the way that `pwd -P` can't name reads as not resolving.
 A git hooks directory git can't name stops the run first, with git's error.
+A long line of git's error keeps its start and its end, so the reason survives.
 A directory on the way to a watched path that resolved before the agent and no longer resolves stops the run.
 
 Run from the skill root:
@@ -1984,7 +1985,8 @@ def test_a_retargeted_home_link_still_puts_back_the_physical_gitconfig(repo, tmp
 
 
 def test_a_symlink_loop_in_an_include_stops_the_run_first(repo, home):
-    git(repo, "config", "--add", "include.path", f"{repo}/loop/x.inc")
+    include = f"{repo}/loop/x.inc"
+    git(repo, "config", "--add", "include.path", include)
     before = state(repo)
     saved = (home / ".gitconfig").read_text()
     (repo / "loop").symlink_to("loop")
@@ -1992,8 +1994,10 @@ def test_a_symlink_loop_in_an_include_stops_the_run_first(repo, home):
         permissions.guard_git_dir(shipped(repo))
     text = str(caught.value)
     for part in ("couldn't read the repo's git config", "Too many levels of symbolic links",
-                 f"{repo}/loop/x.inc", "did not run", "run again"):
+                 include[:100], include[-30:], "did not run", "run again"):
         assert part in text
+    if len(include) <= 200:
+        assert include in text
     assert state(repo) == before
     assert (home / ".gitconfig").read_text() == saved
     assert os.path.islink(repo / "loop")
@@ -2256,6 +2260,28 @@ def test_a_failed_hooks_rev_parse_stops_the_run(repo, monkeypatch, err):
     assert "couldn't name the hooks directory" in msg
     assert "fatal: boom" in msg or "(git printed no error; exit code 128)" in msg
     assert state(repo) == before
+
+
+def test_said_quotes_a_line_within_the_limit_as_is():
+    assert permissions._said("f" * 300, 1) == "  " + "f" * 300
+
+
+def test_said_keeps_both_ends_of_a_long_line():
+    err = "fatal: unable to access '/" + "d" * 400 + "': Too many levels of symbolic links\n"
+    out = permissions._said(err, 128)
+    assert out == "  " + err.strip()[:149] + "[…]" + err.strip()[-148:]
+    assert len(out) == 2 + 300
+
+
+def test_said_shows_non_printables_at_both_ends_of_a_cut_line():
+    assert permissions._said("\x1b" + "a" * 400 + "\x07", 1) == (
+        "  ?" + "a" * 148 + "[…]" + "a" * 147 + "?")
+
+
+def test_said_keeps_at_most_twenty_lines():
+    lines = permissions._said("\n".join(f"line {i}" for i in range(25)), 1).splitlines()
+    assert len(lines) == 20
+    assert lines[-1] == "  line 19"
 
 
 def test_unreadable_keeps_its_message():

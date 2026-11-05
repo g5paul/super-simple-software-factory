@@ -617,12 +617,29 @@ def _entries(source: str, path: str):
     return Counter(tuple(e.partition("\n")[::2]) for e in done.stdout.split("\0") if e)
 
 
+SAID_LINES = 20
+SAID_WIDTH = 300
+SAID_CUT = "[…]"
+
+
+def _said_line(line: str) -> str:
+    """One line of git's error as a breach quotes it: non-printables as ?, and
+    a line over SAID_WIDTH characters cut in the middle, so the path git names
+    first and the reason it gives last both survive."""
+    line = "".join(c if c.isprintable() else "?" for c in line)
+    if len(line) <= SAID_WIDTH:
+        return line
+    room = SAID_WIDTH - len(SAID_CUT)
+    head = room - room // 2
+    return line[:head] + SAID_CUT + line[len(line) - room // 2:]
+
+
 def _said(err: str, code: int) -> str:
-    """git's error as a breach quotes it: at most 20 lines of 300 characters,
-    non-printables as ?."""
-    lines = [l for l in err.strip().splitlines() if l.strip()][:20]
-    return "\n".join("  " + "".join(c if c.isprintable() else "?" for c in l)[:300]
-                     for l in lines) or f"  (git printed no error; exit code {code})"
+    """git's error as a breach quotes it: at most SAID_LINES lines of at most
+    SAID_WIDTH characters, non-printables as ?. A longer line keeps its start
+    and its end with SAID_CUT between them."""
+    lines = [l for l in err.strip().splitlines() if l.strip()][:SAID_LINES]
+    return "\n".join("  " + _said_line(l) for l in lines) or f"  (git printed no error; exit code {code})"
 
 
 def _unreadable(err: str, code: int) -> str:

@@ -431,7 +431,7 @@ In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agen
 
 In the operator container (`container/run.sh`), `SSSF_PI_TOKEN_SOCKET` names a socket to the host's `pi_token_broker.py`. Before each pi agent call on a local tree, SSSF asks it for a one-hour token and sets `OPENAI_API_KEY` to it. The host keeps the sign-in. If the broker errors or doesn't answer, the call stops before pi starts. Config validation's model check (`pi --list-models`) and a trial's sign-in check for `openai` ask the broker the same way, so a broker error, or a stored `openai` login, stops validation with its message before any agent starts, instead of showing up as a missing model. A Claude Code roster never asks. `run.sh` removes a socket left at the broker's path, waits until the new broker answers, and exits 1 if it doesn't.
 
-Each `harness_engineering` path must be inside the repo, committed or not, or the run stops before it starts. An `openai` entry in the `auth.json` pi reads in the container (`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json` when that is set) also stops the run, because pi would use it instead of the host's sign-in. The check also reads `models.json` in that same dir: a `providers.openai` entry there with an `apiKey` (a literal, `$NAME` or `!command`) or any `headers` (at the provider, a model, or a model override) stops the run, because pi would use it ahead of the broker's token. A non-regular or unreadable `models.json` stops the run too. Models and settings without a key pass. So does anything at that path that isn't a regular file, or a relative `PI_CODING_AGENT_DIR`. obs works as on the host: no `OBS_DISABLE`, and `OBS_AUTH_TOKEN` is kept.
+Each `harness_engineering` path must be inside the repo, committed or not, or the run stops before it starts. An `openai` entry in the `auth.json` pi reads in the container (`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json` when that is set) also stops the run, because pi would use it instead of the host's sign-in. So does anything at that path that isn't a regular file, or a relative `PI_CODING_AGENT_DIR`. The check also reads `models.json` in that same dir: a `providers.openai` entry there with an `apiKey` (a literal, `$NAME` or `!command`) or any `headers` (at the provider, a model, or a model override) stops the run, because pi would use it ahead of the broker's token. A non-regular or unreadable `models.json` stops the run too. Models and settings without a key pass. obs works as on the host: no `OBS_DISABLE`, and `OBS_AUTH_TOKEN` is kept.
 
 **Known limit:** any process in the container can get a one-hour token from the socket while the session is open, because everything there runs as one user.
 
@@ -442,6 +442,8 @@ Each `harness_engineering` path must be inside the repo, committed or not, or th
 **Known limit:** a `baseUrl` for openai in `models.json` passes, so pi sends the broker's token and calls to that endpoint, which can add a key of its own.
 
 **Known limit:** SSSF reads key names only, so `"apiKey": "$OPENAI_API_KEY"` stops the run too.
+
+**Known limit:** a `models.json` nested deeper than Python's JSON parser allows stops the run with a traceback instead of a message. It still stops before any pi agent starts.
 
 **Known limit:** the check and pi read `auth.json` and `models.json` at different moments, so a file swapped between them can pass the check and still reach pi.
 

@@ -421,7 +421,7 @@ In the VM, pi loads the file from the run's clone, at the worktree path, so file
 
 `sssf_rules.ts` still loads last, after every listed extension.
 
-In the VM, pi agents get `OBS_DISABLE=1` and no `OBS_AUTH_TOKEN`, so an obs extension loads but posts nothing. SSSF's trace still records the run. Other `OBS_*` variables cross.
+In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agent of either harness. Pi agents also get `OBS_DISABLE=1`, so an obs extension loads but posts nothing. SSSF's trace still records the run. Other `OBS_*` variables cross.
 
 **Known limit:** an agent can edit a committed extension in the VM, and the edited one loads for the next agent call. A host run has the same exposure, since an extension isn't a protected file. Nothing checks it.
 

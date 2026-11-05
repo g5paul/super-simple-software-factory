@@ -6,7 +6,8 @@ at its host path too, so every path the run passes means the same thing on
 both sides. Each command goes through `run` or `start` below:
 
 - `run` is a check, git, or setup. It gets SSSF's own variables, never the
-  Claude token.
+  Claude token. No command gets OBS_AUTH_TOKEN (HELD), which would let code in
+  the VM copy it into the clone and back to the host branch.
 - `start` is an agent. It gets the token from ~/.config/sssf-sandbox/token.env,
   and the handoff folder is copied in before it and back out after it.
 - After each `git commit`, the new commits come back to the host branch as a
@@ -40,6 +41,7 @@ from .sandbox import SandboxFailed
 
 TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"
 PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with UV_PYTHON
+HELD = ("OBS_AUTH_TOKEN",)          # named variables no VM command gets, whatever PASSED says
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
 COMMAND_SECONDS = 60                # what a command with no timeout may need: git, a read
 MARGIN_SECONDS = 30
@@ -471,7 +473,7 @@ class Remote:
 
     def _env(self, env) -> dict[str, str]:
         source = os.environ if env is None else env
-        passed = {k: v for k, v in source.items() if k.startswith(PASSED)}
+        passed = {k: v for k, v in source.items() if k.startswith(PASSED) and k not in HELD}
         # SSSF's refusing shell (sssf_refuse.py), which agent_cc installs in the
         # VM. An operator's own prefix names a host path, so it stays behind.
         if "SSSF_REFUSE_RULES" in passed and source.get("CLAUDE_CODE_SHELL_PREFIX"):

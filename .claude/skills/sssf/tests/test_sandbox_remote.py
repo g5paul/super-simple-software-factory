@@ -609,3 +609,27 @@ def test_a_pi_agents_obs_token_stays_on_the_host_and_obs_is_disabled(box, monkey
     assert passed["OBS_DISABLE"] == "1"
     assert passed["OBS_NAME"] == "builder"
     assert passed["OPENAI_API_KEY"] == "eyJ-access"
+
+
+def test_obs_token_stays_out_of_checks_and_agents_but_other_obs_variables_cross(box, monkeypatch):
+    monkeypatch.setenv("OBS_AUTH_TOKEN", "secret-obs")
+    monkeypatch.setenv("OBS_NAME", "n")
+    done = box.run(["sh", "-c", "env"])
+    assert "OBS_AUTH_TOKEN" not in done.stdout and "secret-obs" not in done.stdout
+    assert "OBS_NAME=n" in done.stdout and "SSSF_ADW_ID=abc" in done.stdout
+    seen = box.start(["sh", "-c", "env"])
+    out = "".join(seen.stdout)
+    seen.wait()
+    assert "OBS_AUTH_TOKEN" not in out and "OBS_NAME=n" in out
+
+
+def test_obs_token_in_a_callers_env_dict_is_dropped_too(box):
+    env = {"OBS_AUTH_TOKEN": "secret-obs", "OBS_POOL": "p", "SSSF_ADW_ID": "abc"}
+    done = box.run(["sh", "-c", "env"], env=env)
+    assert "OBS_AUTH_TOKEN" not in done.stdout and "OBS_POOL=p" in done.stdout
+    seen = box.start(["sh", "-c", "env"], env=env)
+    out = "".join(seen.stdout)
+    seen.wait()
+    assert "OBS_AUTH_TOKEN" not in out and "OBS_POOL=p" in out
+    sent = [c["env"] for c in box.raw.calls]
+    assert sent and all("OBS_AUTH_TOKEN" not in e for e in sent)

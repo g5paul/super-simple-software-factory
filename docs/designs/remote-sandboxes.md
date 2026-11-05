@@ -166,7 +166,7 @@ What this build settled that decisions 20 to 27 left open:
 - The check requires a regular file: no symlink, no directory.
 - The check runs in `session._open_sandbox`, after the worktree exists.
 - A trial no longer pre-checks extensions. Each attempt checks at launch.
-- `OBS_AUTH_TOKEN` is held back for pi agents only.
+- `OBS_AUTH_TOKEN` is held back from every VM command, checks and agents of both harnesses (`sandbox_remote.HELD`).
 - Decision 27's VM proof is still to run.
 
 ## Open

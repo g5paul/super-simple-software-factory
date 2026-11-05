@@ -47,7 +47,7 @@ from adw_modules.data_types import (AgentCall, BuildOutput, EnvelopeBase, GateRe
                                     PhaseParams, PlanOutput, ReviewOutput)
 
 REQUIRED_AGENTS = ["planner", "guard_spec_reviewer", "builder", "bypass_reviewer"]
-MAX_SPEC_ROUNDS = 2
+MAX_SPEC_ROUNDS = 3   # the third only when the review before it blocked on fewer items
 MAX_FIX_LOOPS = 3
 MAX_ROUNDS = 3
 
@@ -348,6 +348,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml",
         plan = ph.call(AgentCall(output_type=PlanOutput, prompt=planned, gates=plan_gates))
 
     spec_ok = False
+    blocked = None                        # how many items the last review blocked on
     for i in range(1, MAX_SPEC_ROUNDS + 1):
         with run.phase(PhaseParams(name=f"spec_review_{i}", kind="agent",
                                    owner="guard_spec_reviewer",
@@ -360,8 +361,10 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml",
         if spec_review.approved:
             spec_ok = True
             break
-        if i == MAX_SPEC_ROUNDS:
+        now = max(len(spec_review.blocking), 1)
+        if i == MAX_SPEC_ROUNDS or (i >= 2 and now >= blocked):
             break
+        blocked = now
         with run.phase(PhaseParams(name=f"revise_plan_{i}", kind="agent", owner="planner",
                                    retries=1, description="Close the spec review's findings")) as ph:
             plan = ph.call(AgentCall(output_type=PlanOutput, prompt=planned,

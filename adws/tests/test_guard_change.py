@@ -348,6 +348,27 @@ def test_a_rejected_spec_is_revised_then_the_run_stops(tmp_path, monkeypatch):
     assert "commit_plan" not in run.phases
 
 
+def test_a_spec_review_that_narrows_gets_a_third_round(tmp_path, monkeypatch):
+    two = ReviewOutput(status="success", approved=False, blocking=["the Bar is vague", "no tests"])
+    run, code = chain(tmp_path, monkeypatch, [review()], spec_reviews=[two, REJECTED, APPROVED])
+    assert owners(run, "planner") == ["plan", "revise_plan_1", "revise_plan_2"]
+    assert "spec_review_3" in run.phases and code == 0
+
+
+def test_a_spec_review_that_does_not_narrow_stops_at_two(tmp_path, monkeypatch):
+    two = ReviewOutput(status="success", approved=False, blocking=["the Bar is vague", "no tests"])
+    run, code = chain(tmp_path, monkeypatch, [], spec_reviews=[REJECTED, two, APPROVED])
+    assert code == 1 and run.finished[1] == "the spec review never approved the spec"
+    assert "spec_review_3" not in run.phases
+
+
+def test_a_third_rejection_stops_the_run(tmp_path, monkeypatch):
+    two = ReviewOutput(status="success", approved=False, blocking=["the Bar is vague", "no tests"])
+    run, code = chain(tmp_path, monkeypatch, [], spec_reviews=[two, REJECTED, REJECTED])
+    assert code == 1 and run.finished[1] == "the spec review never approved the spec"
+    assert owners(run, "planner") == ["plan", "revise_plan_1", "revise_plan_2"]
+
+
 def test_a_guard_change_refuses_to_run_on_main(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         chain(tmp_path, monkeypatch, [review()], branch="main")

@@ -169,8 +169,12 @@ Smaller choices the design left open:
 - The state check covers `sssf_rules.ts` too: a new top-level `let` or `var`
   counts. It runs on the first build as well, but there it only reports;
   only state added by a fix stops the run.
-- A rejected spec goes back to the planner once. A second rejection stops
-  the run before any code.
+- A rejected spec goes back to the planner. A second rejection stops the run
+  before any code, unless it blocks on fewer items than the first. Then the
+  planner revises once more, and a third rejection stops the run. Until
+  2026-11-04 a second rejection always stopped it. Run 7bc35cc5 went from two
+  blocking items to one, with the fix spelled out, and still had to start
+  over.
 - `--base` sets the baseline, `main` by default, and the chain refuses to
   start on `main` itself.
 

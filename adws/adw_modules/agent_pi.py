@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -315,43 +316,116 @@ def _read_regular(path: Path) -> bytes:
         os.close(fd)
 
 
-def check_stored_login(path: Path = None) -> None:
-    """Stop if the container's pi auth.json holds an openai login: pi would use
-    it instead of the host's sign-in. Reads key names only; never a value.
+def _strip_json_comments(text: str) -> str:
+    """Port of pi's stripJsonComments (dist/utils/json.js in pi 1.4.0): drop //
+    line comments, then trailing commas, outside string literals."""
+    text = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*',
+                  lambda m: m.group(0) if m.group(0)[0] == '"' else "", text)
+    return re.sub(r'"(?:\\.|[^"\\])*"|,(\s*[}\]])',
+                  lambda m: m.group(1) if m.group(1) is not None else m.group(0), text)
 
-    Never blocks. The path is stat'ed first (following a symlink, as pi does),
-    so a FIFO, socket, device or directory there stops the run without being
-    opened. That stat stays even though _read_regular checks again, because
-    opening a device can have effects of its own. A missing file passes."""
+
+def _load_agent_json(path: Path, what: str, *, comments: bool = False) -> Optional[dict]:
+    """The parsed JSON object at path, None if the file is missing. Never blocks:
+    the path is stat'ed first (following a symlink, as pi does), so a FIFO,
+    socket, device or directory there stops the run without being opened. That
+    stat stays even though _read_regular checks again, because opening a device
+    can have effects of its own. With comments, parse as pi parses models.json:
+    BOM, // comments and trailing commas removed first."""
+    try:
+        info = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError:
+        info = None
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        raise sandbox.SandboxFailed(
+            f"{path} is not a regular file, so SSSF can't check it for {what}; "
+            "remove it and start again.")
+    data = None
+    if info is not None:
+        try:
+            text = _read_regular(path).decode("utf-8")
+            if comments:
+                text = _strip_json_comments(text.removeprefix("\ufeff"))
+            data = json.loads(text)
+        except (OSError, ValueError):
+            data = None
+    if not isinstance(data, dict):
+        raise sandbox.SandboxFailed(f"SSSF can't read {path} to check it for {what}; "
+                                    "fix or remove it.")
+    return data
+
+
+def _models_json_credential(data: dict) -> Optional[str]:
+    """The first field path in a models.json that gives pi's openai provider a
+    credential, or None. Key names only, never a value. Raises ValueError for a
+    shape pi's schema wouldn't take."""
+    def has_headers(entry: dict) -> bool:
+        return "headers" in entry and entry["headers"] != {}
+
+    providers = data.get("providers", {})
+    if not isinstance(providers, dict):
+        raise ValueError("providers")
+    openai = providers.get("openai")
+    if openai is None:
+        return None
+    if not isinstance(openai, dict):
+        raise ValueError("providers.openai")
+    if "apiKey" in openai:
+        return "providers.openai.apiKey"
+    if has_headers(openai):
+        return "providers.openai.headers"
+    models = openai.get("models", [])
+    if not isinstance(models, list) or not all(isinstance(m, dict) for m in models):
+        raise ValueError("providers.openai.models")
+    for i, model in enumerate(models):
+        if has_headers(model):
+            return f"providers.openai.models[{i}].headers"
+    overrides = openai.get("modelOverrides", {})
+    if not isinstance(overrides, dict) or not all(isinstance(o, dict) for o in overrides.values()):
+        raise ValueError("providers.openai.modelOverrides")
+    if any(has_headers(o) for o in overrides.values()):
+        return "providers.openai.modelOverrides.<key>.headers"
+    return None
+
+
+def check_stored_login(path: Path = None) -> None:
+    """Stop if the container's pi agent dir gives openai a credential of its own:
+    pi would use it instead of the host's sign-in. Checks auth.json for an
+    openai login, then models.json in the same dir for what pi 1.4.0 accepts as
+    a credential: providers.openai.apiKey (a literal, $NAME or !command) and
+    headers at the provider, model and modelOverrides level. Reads key names
+    only; never a value.
+
+    Never blocks, for either file (see _load_agent_json). A missing file passes;
+    an unreadable one stops the run."""
     path = path or PI_AUTH_JSON
     if not path.is_absolute():
         raise sandbox.SandboxFailed(
             f"PI_CODING_AGENT_DIR puts pi's auth.json at {path}, a relative path, so SSSF "
             "can't tell which file pi will read; set it to an absolute path.")
-    try:
-        info = os.stat(path)
-    except (FileNotFoundError, NotADirectoryError):
-        return
-    except OSError:
-        info = None
-    if info is not None and not stat.S_ISREG(info.st_mode):
-        raise sandbox.SandboxFailed(
-            f"{path} is not a regular file, so SSSF can't check it for a stored ChatGPT "
-            "login; remove it and start again.")
-    data = None
-    if info is not None:
-        try:
-            data = json.loads(_read_regular(path).decode("utf-8"))
-        except (OSError, ValueError):
-            data = None
-    if not isinstance(data, dict):
-        raise sandbox.SandboxFailed(f"SSSF can't read {path} to check it for a stored ChatGPT "
-                                    "login; fix or remove it.")
-    if "openai" in data:
+    data = _load_agent_json(path, "a stored ChatGPT login")
+    if data is not None and "openai" in data:
         raise sandbox.SandboxFailed(
             f"{path} has a ChatGPT login stored in the container (an openai entry). pi would use "
             "it instead of the host's sign-in, so remove that entry (or the file) and start "
             "again; the container gets its token from the host.")
+    what = "an openai key of its own"
+    models_path = path.parent / "models.json"
+    models = _load_agent_json(models_path, what, comments=True)
+    if models is None:
+        return
+    try:
+        field = _models_json_credential(models)
+    except ValueError:
+        raise sandbox.SandboxFailed(f"SSSF can't read {models_path} to check it for {what}; "
+                                    "fix or remove it.") from None
+    if field:
+        raise sandbox.SandboxFailed(
+            f"{models_path} gives pi's openai provider a credential of its own ({field}). pi "
+            "would use it instead of the host's sign-in, so remove that entry and start again; "
+            "the container gets its token from the host.")
 
 
 def container_token(socket_path: str) -> str:

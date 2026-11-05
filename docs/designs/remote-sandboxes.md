@@ -71,6 +71,19 @@ From [the research](../research/remote-sandboxes.md), sandcastle's providers (`~
 18. **Rollout, on the engineer's word.** No project repo gets `--sandbox` until both providers pass, then one repo at a time, the way `--worktree` rolled out. A repo that is work for an employer stays off Vercel's free tier, which is for personal, non-commercial use. Nothing runs unattended on E2B until its behavior past the credit is known.
 19. **The engineer makes the accounts and keys.** `VERCEL_TOKEN` and `E2B_API_KEY` go in sssf-sandbox's `.env`, and the Claude token in its own file, per decision 14. All are checked by key name only. The first two are sandbox keys, not model keys. No `ANTHROPIC_API_KEY` may be set where a sandbox run starts, since it would win over the token.
 
+### pi extensions in the VM
+
+Settled in a grilling session on 2026-11-05. Until then a roster with `harness_engineering` extensions was refused under `--sandbox`, so pi-agent-observability, whose eight agents all load its obs extension, couldn't use a VM.
+
+20. **Any extension a pi roster names.** Not a list of known ones. The obs extension is the first real case. Both providers get it.
+21. **Extensions come from the VM's own clone.** An extension must be a file committed in the repo. In a VM run its path is anchored to the worktree path, where the run's branch is cloned, so the files it imports come along. Nothing new is copied in; the refuse extension is still copied as today. Copying each file and following its imports, or requiring a bundled single file, were both turned down.
+22. **Checked at launch.** Before the VM opens, each `harness_engineering` path must be inside the repo and committed at the run's starting commit. One that isn't stops the run with a message naming the agent and the path. This replaces the refusal in `sandbox.check_roster`. Imports aren't followed: a missing one fails when pi loads the extension in the VM, and the run stops with pi's error.
+23. **No obs events from a VM, for now.** In the VM, `OBS_DISABLE=1` is set and `OBS_AUTH_TOKEN` stays on the host. The extension loads and posts nothing. SSSF's own trace still records the run from pi's JSON stream. A relay that buffers events in the VM and replays them to the host's obs server after each call is under Open. Opening the engineer's obs server to the internet is not an option.
+24. **The refuse extension loads last,** as now, so it checks the command after every other extension has had its turn. A test pins the order.
+25. **A known limit.** The agent can edit a committed extension in the VM, and the edited one loads for the next agent call. A host run has the same exposure, since an extension isn't a protected file. `config.md` says so; nothing checks it.
+26. **Built through the guard chain,** since `agent_pi.py` changes, on a branch from `main`.
+27. **Proof in sssf-sandbox, on both providers.** (1) A committed test extension that imports a file beside it loads in the VM and leaves a marker the trace shows. (2) An uncommitted extension stops the run before a VM opens. (3) So does one outside the repo. (4) With the test extension loaded, a refuse rule still blocks a command. (5) In the VM, `OBS_DISABLE=1` is set and `OBS_AUTH_TOKEN` is absent. (6) A roster with no extensions runs as before. Then pi-agent-observability is asked to try one VM run. pi in the Podman container is the next job after this one; see `container-operator.md`.
+
 ## As built: Vercel
 
 What step 2 settled that the decisions left open, or changed:
@@ -147,7 +160,7 @@ The versions go into the trace as a `sandbox_tools` event and into the `sandbox`
 
 ## Open
 
-- **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in, and rosters with `harness_engineering` extensions, which aren't copied yet. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
+- **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in, and rosters with `harness_engineering` extensions until decisions 20 to 27 are built. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on one project), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.
 - **`--sandbox` for tickets and trials** was built after the dashboard; see "As built: tickets and trials".

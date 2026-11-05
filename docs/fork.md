@@ -39,7 +39,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 
 - `--worktree` runs a request on its own branch in its own worktree. The engineer then runs `just merge`, `just rebase` or `just discard`, and `just kill` stops a run by its adw_id. Design: [branch-per-run.md](designs/branch-per-run.md).
 - Worktree runs go in parallel, up to `max_worktree_runs`. Each new worktree runs repo.yaml's `worktree_setup` before its first agent. Design: [parallel-worktree-runs.md](designs/parallel-worktree-runs.md).
-- `--container` runs the operator session in a Podman container. Design: [container-operator.md](designs/container-operator.md).
+- `--container` runs the operator session in a Podman container. A pi roster runs there too: a broker on the host hands each pi call a one-hour ChatGPT token over a socket, so the login stays on the host, and a login or an openai key stored in the container stops the run. Obs works as on the host. Design: [container-operator.md](designs/container-operator.md).
 
 ### Runs in a remote VM
 
@@ -47,6 +47,8 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 - Claude Code agents sign in with a `claude setup-token` token. Pi agents on `openai/` models get a short-lived access token from the host's ChatGPT sign-in before each call, so the login never leaves the machine. Research: [pi-chatgpt-in-vm.md](research/pi-chatgpt-in-vm.md).
 - Before any agent starts, the VM's git, uv, `claude`, Node and `pi` versions are read. A missing or too-old tool fails the run with each one named, and nothing runs in that VM.
 - The dashboard shows each run's VM and what runs have used of each provider's allowance, as does `just sandbox-usage`.
+- A pi roster's extensions load in the VM from its own clone, with obs off there; an extension must be committed in the repo.
+- Every SDK call has a deadline, and so does each agent's output stream: after 2 minutes of quiet the host asks the VM whether the agent still runs, and a dead stream fails the call as `agent_stream_lost`. A dropped connection once held a run for 15.7 minutes.
 
 ### Two new workflows
 
@@ -78,3 +80,4 @@ A code change is committed under the first build's message, not the last repair'
 | 2026-11-02 | 901e7f4 | First write, covering the fork from de31374 |
 | 2026-11-03 | 247ebda | Remote VMs, the ChatGPT roster in them, the VM tool check, and the pre-push secret scan |
 | 2026-11-03 | 448e88c | The installer stamps the pre-push hook; agents that go quiet are stopped |
+| 2026-11-05 | b72d057 | pi extensions in a VM, the SDK and stream deadlines, and pi in the operator container |

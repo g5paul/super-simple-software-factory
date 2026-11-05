@@ -30,8 +30,16 @@ def _local_env(home: str, env) -> dict:
     return {"PATH": os.environ["PATH"], "HOME": home, **(env or {})}
 
 
+def _as_root(call: dict) -> bool:
+    return bool(call.get("sudo")) or call.get("user") == "root"
+
+
+def _words(call: dict) -> str:
+    return " ".join(call.get("argv") or [call.get("line", "")])
+
+
 def _no_chown(text: str) -> str:
-    return re.sub(r"&& chown -R \w+", "&& true", text)
+    return re.sub(r"&& chown (-R )?\w+", "&& true", text)
 
 
 # --- Vercel's SDK -------------------------------------------------------------
@@ -57,7 +65,7 @@ class FakeVercel:
     def run_process(self, command, args=(), *, cwd=None, env=None, sudo=False,
                     capture_output=False, input=None, kill_after=None):
         argv = [self._map(a) for a in [command, *args]]
-        self.calls.append({"argv": argv, "env": dict(env or {}), "cwd": cwd})
+        self.calls.append({"argv": argv, "env": dict(env or {}), "cwd": cwd, "sudo": sudo})
         if sudo:
             argv = [_no_chown(a) for a in argv]
         data = input.encode() if isinstance(input, str) else input
@@ -510,10 +518,47 @@ def test_install_copies_a_host_file_into_the_vm_executable_once(box, tmp_path):
     script.parent.mkdir(parents=True)
     script.write_text("#!/bin/sh\necho refused\n")
     box.install(script)
+    before = len(box.raw.calls)
     box.install(script)
+    assert len(box.raw.calls) == before
     copied = Path(box.fake._map(str(script)))
     assert copied.read_text() == script.read_text() and os.access(copied, os.X_OK)
     assert box.installed == {str(script)}
+
+
+def test_install_makes_the_folder_as_root_and_writes_the_file_as_the_vm_user(box, tmp_path):
+    script = tmp_path / "host" / "skill" / "adw_modules" / "sssf_refuse.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\necho refused\n")
+    before = len(box.raw.calls)
+    box.install(script)
+    new = box.raw.calls[before:]
+    assert len(new) == 2
+    assert _as_root(new[0])
+    first = _words(new[0])
+    assert "mkdir -p" in first and f"chown {box.owner}" in first and "chown -R" not in first
+    assert box.fake._map(str(script.parent)) in first.split() and "cat >" not in first
+    assert not _as_root(new[1])
+    second = _words(new[1])
+    assert "cat >" in second and "chmod 755" in second and "mkdir" not in second
+    assert box.fake._map(str(script)) in second
+    copied = Path(box.fake._map(str(script)))
+    assert copied.read_text() == script.read_text() and os.access(copied, os.X_OK)
+
+
+def test_a_folder_root_cannot_make_stops_the_install_and_records_nothing(box, tmp_path):
+    from adw_modules.sandbox import SandboxFailed
+    script = tmp_path / "host" / "blocked" / "sub" / "f.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\n")
+    blocker = Path(box.fake._map(str(tmp_path / "host" / "blocked")))
+    blocker.parent.mkdir(parents=True, exist_ok=True)
+    blocker.write_text("x")
+    before = len(box.raw.calls)
+    with pytest.raises(SandboxFailed):
+        box.install(script)
+    assert box.installed == set()
+    assert not any("cat >" in _words(c) for c in box.raw.calls[before:])
 
 
 def test_an_agent_gets_sssfs_shell_prefix_only_with_refuse_rules(box, monkeypatch):

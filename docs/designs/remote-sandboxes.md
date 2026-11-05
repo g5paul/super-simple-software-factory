@@ -84,6 +84,20 @@ Settled in a grilling session on 2026-11-05. Until then a roster with `harness_e
 26. **Built through the guard chain,** since `agent_pi.py` changes, on a branch from `main`.
 27. **Proof in sssf-sandbox, on both providers.** (1) A committed test extension that imports a file beside it loads in the VM and leaves a marker the trace shows. (2) An uncommitted extension stops the run before a VM opens. (3) So does one outside the repo. (4) With the test extension loaded, a refuse rule still blocks a command. (5) In the VM, `OBS_DISABLE=1` is set and `OBS_AUTH_TOKEN` is absent. (6) A roster with no extensions runs as before. Then pi-agent-observability is asked to try one VM run. pi in the Podman container is the next job after this one; see `container-operator.md`.
 
+### An agent's output stream in the VM
+
+Settled with the engineer on 2026-11-05. Run 80481cd6 hung 15.7 minutes on a dropped connection inside an SDK call; ae14686 gave every SDK call a deadline, but the host's read of an agent's output still waits on the stream with none. On E2B a thread fills a queue from `handle.wait(on_stdout=...)` and the reader blocks on the queue; on Vercel the reader iterates the SDK's stream. A connection that drops while nothing is in flight can hold that read indefinitely, and the silence watchdog's `stop_tree()` doesn't end it.
+
+28. **The fix sits behind `RemoteProcess.stdout`,** in the sandbox modules. `agent_cc` and `agent_pi` read lines as now and aren't edited, so it isn't a guard change. Host and container runs don't change.
+29. **A probe after 2 minutes of quiet.** With no line for `QUIET_SECONDS` (120), the host asks the VM, in one SDK call with its usual deadline, whether the agent's process is still running. No answer: the stream is dead. The agent has exited but the stream never ended: the stream is dead. The agent is running: keep reading; the silence watchdog still bounds it.
+30. **A dead stream fails the call.** It raises its own error and writes an `agent_stream_lost` event, and the run fails. Nothing retries it, since the agent may already have edited files or spent tokens; `just resume` carries on.
+31. **The silence watchdog ends the read in a VM too,** so `SilentStop` stops a VM run the way it stops a host run.
+32. **One stop, then fail.** On a dead stream the host makes one `stop_tree()` call under its deadline, then fails the call whatever it returns. The provider ends the VM at the session's end and the run's close deletes it, as now.
+33. **Priced from the raw log,** as a killed or silent call is. Tokens spent after the drop aren't counted: a known limit.
+34. **No copy of the output in the VM.** Nothing rescues an agent that finished while its stream was dead. Revisit if drops turn out to be common.
+35. **Tests, then a normal run per provider.** A fake provider whose stream blocks forever covers each outcome in 29 and the watchdog case, and fails on the old code. The proof is one normal VM run on each provider in sssf-sandbox; the first real drop gets a Log row.
+36. **Built test-first on a branch,** reviewed by a fresh reviewer against these decisions before the merge.
+
 ## As built: Vercel
 
 What step 2 settled that the decisions left open, or changed:
@@ -174,7 +188,7 @@ What this build settled that decisions 20 to 27 left open:
 
 - **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
 - **Obs events from a VM run.** Decision 23 turns them off. A relay would take the extension's posts in the VM, buffer them, and replay them to the host's obs server after each agent call, so the obs token never enters the VM either.
-- **An agent's output stream with no deadline.** Since ae14686 every SDK call has one (`CALL_SECONDS` past the command's own time, or the session's length for an agent's wait), after run 80481cd6 hung 15.7 minutes on a dropped connection. Reading an agent's output line by line still waits on the stream with none, so a stream that drops mid-agent holds the run until the host's TCP gives up, about 15 minutes.
+- **An agent's output stream with no deadline: designed.** Decisions 28 to 36, settled on 2026-11-05. Reading an agent's output waits on the stream with no deadline, so a stream that drops mid-agent can hold the run indefinitely.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on one project), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.
 - **`--sandbox` for tickets and trials** was built after the dashboard; see "As built: tickets and trials".

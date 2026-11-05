@@ -28,6 +28,7 @@ import base64
 import importlib
 import io
 import os
+import queue
 import re
 import socket
 import subprocess
@@ -50,6 +51,14 @@ MARGIN_SECONDS = 30
 # SDKs wait on a running command with no timeout of their own, so a dropped
 # connection held run 80481cd6 for 15.7 minutes, until the host's TCP gave up.
 CALL_SECONDS = 120
+# An agent's output stream has no deadline of its own either, and a dropped
+# connection can hold it with nothing in flight for TCP to retry. After
+# QUIET_SECONDS with no line the host asks the VM whether the agent still runs
+# (decisions 28 to 35 in docs/designs/remote-sandboxes.md). Once the agent is
+# gone or stopped, its stream gets DRAIN_SECONDS to end before it counts as dead.
+QUIET_SECONDS = 120
+DRAIN_SECONDS = 10
+POLL_SECONDS = 1.0
 # The tools a VM must have, by what the roster runs (docs/designs/remote-sandboxes.md,
 # "As built: the tool check"). `min` is the oldest version SSSF has run on, or
 # the tool's own floor; a VM below it fails before any agent starts. `tested`
@@ -177,21 +186,111 @@ def _git_verb(argv: list[str]) -> str:
 
 class RemoteProcess:
     """An agent in the VM. Its pid is a negative stand-in, unique in the run:
-    the trace records it, and `just kill` knows not to signal it on the host."""
+    the trace records it, and `just kill` knows not to signal it on the host.
+
+    Its output is read by a thread of its own, so the runner's read loop can
+    stop waiting on a stream that has gone dead. When it does, the silence
+    watchdog the runner watches it with (`watched`) is told, and the runner
+    raises SilentStop for it."""
 
     def __init__(self, box: "Remote", process, sid_file: str, pid: int):
         self._box, self._process, self._sid_file = box, process, sid_file
         self.pid = pid
-        self.stdout = process.stdout
-        self.stderr = process.stderr
+        self._lines: queue.Queue = queue.Queue()
+        self._stopped = threading.Event()
+        self._abandoned = False       # the read ended before the stream did
+        self._dog = None
         self._done = False
+        threading.Thread(target=self._pump, args=(process.stdout,), daemon=True,
+                         name=f"sssf-{box.name}-stream").start()
+        self.stdout = self._read()
+        self.stderr = _Stderr(self, process.stderr) if process.stderr is not None else None
+
+    def watched(self, dog) -> None:
+        self._dog = dog
+
+    def _pump(self, source) -> None:
+        try:
+            for line in source:
+                self._lines.put(line)
+        except BaseException as error:      # the runner sees the stream's own error
+            self._lines.put(error)
+        finally:
+            self._lines.put(None)
+
+    def _read(self):
+        heard = time.monotonic()
+        ending = None                       # (since, why): the agent is gone or stopped
+        while True:
+            try:
+                item = self._lines.get(timeout=POLL_SECONDS)
+            except queue.Empty:
+                now = time.monotonic()
+                if ending is None and self._stopped.is_set():
+                    ending = (now, "")
+                if ending is None and now - heard >= QUIET_SECONDS:
+                    alive = self._alive()
+                    if alive:
+                        heard = time.monotonic()
+                        continue
+                    if alive is None:
+                        self._lose("didn't answer when SSSF checked on the agent")
+                        return
+                    ending = (time.monotonic(), "said the agent had exited, but its stream never ended")
+                if ending and time.monotonic() - ending[0] >= DRAIN_SECONDS:
+                    self._abandoned = True
+                    if ending[1]:
+                        self._lose(ending[1])
+                    return
+                continue
+            if item is None:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            heard = time.monotonic()
+            yield item
+
+    def _alive(self) -> bool | None:
+        """Whether the agent's session still has a live process (a zombie
+        doesn't count), read from /proc so it needs no `ps`. None when the VM
+        doesn't answer. A probe that can't tell says alive: keep reading, and
+        the silence watchdog bounds it."""
+        try:
+            done = self._box._call(self._box.sandbox.run_process, "sh", ["-c", _PROBE, self._sid_file],
+                                   capture_output=True)
+        except Exception:
+            return None
+        return (done.stdout or "").strip() != "gone"
+
+    def _lose(self, why: str) -> None:
+        self._abandoned = True
+        if self._dog is not None:
+            self._dog.lose(why)
+        if not self._stopped.is_set():
+            try:
+                self.stop_tree()            # once; the VM's end stops it otherwise
+            except Exception:
+                pass
 
     def wait(self) -> int:
-        # Past the session's end the provider has stopped the VM, agent and all.
-        code = self._box._call(self._process.wait, deadline=self._box.limit + CALL_SECONDS)
+        # Once stopped, or with its stream dead, the agent is gone or the VM may
+        # be: a short wait, and no error of its own to hide why the call ended.
+        # Otherwise, past the session's end the provider has stopped the VM.
+        quick = self._abandoned or self._stopped.is_set()
+        try:
+            code = self._box._call(self._process.wait,
+                                   deadline=CALL_SECONDS if quick else self._box.limit + CALL_SECONDS)
+        except Exception:
+            if not quick:
+                raise
+            code = -1
         if not self._done:
             self._done = True
-            self._box.handoff_out()
+            try:
+                self._box.handoff_out()
+            except Exception:
+                if not (self._dog is not None and self._dog.hung):
+                    raise           # a call that keeps its result needs its handoff
         return code
 
     def kill(self) -> None:
@@ -199,8 +298,37 @@ class RemoteProcess:
 
     def stop_tree(self) -> None:
         # Started under setsid, so the agent and everything it ran share its session.
+        self._stopped.set()
         self._box._call(self._box.sandbox.run_process,
                         "sh", ["-c", f'pkill -KILL -s "$(cat {self._sid_file})"'], capture_output=True)
+
+
+# Prints "alive" or "gone" for the session whose id is in the file $0 names.
+# /proc/<pid>/stat is "pid (comm) state ppid pgrp session ...", and comm can
+# hold spaces or parentheses, so the fields are read after its last ")".
+_PROBE = r"""sid=$(cat "$0") || exit 3
+for f in /proc/[0-9]*/stat; do
+  read -r line < "$f" 2>/dev/null || continue
+  set -- ${line##*) }
+  if [ "$4" = "$sid" ] && [ "$1" != Z ]; then echo alive; exit 0; fi
+done
+echo gone"""
+
+
+class _Stderr:
+    """The agent's stderr. Read in full once its stdout has ended, as before;
+    after a stop or a dead stream, read with a deadline, and empty if it has none."""
+
+    def __init__(self, process: RemoteProcess, source):
+        self._process, self._source = process, source
+
+    def read(self) -> str:
+        if not (self._process._abandoned or self._process._stopped.is_set()):
+            return self._source.read()
+        try:
+            return self._process._box._call(self._source.read, deadline=DRAIN_SECONDS) or ""
+        except Exception:
+            return ""
 
 
 class Remote:

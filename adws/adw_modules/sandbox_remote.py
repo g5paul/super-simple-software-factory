@@ -393,11 +393,15 @@ class Remote:
     def install(self, path) -> None:
         """Copy one of SSSF's own host files into the VM at the same path,
         executable, once per VM. The VM's clone holds the repo's committed
-        files, which can lag the skill the host is running."""
+        files, which can lag the skill the host is running. Its folder is
+        outside the clone, where the VM's user can't make folders, so root
+        makes it and hands it over, as _clone does; the user writes the file."""
         where = self._path(path)
         if where in self.installed:
             return
-        self._must("sh", ["-c", 'mkdir -p "$(dirname "$0")" && cat > "$0" && chmod 755 "$0"', where],
+        self._must("sh", ["-c", f'mkdir -p "$1" && chown {self.owner} "$1"', "sh", str(Path(where).parent)],
+                   sudo=True)
+        self._must("sh", ["-c", 'cat > "$0" && chmod 755 "$0"', where],
                    input=Path(path).read_bytes())
         self.installed.add(where)
 

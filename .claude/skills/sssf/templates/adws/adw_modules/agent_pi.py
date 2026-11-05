@@ -63,11 +63,18 @@ def _count(value: str) -> int:
 
 @lru_cache(maxsize=1)
 def _pi_catalog() -> list[tuple[str, str, int]]:
-    """Read pi's merged catalog, including built-in providers and custom models."""
+    """Read pi's merged catalog, including built-in providers and custom models.
+
+    pi runs here, on this machine, whatever tree the agents use. In the operator
+    container it has no login of its own, so it gets the host broker's token as
+    OPENAI_API_KEY (_in_container), as an agent call does; without it pi lists
+    no openai models. A broker error raises SandboxFailed and nothing is cached.
+    The cache holds the parsed rows only, never the environment."""
+    env = _in_container(operator_env(), sandbox.LOCAL)
     try:
         result = subprocess.run(
             [PI_PATH, "--list-models"], capture_output=True, text=True,
-            timeout=30, env=operator_env(), check=False,
+            timeout=30, env=env, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -381,6 +388,7 @@ def container_token(socket_path: str) -> str:
 def _in_container(env: dict[str, str], tree) -> dict[str, str]:
     """In the operator container (SSSF_PI_TOKEN_SOCKET set) on a local tree: a
     fresh token from the host's broker as OPENAI_API_KEY. Otherwise unchanged.
+    Serves the model catalog (_pi_catalog) as well as agent calls.
     obs stays on: the container reaches the host's obs server."""
     socket_path = os.environ.get(CONTAINER_SOCKET_VAR)
     if tree is not sandbox.LOCAL or not socket_path:

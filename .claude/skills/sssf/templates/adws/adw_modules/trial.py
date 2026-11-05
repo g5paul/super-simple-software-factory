@@ -116,7 +116,21 @@ def family(agent) -> str:
 
 
 def pi_problems(made_by: str) -> list[str]:
-    """Why Pi can't run on this provider without billing the wrong account, or []."""
+    """Why Pi can't run on this provider without billing the wrong account, or [].
+    In the operator container the host's broker answers for `openai`."""
+    socket_path = os.environ.get(agent_pi.CONTAINER_SOCKET_VAR)
+    if made_by == "openai" and socket_path:
+        # In the operator container pi has no login: every openai call gets the
+        # host broker's token (agent_pi._in_container), so ask the broker the
+        # same way. It refuses an API key, and a failed broker stops the call
+        # rather than billing a key, so the oauth and SSSF_PI_AUTH checks below
+        # have nothing to add here.
+        try:
+            agent_pi.check_stored_login()
+            agent_pi.container_token(socket_path)
+        except sandbox.SandboxFailed as error:
+            return [str(error)]
+        return []
     try:
         done = subprocess.run([agent_pi.PI_PATH, "auth", "check", "--provider", made_by, "--json"],
                               capture_output=True, text=True, stdin=subprocess.DEVNULL,

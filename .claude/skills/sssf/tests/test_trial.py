@@ -243,6 +243,52 @@ def test_pi_on_openai_needs_the_chatgpt_sign_in_and_subscription_auth(monkeypatc
     assert "provider_not_found" in trial.pi_problems("google")[0]
 
 
+@pytest.fixture
+def container_broker(tmp_path, monkeypatch):
+    """A fake broker answering one line; set `answer` before connecting."""
+    import shutil
+    import socket
+    import tempfile
+    import threading
+    from adw_modules import agent_pi
+    d = tempfile.mkdtemp(dir="/tmp")
+    path = f"{d}/b.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(5)
+    state = {"answer": b"OK eyJ-tok\n"}
+
+    def serve():
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            conn.sendall(state["answer"])
+            conn.close()
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", path)
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", tmp_path / "auth.json")
+    yield state
+    server.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_in_the_container_the_broker_answers_for_openai(container_broker, monkeypatch):
+    def no_run(*a, **k):
+        raise AssertionError("pi auth check ran")
+    monkeypatch.setattr(trial.subprocess, "run", no_run)
+    assert trial.pi_problems("openai") == []
+    container_broker["answer"] = b"ERR nope\n"
+    assert trial.pi_problems("openai") == ["nope"]
+
+
+def test_in_the_container_other_providers_still_run_pi_auth_check(container_broker, monkeypatch):
+    monkeypatch.setattr(trial.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        stdout=json.dumps({"status": "not_ready", "reason": "provider_not_found"})))
+    assert "provider_not_found" in trial.pi_problems("google")[0]
+
+
 def test_too_few_worktree_slots_refuses_naming_the_runs_that_hold_them(repo):
     cfg = SSSFConfig()
     place = worktree.enter(cfg, "busy0001", True)

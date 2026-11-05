@@ -26,7 +26,7 @@ import pytest
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agent_pi, sandbox
+from adw_modules import agent_pi, agents, sandbox
 from adw_modules.data_types import AgentRequest
 
 KEYS = {"OPENAI_API_KEY": "sk-x", "ANTHROPIC_API_KEY": "sk-y", "OPENROUTER_API_KEY": "sk-z"}
@@ -348,3 +348,98 @@ def test_run_stops_before_pi_starts(broker, tmp_path, monkeypatch, fault):
     with pytest.raises(sandbox.SandboxFailed):
         agent_pi.run(request)
     assert started == []
+
+
+# --- the roster's model check signs in through the broker too ---
+
+@pytest.fixture
+def catalog():
+    agent_pi._pi_catalog.cache_clear()
+    yield
+    agent_pi._pi_catalog.cache_clear()
+
+
+def _shipped(tmp_path, monkeypatch, roster="sssf.config.yaml"):
+    """The shipped roster, with a fake pi that lists openai models only when it
+    holds OPENAI_API_KEY, and every prompt file present."""
+    cfg = agents.load_config(str(SKILL / "templates" / roster))
+    monkeypatch.chdir(tmp_path)
+    rows = []
+    for a in cfg.agents:
+        for ref in (a.prompt_engineering.system, a.prompt_engineering.user):
+            f = tmp_path / ref
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.touch()
+        if a.coding_agent != "claude_code":
+            provider, model_id = a.model.split("/", 1)
+            rows.append((provider, model_id))
+    lines = "\n".join(
+        (f'[ -n "$OPENAI_API_KEY" ] && echo "{p} {m} 200K"' if p == "openai"
+         else f'echo "{p} {m} 200K"') for p, m in sorted(set(rows)))
+    script = tmp_path / "pi"
+    script.write_text(
+        '#!/bin/sh\n'
+        f'touch "{tmp_path}/ran"\n'
+        f'printf %s "$OPENAI_API_KEY" > "{tmp_path}/seen_key"\n'
+        'echo "provider model context"\n' + lines + "\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    return cfg, [a.name for a in cfg.agents]
+
+
+def test_the_model_check_signs_in_through_the_broker(broker, catalog, tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg, names = _shipped(tmp_path, monkeypatch)
+    agents.validate(cfg, names)
+    assert (tmp_path / "seen_key").read_text() == "eyJ-tok"
+    assert "OPENAI_API_KEY" not in os.environ
+    assert "eyJ-tok" not in repr(agent_pi._pi_catalog())
+
+
+def test_a_broker_error_stops_the_model_check_with_its_message(broker, catalog, tmp_path, monkeypatch):
+    broker["answer"] = b"ERR sign in with pi, then /login\n"
+    cfg, names = _shipped(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as stop:
+        agents.validate(cfg, names)
+    text = str(stop.value)
+    assert text.startswith("config validation failed:")
+    assert "sign in with pi, then /login" in text
+    assert "not found in pi --list-models" not in text
+    assert not (tmp_path / "ran").exists()
+
+
+def test_a_stored_login_stops_the_model_check(broker, catalog, tmp_path, monkeypatch):
+    (tmp_path / "auth.json").write_text('{"openai": {"access": "SECRET"}}')
+    cfg, names = _shipped(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as stop:
+        agents.validate(cfg, names)
+    assert "openai entry" in str(stop.value) and "SECRET" not in str(stop.value)
+    assert not (tmp_path / "ran").exists()
+
+
+def test_an_api_key_from_the_broker_stops_the_model_check_without_echoing_it(
+        broker, catalog, tmp_path, monkeypatch):
+    broker["answer"] = b"OK sk-leak\n"
+    cfg, names = _shipped(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as stop:
+        agents.validate(cfg, names)
+    assert "sk-leak" not in str(stop.value)
+
+
+def test_a_host_model_check_is_unchanged(catalog, tmp_path, monkeypatch):
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg, names = _shipped(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit, match="not found in pi --list-models"):
+        agents.validate(cfg, names)
+    agent_pi._pi_catalog.cache_clear()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-op")
+    agents.validate(cfg, names)
+    assert (tmp_path / "seen_key").read_text() == "sk-op"
+
+
+def test_a_claude_code_roster_never_asks_the_broker(broker, catalog, tmp_path, monkeypatch):
+    broker["answer"] = b"ERR nope\n"
+    cfg, names = _shipped(tmp_path, monkeypatch, "sssf.config.claude_code.yaml")
+    agents.validate(cfg, names)
+    assert not (tmp_path / "ran").exists()

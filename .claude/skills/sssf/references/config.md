@@ -439,7 +439,7 @@ Each `harness_engineering` path must be inside the repo, committed or not, or th
 
 **Known limit:** code in pi's `extensions/` dir in the agent dir, or a package that `settings.json` loads, can register an openai key in code and isn't checked.
 
-**Known limit:** a `baseUrl` for openai in `models.json` passes, so pi sends the broker's token and calls to that endpoint, which can add a key of its own.
+**Known limit:** a `baseUrl`, `api` or `oauth` setting for openai in `models.json` passes. Each can send pi's calls, with the broker's token, to another endpoint, which can add a key of its own.
 
 **Known limit:** SSSF reads key names only, so `"apiKey": "$OPENAI_API_KEY"` stops the run too.
 

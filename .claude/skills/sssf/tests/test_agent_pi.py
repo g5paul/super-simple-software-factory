@@ -275,12 +275,13 @@ def test_a_relative_agent_dir_stops():
         agent_pi.check_stored_login(Path("rel/auth.json"))
 
 
+@pytest.mark.parametrize("name", ["auth.json", "models.json"])
 @pytest.mark.parametrize("kind", ["fifo", "fifo_link", "dir", "socket", "device_link"])
-def test_a_non_regular_auth_json_stops_without_blocking(tmp_path, kind):
+def test_a_non_regular_auth_json_stops_without_blocking(tmp_path, kind, name):
     tmp = Path(tempfile.mkdtemp(dir="/tmp"))
     fifo = tmp / "fifo"
     sock = None
-    path = tmp / "auth.json"
+    path = tmp / name
     try:
         if kind == "fifo":
             os.mkfifo(path)
@@ -299,7 +300,7 @@ def test_a_non_regular_auth_json_stops_without_blocking(tmp_path, kind):
 
         def run():
             try:
-                agent_pi.check_stored_login(path)
+                agent_pi.check_stored_login(tmp / "auth.json")
                 outcome.append(None)
             except BaseException as e:      # noqa: BLE001 - reported below
                 outcome.append(e)
@@ -335,7 +336,82 @@ def test_a_symlinked_auth_json_is_read_like_pi_reads_it(tmp_path):
     agent_pi.check_stored_login(link)
 
 
-@pytest.mark.parametrize("fault", ["error", "login"])
+def _write_models(tmp_path, openai):
+    (tmp_path / "models.json").write_text(json.dumps({"providers": {"openai": openai}}))
+
+
+@pytest.mark.parametrize("body, field", [
+    ({"apiKey": "SECRET"}, "providers.openai.apiKey"),
+    ({"apiKey": "$SECRET_VAR"}, "providers.openai.apiKey"),
+    ({"apiKey": "!echo SECRET"}, "providers.openai.apiKey"),
+    ({"headers": {"Authorization": "Bearer SECRET"}}, "providers.openai.headers"),
+    ({"models": [{"id": "m"}, {"id": "n", "headers": {"api-key": "SECRET"}}]},
+     "providers.openai.models[1].headers"),
+    ({"modelOverrides": {"gpt-SECRET": {"headers": {"x": "SECRET"}}}},
+     "providers.openai.modelOverrides.<key>.headers"),
+])
+def test_a_models_json_credential_stops(tmp_path, body, field):
+    _write_models(tmp_path, body)
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi.check_stored_login(tmp_path / "auth.json")
+    text = str(stop.value)
+    assert str(tmp_path / "models.json") in text and field in text and "SECRET" not in text
+
+
+def test_a_models_json_without_an_openai_credential_passes(tmp_path):
+    auth = tmp_path / "auth.json"
+    agent_pi.check_stored_login(auth)
+    (tmp_path / "models.json").write_text(json.dumps({"providers": {
+        "openai": {"baseUrl": "https://x", "authHeader": True, "headers": {}, "compat": {},
+                   "models": [{"id": "m", "contextWindow": 1000, "reasoning": True}],
+                   "modelOverrides": {"gpt-5": {"maxTokens": 10}}},
+        "anthropic": {"apiKey": "k", "headers": {"a": "b"}}}}))
+    agent_pi.check_stored_login(auth)
+    (tmp_path / "models.json").write_text("{}")
+    agent_pi.check_stored_login(auth)
+
+
+def test_models_json_is_parsed_like_pi(tmp_path):
+    auth = tmp_path / "auth.json"
+    models = tmp_path / "models.json"
+    models.write_text('﻿{ // note\n "providers": {"openai": {"apiKey": "SECRET",},},}')
+    with pytest.raises(sandbox.SandboxFailed, match=r"providers\.openai\.apiKey") as stop:
+        agent_pi.check_stored_login(auth)
+    assert "SECRET" not in str(stop.value)
+    models.write_text('{"providers": {"openai": {"baseUrl": "https://x//y"}}}')
+    agent_pi.check_stored_login(auth)
+    models.write_text('{ // only a comment\n "providers": {"openai": {"name": "x"},},\n}')
+    agent_pi.check_stored_login(auth)
+
+
+@pytest.mark.parametrize("content", [
+    "not json", '{"providers": []}', '{"providers": {"openai": "x"}}',
+    '{"providers": {"openai": {"models": "x"}}}'])
+def test_an_unreadable_models_json_stops(tmp_path, content):
+    (tmp_path / "models.json").write_text(content)
+    with pytest.raises(sandbox.SandboxFailed, match="can't read") as stop:
+        agent_pi.check_stored_login(tmp_path / "auth.json")
+    assert str(tmp_path / "models.json") in str(stop.value)
+
+
+def test_a_symlinked_models_json_is_read_like_pi_reads_it(tmp_path):
+    real = tmp_path / "real.json"
+    (tmp_path / "models.json").symlink_to(real)
+    agent_pi.check_stored_login(tmp_path / "auth.json")     # dangling: passes
+    real.write_text('{"providers": {"openai": {"apiKey": "SECRET"}}}')
+    with pytest.raises(sandbox.SandboxFailed) as stop:
+        agent_pi.check_stored_login(tmp_path / "auth.json")
+    assert "SECRET" not in str(stop.value)
+
+
+def test_auth_json_is_checked_before_models_json(tmp_path):
+    (tmp_path / "auth.json").write_text('{"openai": {}}')
+    _write_models(tmp_path, {"apiKey": "SECRET"})
+    with pytest.raises(sandbox.SandboxFailed, match="openai entry"):
+        agent_pi.check_stored_login(tmp_path / "auth.json")
+
+
+@pytest.mark.parametrize("fault", ["error", "login", "models_key"])
 def test_run_stops_before_pi_starts(broker, tmp_path, monkeypatch, fault):
     request = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi"))
     started = []
@@ -343,6 +419,8 @@ def test_run_stops_before_pi_starts(broker, tmp_path, monkeypatch, fault):
     monkeypatch.setattr(sandbox.LOCAL, "start", lambda *a, **k: started.append(1), raising=False)
     if fault == "error":
         broker["answer"] = b"ERR nope\n"
+    elif fault == "models_key":
+        _write_models(tmp_path, {"apiKey": "SECRET"})
     else:
         (tmp_path / "auth.json").write_text('{"openai": {}}')
     with pytest.raises(sandbox.SandboxFailed):
@@ -414,6 +492,29 @@ def test_a_stored_login_stops_the_model_check(broker, catalog, tmp_path, monkeyp
     with pytest.raises(SystemExit) as stop:
         agents.validate(cfg, names)
     assert "openai entry" in str(stop.value) and "SECRET" not in str(stop.value)
+    assert not (tmp_path / "ran").exists()
+
+
+def test_a_models_json_key_stops_the_model_check(broker, catalog, tmp_path, monkeypatch):
+    _write_models(tmp_path, {"apiKey": "SECRET"})
+    cfg, names = _shipped(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as stop:
+        agents.validate(cfg, names)
+    assert "providers.openai.apiKey" in str(stop.value) and "SECRET" not in str(stop.value)
+    assert not (tmp_path / "ran").exists()
+
+
+def test_a_host_run_ignores_models_json(broker, tmp_path, monkeypatch):
+    _write_models(tmp_path, {"apiKey": "SECRET"})
+    assert agent_pi._in_container({"A": "1"}, object()) == {"A": "1"}      # a VM tree
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET")
+    assert agent_pi._in_container({"A": "1"}, sandbox.LOCAL) == {"A": "1"}
+
+
+def test_a_claude_code_roster_ignores_models_json(broker, catalog, tmp_path, monkeypatch):
+    _write_models(tmp_path, {"apiKey": "SECRET"})
+    cfg, names = _shipped(tmp_path, monkeypatch, "sssf.config.claude_code.yaml")
+    agents.validate(cfg, names)
     assert not (tmp_path / "ran").exists()
 
 

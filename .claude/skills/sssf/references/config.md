@@ -431,19 +431,25 @@ In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agen
 
 In the operator container (`container/run.sh`), `SSSF_PI_TOKEN_SOCKET` names a socket to the host's `pi_token_broker.py`. Before each pi agent call on a local tree, SSSF asks it for a one-hour token and sets `OPENAI_API_KEY` to it. The host keeps the sign-in. If the broker errors or doesn't answer, the call stops before pi starts. Config validation's model check (`pi --list-models`) and a trial's sign-in check for `openai` ask the broker the same way, so a broker error, or a stored `openai` login, stops validation with its message before any agent starts, instead of showing up as a missing model. A Claude Code roster never asks. `run.sh` removes a socket left at the broker's path, waits until the new broker answers, and exits 1 if it doesn't.
 
-Each `harness_engineering` path must be inside the repo, committed or not, or the run stops before it starts. An `openai` entry in the `auth.json` pi reads in the container (`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json` when that is set) also stops the run, because pi would use it instead of the host's sign-in. So does anything at that path that isn't a regular file, or a relative `PI_CODING_AGENT_DIR`. obs works as on the host: no `OBS_DISABLE`, and `OBS_AUTH_TOKEN` is kept.
+Each `harness_engineering` path must be inside the repo, committed or not, or the run stops before it starts. An `openai` entry in the `auth.json` pi reads in the container (`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json` when that is set) also stops the run, because pi would use it instead of the host's sign-in. The check also reads `models.json` in that same dir: a `providers.openai` entry there with an `apiKey` (a literal, `$NAME` or `!command`) or any `headers` (at the provider, a model, or a model override) stops the run, because pi would use it ahead of the broker's token. A non-regular or unreadable `models.json` stops the run too. Models and settings without a key pass. So does anything at that path that isn't a regular file, or a relative `PI_CODING_AGENT_DIR`. obs works as on the host: no `OBS_DISABLE`, and `OBS_AUTH_TOKEN` is kept.
 
 **Known limit:** any process in the container can get a one-hour token from the socket while the session is open, because everything there runs as one user.
 
-**Known limit:** the stored-login check reads `auth.json` only, for an `openai` entry. Other stored logins pi keeps are not checked, and neither is `~/.pi/agent/models.json`: an `apiKey` for openai there, in the container's shared home volume, wins over the broker's token, so pi bills that key instead of the host's ChatGPT plan.
+**Known limit:** the check reads `auth.json` for an `openai` entry and `models.json` for an openai `apiKey` or `headers`. Other stored logins pi keeps are not checked.
 
-**Known limit:** the check and pi read `auth.json` at different moments, so a file swapped between them can pass the check and still reach pi.
+**Known limit:** code in pi's `extensions/` dir in the agent dir, or a package that `settings.json` loads, can register an openai key in code and isn't checked.
+
+**Known limit:** a `baseUrl` for openai in `models.json` passes, so pi sends the broker's token and calls to that endpoint, which can add a key of its own.
+
+**Known limit:** SSSF reads key names only, so `"apiKey": "$OPENAI_API_KEY"` stops the run too.
+
+**Known limit:** the check and pi read `auth.json` and `models.json` at different moments, so a file swapped between them can pass the check and still reach pi.
 
 **Known limit:** an extension path inside the repo that is a symlink to a file outside it passes the launch check, and imports aren't followed.
 
 **Known limit:** each connection to the socket starts one host `pi` process, with no cap, so a process in the container can load the host.
 
-**Known limit:** the check reads `auth.json` only when it is a regular file, but a regular file whose read never ends, such as one on a FUSE mount, still holds the operator. It has no size limit either.
+**Known limit:** the check reads `auth.json` and `models.json` only when each is a regular file, but a regular file whose read never ends, such as one on a FUSE mount, still holds the operator. It has no size limit either.
 
 **Known limit:** `run.sh` removes an old socket before the broker binds its path, and another host process could bind it in between. Only the host user can write in `$XDG_RUNTIME_DIR`.
 

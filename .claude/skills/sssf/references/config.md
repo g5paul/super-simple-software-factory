@@ -421,7 +421,9 @@ In the VM, pi loads the file from the run's clone, at the worktree path, so file
 
 `sssf_rules.ts` still loads last, after every listed extension.
 
-In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agent of either harness. Pi agents also get `OBS_DISABLE=1`, so an obs extension loads but posts nothing. SSSF's trace still records the run. Other `OBS_*` variables cross.
+In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agent of either harness. Pi agents also get `OBS_DISABLE=1`, so an obs extension loads but posts nothing. SSSF's trace still records the run. Every other `OBS_*` and `SSSF_*` variable crosses, and a host run still passes `OBS_AUTH_TOKEN` as before.
+
+**Known limits on secrets in a VM.** Only that one name is held back, so a secret under another `OBS_` or `SSSF_` name crosses. The Claude token and pi's ChatGPT token reach agents in the VM by design, and nothing scans the commits or handoff folder that come back for secrets, so an agent that writes a token into the clone brings it to the host branch. A secret committed in the repo is in the clone too. The pre-push secret scan, when the repo has it, is what stops such a token leaving the machine.
 
 **Known limit:** an agent can edit a committed extension in the VM, and the edited one loads for the next agent call. A host run has the same exposure, since an extension isn't a protected file. Nothing checks it.
 

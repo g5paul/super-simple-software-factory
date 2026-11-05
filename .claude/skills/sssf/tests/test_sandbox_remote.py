@@ -633,3 +633,10 @@ def test_obs_token_in_a_callers_env_dict_is_dropped_too(box):
     assert "OBS_AUTH_TOKEN" not in out and "OBS_POOL=p" in out
     sent = [c["env"] for c in box.raw.calls]
     assert sent and all("OBS_AUTH_TOKEN" not in e for e in sent)
+
+
+def test_a_host_command_still_gets_the_obs_token(tmp_path, monkeypatch):
+    from adw_modules import sandbox
+    monkeypatch.setenv("OBS_AUTH_TOKEN", "secret-obs")
+    done = sandbox.LOCAL.run(["sh", "-c", "env"], cwd=tmp_path)
+    assert "OBS_AUTH_TOKEN=secret-obs" in done.stdout

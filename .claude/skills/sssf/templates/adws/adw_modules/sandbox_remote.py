@@ -5,7 +5,7 @@ same absolute path as the host worktree, and the run's context_handoff folder
 at its host path too, so every path the run passes means the same thing on
 both sides. Each command goes through `run` or `start` below:
 
-- `run` is a check, git, or setup. It gets SSSF's own variables, never the
+- `run` is a check, git, or setup. It gets SSSF's own and obs variables, never the
   Claude token. No command gets OBS_AUTH_TOKEN (HELD), which would let code in
   the VM copy it into the clone and back to the host branch.
 - `start` is an agent. It gets the token from ~/.config/sssf-sandbox/token.env,

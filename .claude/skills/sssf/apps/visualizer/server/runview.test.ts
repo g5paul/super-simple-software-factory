@@ -84,6 +84,12 @@ test("an agent that went quiet is a stop reason of its own", () => {
   expect(stopReason(events, phases, "fail")).toMatchObject({ kind: "agent_silent", message: "builder wrote nothing for 15 minutes and was stopped" });
 });
 
+test("a lost VM stream names its own stop", () => {
+  const phases = [phase("build", "fail", "SilentStop: builder wrote nothing for 15 minutes")];
+  const events = [ev("error", "agent_stream_lost", { error: "builder's output stream from the sandbox VM went dead", minutes: 15 }, phases[0].phase_id)];
+  expect(stopReason(events, phases, "fail")).toMatchObject({ kind: "agent_stream_lost", message: "builder's output stream from the sandbox VM went dead" });
+});
+
 test("the repo's daily cap is a stop reason of its own", () => {
   const phases = [phase("build", "fail", "DailyBudgetStop: this repo's runs have spent $20.10")];
   const events = [ev("error", "daily_budget_stop", { error: "this repo's runs have spent $20.10 in the last 24 hours" }, phases[0].phase_id)];

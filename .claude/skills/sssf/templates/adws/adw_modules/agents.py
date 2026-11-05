@@ -261,7 +261,10 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             count_partial(stop)
             stop.running = forward.tracker.running()
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                         type="error", name="agent_silent",
+                                         type="error",
+                                         # A VM stream that went dead stops the same way, and
+                                         # is named apart (remote-sandboxes.md, decision 30).
+                                         name="agent_stream_lost" if stop.lost else "agent_silent",
                                          payload={"agent": agent.name, "error": str(stop),
                                                   "minutes": stop.minutes,
                                                   "running": stop.running.get("label", ""),

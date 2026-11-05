@@ -128,9 +128,11 @@ class FakeE2BHandle:
         self.popen, self.chunk = popen, chunk
 
     def wait(self, on_stdout=None, on_stderr=None, on_pty=None):
-        # Odd-sized chunks, so lines arrive split, as E2B's do.
-        while piece := self.popen.stdout.read(self.chunk):
-            on_stdout(piece)
+        # Odd-sized chunks, so lines arrive split, as E2B's do, each sent as
+        # soon as it's there (os.read), not held until a chunk fills.
+        fd = self.popen.stdout.fileno()
+        while piece := os.read(fd, self.chunk):
+            on_stdout(piece.decode())
         err = self.popen.stderr.read()
         if err:
             on_stderr(err)
@@ -747,3 +749,98 @@ def test_sdk_errors_become_oserror_and_others_pass_through(box, monkeypatch):
     monkeypatch.setattr(box.sandbox, "run_process", other)
     with pytest.raises(ValueError, match="ours"):
         box.run(["true"])
+
+
+# --- an agent's output stream that goes dead (decisions 28 to 35) ---------------
+#
+# A stream stays open while anything holds the agent's stdout. A grandchild
+# started in a session of its own does, after the agent's session has gone:
+# to the host that is a stream that never ends, as one on a dropped
+# connection is.
+
+HOLD = "(setsid sleep 6 >&1 2>&2 &)"
+
+
+@pytest.fixture
+def quick(monkeypatch):
+    from adw_modules import sandbox_remote
+    monkeypatch.setattr(sandbox_remote, "QUIET_SECONDS", 0.5, raising=False)
+    monkeypatch.setattr(sandbox_remote, "DRAIN_SECONDS", 0.5, raising=False)
+    monkeypatch.setattr(sandbox_remote, "POLL_SECONDS", 0.05, raising=False)
+    monkeypatch.setattr(sandbox_remote, "CALL_SECONDS", 0.5, raising=False)
+    monkeypatch.setattr(sandbox_remote, "COMMAND_SECONDS", 0.5)
+
+
+def _read(process, dog=None):
+    """The runner's read loop, as agent_cc and agent_pi run it."""
+    from adw_modules import silence
+    lines = []
+    with silence.watch(process, dog) as watchdog:
+        for line in process.stdout:
+            watchdog.touch()
+            lines.append(line)
+        stderr = process.stderr.read() if process.stderr else ""
+        code = process.wait()
+    return lines, watchdog, stderr, code
+
+
+def test_a_quiet_agent_that_is_still_running_keeps_its_stream(box, quick):
+    process = box.start(["sh", "-c", "echo one; sleep 1.5; echo two"])
+    lines, dog, _, code = _read(process)
+    assert [l.strip() for l in lines] == ["one", "two"]
+    assert code == 0 and not dog.fired and not dog.lost
+
+
+def test_a_stream_the_vm_never_answers_about_ends_and_says_so(box, quick, hang, monkeypatch):
+    from adw_modules import silence
+    process = box.start(["sh", "-c", "echo one; sleep 6"])
+    started = time.monotonic()
+    first = next(iter(process.stdout))
+    monkeypatch.setattr(box.sandbox, "run_process", hang)   # the VM stops answering
+    rest, dog, stderr, code = _read(process)
+    assert first.strip() == "one" and rest == []
+    assert time.monotonic() - started < 5
+    assert dog.lost and dog.hung and code == -1 and stderr == ""
+    stop = silence.SilentStop("builder", 15, "abc")
+    assert stop.lost and "didn't answer" in str(stop) and "--adw-id abc" in str(stop)
+
+
+def test_a_stream_that_outlives_its_agent_ends_and_says_so(box, quick):
+    from adw_modules import silence
+    process = box.start(["sh", "-c", f"echo one; {HOLD}"])
+    started = time.monotonic()
+    lines, dog, _, _ = _read(process)
+    assert [l.strip() for l in lines] == ["one"]
+    assert time.monotonic() - started < 5
+    assert dog.lost and dog.hung
+    assert "had exited" in str(silence.SilentStop("builder", 15, "abc"))
+
+
+def test_a_silence_stop_ends_the_read_in_a_vm(box, quick):
+    from adw_modules import silence, sandbox_remote
+    sandbox_remote.QUIET_SECONDS = 60          # the probe stays out of it
+    process = box.start(["sh", "-c", f"echo one; {HOLD}; sleep 6"])
+    started = time.monotonic()
+    lines, dog, _, _ = _read(process, dog=0.5)
+    assert [l.strip() for l in lines] == ["one"]
+    assert time.monotonic() - started < 5
+    assert dog.fired and dog.hung and not dog.lost
+    assert not silence.SilentStop("builder", 15, "abc").lost
+
+
+def test_a_lost_stream_is_stopped_once(box, quick):
+    process = box.start(["sh", "-c", f"echo one; {HOLD}"])
+    stops = []
+    real = process.stop_tree
+    process.stop_tree = lambda: (stops.append(1), real())
+    _read(process)
+    assert stops == [1]
+
+
+def test_a_stream_that_ends_normally_is_unchanged(box, quick):
+    from adw_modules import silence
+    process = box.start(["sh", "-c", "echo one; echo two >&2; exit 3"])
+    lines, dog, stderr, code = _read(process)
+    assert [l.strip() for l in lines] == ["one"] and "two" in stderr
+    assert code == 3 and not dog.fired
+    assert not silence.SilentStop("builder", 15, "abc").lost

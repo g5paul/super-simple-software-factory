@@ -325,12 +325,24 @@ def test_an_unwritable_tmpdir_still_restores(repo, tmp_path, monkeypatch):
     assert not list((repo / ".git").glob("sssf.*"))
 
 
+def small_cap(monkeypatch, run, slack: int = 64 * 1024) -> None:
+    """Set the cap just above what the watched paths pack to now, far under the
+    1 MB the cap tests add. A fixed 64 KB failed under a long TMPDIR, since tar
+    spends extra blocks on each long name."""
+    import base64
+    _, paths, _ = permissions._watched(run)
+    packs = [permissions._pack(paths, follow=f) for f in (False, True)]
+    assert all(pack is not None for pack in packs)
+    used = max(len(base64.b64decode(pack)) for pack in packs)
+    monkeypatch.setattr(permissions, "PACK_CAP", used + slack)
+
+
 def test_a_symlink_to_a_big_tree_is_cut_off(repo, tmp_path, monkeypatch):
-    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
     big = tmp_path / "big"
     big.mkdir()
     (big / "blob").write_bytes(os.urandom(1024 * 1024))
     run = SimpleNamespace(repo_root=repo)
+    small_cap(monkeypatch, run)
     guard = permissions.guard_git_dir(run)
     (repo / ".git" / "hooks" / "zz").symlink_to(big)
     assert permissions.git_dir_changed(guard)
@@ -1037,24 +1049,25 @@ def test_a_names_link_over_the_cap_stops_the_run_first(repo, home, tmp_path):
 
 
 def test_a_hooks_link_to_a_big_tree_stops_the_run_first(repo, tmp_path, monkeypatch):
-    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
     big = tmp_path / "big"
     big.mkdir()
     (big / "blob").write_bytes(os.urandom(1024 * 1024))
+    run = shipped(repo)
+    small_cap(monkeypatch, run)
     (repo / ".git" / "hooks" / "zz").symlink_to(big)
     with pytest.raises(permissions.PermissionBreach, match="too large to check"):
-        permissions.guard_git_dir(shipped(repo))
+        permissions.guard_git_dir(run)
     assert (repo / ".git" / "hooks" / "zz").is_symlink()
 
 
 def test_a_names_link_grown_past_the_cap_is_a_breach(repo, home, tmp_path, monkeypatch):
-    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
     target = tmp_path / "names"
     target.write_text(PRIVATE)
     names = repo / ".git" / "sssf-private-names"
     names.symlink_to(target)
     dotfile = linked_gitconfig(home, tmp_path)
     run = shipped(repo)
+    small_cap(monkeypatch, run)
     guard = permissions.guard_git_dir(run)
     target.write_bytes(os.urandom(1024 * 1024))
     with dotfile.open("a") as f:
@@ -1068,10 +1081,10 @@ def test_a_names_link_grown_past_the_cap_is_a_breach(repo, home, tmp_path, monke
 
 
 def test_a_names_file_swapped_for_a_big_link_names_the_gitconfig(repo, home, tmp_path, monkeypatch):
-    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
     names = write_private(repo)
     dotfile = linked_gitconfig(home, tmp_path)
     run = shipped(repo)
+    small_cap(monkeypatch, run)
     guard = permissions.guard_git_dir(run)
     big = tmp_path / "big"
     big.write_bytes(os.urandom(1024 * 1024))
@@ -1090,12 +1103,12 @@ def test_a_names_file_swapped_for_a_big_link_names_the_gitconfig(repo, home, tmp
 
 
 def test_a_link_under_the_cap_is_still_checked(repo, home, tmp_path, monkeypatch):
-    monkeypatch.setattr(permissions, "PACK_CAP", 64 * 1024)
     small = tmp_path / "small"
     small.write_bytes(b"x" * 4096)
     (repo / ".git" / "sssf-private-names").symlink_to(small)
     dotfile = linked_gitconfig(home, tmp_path)
     run = shipped(repo)
+    small_cap(monkeypatch, run)
     guard = permissions.guard_git_dir(run)
     assert permissions.restore_git_dir(run, guard) == []
     guard = permissions.guard_git_dir(run)

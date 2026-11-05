@@ -56,6 +56,7 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 - **Sandbox branches: done.** sssf-sandbox is on its trunk, `master`, with no other branches.
 - **Parallel runs in the container: done.** Built to [parallel-worktree-runs.md](parallel-worktree-runs.md). Each worktree run in the container gets its own project environment, removed on merge or discard, and `run.sh` gives the container a fixed hostname, so the trace tells its processes from the host's. Proven in sssf-sandbox (pr3conso and pr3title together, then pr4contr beside a host run). Each environment's editable install points at its own worktree, checked in this image with a scratch package.
 - **The sandbox seam: built.** [remote-sandboxes.md](remote-sandboxes.md), settled on 2026-11-02, built it against Vercel Sandbox and E2B the same week. `--sandbox vercel` and `--sandbox e2b` run beside `--container`, and that doc keeps what is still open.
+- **pi in the container: not built, next after extensions in the VM.** The image installs Claude Code but not node or pi, and only a Claude token goes in, so a pi roster can't run under `--container` at all. It needs node and pi in the image and a way for the ChatGPT sign-in to reach pi there; [remote-sandboxes.md](remote-sandboxes.md) passes a short-lived bearer token for the VM, which may serve here too. Extensions then need no copying, since the repo is mounted at its host path. The engineer asked for it on 2026-11-05.
 
 ### What a second sandbox means
 

@@ -100,3 +100,21 @@ uv run .claude/skills/sssf/scripts/install.py --update
 Then `--take` or `--keep` each flagged file, as in the install cookbook, and
 fast-forward `main`. The stamp records no `skill` commit here, for the same
 reason. `git log -1 -- adws/` names the update that stamped `adws/`.
+
+## Check the projects' updates
+
+After the hub asks each project session to update, check their reports with
+
+```bash
+uv run adws/check_projects.py
+```
+
+It reads every repo in the install registry except this one, and fails a
+repo when its `stamp.json` names a different skill, its last stamp commit
+isn't "Update SSSF to skill <h>", its tree isn't clean, its committed
+`.claude/skills/sssf` differs from this repo's at that commit, or no
+`adw_quality` run has passed since the update. A stray or leftover skill
+file shows as `extra`. It only reads git and each trace, so it is safe on a
+repo whose session owns it. `--skill <h>` expects an older commit, and
+`--repo <name>` checks one repo. The script and its tests are hub-only, like
+the guard chain.

@@ -226,6 +226,25 @@ def test_the_third_refusal_stops_the_run_and_says_nothing_ran():
     assert stop.value.refusals == rules.MAX_REFUSALS
 
 
+def test_denied_reads_only_claude_codes_permission_denied_event():
+    event = {"type": "system", "subtype": "permission_denied", "tool_name": "Bash",
+             "tool_use_id": "toolu_011E3m58bgpqe7LGELGbwmZ2", "decision_reason_type": "rule",
+             "message": "Permission to use Bash with command cat .env has been denied."}
+    assert rules.denied(event) == ["toolu_011E3m58bgpqe7LGELGbwmZ2"]
+    for other in ({"type": "system", "subtype": "init"},
+                  {k: v for k, v in event.items() if k != "tool_use_id"},
+                  {**event, "tool_use_id": None}, {**event, "tool_use_id": 7},
+                  {"type": "user", "message": {"content": [
+                      {"type": "tool_result", "tool_use_id": "c1", "content": event["message"]}]}},
+                  finish("c1", "x")):
+        assert rules.denied(other) == []
+    forward, events, _ = forwarder()
+    forward(announce("c1"))
+    forward({"type": "system", "subtype": "permission_denied", "tool_use_id": "c1"})
+    forward(finish("c1", "Permission denied"))
+    assert [(e.name, e.payload["refusals"]) for e in events] == [("rule_refused", 1)]
+
+
 def test_a_harness_that_cannot_refuse_stops_at_the_announcement():
     forward, _, _ = forwarder(can_refuse=False)
     with pytest.raises(rules.RuleBreach, match="may have run"):

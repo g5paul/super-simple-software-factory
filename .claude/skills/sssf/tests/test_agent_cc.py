@@ -14,14 +14,17 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
 SKILL = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agent_cc, agents
+from adw_modules import agent_cc, agents, rules, secret_files
+from adw_modules.repo_settings import RepoSettings
 from adw_modules.data_types import AgentConfig, AgentRequest, SSSFConfig
 
 SESSION = "f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10"
@@ -215,6 +218,71 @@ def test_tool_result_content_may_be_a_block_list():
     assert record["ok"] is True
 
 
+def _stream(tmp_path, name, middle) -> tuple[Path, dict]:
+    """cc_turn1's init and result lines around `middle`; no new fixture file."""
+    lines = (FIXTURES / "cc_turn1.jsonl").read_text().splitlines()
+    result = json.loads(lines[-1])
+    path = tmp_path / name
+    path.write_text("".join(json.dumps(e) + "\n" for e in [json.loads(lines[0]), *middle, result]))
+    return path, result
+
+
+def test_a_denied_read_is_a_failed_call_and_the_call_goes_on(tmp_path, fake):
+    from adw_modules import rules
+    usage = next(json.loads(line) for line in (FIXTURES / "cc_turn1.jsonl").read_text().splitlines()
+                 if json.loads(line).get("type") == "assistant")["message"]["usage"]
+    call_id = "toolu_01BdBmiNqfMBM4JPshZVxodW"
+    path, result = _stream(tmp_path, "denied.jsonl", [
+        {"type": "assistant", "message": {
+            "id": "msg_denied", "model": "claude-haiku-5-5", "role": "assistant", "usage": usage,
+            "content": [{"type": "tool_use", "id": call_id, "name": "Read",
+                         "input": {"file_path": "/repo/.env"}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": call_id, "is_error": True,
+             "content": "<tool_use_error>File is in a directory that is denied by your "
+                        "permission settings.</tool_use_error>"}]}},
+        {"type": "system", "subtype": "permission_denied", "tool_name": "Grep",
+         "tool_use_id": call_id, "decision_reason_type": "rule",
+         "message": "Permission to read /repo/.env has been denied.",
+         "uuid": "bacf0074-14fc-4c40-9871-972f71ae02f7",
+         "session_id": "2b34dc8b-a340-4c0c-82bb-046a7632da0a"},
+        {"type": "system", "subtype": "permission_denied", "tool_name": "Bash",
+         "tool_use_id": "toolu_011E3m58bgpqe7LGELGbwmZ2", "decision_reason_type": "rule",
+         "message": "Permission to use Bash with command cat .env has been denied.",
+         "session_id": "2b34dc8b-a340-4c0c-82bb-046a7632da0a"},
+    ])
+    fake(path)
+    tracker = agent_cc.ToolCallTracker()
+    records = []
+
+    def on_event(event):
+        records.extend(tracker.observe(event))
+        rules.calls(event)
+        rules.results(event)
+
+    outcome = agent_cc.run(request(tmp_path), on_event=on_event)
+
+    assert outcome.text == result["result"]
+    assert len(records) == 1
+    assert records[0]["tool"] == "Read"
+    assert records[0]["ok"] is False
+    assert "denied by your permission settings" in records[0]["result_snippet"]
+
+
+def test_an_assistant_message_that_is_not_a_dict_does_not_raise(tmp_path, fake):
+    tracker = agent_cc.ToolCallTracker()
+    assert tracker.observe({"type": "assistant", "message": "oops"}) == []
+    assert tracker.observe({"type": "user", "message": "oops"}) == []
+    assert tracker.observe({"type": "system", "subtype": "permission_denied",
+                            "message": "Permission to read /repo/.env has been denied."}) == []
+
+    path, _ = _stream(tmp_path, "odd.jsonl", [
+        {"type": "assistant", "message": "oops"},
+        {"type": "stream_event", "event": {"type": "message_start", "message": "oops"}}])
+    fake(path)
+    agent_cc.run(request(tmp_path), on_event=lambda e: tracker.observe(e))
+
+
 # ── failures ─────────────────────────────────────────────────────────────────
 
 def _rewrite(tmp_path, name, edit) -> Path:
@@ -383,3 +451,131 @@ def test_a_copy_without_the_exec_bit_gets_it_back(tmp_path, monkeypatch):
     script.chmod(0o644)
     sandbox.LOCAL.install(script)
     assert os.access(script, os.X_OK)
+
+
+# ── Claude Code's own denials ────────────────────────────────────────────────
+
+DENIED_TEXT = "Permission to use Bash with command cat .env has been denied."
+CAT_RULE = {"rule": "Never cat .env.", "forbid": [r"\bcat\s+\.env\b"]}
+
+
+def _guarded(root, agent_rules=()):
+    """The forwarder agents.py builds, from the shipped repo.yaml."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".env").write_text("APP_CANARY=x\n")
+    data = yaml.safe_load((SKILL / "templates" / "repo.yaml").read_text()) or {}
+    settings = RepoSettings.model_validate({**data, "agent_rules": list(agent_rules)})
+    files = secret_files.find([root], settings.secret_files)
+    builtin = secret_files.shell_rule(files)
+    enforced = [*settings.agent_rules, builtin]
+    events, said = [], []
+    run = SimpleNamespace(adw_id="r1", tracer=SimpleNamespace(event=events.append),
+                          console=SimpleNamespace(advise=said.append))
+    forward = agents._event_forwarder(run, SimpleNamespace(phase_id="r1_01"), "builder",
+                                      agent_cc, enforced, uncounted=(builtin,))
+    return forward, events, builtin
+
+
+def _usage():
+    return next(json.loads(line) for line in (FIXTURES / "cc_turn1.jsonl").read_text().splitlines()
+                if json.loads(line).get("type") == "assistant")["message"]["usage"]
+
+
+def _bash_call(call_id, command="cat .env"):
+    return {"type": "assistant", "message": {
+        "id": f"msg_{call_id}", "model": "claude-haiku-5-5", "role": "assistant",
+        "usage": _usage(),
+        "content": [{"type": "tool_use", "id": call_id, "name": "Bash",
+                     "input": {"command": command, "description": "Read the file"}}]}}
+
+
+def _result(call_id, content):
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": call_id, "is_error": True, "content": content}]}}
+
+
+def _denial(call_id, tool="Bash"):
+    return {"type": "system", "subtype": "permission_denied", "tool_name": tool,
+            "tool_use_id": call_id, "decision_reason_type": "rule", "message": DENIED_TEXT}
+
+
+def _denied_bash(call_id, command="cat .env", result=None):
+    return [_bash_call(call_id, command), _denial(call_id),
+            _result(call_id, DENIED_TEXT if result is None else result)]
+
+
+def _refused_bash(call_id):
+    return [_bash_call(call_id),
+            _result(call_id, "Exit code 126\n" + rules.REFUSED + ", by this repo's rule: ...")]
+
+
+def _replay(tmp_path, fake, name, events, agent_rules=()):
+    forward, logged, _ = _guarded(tmp_path / f"repo_{name}", agent_rules)
+    path, result = _stream(tmp_path, name, events)
+    fake(path)
+    return agent_cc.run(request(tmp_path), on_event=forward), logged, result
+
+
+def _refusals(logged):
+    return [e.payload for e in logged if e.name == "rule_refused"]
+
+
+def test_a_bash_read_claude_code_denies_is_a_refusal_and_the_call_goes_on(tmp_path, fake):
+    call_id = "toolu_011E3m58bgpqe7LGELGbwmZ2"
+    outcome, logged, result = _replay(tmp_path, fake, "d.jsonl", _denied_bash(call_id))
+    assert outcome.text == result["result"]
+    [payload] = _refusals(logged)
+    assert payload["command"] == "cat .env"
+    assert payload["rule"] == secret_files.RULE_TEXT
+    assert payload["refusals"] == 0
+    [call] = [e for e in logged if e.type == "tool_call"]
+    assert call.payload["ok"] is False
+    _, by_sssf, _ = _replay(tmp_path, fake, "r.jsonl", _refused_bash(call_id))
+    assert _refusals(by_sssf) == [payload]
+
+
+def test_three_denials_by_claude_code_stop_at_max_refusals(tmp_path, fake):
+    ids = ["toolu_den1", "toolu_den2", "toolu_den3"]
+    caught = []
+    for name, build in (("d", _denied_bash), ("r", _refused_bash)):
+        events = [e for i in ids for e in build(i)]
+        with pytest.raises(rules.RuleBreach, match="Nothing refused ran") as stop:
+            _replay(tmp_path, fake, f"{name}.jsonl", events,
+                    agent_rules=[{**CAT_RULE, "on_match": "refuse"}])
+        caught.append(stop.value)
+    assert caught[0].refusals == caught[1].refusals == rules.MAX_REFUSALS
+    assert caught[0].partial is not None
+
+
+def test_three_denials_under_the_builtin_rule_never_stop_the_run(tmp_path, fake):
+    ids = ["toolu_den1", "toolu_den2", "toolu_den3"]
+    seen = []
+    for name, build in (("d", _denied_bash), ("r", _refused_bash)):
+        _, logged, _ = _replay(tmp_path, fake, f"{name}.jsonl", [e for i in ids for e in build(i)])
+        seen.append([p["refusals"] for p in _refusals(logged)])
+    assert seen == [[0, 0, 0], [0, 0, 0]]
+
+
+def test_a_denial_for_another_call_does_not_excuse_a_call_that_ran(tmp_path, fake):
+    grep_id = "toolu_01BdBmiNqfMBM4JPshZVxodW"
+    events = [
+        {"type": "assistant", "message": {
+            "id": "msg_grep", "model": "claude-haiku-5-5", "role": "assistant", "usage": _usage(),
+            "content": [{"type": "tool_use", "id": grep_id, "name": "Grep",
+                         "input": {"path": "/repo/.env"}}]}},
+        _bash_call("toolu_ran"),
+        _denial(grep_id, "Grep"),
+        _result("toolu_ran", "APP_CANARY=x"),
+    ]
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        _replay(tmp_path, fake, "other.jsonl", events)
+
+
+def test_a_stop_rule_match_stops_the_run_even_when_claude_code_denies_it(tmp_path, fake):
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        _replay(tmp_path, fake, "stop.jsonl", _denied_bash("toolu_stop"), agent_rules=[CAT_RULE])
+    forward, logged, _ = _guarded(tmp_path / "direct", agent_rules=[CAT_RULE])
+    forward(_denial("toolu_stop"))
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(_bash_call("toolu_stop"))
+    assert _refusals(logged) == []

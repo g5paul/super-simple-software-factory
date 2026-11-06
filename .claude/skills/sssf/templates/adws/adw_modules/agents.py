@@ -488,18 +488,24 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
 
     A refuse rule waits for the call's result instead: sssf_rules.ts refuses
     for pi, sssf_refuse.py for Claude Code. SSSF's refusal there
-    means nothing ran, and the run goes on; any other result means it ran.
+    means nothing ran, and the run goes on; any other result means it ran. So
+    does a call Claude Code denied itself (a `permission_denied` event with its
+    `tool_use_id`, read by rules.denied): nothing ran, and it counts like
+    SSSF's refusal.
 
     Refusals by a rule in `uncounted` (the built-in secret-file rule, by
     identity) don't count toward MAX_REFUSALS, so a command that only mentions
     .env never ends a run; the cost caps bound a loop. A call by such a rule
-    whose result isn't the refusal still raises RuleBreach."""
+    whose result isn't the refusal, and that Claude Code didn't deny, still
+    raises RuleBreach."""
     tracker = interface.ToolCallTracker()
     pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
+    denied: set[str] = set()            # call ids Claude Code denied itself (permission_denied)
     refusals = 0
 
     def forward(event: dict) -> None:
         nonlocal refusals
+        denied.update(rules.denied(event))
         for call_id, command in rules.calls(event):
             found = rules.breach(list(enforced), command)
             if found and can_refuse and found[0].on_match == "refuse":
@@ -508,9 +514,12 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
                 raise rules.RuleBreach(agent_name, *found, command)
         for call_id, text in rules.results(event):
             if call_id not in pending:
+                denied.discard(call_id)
                 continue
             rule, pattern, command = pending.pop(call_id)
-            if not rules.refused(text):
+            by_claude = call_id in denied
+            denied.discard(call_id)
+            if not (by_claude or rules.refused(text)):
                 raise rules.RuleBreach(agent_name, rule, pattern, command)
             if not any(rule is u for u in uncounted):
                 refusals += 1

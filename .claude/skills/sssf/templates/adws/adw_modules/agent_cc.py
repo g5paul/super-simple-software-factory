@@ -18,9 +18,15 @@ drops their CLAUDE.md, skills, plugins, hooks, and MCP servers, so a factory
 agent sees its system.md and nothing else. Safe mode keeps environment
 variables, so a repo's refuse rules reach the agent as a shell prefix,
 sssf_refuse.py, not as a hook. Protected secret files (secret_files.py) are
-denied to Read and Grep with `--disallowedTools "Read(//<abs>)"`, one per
+denied to Read and Grep (and to Bash reads, by Claude Code itself) with
+`--disallowedTools "Read(//<abs>)"`, one per
 file, with the path's pattern characters escaped (deny_rule), which
 --safe-mode and bypassPermissions keep; checked by hand on claude 2.1.319.
+Claude Code applies those denies to any tool that reads the file, Bash
+included, so it may deny `cat .env` before sssf_refuse.py runs. Each denial
+arrives as a `permission_denied` system event, whose `message` is a string. The
+forwarder (agents._event_forwarder, via rules.denied) counts that call as
+refused, by its `tool_use_id`, and the trace records it from its `tool_result`.
 Keys .env names don't reach the agent (utils.agent_env). Auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """
@@ -154,6 +160,13 @@ def _text_of(content) -> str:
                    if isinstance(part, dict) and part.get("type") == "text")
 
 
+def _message(event: dict) -> dict:
+    """An event's `message`, or {} when it isn't a dict. Claude Code 2.1.319's
+    permission_denied system event carries a string there, one per denied call."""
+    message = event.get("message")
+    return message if isinstance(message, dict) else {}
+
+
 class ToolCallTracker(_PiToolCallTracker):
     """Folds Claude's stream into ONE normalized record per completed call.
 
@@ -167,7 +180,7 @@ class ToolCallTracker(_PiToolCallTracker):
 
     def observe(self, event: dict) -> list[dict]:
         etype = event.get("type", "")
-        blocks = [b for b in (event.get("message", {}) or {}).get("content", []) or []
+        blocks = [b for b in _message(event).get("content") or []
                   if isinstance(b, dict)]
         if etype == "assistant":
             for block in blocks:
@@ -305,7 +318,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         inner = event.get("event") or {}
                         stream = event.get("parent_tool_use_id")
                         if inner.get("type") == "message_start":
-                            streaming[stream] = (inner.get("message") or {}).get("id")
+                            streaming[stream] = _message(inner).get("id")
                         elif inner.get("type") == "message_delta" and streaming.get(stream):
                             output[streaming[stream]] = (inner.get("usage") or {}).get("output_tokens") or 0
                             raw.write(line)
@@ -334,13 +347,13 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     if etype == "assistant":
                         # Per message, subagents' too: a killed call never sends the
                         # result event that totals them.
-                        message = event.get("message") or {}
+                        message = _message(event)
                         if message.get("id") and message.get("usage"):
                             turns[message["id"]] = message
                     if etype == "assistant" and not event.get("parent_tool_use_id"):
                         # One API message streams as one event per content block,
                         # each repeating the same usage: read occupancy, never sum it.
-                        turn = _context_tokens(event.get("message", {}).get("usage") or {})
+                        turn = _context_tokens(_message(event).get("usage") or {})
                         if turn:
                             result.context_tokens = turn
                     elif etype == "rate_limit_event" and event.get("rate_limit_info"):

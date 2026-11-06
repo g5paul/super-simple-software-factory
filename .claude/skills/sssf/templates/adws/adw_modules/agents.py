@@ -224,7 +224,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             cwd=str(run.repo_root),
             max_cost=agent.max_call_cost,
             stop_on_usage_credits=run.cfg.defaults.rate_limit_stop is not None,
-            refuse_rules=rules.refusing(enforced),
+            refuse_rules=rules.refusing(enforced, builtin=builtin),
             max_silence_seconds=silent_after,
             secret_files=protected,
             agent_env=settings.agent_env,
@@ -497,7 +497,9 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
     identity) don't count toward MAX_REFUSALS, so a command that only mentions
     .env never ends a run; the cost caps bound a loop. A call by such a rule
     whose result isn't the refusal, and that Claude Code didn't deny, still
-    raises RuleBreach."""
+    raises RuleBreach. A RuleBreach for a rule in `uncounted` names it as
+    SSSF's secret-file rule."""
+    is_builtin = lambda rule: any(rule is u for u in uncounted)
     tracker = interface.ToolCallTracker()
     pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
     denied: set[str] = set()            # call ids Claude Code denied itself (permission_denied)
@@ -511,7 +513,7 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
             if found and can_refuse and found[0].on_match == "refuse":
                 pending.setdefault(call_id, (*found, command))
             elif found:
-                raise rules.RuleBreach(agent_name, *found, command)
+                raise rules.RuleBreach(agent_name, *found, command, builtin=is_builtin(found[0]))
         for call_id, text in rules.results(event):
             if call_id not in pending:
                 denied.discard(call_id)
@@ -520,8 +522,8 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
             by_claude = call_id in denied
             denied.discard(call_id)
             if not (by_claude or rules.refused(text)):
-                raise rules.RuleBreach(agent_name, rule, pattern, command)
-            if not any(rule is u for u in uncounted):
+                raise rules.RuleBreach(agent_name, rule, pattern, command, builtin=is_builtin(rule))
+            if not is_builtin(rule):
                 refusals += 1
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="log", name="rule_refused",
@@ -530,7 +532,8 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
                                                   "refusals": refusals}))
             run.console.advise(f"refused {agent_name}: `{command[:200]}` ({rule.rule})")
             if refusals >= rules.MAX_REFUSALS:
-                raise rules.RuleBreach(agent_name, rule, pattern, command, refusals=refusals)
+                raise rules.RuleBreach(agent_name, rule, pattern, command, refusals=refusals,
+                                       builtin=is_builtin(rule))
         # The call's span rides the columns; duration_ms stays in the payload as
         # the interface's own number.
         for record in tracker.observe(event):

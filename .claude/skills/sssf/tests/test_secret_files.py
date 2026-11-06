@@ -24,7 +24,7 @@ SKILL = Path(__file__).resolve().parent.parent
 TEMPLATES = SKILL / "templates"
 sys.path.insert(0, str(TEMPLATES / "adws"))
 
-from adw_modules import agent_cc, agent_pi, agents, rules, sandbox, secret_files, utils
+from adw_modules import agent_cc, agent_pi, agents, repo_settings, rules, sandbox, secret_files, utils
 from adw_modules.data_types import AgentRequest, SSSFConfig
 from adw_modules.repo_settings import RepoSettings
 
@@ -258,3 +258,63 @@ def test_the_refuse_extension_is_the_last_pi_extension_without_refuse_rules(tmp_
     argv = seen.read_text().splitlines()
     loaded = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
     assert loaded == ["first.ts", str(agent_pi.REFUSE_EXTENSION)]
+
+
+def test_execute_marks_only_the_built_in_rule_in_the_requests_refuse_rules(tmp_path, monkeypatch):
+    cfg = shipped_config()
+    root = make_repo(tmp_path / "repo")
+    monkeypatch.chdir(root)
+    push = {"rule": "Never run `git push`.", "forbid": [r"\bgit\s+push\b"], "on_match": "refuse"}
+    twin = {"rule": secret_files.RULE_TEXT, "forbid": [r"\bcat\s+\.env\b"], "on_match": "refuse"}
+    rm = {"rule": "Never run rm -rf.", "forbid": [r"\brm\s+-rf\b"]}
+    data = yaml.safe_load((TEMPLATES / "repo.yaml").read_text()) or {}
+    data["agent_rules"] = [push, twin, rm]
+    path = root / repo_settings.PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data))
+    for a in cfg.agents:
+        for ref in (a.prompt_engineering.system, a.prompt_engineering.user):
+            f = root / ref
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.touch()
+
+    class Captured(Exception):
+        pass
+
+    seen = []
+
+    def run_fake(request, **kw):
+        seen.append(request)
+        raise Captured()
+
+    fake = SimpleNamespace(run=run_fake, ToolCallTracker=agent_pi.ToolCallTracker)
+    monkeypatch.setattr(agents, "_interface", lambda agent: fake)
+    for name in ("check_run", "check_live", "check_daily", "check_machine"):
+        monkeypatch.setattr(agents.budget, name, lambda *a, **k: None)
+    monkeypatch.setattr(agents.permissions, "guard_git_dir", lambda run: None)
+    monkeypatch.setattr(agents.permissions, "restore_git_dir", lambda *a, **k: [])
+    monkeypatch.setattr(agents.agent_cc, "check_login", lambda *a, **k: None)
+    monkeypatch.setattr(agents.account, "check", lambda *a, **k: None)
+    run = SimpleNamespace(
+        cfg=cfg, adw_id="r1", session_dir=tmp_path / "s", repo_root=root,
+        context_handoff_dir=tmp_path / "h", agent_map={},
+        tracer=SimpleNamespace(event=lambda e: None, process_start=lambda *a: None,
+                               process_end=lambda *a: None, gate_row=lambda *a: None,
+                               agent_session_row=lambda *a, **k: None),
+        console=SimpleNamespace(agent_started=lambda *a: None, advise=lambda *a: None,
+                                note=lambda *a: None, envelope_summary=lambda *a: None),
+        add_usage=lambda *a: None, save_agent_map=lambda *a: None)
+    phase = SimpleNamespace(phase_id="r1_01", params=SimpleNamespace(owner="builder", name="build"))
+    call = SimpleNamespace(prompt="x", previous=None, session=None)
+    with pytest.raises(Captured):
+        agents.execute(run, phase, call)
+
+    [request] = seen
+    got = request.refuse_rules
+    find_files = [str(root / ".env"), str(root / "sub/.env.local")]
+    assert [r for r in got if r.get("builtin")] == [
+        {"rule": secret_files.RULE_TEXT, "forbid": secret_files.shell_rule(find_files).forbid,
+         "builtin": True}]
+    assert {"rule": push["rule"], "forbid": push["forbid"]} in got
+    assert {"rule": twin["rule"], "forbid": twin["forbid"]} in got
+    assert not any(r["rule"] == rm["rule"] for r in got)

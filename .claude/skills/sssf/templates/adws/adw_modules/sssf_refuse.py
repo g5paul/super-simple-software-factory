@@ -20,7 +20,8 @@ that command. A line in another shape is searched whole, and so is each
 a command still finds one. Keep this docstring free of backslashes: a
 warning on stderr would come before the refusal and hide it. A change in Claude
 Code's wrapping can still make a pattern miss, and SSSF's stream check stays
-the backstop either way.
+the backstop either way. SSSF's built-in secret-file rule comes marked
+`builtin`, and its refusal names it as SSSF's.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ import shlex
 import sys
 
 REFUSED = "SSSF refused this command"     # rules.REFUSED; the stream check looks for it
+TAIL = ("Nothing ran. Don't try it another way: do the task without it, or say in your "
+        "report that the task needs it.")
 EXIT = 126
 EVAL = re.compile(r"&& eval (.*) < /dev/null && pwd -P", re.S)
 ANY_EVAL = re.compile(r"\beval\s+('(?:[^']|'\\'')*')")   # one single-quoted eval argument
@@ -64,9 +67,10 @@ def refusal(line: str, rules: list[dict]) -> str | None:
             except re.error:
                 continue
             if hit:
+                if rule.get("builtin"):
+                    return f"{REFUSED}, by SSSF's secret-file rule: {rule.get('rule')} {TAIL}"
                 return (f"{REFUSED}, by this repo's rule: {rule.get('rule')} (it matches "
-                        f"{json.dumps(pattern)}). Nothing ran. Don't try it another way: do the "
-                        "task without it, or say in your report that the task needs it.")
+                        f"{json.dumps(pattern)}). {TAIL}")
     return None
 
 

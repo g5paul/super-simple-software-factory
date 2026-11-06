@@ -8,17 +8,21 @@
  * before it runs, and the agent reads the rule as the call's result. The
  * patterns are Python regexes read here as JavaScript ones; one that doesn't
  * compile is skipped, and SSSF's stream check, which reads them as Python,
- * stops the run if that command runs.
+ * stops the run if that command runs. SSSF's built-in secret-file rule comes
+ * marked `builtin`, and its refusal names it as SSSF's.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-// rules.REFUSED in Python: the stream check looks for it in the call's result.
+// rules.REFUSED in Python: the stream check looks for it in a bash call's result.
+// File-tool refusals don't use it; the stream check never reads those.
 const REFUSED = "SSSF refused this command";
+const TAIL = "Nothing ran. Don't try it another way: do the task without it, or say in your "
+  + "report that the task needs it.";
 
-interface Rule { rule: string; forbid: string[] }
+interface Rule { rule: string; forbid: string[]; builtin?: boolean }
 
 // Patterns compile with the m flag, as the Python side searches with re.M, so
 // `^` matches at the start of every line.
@@ -55,7 +59,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   const rules: Rule[] = JSON.parse(process.env.SSSF_REFUSE_RULES || "[]");
-  const compiled = rules.map((r) => ({ rule: r.rule, patterns: r.forbid.map((p) => [p, compile(p)] as const) }));
+  const compiled = rules.map((r) => ({ rule: r.rule, builtin: !!r.builtin, patterns: r.forbid.map((p) => [p, compile(p)] as const) }));
 
   pi.on("tool_call", (event) => {
     if (["read", "grep", "find", "ls"].includes(event.toolName)) {
@@ -66,23 +70,23 @@ export default function (pi: ExtensionAPI) {
       if (secrets.has(wanted) || (resolved && secrets.has(resolved))) {
         return {
           block: true,
-          reason: `${REFUSED}: ${given} is one of this repo's secret files, which SSSF keeps from agents. `
-            + "Nothing ran. Don't try it another way: do the task without it, or say in your "
-            + "report that the task needs it.",
+          reason: `SSSF refused this ${event.toolName} call: ${given} is one of this repo's secret files, `
+            + "which SSSF keeps from agents. Nothing was read. Don't try it another way: do the task "
+            + "without it, or say in your report that the task needs it.",
         };
       }
       return;
     }
     if (event.toolName !== "bash") return;
     const command = String((event.input as { command?: unknown })?.command ?? "");
-    for (const { rule, patterns } of compiled) {
+    for (const { rule, builtin, patterns } of compiled) {
       for (const [source, re] of patterns) {
         if (re?.test(command)) {
           return {
             block: true,
-            reason: `${REFUSED}, by this repo's rule: ${rule} (it matches ${JSON.stringify(source)}). `
-              + "Nothing ran. Don't try it another way: do the task without it, or say in your "
-              + "report that the task needs it.",
+            reason: builtin
+              ? `${REFUSED}, by SSSF's secret-file rule: ${rule} ${TAIL}`
+              : `${REFUSED}, by this repo's rule: ${rule} (it matches ${JSON.stringify(source)}). ${TAIL}`,
           };
         }
       }

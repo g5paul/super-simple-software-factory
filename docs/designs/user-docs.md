@@ -1,6 +1,6 @@
 # Docs for people who use this fork
 
-Status: decided on 2026-11-05. The worktree bug is reproduced and fixed; the rest is not started. Work goes in the order under "The plan".
+Status: decided on 2026-11-05. The worktree bug is fixed and the images are merged. The docs branch has every page in decision 5; the skill's own docs and the review are next. Work goes in the order under "The plan".
 
 ## The gap
 
@@ -41,6 +41,8 @@ The audit also found a code bug that the docs repeat, so it comes first.
    - **changed or added:** subscriptions instead of API keys, caps and usage stops, a branch per run and parallel runs, the container and the VMs, rules the repo owns, and the guard chain.
 
    The copy doesn't claim the fork threw out half the workflows. It kept all 13 and grew by about 54,000 lines, keeping the shape and building what a real repo needed around it. "Built to be Observed, Customized, and Reused" becomes the closing section. It invites readers to strip this fork in turn, and names the parts that are the hub's own and safe to delete: the guard chain, `projects.md` and the push rules.
+
+   Written, the push rules came off that list. The tracked one is the `agent_rules` entry in the hub's `repo.yaml` that refuses agent pushes, which a fork likely wants to keep, and the rest live in files that aren't tracked. The list names `docs/sssf.md` in their place.
 7. **Order and branches.** Three branches off main, each merged before the next starts:
    1. the bug fix;
    2. the diagrams;

@@ -76,7 +76,11 @@ const tip = "SSSF's runs in every registered repo, against each provider's Hobby
 </script>
 
 <template>
-  <div v-if="providers.length" class="sandbox" :title="tip">
+  <div v-if="providers.length" class="meter-card sandbox" :title="tip">
+    <div class="card-head">
+      <span class="card-title">Sandboxes</span>
+      <span class="dim">VM runs in every repo, against each provider's free allowance</span>
+    </div>
     <div v-for="p in providers" :key="p.provider" class="provider">
       <div class="line">{{ heading(p) }}</div>
       <div v-for="b in bars(p)" :key="b.label" class="row" :class="level(b.share)">
@@ -94,13 +98,14 @@ const tip = "SSSF's runs in every registered repo, against each provider's Hobby
 </template>
 
 <style scoped>
-.sandbox {
-  font-size: 15px;
-  margin-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.sandbox { font-size: 15px; }
+
+.provider + .provider {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
 }
+
+.line { font-weight: 600; }
 
 .row {
   display: grid;

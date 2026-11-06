@@ -40,7 +40,12 @@ const tip = computed(() => `max_daily_cost in ${day.value?.path ?? 'limits.yaml'
 </script>
 
 <template>
-  <div v-if="day && (day.cap !== null || day.error)" class="machine" :class="level" :title="tip">
+  <div v-if="day && (day.cap !== null || day.error)" class="meter-card machine" :class="level" :title="tip">
+    <div class="card-head">
+      <span class="card-title">Machine cap</span>
+      <span class="dim">max_daily_cost across every repo</span>
+    </div>
+    <div>
     <template v-if="day.cap !== null">
       <div class="line">
         <b class="spent">{{ dollars(day.spent) }}</b> of {{ dollars(day.cap) }} across every repo in the last 24 hours
@@ -52,14 +57,12 @@ const tip = computed(() => `max_daily_cost in ${day.value?.path ?? 'limits.yaml'
       <div v-if="clears" class="clears">runs on this machine stop until {{ clears }}</div>
     </template>
     <div v-else class="clears">{{ day.path }} can't be read, so runs stop: {{ day.error }}</div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.machine {
-  font-size: 15px;
-  margin-top: 14px;
-}
+.machine { font-size: 15px; }
 
 .bar {
   height: 8px;

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import type { AccountUsage, LimitWindow, SpendRow } from '../lib/types'
+import type { AccountUsage, LimitWindow } from '../lib/types'
 import { fetchAccount } from '../lib/api'
-import { fmtCost, fmtDate, fmtTokens } from '../lib/format'
+import { fmtCost, fmtDate } from '../lib/format'
 import { modelName } from '../lib/models'
 import MachineGauge from './MachineGauge.vue'
 import SandboxGauge from './SandboxGauge.vue'
+import SpendTables from './SpendTables.vue'
 
 const usage = shallowRef<AccountUsage | null>(null)
 const error = ref<string | null>(null)
@@ -63,118 +64,106 @@ const windows = computed(() => {
     { label: '7-day', w: s?.seven_day ?? null },
   ]
 })
-
-function share(row: SpendRow, total: number): string {
-  return total > 0 ? `${Math.round((row.est_usd / total) * 100)}%` : ''
-}
 </script>
 
 <template>
   <section class="account">
-    <div class="head">
-      <span class="title">Claude account</span>
-      <span v-if="usage?.sample" class="dim">
-        limits as of {{ age(usage.sample.age_s) }}, from the last SSSF agent call
-      </span>
-      <span v-else-if="usage" class="dim">no limit reading yet: one SSSF run on Claude Code records it</span>
-      <span v-if="error" class="err">account unavailable: {{ error }}</span>
-    </div>
+    <div v-if="error" class="err">account unavailable: {{ error }}</div>
 
-    <div v-if="usage" class="meters">
-      <div v-for="m in windows" :key="m.label" class="meter" :class="level(m.w)">
-        <div class="meter-top">
-          <span>{{ m.label }} window</span>
-          <span class="pct">{{ m.w ? `${Math.round(m.w.utilization * 100)}%` : '—' }}</span>
+    <div class="meter-card">
+      <div class="card-head">
+        <span class="card-title">Claude</span>
+        <span v-if="usage?.sample" class="dim">
+          limits as of {{ age(usage.sample.age_s) }}, from the last SSSF agent call
+        </span>
+        <span v-else-if="usage" class="dim">no limit reading yet: one SSSF run on Claude Code records it</span>
+      </div>
+
+      <div v-if="usage" class="meters">
+        <div v-for="m in windows" :key="m.label" class="meter" :class="level(m.w)">
+          <div class="meter-top">
+            <span>{{ m.label }} window</span>
+            <span class="pct">{{ m.w ? `${Math.round(m.w.utilization * 100)}%` : '—' }}</span>
+          </div>
+          <div class="bar"><div class="fill" :style="{ width: `${(m.w?.utilization ?? 0) * 100}%` }" /><div class="stop" /></div>
+          <div class="faint small">
+            {{ m.w ? `resets ${fmtDate(m.w.resets_at)}` : 'no live reading: the last one has reset' }}
+          </div>
         </div>
-        <div class="bar"><div class="fill" :style="{ width: `${(m.w?.utilization ?? 0) * 100}%` }" /><div class="stop" /></div>
+        <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
+      </div>
+
+      <div v-if="usage" class="spend">
+        <div class="totals">
+          <span>
+            {{ usage.window.basis === 'five_hour' ? 'This 5-hour window' : 'Last 5 hours' }}:
+            <b>{{ fmtCost(usage.window.est_usd) }}</b> est. over {{ usage.window.calls }} calls
+          </span>
+          <span>
+            {{ usage.week.basis === 'seven_day' ? 'This 7-day window' : 'Last 7 days' }}:
+            <b>{{ fmtCost(usage.week.est_usd) }}</b> est.
+          </span>
+        </div>
+        <SpendTables
+          :caption="usage.window.basis === 'five_hour' ? 'Where this 5-hour window\'s spend went' : 'Where the last 5 hours\' spend went'"
+          :total="usage.window.est_usd"
+          empty="no calls in this window"
+          :tables="[
+            { name: 'by kind', rows: usage.window.by_kind },
+            { name: 'by project', rows: usage.window.by_project },
+            { name: 'by model', rows: usage.window.by_model, label: modelName },
+          ]"
+        />
         <div class="faint small">
-          {{ m.w ? `resets ${fmtDate(m.w.resets_at)}` : 'no live reading: the last one has reset' }}
+          Cost is estimated from transcript token counts at list price. The subscription pays it; it shows
+          what fills the windows.
+        </div>
+        <div v-if="unlisted.length" class="unlisted">
+          No list price for {{ unlisted.join(', ') }}, so its calls are left out of these estimates.
+          Add it to the skill's <code>adws/adw_modules/prices.json</code> from
+          <a href="https://claude.com/pricing" target="_blank" rel="noopener">claude.com/pricing</a>.
         </div>
       </div>
-      <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
     </div>
 
-    <MachineGauge />
-    <SandboxGauge />
+    <div v-if="usage?.pi.limit_hit || usage?.pi.week.calls" class="meter-card">
+      <div class="card-head">
+        <span class="card-title">pi agents</span>
+        <span class="dim">ChatGPT and the other pi providers</span>
+      </div>
 
-    <div v-if="usage" class="spend">
-      <div class="spend-head">
-        <span>
-          {{ usage.window.basis === 'five_hour' ? 'This 5-hour window' : 'Last 5 hours' }}:
-          <b>{{ fmtCost(usage.window.est_usd) }}</b> est. over {{ usage.window.calls }} calls
-        </span>
-        <span class="dim">
-          {{ usage.week.basis === 'seven_day' ? 'this 7-day window' : 'last 7 days' }}: {{ fmtCost(usage.week.est_usd) }}
-        </span>
+      <div v-if="usage.pi.limit_hit" class="pi-limit">
+        The ChatGPT plan was out of usage at {{ fmtDate(usage.pi.limit_hit.at) }} (run
+        <a :href="`#/${encodeURIComponent(usage.pi.limit_hit.project)}/${encodeURIComponent(usage.pi.limit_hit.adw_id)}`">{{ usage.pi.limit_hit.adw_id }}</a>,
+        {{ usage.pi.limit_hit.project }}). OpenAI gives no reset time, so it may have usage again:
+        <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener">check its usage</a>.
       </div>
-      <div class="tables">
-        <table v-for="t in [
-          { name: 'by kind', rows: usage.window.by_kind, label: (k: string) => k },
-          { name: 'by project', rows: usage.window.by_project, label: (k: string) => k },
-          { name: 'by model', rows: usage.window.by_model, label: modelName },
-        ]" :key="t.name">
-          <thead><tr><th>{{ t.name }}</th><th>calls</th><th>est.</th><th></th><th>out</th></tr></thead>
-          <tbody>
-            <tr v-for="r in t.rows.slice(0, 8)" :key="r.key">
-              <td class="key" :title="r.key">{{ t.label(r.key) }}</td>
-              <td>{{ r.calls }}</td>
-              <td>{{ fmtCost(r.est_usd) }}</td>
-              <td class="dim">{{ share(r, usage.window.est_usd) }}</td>
-              <td class="dim">{{ fmtTokens(r.output_tokens) }}</td>
-            </tr>
-            <tr v-if="!t.rows.length"><td colspan="5" class="dim">no calls in this window</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="faint small">
-        Cost is estimated from transcript token counts at list price. The subscription pays it; it shows
-        what fills the windows.
-      </div>
-      <div v-if="unlisted.length" class="unlisted">
-        No list price for {{ unlisted.join(', ') }}, so its calls are left out of these estimates.
-        Add it to the skill's <code>adws/adw_modules/prices.json</code> from
-        <a href="https://claude.com/pricing" target="_blank" rel="noopener">claude.com/pricing</a>.
-      </div>
+
+      <template v-if="usage.pi.week.calls">
+        <div class="totals">
+          <span>Last 5 hours: <b>{{ fmtCost(usage.pi.window.est_usd) }}</b> est. over {{ usage.pi.window.calls }} calls</span>
+          <span>Last 7 days: <b>{{ fmtCost(usage.pi.week.est_usd) }}</b> est.</span>
+        </div>
+        <SpendTables
+          caption="Where the last 5 hours' spend went"
+          :total="usage.pi.window.est_usd"
+          empty="no pi calls in the last 5 hours"
+          :tables="[
+            { name: 'by project', rows: usage.pi.window.by_project },
+            { name: 'by model', rows: usage.pi.window.by_model },
+          ]"
+        />
+        <div class="faint small">
+          Cost is pi's list-price figure. A subscription sign-in, such as ChatGPT, pays it. pi's providers
+          report no usage limits to SSSF, so check a ChatGPT plan's limits in ChatGPT or Codex. A run
+          that reaches the plan's limit stops there, and shows here for 5 hours.
+        </div>
+      </template>
     </div>
 
-    <div v-if="usage?.pi.limit_hit" class="pi-limit">
-      The ChatGPT plan was out of usage at {{ fmtDate(usage.pi.limit_hit.at) }} (run
-      <a :href="`#/${encodeURIComponent(usage.pi.limit_hit.project)}/${encodeURIComponent(usage.pi.limit_hit.adw_id)}`">{{ usage.pi.limit_hit.adw_id }}</a>,
-      {{ usage.pi.limit_hit.project }}). OpenAI gives no reset time, so it may have usage again:
-      <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener">check its usage</a>.
-    </div>
-
-    <div v-if="usage?.pi.week.calls" class="spend pi">
-      <div class="spend-head">
-        <span>
-          <b>Pi agents</b>, last 5 hours: <b>{{ fmtCost(usage.pi.window.est_usd) }}</b> est. over
-          {{ usage.pi.window.calls }} calls
-        </span>
-        <span class="dim">last 7 days: {{ fmtCost(usage.pi.week.est_usd) }}</span>
-      </div>
-      <div class="tables">
-        <table v-for="t in [
-          { name: 'by project', rows: usage.pi.window.by_project },
-          { name: 'by model', rows: usage.pi.window.by_model },
-        ]" :key="t.name">
-          <thead><tr><th>{{ t.name }}</th><th>calls</th><th>est.</th><th></th><th>out</th></tr></thead>
-          <tbody>
-            <tr v-for="r in t.rows.slice(0, 8)" :key="r.key">
-              <td class="key" :title="r.key">{{ r.key }}</td>
-              <td>{{ r.calls }}</td>
-              <td>{{ fmtCost(r.est_usd) }}</td>
-              <td class="dim">{{ share(r, usage.pi.window.est_usd) }}</td>
-              <td class="dim">{{ fmtTokens(r.output_tokens) }}</td>
-            </tr>
-            <tr v-if="!t.rows.length"><td colspan="5" class="dim">no Pi calls in the last 5 hours</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="faint small">
-        Cost is Pi's list-price figure. A subscription sign-in, such as ChatGPT, pays it. Pi's providers
-        report no usage limits to SSSF, so check a ChatGPT plan's limits in ChatGPT or Codex. A run
-        that reaches the plan's limit stops there, and shows here for 5 hours.
-      </div>
+    <div class="side-by-side">
+      <SandboxGauge />
+      <MachineGauge />
     </div>
   </section>
 </template>
@@ -182,26 +171,19 @@ function share(row: SpendRow, total: number): string {
 <style scoped>
 .account {
   margin: 16px 24px 0;
-  padding: 18px 22px;
-  border: 1px solid var(--border-soft);
-  border-radius: 16px;
-  background: var(--surface);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
-.head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 14px;
+/* Sandboxes and the machine cap share a row on a wide screen; either may be absent. */
+.side-by-side {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  gap: 16px;
 }
 
-.title {
-  font-size: 18px;
-  font-weight: 700;
-}
+.side-by-side:not(:has(*)) { display: none; }
 
 .meters {
   display: grid;
@@ -249,80 +231,43 @@ function share(row: SpendRow, total: number): string {
 .high .fill { background: var(--red); }
 .high .pct { color: var(--red); }
 
-.unlisted {
-  margin-top: 8px;
-  color: var(--amber);
+/* The rule between the limits and the spend. */
+.meters + .spend {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
 }
 
-.unlisted a {
-  color: inherit;
-  text-decoration: underline;
+.spend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.pi-limit {
-  margin-top: 12px;
+.totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
   font-size: 15px;
-  color: var(--red);
 }
 
+.unlisted { color: var(--amber); }
+
+.unlisted a,
 .pi-limit a {
   color: inherit;
   text-decoration: underline;
 }
 
-.pi {
-  padding-top: 14px;
-  border-top: 1px solid var(--border-soft);
-}
-
-.spend-head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 10px;
+.pi-limit {
   font-size: 15px;
-}
-
-.tables {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
-  align-items: start;
-  gap: 18px;
-  margin: 10px 0;
-}
-
-table {
-  border-collapse: collapse;
-  font-size: 13px;
-  width: 100%;
-}
-
-th {
-  text-align: left;
-  font-weight: 400;
-  color: var(--faint);
-  padding: 0 8px 4px 0;
-}
-
-td {
-  padding: 3px 8px 3px 0;
-  font-family: var(--mono);
-}
-
-td.key {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--sans);
+  color: var(--red);
 }
 
 .small { font-size: 12px; }
 
-/* At phone width the token column goes, so each table fits without scrolling. */
 @media (max-width: 520px) {
-  .account { margin: 12px 16px 0; padding: 14px 16px; }
-  th:last-child, td:last-child { display: none; }
+  .account { margin: 12px 16px 0; }
 }
+
 .err { color: var(--red); }
 </style>

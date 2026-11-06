@@ -204,3 +204,33 @@ pre {
     opacity: 0.35;
   }
 }
+
+/* The account area's cards: one per thing metered, each with its own heading. */
+.meter-card {
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.meter-card > .card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.meter-card .card-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+@media (max-width: 520px) {
+  .meter-card { padding: 14px 16px; }
+}

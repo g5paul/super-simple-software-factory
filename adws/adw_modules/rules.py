@@ -21,7 +21,8 @@ runs, the agent reads the rule as the tool's result, and the run goes on. On
 pi, SSSF's own extension (sssf_rules.ts) blocks it. Claude Code agents run
 with --safe-mode, which ignores every hook, so their Bash calls go through
 SSSF's shell prefix (sssf_refuse.py) instead. The stream check stays as the
-backstop: a matching call whose result isn't that refusal ran, and is a
+backstop: a matching call whose result isn't that refusal, and that Claude Code
+didn't deny itself (a `permission_denied` event for its id), ran, and is a
 breach.
 """
 
@@ -135,6 +136,17 @@ def results(event: dict) -> list[tuple[str, str]]:
                 for block in message.get("content") or []
                 if isinstance(block, dict) and block.get("type") == "tool_result"]
     return []
+
+
+def denied(event: dict) -> list[str]:
+    """The call id in a Claude Code `permission_denied` system event: Claude
+    Code denied that call itself, by its own permission rules, before it ran
+    (claude 2.1.319 sends it right after the call's tool_use). Matched by id
+    only; the event's `message` is never read."""
+    if event.get("type") != "system" or event.get("subtype") != "permission_denied":
+        return []
+    call_id = event.get("tool_use_id")
+    return [call_id] if isinstance(call_id, str) and call_id else []
 
 
 def _text(content) -> str:

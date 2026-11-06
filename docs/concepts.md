@@ -196,7 +196,7 @@ The database has seven tables:
 | `events` | everything that happened, in order |
 | `envelopes` | each agent's parsed report |
 | `gate_results` | each gate's checks |
-| `agent_sessions` | which agent session each phase used |
+| `agent_sessions` | one row per agent per run: its coding-agent session, model, and how full its context window is |
 | `processes` | each run's live processes and pids, so `just kill` can stop them |
 
 Every event carries its `adw_id` and `phase_id`, and `parent_id` nests an agent's tool calls under its phase. One `tool_call` row covers each call, named the way you'd read it, such as `bash: ls -la src`.

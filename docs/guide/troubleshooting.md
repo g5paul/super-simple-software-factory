@@ -8,11 +8,13 @@ Start with the trace. `just phases <adw_id>` shows which phase failed, and the r
 
 **`claude has no login the agents can use`.** The agents run `claude` with your shell's environment, and `claude auth status` there found no login. Log in with `claude`. In the container, or anywhere you sign in with a token, export `CLAUDE_CODE_OAUTH_TOKEN` in the shell that launches the ADW: a Claude Code session doesn't pass its own token to the shells it runs. `just login-check` runs the same check without starting a run.
 
-**An agent billed the API.** Every Claude Code agent's init event must show `apiKeySource` as `none`. If one doesn't, `ANTHROPIC_API_KEY` reached it from somewhere SSSF doesn't clear. [install.md](install.md#4-check-that-it-works) has the check.
+**`claude would bill the API (apiKeySource=...) on a subscription run`.** A Claude Code agent started with an API key it found, from somewhere SSSF doesn't clear. SSSF kills the call at its first event, before it does any work. Remove that key source, or set `SSSF_CLAUDE_AUTH=api_key` if you mean to bill the API. [install.md](install.md#4-check-that-it-works) shows how to check past runs.
 
 **`model pattern ... is ambiguous`.** A pi roster names a model without its provider, and pi knows it under several. Write it as `provider/model-id`, as `just rosters` shows.
 
-**A pi agent fails partway through a chain.** Nothing checks API keys at startup. A missing `FIREWORKS_API_KEY` or `OPENAI_API_KEY` fails the first agent that needs it. [install.md](install.md#2-run-the-installer) lists which agent needs which key.
+**`model pattern ... not found in pi --list-models`.** The chain stopped at launch, before any agent ran. pi lists a provider's models only once that provider has a key, so this usually means a missing key, such as `FIREWORKS_API_KEY` for the starter planner. `just demo` can pass while a larger chain stops, since the demo uses only the scout. [install.md](install.md#2-run-the-installer) lists which model needs which key.
+
+**A pi agent fails partway through a chain.** A key that's set but wrong passes the launch check and fails when its agent first calls the provider.
 
 **Every test phase passes, whatever the builder wrote.** `quality.py` is still on its placeholders. `uv run adws/adw_quality.py "check"` reports each placeholder block as `not configured`. [customize.md](customize.md#your-checks) shows the fix.
 
@@ -63,7 +65,7 @@ If `procs` shows a pi agent but its `raw_output.jsonl` is empty and the phase ha
 
 - a spec with no `## Testing Decisions` section naming the test seams;
 - uncommitted changes, or a feature folder that isn't committed;
-- `main` without `--worktree`;
+- `main` or `master` without `--worktree`;
 - a ticket blocked by one that doesn't exist, or a cycle.
 
 The message names the file and what's missing. [tickets.md](../../.claude/skills/sssf/cookbooks/tickets.md) covers each.
@@ -82,7 +84,7 @@ The message names the file and what's missing. [tickets.md](../../.claude/skills
 
 **An update flags a file.** You changed it and the skill changed it too. Run the `diff` the update prints, then `--take <path>` for the skill's version or `--keep <path>` for yours.
 
-**`stamp.json` says `skill: unknown`.** `SSSF_SOURCE` wasn't set when the installer ran, so it couldn't read the source's commit. Set it in `.env` and update.
+**The installer prints `skill: unknown (no git source)`.** `SSSF_SOURCE` wasn't set when it ran, so it couldn't read the source's commit, and `stamp.json` has no `skill` key. Set it in `.env` and update.
 
 ## The dashboard
 

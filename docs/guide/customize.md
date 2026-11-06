@@ -50,12 +50,18 @@ An agent's report format is in its `user.md`, under `## Report`. It must match t
 ```yaml
 agents:
   - name: reviewer
-    model: anthropic/claude-opus-5-5   # a different model from the builder, so it doesn't share its blind spots
+    model: anthropic/claude-opus-5-5   # a different model from the builder, so it does not share its blind spots
+    max_call_cost: 1.00                # one call stops itself here
     thinking: high
-    max_call_cost: 2.00                # one call stops itself here
-    tools: [read, grep, find, ls]
-    writes: []                         # it changes nothing in the repo
+    purpose: Confirm that what was built is what was asked for; change nothing.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/reviewer/system.md
+      user: adws/adw_data/prompt_engineering/reviewer/user.md
+    writes: []                         # it may change nothing in the repo
+    tools: [read, grep, find, bash, write]
 ```
+
+That's the starter Claude roster's reviewer. It has `bash` and `write` but `writes: []`, so it can run commands and write its report outside the repo, and any change it makes inside the repo is rolled back.
 
 - **Models.** Write every model as `provider/model-id`. A bare id can match several providers, and the run refuses to start.
 - **Cheap where it's safe.** Put a frontier model on the planner and the reviewers, and a cheaper one on the scout and documenter.
@@ -135,9 +141,9 @@ pi agents can load TypeScript extensions from `adws/adw_data/harness_engineering
 
 This fork is built to be cut down. The parts that serve only this hub, and are safe to delete in your fork:
 
-- the guard chain, which reviews changes to SSSF's own guard code: `adws/adw_guard_change.py`, `.claude/agents/bypass-reviewer.md`, `docs/designs/hub-guard-chain.md`, the guard section of `CLAUDE.md`, and the run specs it left in `specs/`;
+- the guard chain, which reviews changes to SSSF's own guard code: `adws/adw_guard_change.py`, `.claude/agents/bypass-reviewer.md`, `adws/tests/test_guard_change.py`, `docs/designs/hub-guard-chain.md`, the guard section of `CLAUDE.md`, and the run specs it left in `specs/`;
 - `docs/projects.md` and `docs/sssf.md`: the repos this hub runs and how it runs SSSF on itself.
 
-Keep the `agent_rules` in this hub's `repo.yaml` unless you want agents to push. They refuse `git push` and every `gh` command that writes to GitHub.
+Keep the `agent_rules` in this hub's `repo.yaml` unless you want agents to push. They refuse `git push` and the `gh` commands their pattern lists, such as `gh pr create` and `gh api`.
 
 The stamped chains you never run can go too, in an installed repo. `install.py --update` adds back any stamped file that's missing, so a deleted chain returns with each update. Delete it again in the update's commit.

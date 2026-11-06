@@ -17,6 +17,8 @@ The two subscriptions are cheaper to start with: there's no bill per token, and 
 | [uv](https://docs.astral.sh/uv/) | runs every ADW | `uv --version` |
 | git 2.32 or later | branches, worktrees, commits | `git --version` |
 | sqlite3 | reading the trace by hand | `sqlite3 --version` |
+| python3 | the billing check below, and `container/run.sh` | `python3 --version` |
+| rsync | `just sssf-update` | `rsync --version` |
 | [just](https://github.com/casey/just) | the recipes in this guide. Without it, run the line each recipe wraps | `just --version` |
 | [Claude Code](https://docs.claude.com/en/docs/claude-code) | the operator session, and the agents on a Claude roster | `claude auth status` |
 | [pi](https://github.com/earendil-works/pi) | the agents on a ChatGPT or API-key roster | `pi --version` |
@@ -35,7 +37,7 @@ mkdir -p .claude/skills
 cp -r ~/github/super-simple-software-factory/.claude/skills/sssf .claude/skills/
 ```
 
-Use the path of your own clone of this repo. Then set `SSSF_SOURCE` to the same skill folder whenever you run the installer, so it records which commit you installed. Without it, `stamp.json` says `skill: unknown`.
+Use the path of your own clone of this repo. Then set `SSSF_SOURCE` to the same skill folder whenever you run the installer, so it records which commit you installed. Without it, the installer prints `skill: unknown (no git source)` and `stamp.json` has no `skill` key.
 
 ## 2. Run the installer
 
@@ -78,15 +80,19 @@ The starter pi roster names three providers, so it needs three keys in `.env`:
 | `fireworks/accounts/fireworks/models/kimi-k3` | planner | `FIREWORKS_API_KEY` |
 | `openai/gpt-5.6-terra`, `openai/gpt-5.6-luna` | reviewers, documenter | `OPENAI_API_KEY` |
 
-For one key instead of three, delete the agents' own `model:` lines in `adws/adw_sssf_config/sssf.config.yaml`, so every agent uses `defaults.model`. Nothing checks a key at startup. A missing one fails when its agent runs, partway through a chain.
+For one key instead of three, delete the agents' own `model:` lines in `adws/adw_sssf_config/sssf.config.yaml`, so every agent uses `defaults.model`.
+
+Each chain checks at launch that every model it uses is in `pi --list-models`, and pi lists a provider's models only once that provider has a key. So a chain whose agent lacks its key stops before any agent runs, with `model pattern ... not found in pi --list-models`. `just demo` uses only the scout, so it can pass while `just sdlc` stops. A key that's set but wrong fails later, when its agent runs.
 
 The installer prints what it stamped, and the line that turns on the secret scan.
+
+**A repo with its own justfile.** The installer leaves an existing justfile alone. Add `mod sssf 'sssf.just'` to it, then run the installer again: it stamps SSSF's recipes as `sssf.just`, and they run as `just sssf demo`, `just sssf sessions` and so on. If you add the line before the first install, one run is enough. Wherever this guide says `just <recipe>`, read `just sssf <recipe>`.
 
 ## 3. Restart Claude Code and commit
 
 Claude Code registers `/sssf` when a session starts. Restart any session that was open in the repo before the install. `claude --continue` keeps the conversation.
 
-Commit the install on its own. Worktree runs cut their branch from your last commit, and VM runs clone it, so an uncommitted install isn't in them.
+Commit the install on its own, from a tree that was clean before you started. Worktree runs cut their branch from your last commit, and VM runs clone it, so an uncommitted install isn't in them.
 
 ```bash
 git add -A && git commit -m "Install SSSF"
@@ -118,7 +124,7 @@ Then check the sign-in for your roster:
 
 The stamped `adws/adw_modules/quality.py` holds placeholder commands that exit 0. Until you replace them, a test phase passes whatever the builder did. Put in the commands your CI runs: tests, lint, format, typecheck, build. [customize.md](customize.md#your-checks) shows how.
 
-Then keep SSSF's files out of your repo's own tools. A repo-wide `ruff check .`, eslint or tsc also reads the files SSSF stamped in `adws/` and `.claude/`, and CI fails on them. Exclude `adws/`, `.claude/`, `specs/` and `app_docs/`:
+Then keep SSSF's files out of your repo's own tools. A repo-wide `ruff check .`, eslint or tsc also reads the files SSSF stamped in `adws/` and `.claude/`, and CI fails on them. Exclude `adws/`, `.claude/`, `specs/` and `app_docs/`, and `container/` if you stamp the container:
 
 | Tool | Setting |
 |---|---|
@@ -142,11 +148,15 @@ This stops git reading `.git/hooks`, so move any hook you keep there into `.gith
 
 ## Add another roster
 
-To race two rosters with a trial, stamp the second beside the first:
+To race two rosters with a trial, stamp the second beside the first. For the ChatGPT roster on a Claude install:
 
 ```bash
 uv run .claude/skills/sssf/scripts/install.py --add-roster chatgpt
+echo "SSSF_PI_AUTH=subscription" >> .env
+git add adws/adw_sssf_config/sssf.config.chatgpt.yaml && git commit -m "Add the ChatGPT roster"
 ```
+
+Sign pi in to ChatGPT too, if it isn't: run `pi`, type `/login`, and pick `openai`. A trial refuses a ChatGPT roster unless pi reports an OAuth sign-in and `SSSF_PI_AUTH=subscription` is set. Commit the roster, since `just merge` and `just sssf-update` refuse on a dirty tree.
 
 It lands as `adws/adw_sssf_config/sssf.config.chatgpt.yaml`. `just rosters` lists every roster and the model each agent runs. Any recipe takes a roster for one run with `SSSF_CONFIG`:
 
@@ -158,7 +168,7 @@ SSSF_CONFIG=adws/adw_sssf_config/sssf.config.chatgpt.yaml just sdlc "add a /heal
 
 On the host, Claude Code asks you to approve each chain launch. The container runs the operator session with `--dangerously-skip-permissions` instead. Inside it the session can reach only the repo and `~/.config/sssf`, so it can launch chains without asking. It needs rootless Podman with pasta, the default from Podman 5.
 
-1. Stamp it, at install or later:
+1. Stamp it. At install, add `--container` to your sign-in flag, as in `install.py --coding-agent claude_code --container`. On its own, `--container` stamps the default pi roster. In a repo that's already installed, run it alone:
 
    ```bash
    uv run .claude/skills/sssf/scripts/install.py --container
@@ -216,6 +226,6 @@ It copies the skill in and runs `install.py --update`. A file you never changed 
 
 `just sssf-update` refuses while the tree has uncommitted changes or a chain is running, and when the source checkout is on a branch with commits that aren't on its `main`. [The install cookbook](../../.claude/skills/sssf/cookbooks/install.md#update-an-installed-repo) has the details.
 
-A repo with its own justfile can load SSSF's recipes as a module. Add `mod sssf 'sssf.just'` to it and install or update; the recipes then run as `just sssf demo`, `just sssf sessions` and so on.
+In a repo that loads SSSF as a module, run `just sssf sssf-update`.
 
 Don't use `--force` to update. It overwrites every stamped file, your roster, prompts and `quality.py` included.

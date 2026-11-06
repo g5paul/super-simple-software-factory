@@ -42,7 +42,7 @@ adw_id: d36de4d2   engineer George Paul
 │  next     just phases d36de4d2
 ```
 
-This ran on the default Claude roster. The run worked on the checked-out branch and committed there. Had the suite failed, the builder would have got the failures and up to three tries to fix them, and the run would have failed without a commit.
+This ran on the default Claude roster. The run worked on the checked-out branch and committed there. Had the suite failed, the builder would have got the failures and up to two fixes, each rechecked by the suite, and the run would have failed without a commit.
 
 Next: `git show` to read the change, or `just phases d36de4d2` for each phase's status.
 
@@ -85,6 +85,7 @@ just rebase <adw_id>     # for a repo that only takes fast-forwards: move the br
 Worktree runs can go side by side, up to `max_worktree_runs` in `repo.yaml`, 2 by default. Each is its own launch, merged on its own.
 
 ```console
+$ export SSSF_CONFIG=adws/adw_sssf_config/sssf.config.chatgpt.yaml
 $ just sdlc "Add textkit.kebab_case(text), ..." --worktree &
 $ just sdlc "Add textkit.camel_case(text), ..." --worktree &
 $ wait
@@ -125,7 +126,7 @@ Each run's `max_run_cost` holds for that run alone, so two runs can spend twice 
     └── 02-pascal-case.md            # "**Blocked by:** 01"
 ```
 
-Commit the folder, then build it. On `main` it needs `--worktree`:
+Commit the folder, then build it. On `main` or `master` it needs `--worktree`:
 
 ```console
 $ git add .scratch && git commit -m "Spec and tickets for case-convert"
@@ -153,7 +154,7 @@ $ git log --oneline -3
 f8b4e7b 01: Split an identifier into words
 ```
 
-Each ticket gets a fresh builder and lands as its own commit once every check passes. The read step refuses, before any agent spends, on a spec with no test seams, a dirty tree, an uncommitted folder, or `main` without `--worktree`. A rerun skips finished tickets and resumes at the first unfinished one. [tickets.md](../../.claude/skills/sssf/cookbooks/tickets.md) covers each stop and what to do.
+Each ticket gets a fresh builder and lands as its own commit once every check passes. The read step refuses, before any agent spends, on a spec with no test seams, a dirty tree, an uncommitted folder, or `main` or `master` without `--worktree`. A rerun skips finished tickets and resumes at the first unfinished one. [tickets.md](../../.claude/skills/sssf/cookbooks/tickets.md) covers each stop and what to do.
 
 ## Two rosters on one request
 

@@ -209,6 +209,21 @@ def dirty(root: Path) -> bool:
     return bool(git("status", "--porcelain", cwd=root).stdout.strip())
 
 
+def uncommitted(path: Path) -> list[str]:
+    """The paths a worktree holds that aren't committed, ignored files aside.
+    Empty when the folder is gone."""
+    if not path.is_dir():
+        return []
+    lines = git("status", "--porcelain", "--untracked-files=all", cwd=path).stdout.splitlines()
+    return [line[3:] for line in lines if line.strip()]
+
+
+def in_run_worktree() -> bool:
+    """Whether this process works in a run's worktree, not the main checkout."""
+    here = Path(git("rev-parse", "--show-toplevel").stdout.strip()).resolve()
+    return here != main_checkout()
+
+
 def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
     """Anchor SSSF to the launch checkout, then start or resume the run's worktree.
 
@@ -378,6 +393,16 @@ def _merge(cfg: SSSFConfig, adw_id: str, ff_only: bool) -> str:
     if dirty(root):
         raise WorktreeError("the checkout has uncommitted changes. Commit or stash them first: "
                             "a merge that has to abort can't promise to put them back.")
+    # The merge lands only the branch's commits, then removes the worktree, so
+    # work left uncommitted there would go with it.
+    left = uncommitted(path)
+    if left:
+        shown = ", ".join(left[:10]) + (f" and {len(left) - 10} more" if len(left) > 10 else "")
+        raise WorktreeError(
+            f"run {adw_id}'s worktree ({path}) has uncommitted changes: {shown}. The merge "
+            f"takes only {branch}'s commits and then removes the worktree, so they'd be lost. "
+            f"Commit them there (`git -C {path} add -A && git -C {path} commit`) and merge "
+            f"again, or `{just(f'discard {adw_id}')}` to drop the run.")
     fast_forward = git("merge-base", "--is-ancestor", "HEAD", branch, cwd=root,
                        check=False).returncode == 0
     if ff_only and not fast_forward:
@@ -418,10 +443,12 @@ def _discard(cfg: SSSFConfig, adw_id: str) -> str:
         raise WorktreeError(f"run {adw_id} did not run in a worktree; there is nothing to discard.")
     if adw_id in live_runs(db):
         raise WorktreeError(f"run {adw_id} is still going. Stop it with `{just(f'kill {adw_id}')}` first.")
+    dropped = len(uncommitted(Path(record["worktree"])))
     left = _remove(root, Path(record["worktree"]), record["branch"], record.get("environment"),
                    force_branch=True)
-    _log(cfg, adw_id, "worktree_discarded", {})
-    return f"discarded {record['branch']} and its worktree{left}"
+    _log(cfg, adw_id, "worktree_discarded", {"uncommitted": dropped})
+    lost = f", with {dropped} uncommitted file{'s' if dropped != 1 else ''}" if dropped else ""
+    return f"discarded {record['branch']} and its worktree{lost}{left}"
 
 
 def rebase(cfg: SSSFConfig, adw_id: str) -> str:

@@ -146,3 +146,26 @@ def test_simple_sdlc_sends_a_lint_failure_to_the_builder(repo, monkeypatch):
     monkeypatch.setattr(agents, "execute", _always_approve(execute))
     assert run_adw("adw_simple_sdlc") == 0
     assert "fix_1" in seen
+
+
+def test_build_test_commits_its_work_in_a_worktree(repo, monkeypatch):
+    # Without a commit, a --worktree run's work stayed uncommitted, and
+    # `just merge` landed an unchanged branch and removed the worktree.
+    monkeypatch.setattr(quality, "run_tests", suite(False, True))
+    assert importlib.import_module("adw_build_test").main("add slugify", worktree=True) == 0
+    assert Path.cwd().name != repo.name                # the run moved into its worktree
+    assert subjects()[0] == FEATURE
+    assert git("status", "--porcelain").strip() == ""
+
+
+def test_build_test_leaves_a_plain_run_uncommitted_as_before(repo, monkeypatch):
+    monkeypatch.setattr(quality, "run_tests", suite(True))
+    assert run_adw("adw_build_test") == 0
+    assert subjects() == ["init"]
+    assert "build.txt" in git("status", "--porcelain")
+
+
+def test_build_test_commits_nothing_when_the_suite_stays_red(repo, monkeypatch):
+    monkeypatch.setattr(quality, "run_tests", suite(False, False, False, False))
+    assert importlib.import_module("adw_build_test").main("add slugify", worktree=True) == 1
+    assert subjects() == ["init"]

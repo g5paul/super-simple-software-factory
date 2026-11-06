@@ -96,7 +96,7 @@ merge ADW_ID *ARGS:
 rebase ADW_ID:
     uv run adws/adw_worktree.py rebase {{ADW_ID}} --config {{config}}
 
-# drop a worktree run's branch and folder: just discard <adw_id>
+# drop a worktree run's branch and folder, uncommitted work included: just discard <adw_id>
 discard ADW_ID:
     uv run adws/adw_worktree.py discard {{ADW_ID}} --config {{config}}
 

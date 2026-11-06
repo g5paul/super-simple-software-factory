@@ -1,6 +1,6 @@
 # Docs for people who use this fork
 
-Status: decided on 2026-11-05, not started. Work goes in the order under "The plan".
+Status: decided on 2026-11-05. The worktree bug is reproduced and fixed; the rest is not started. Work goes in the order under "The plan".
 
 ## The gap
 
@@ -12,7 +12,7 @@ The audit also found a code bug that the docs repeat, so it comes first.
 
 ## Decisions
 
-1. **Fix the worktree bug first, apart from the docs.** `adw_build_test --worktree` followed by `just merge` can delete the run's work. Reproduce it in sssf-sandbox first. Then `just merge` and `just discard` refuse a run whose worktree has uncommitted changes, and `adw_build_test` gets a commit phase, so `--worktree` and `--sandbox` runs keep their work.
+1. **Fix the worktree bug first, apart from the docs.** `adw_build_test --worktree` followed by `just merge` can delete the run's work. Reproduce it in sssf-sandbox first. Then `just merge` refuses a run whose worktree has uncommitted changes, and `adw_build_test` gets a commit phase, so `--worktree` and `--sandbox` runs keep their work. `just discard` still drops everything, and says how many uncommitted files went with the run. The engineer chose that over a refusing discard, since discard is documented as dropping a run in any state and trials call it to drop their losing attempts.
 2. **Audience: both newcomers and the engineer.** A guided path for someone who forks this fork, and a reference section the rest can skip to.
 3. **Upstream's voice and links.** Keep the credit to disler and the links to his repo and video, in a section of their own. Drop the "IndyDevDan" sign-off, since it makes the fork's docs read as his. Rewrite "Why this exists" and the three principles once, in the engineer's voice.
 4. **Images.** Fix all eight before drawing any new ones:
@@ -62,7 +62,7 @@ The audit also found a code bug that the docs repeat, so it comes first.
 
 1. **The bug fix branch.**
    1. Reproduce the data loss in sssf-sandbox.
-   2. Fix it test-first: `_merge` and `_discard` refuse a run with a dirty worktree, and `adw_build_test` gets a commit phase.
+   2. Fix it test-first: `_merge` refuses a run with a dirty worktree, `_discard` says what it dropped, and `adw_build_test` commits a green worktree run.
    3. Merge, then run a proof.
 2. **The images branch.** Decision 4.
 3. **The docs branch.**
@@ -76,6 +76,9 @@ The audit also found a code bug that the docs repeat, so it comes first.
 Checked against main at 92220f5. Line numbers are as of that commit.
 
 ### The worktree bug
+
+Reproduced on 2026-11-05 in sssf-sandbox: run b03647f9 (`adw_build_test --worktree`, $0.010) succeeded with `WORKTREE_PROBE.md` uncommitted in its worktree. `just merge b03647f9` printed "merged sssf/b03647f9 into master (fast-forward), now at c52bbae; removed its worktree and branch", and the file was gone from both.
+
 
 `adw_build_test` has no commit phase, so a `--worktree` run leaves its work uncommitted in the worktree. `_merge` checks for uncommitted changes in the launch checkout, never in the run's worktree (`worktree.py:378`). The merge of an unchanged branch succeeds, then `_remove` runs `git worktree remove --force` (`worktree.py:532`). README:427 and `run_adw.md:75,112` show this chain for `--worktree` and `--sandbox`.
 

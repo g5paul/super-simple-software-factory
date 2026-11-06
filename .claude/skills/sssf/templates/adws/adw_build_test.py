@@ -8,6 +8,7 @@ Usage:
     uv run adws/adw_build_test.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel|e2b|none]
 
 Phases: engineer(request) -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
+        [-> code(commit), in a worktree run with a green suite]
 
 Testing is CODE. The suite's command is written down in adw_modules/quality.py,
 so running it needs no judgement — only repairing it does. Failures reach the
@@ -17,12 +18,17 @@ agent's report came through, so the repair loop is unchanged.
 A failing suite does NOT fail its phase: the runner did its job, the code is
 what failed. It fails the run, checked at the end, after the bounded fix loop
 has had its chances.
+
+In a worktree run (--worktree, or --sandbox), green work is committed, since
+`just merge` lands only the branch's commits. A run on the current branch
+leaves its work uncommitted, as it always has.
 """
 
 import argparse
 import sys
 
-from adw_modules import agents, gates, quality, session, utils
+from adw_modules import agents, gates, git_helper, quality, session, utils
+from adw_modules.worktree import in_run_worktree
 from adw_modules.data_types import AgentCall, BuildOutput, PhaseParams
 
 REQUIRED_AGENTS = ["builder"]
@@ -46,8 +52,8 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the request")) as ph:
-        previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                                     gates=[gates.diff_matches_claims]))
+        built = previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
+                                             gates=[gates.diff_matches_claims]))
 
     test = None
     for i in range(1, MAX_FIX_LOOPS + 1):
@@ -66,6 +72,13 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
             previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
                                          previous=quality.as_envelope(test, "tests"),
                                          gates=[gates.diff_matches_claims]))
+
+    if test is not None and test.passed and in_run_worktree():
+        with run.phase(PhaseParams(name="commit", kind="code", owner="git",
+                                   description="Commit the green work to the run's branch, "
+                                               "which is all `just merge` lands")) as ph:
+            message = built.commit_message or f"sssf({run.adw_id}): {built.summary}"
+            ph.log(sha=git_helper.commit_all(message), message=message)
 
     return run.finish(accepted=test is not None and test.passed,
                       reason=f"the suite still failed after {MAX_FIX_LOOPS} fix attempt(s)")

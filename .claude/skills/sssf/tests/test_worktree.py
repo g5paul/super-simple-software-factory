@@ -158,6 +158,34 @@ def test_merge_refuses_a_dirty_checkout_or_the_wrong_branch(repo):
         worktree.merge(cfg, "wt000007")
 
 
+def test_merge_refuses_a_run_whose_worktree_holds_uncommitted_work(repo):
+    # A run that left its work uncommitted: merging its unchanged branch would
+    # succeed, and removing the worktree would throw the work away.
+    cfg, _, tracer = start("wt000020")
+    Path("new.txt").write_text("the run's work\n")
+    Path("app.txt").write_text("edited, not committed\n")
+    finish(tracer, "wt000020")
+    os.chdir(repo)
+    with pytest.raises(worktree.WorktreeError, match="uncommitted") as refused:
+        worktree.merge(cfg, "wt000020")
+    assert "new.txt" in str(refused.value) and "app.txt" in str(refused.value)
+    path = repo / "adws/adw_data/worktrees/wt000020"
+    assert (path / "new.txt").read_text() == "the run's work\n"
+    assert "sssf/wt000020" in git("branch", cwd=repo)
+    assert git("rev-parse", "HEAD", cwd=repo) == git("rev-parse", "sssf/wt000020", cwd=repo)
+
+
+def test_discard_says_how_much_uncommitted_work_it_dropped(repo):
+    cfg, _, tracer = start("wt000021")
+    Path("new.txt").write_text("half done\n")
+    Path("app.txt").write_text("edited\n")
+    finish(tracer, "wt000021", ok=False)
+    os.chdir(repo)
+    out = worktree.discard(cfg, "wt000021")
+    assert "2 uncommitted files" in out
+    assert not (repo / "adws/adw_data/worktrees/wt000021").exists()
+
+
 def test_discard_removes_a_failed_runs_branch_and_folder(repo):
     cfg, _, tracer = start("wt000008")
     work("broken\n", "run")
@@ -442,7 +470,7 @@ def test_a_discard_is_recorded_and_a_refused_merge_is_not(repo):
         worktree.merge(cfg, "wt000018")
     assert landed("wt000018") == []
     worktree.discard(cfg, "wt000018")
-    assert landed("wt000018") == [("worktree_discarded", {})]
+    assert landed("wt000018") == [("worktree_discarded", {"uncommitted": 0})]
 
 
 def test_setup_runs_each_command_in_order_and_stops_at_the_first_failure(tmp_path):

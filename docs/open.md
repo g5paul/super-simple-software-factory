@@ -16,6 +16,7 @@ To add an item, add a row and link the doc that explains it. When an item closes
 | Item | Kind | Since | Background |
 |---|---|---|---|
 | `worktree_setup` runs every command for every run, even one that touches a single package. Running less needs the run's scope before its first agent, and only the planner knows it, later. It costs about a second today. Reopen if a repo's setup grows slow; the simplest fix is the engineer naming the packages at launch | build | 2026-10-30 | [parallel-worktree-runs.md](designs/parallel-worktree-runs.md#decisions), decision 16 |
+| The secret-file refusals' wording. The built-in shell rule's refusal says "by this repo's rule", though the rule is SSSF's own, and a refused read, grep, find or ls call says "SSSF refused this command". Seen in pi proof run 6eaef389. It's guard code, so fold it into the next guard change | build | 2026-11-06 | [config.md](../.claude/skills/sssf/references/config.md#secret-files--secret_files-and-agent_env) |
 | A narrower VM network: a domain allowlist, and the provider's proxy adding the token instead of SSSF passing it in. Matters only for untrusted code | build | 2026-11-02 | [remote-sandboxes.md](designs/remote-sandboxes.md) |
 | Rebase checks off the host. Today `just rebase` runs its setup and checks on the host | build | 2026-11-02 | [remote-sandboxes.md](designs/remote-sandboxes.md#decisions), decision 11 |
 | A trial judge that picks the winner on its own, once enough scorecards show whether its picks match the engineer's | need | 2026-11-01 | [trials.md](designs/trials.md) |

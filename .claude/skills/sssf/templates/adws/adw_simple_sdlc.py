@@ -9,6 +9,7 @@ Usage:
 
 Phases: engineer(request) -> planner -> git(commit_plan)
         -> builder -> code(verify) [-> builder(fix) -> code(verify) ... bounded]
+           (still red after the last verify: the run ends here, with no review)
         -> reviewer [-> builder(revise) -> reviewer ... bounded]
         -> code(reverify, only if a revision changed code)
         -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
@@ -122,6 +123,12 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                       previous=quality.as_envelope(test, "checks"),
                                       gates=[gates.diff_matches_claims]))
 
+    # Code that never went green is never committed, so a review of it would
+    # spend reviewer calls on work the run throws away. The plan commit stands.
+    if test is None or not test.passed:
+        return run.finish(accepted=False,
+                          reason=f"the checks still failed after {MAX_FIX_LOOPS - 1} fix attempt(s)")
+
     review = None
     revised = False
     for i in range(1, MAX_REVISION_LOOPS + 1):
@@ -148,7 +155,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
             test = plan_checks.verify(run, plan)
             record(ph, test)
 
-    # Red tests or a rejected review stop the chain here: the code stays
+    # A rejected review, or a revision that broke the checks, stops the chain here: the code stays
     # uncommitted and nothing is documented, because there is nothing worth
     # describing yet. The plan commit stands — it is a record of what was asked.
     verified = (test is not None and test.passed

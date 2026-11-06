@@ -195,3 +195,18 @@ def test_a_red_suite_gets_no_fix_it_never_checks(repo, monkeypatch, module, bloc
     assert run_adw(module) == 1
     assert len(checks) == 3
     assert [n for n in seen if n.startswith("fix_")] == ["fix_1", "fix_2"]
+
+
+def test_simple_sdlc_ends_before_review_when_the_checks_stay_red(repo, monkeypatch):
+    # A build that failed its last check is never committed, so a review of
+    # it is a reviewer call spent on code the run throws away.
+    seen = []
+
+    def execute(run, phase, call):
+        seen.append(phase.params.name)
+        return fake_execute(run, phase, call)
+    monkeypatch.setattr(quality, "run_quality", lambda _run: QualityResult(passed=False, failures=["1 test failed"]))
+    monkeypatch.setattr(agents, "execute", execute)
+    assert run_adw("adw_simple_sdlc") == 1
+    assert not [n for n in seen if n.startswith(("review_", "revise_", "document"))]
+    assert subjects()[0] == "Add the slugify spec"     # the plan commit stands

@@ -20,7 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import rules, sandbox, silence
+from . import obs_relay, rules, sandbox, silence
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
 from .utils import mark_agent, now_iso, operator_env
@@ -549,18 +549,42 @@ def _in_container(env: dict[str, str], tree) -> dict[str, str]:
     return env
 
 
-def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict]) -> dict[str, str]:
+def _obs_target(env: dict[str, str], token: str, extensions) -> Optional[obs_relay.Target]:
+    """Where a VM call's obs events go, or None when obs couldn't post
+    (design decision 40): no roster extension, no OBS_AUTH_TOKEN on the
+    host, or the operator turned obs off. SSSF doesn't try to tell which
+    extension is obs."""
+    roster = [e for e in extensions if str(e) != str(REFUSE_EXTENSION)]
+    if not roster or not token or env.get("OBS_DISABLE") == "true":
+        return None
+    return obs_relay.Target(
+        server=env.get("OBS_SERVER_URL") or obs_relay.DEFAULT_SERVER,
+        token=token,
+        name=env.get("OBS_NAME", ""),
+        pool=env.get("OBS_POOL", ""),
+        tags=[t.strip() for t in env.get("OBS_TAG", "").split(",") if t.strip()])
+
+
+def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict],
+           extensions=()) -> dict[str, str]:
     """On a remote tree: the ChatGPT token, renamed to OPENAI_API_KEY in the VM
-    (sandbox_remote), SSSF's refuse extension copied in, and obs off: no events
-    come from a VM yet, and the obs server's token stays on the host. In the
-    operator container the token comes through a socket instead (_in_container)."""
+    (sandbox_remote), SSSF's refuse extension copied in, and obs off with the
+    value the extension reads, OBS_DISABLE=true. The obs server's token stays
+    on the host. When obs could post (_obs_target), the tree gets a relay for
+    this call. Remote.start then points OBS_SERVER_URL at it and drops
+    OBS_DISABLE, and the host posts the events with the token (design
+    decisions 37 to 50). In the operator container, the token comes through a
+    socket instead (_in_container)."""
     if tree is sandbox.LOCAL:
         return env
-    env["OBS_DISABLE"] = "1"            # no obs events from a VM yet (design decision 23)
-    env.pop("OBS_AUTH_TOKEN", None)     # the obs server's token stays on the host
+    token = env.pop("OBS_AUTH_TOKEN", "")   # never enters the VM; only the host relay holds it
+    target = _obs_target(env, token, extensions)
+    env["OBS_DISABLE"] = "true"             # the only value the obs extension reads as off
     env["SSSF_PI_TOKEN"] = vm_token()
     if refuse_rules:
         tree.install(REFUSE_EXTENSION)
+    if target is not None:
+        tree.relay_obs(target)              # for the next start only
     return env
 
 
@@ -641,7 +665,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     last_stop, last_error = None, ""
     tree = sandbox.current()
     env = _with_refusals(child_env(request.agent_name, request.adw_id), request.refuse_rules)
-    env = _in_vm(env, tree, request.refuse_rules)
+    env = _in_vm(env, tree, request.refuse_rules, request.extensions)
     env = _in_container(env, tree)
     process = tree.start(cmd, cwd=request.cwd, env=env)
     if on_spawn:

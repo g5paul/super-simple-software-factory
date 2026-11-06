@@ -9,7 +9,9 @@ both sides. Each command goes through `run` or `start` below:
   Claude token. No command gets OBS_AUTH_TOKEN (HELD), which would let code in
   the VM copy it into the clone and back to the host branch.
 - `start` is an agent. It gets the token from ~/.config/sssf-sandbox/token.env,
-  and the handoff folder is copied in before it and back out after it.
+  and the handoff folder is copied in before it and back out after it. A pi
+  agent whose events obs should get (`relay_obs`) gets an obs relay of its own
+  for the call, on the VM's loopback (obs_relay.py, sssf_obs_relay.cjs).
 - After each `git commit`, the new commits come back to the host branch as a
   git bundle, so the host keeps them if the VM dies.
 - At the end, uncommitted work is saved as a patch in the run's folder, not
@@ -25,8 +27,10 @@ SSSF_SANDBOX_SESSION_MINUTES shortens the session, for tests.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import importlib
 import io
+import json
 import os
 import queue
 import re
@@ -39,6 +43,7 @@ import time
 import uuid
 from pathlib import Path
 
+from . import obs_relay
 from .sandbox import SandboxFailed
 
 TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"
@@ -59,6 +64,28 @@ CALL_SECONDS = 120
 QUIET_SECONDS = 120
 DRAIN_SECONDS = 10
 POLL_SECONDS = 1.0
+# The obs relay (decisions 37 to 50): its folder in the VM, outside the clone,
+# and how long it may take to say which port it listens on.
+OBS_ROOT = "/tmp"
+RELAY_START_SECONDS = 10
+RELAY_SECONDS = 30          # each of the relay's own SDK calls
+# The relay, then its follower on the relay's file as the live stream, in one
+# session of their own: one pkill stops both. The relay's port line comes
+# first. Both are the same Node script, which waits on the pipe before it
+# writes more; `tail` died on the first full pipe, since node makes the
+# shared pipe non-blocking. The relay's pid goes beside the session id, so
+# the host can tell at the end whether it died during the call.
+RELAY_SHELL = ('echo $$ > "$0"; node "$1" "$2" & echo $! > "$0.relay"; '
+               'exec node "$1" --follow "$2"')
+# Run at the end of a call: says whether the relay and its follower were
+# still up, then stops both.
+# A zombie counts as down: the relay's parent is the follower, which never
+# reaps it. The state is the field after the last ")" in /proc/<pid>/stat.
+RELAY_STOP = ('up() { p=$(cat "$1" 2>/dev/null) || return 1; '
+              's=$(sed "s/.*) //" "/proc/$p/stat" 2>/dev/null | cut -d" " -f1); '
+              '[ -n "$s" ] && [ "$s" != Z ]; }; '
+              'r=down; up "$0.relay" && r=up; f=down; up "$0" && f=up; '
+              'echo "relay=$r follower=$f"; pkill -KILL -s "$(cat "$0")"')
 # The tools a VM must have, by what the roster runs (docs/designs/remote-sandboxes.md,
 # "As built: the tool check"). `min` is the oldest version SSSF has run on, or
 # the tool's own floor; a VM below it fails before any agent starts. `tested`
@@ -193,12 +220,14 @@ class RemoteProcess:
     watchdog the runner watches it with (`watched`) is told, and the runner
     raises SilentStop for it."""
 
-    def __init__(self, box: "Remote", process, sid_file: str, pid: int):
+    def __init__(self, box: "Remote", process, sid_file: str, pid: int, relay: "_Relay | None" = None):
         self._box, self._process, self._sid_file = box, process, sid_file
+        self._relay = relay
         self.pid = pid
         self._lines: queue.Queue = queue.Queue()
         self._stopped = threading.Event()
         self._abandoned = False       # the read ended before the stream did
+        self._silent = False          # the VM didn't answer the probe
         self._dog = None
         self._done = False
         threading.Thread(target=self._pump, args=(process.stdout,), daemon=True,
@@ -234,6 +263,7 @@ class RemoteProcess:
                         heard = time.monotonic()
                         continue
                     if alive is None:
+                        self._silent = True
                         self._lose("didn't answer when SSSF checked on the agent")
                         return
                     ending = (time.monotonic(), "said the agent had exited, but its stream never ended")
@@ -277,13 +307,17 @@ class RemoteProcess:
         # be: a short wait, and no error of its own to hide why the call ended.
         # Otherwise, past the session's end the provider has stopped the VM.
         quick = self._abandoned or self._stopped.is_set()
+        reach = not self._silent
         try:
             code = self._box._call(self._process.wait,
                                    deadline=CALL_SECONDS if quick else self._box.limit + CALL_SECONDS)
         except Exception:
+            reach = False                   # the VM may be gone: ask it nothing more for obs
             if not quick:
+                self._close_relay(reach)
                 raise
             code = -1
+        self._close_relay(reach)            # the agent has exited, so its extension has flushed
         if not self._done:
             self._done = True
             try:
@@ -292,6 +326,11 @@ class RemoteProcess:
                 if not (self._dog is not None and self._dog.hung):
                     raise           # a call that keeps its result needs its handoff
         return code
+
+    def _close_relay(self, reach: bool) -> None:
+        if self._relay is not None:
+            relay, self._relay = self._relay, None
+            self._box._close_relay(relay, reach=reach)
 
     def kill(self) -> None:
         self.stop_tree()
@@ -313,6 +352,45 @@ for f in /proc/[0-9]*/stat; do
   if [ "$4" = "$sid" ] && [ "$1" != Z ]; then echo alive; exit 0; fi
 done
 echo gone"""
+
+
+class _Relay:
+    """An obs relay in the VM, for one agent call. A thread reads its stdout:
+    the first line says its port, and each line after it is an event, which
+    goes to the call's Forwarder as it comes."""
+
+    def __init__(self, process, sid_file: str, path: str, forwarder: obs_relay.Forwarder):
+        # the relay's port line, then tail's lines from the relay's file
+        self.sid_file, self.path, self.forwarder = sid_file, path, forwarder
+        self.url = ""
+        self.live = True                    # the live stream ended as it should
+        self.ended = threading.Event()
+        self._port: queue.Queue = queue.Queue()
+        threading.Thread(target=self._pump, args=(process.stdout,), daemon=True,
+                         name="sssf-obs-relay-stream").start()
+
+    def _pump(self, source) -> None:
+        first = True
+        try:
+            for line in source:
+                if first:
+                    first = False
+                    self._port.put(line)
+                else:
+                    self.forwarder.feed(line)
+        except BaseException:
+            self.live = False
+        finally:
+            self._port.put(None)
+            self.ended.set()
+
+    def wait_port(self, seconds: float) -> int | None:
+        try:
+            line = self._port.get(timeout=seconds)
+            port = json.loads(line)["sssf_obs_relay"] if line else None
+        except (queue.Empty, ValueError, TypeError, KeyError):
+            return None
+        return port if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536 else None
 
 
 class _Stderr:
@@ -353,6 +431,9 @@ class Remote:
         self.refreshes = 0
         self.processes = 0
         self.installed: set[str] = set()    # paths install() has copied in
+        self._obs_target: obs_relay.Target | None = None   # for the next start only
+        self._obs_dir = ""
+        self._relays: set[_Relay] = set()
         self.synced = ""
         self.python = ""
         self.tools: dict[str, str] = {}
@@ -442,6 +523,8 @@ class Remote:
         if self.sandbox is None:
             return
         patch = ""
+        for relay in list(self._relays):    # a call the runner left before its wait()
+            self._close_relay(relay)
         try:
             self.commits_out()
             done = self._call(
@@ -490,18 +573,113 @@ class Remote:
         return subprocess.CompletedProcess(command, done.returncode, out, err)
 
     def start(self, command: list[str], *, cwd=None, env=None) -> RemoteProcess:
+        target, self._obs_target = self._obs_target, None    # this start's, used or not
         argv = list(command)
         if Path(argv[0]).is_absolute():
             argv[0] = Path(argv[0]).name        # the host's install path means nothing in the VM
         self._refresh(AGENT_SECONDS)
         self.handoff_in()
         self.processes += 1
+        relay = self._open_relay(target) if target is not None else None
         sid_file = f"/tmp/sssf-{uuid.uuid4().hex}.sid"
         agent_env = {**self._env(env), "CLAUDE_CODE_OAUTH_TOKEN": self._token}
-        process = self._call(self.sandbox.create_process, "setsid",
-                             ["sh", "-c", 'echo $$ > "$0"; exec "$@"', sid_file, *argv],
-                             cwd=self._cwd(cwd), env=agent_env)
-        return RemoteProcess(self, process, sid_file, -self.processes)
+        if relay is not None:
+            agent_env["OBS_SERVER_URL"] = relay.url
+            agent_env.pop("OBS_DISABLE", None)
+        try:
+            process = self._call(self.sandbox.create_process, "setsid",
+                                 ["sh", "-c", 'echo $$ > "$0"; exec "$@"', sid_file, *argv],
+                                 cwd=self._cwd(cwd), env=agent_env)
+        except BaseException:
+            if relay is not None:
+                self._close_relay(relay)
+            raise
+        return RemoteProcess(self, process, sid_file, -self.processes, relay)
+
+    # --- the obs relay (decisions 37 to 50) ------------------------------------
+
+    def relay_obs(self, target: obs_relay.Target) -> None:
+        """Give the next agent this starts an obs relay posting to `target`.
+        Only the next start: it takes the request whether it uses it or not."""
+        self._obs_target = target
+
+    def _open_relay(self, target: obs_relay.Target) -> _Relay | None:
+        """Start a relay in a session of its own, so the stream probe never
+        takes it for the agent. None, with one warning, if it won't start;
+        the agent then runs with obs off. The script goes in for each call,
+        so a VM that lost /tmp in a refresh still gets one."""
+        try:
+            if not self._obs_dir:
+                self._obs_dir = f"{OBS_ROOT.rstrip('/')}/sssf-obs-{uuid.uuid4().hex}"
+            self._must("sh", ["-c", 'mkdir -p "$0" && cat > "$0/relay.cjs"', self._obs_dir],
+                       input=obs_relay.RELAY_SCRIPT.read_bytes())
+            name = uuid.uuid4().hex
+            sid_file, path = f"{self._obs_dir}/{name}.sid", f"{self._obs_dir}/{name}.jsonl"
+            process = self._call(self.sandbox.create_process, "setsid",
+                                 ["sh", "-c", RELAY_SHELL, sid_file, f"{self._obs_dir}/relay.cjs", path])
+        except Exception as error:
+            self._relay_warning("start", f"the obs relay didn't start: {str(error)[-300:]}")
+            return None
+        target = dataclasses.replace(target, session_prefix=f"sssf-{self.run_.adw_id}-")
+        relay = _Relay(process, sid_file, path, obs_relay.Forwarder(target))
+        port = relay.wait_port(RELAY_START_SECONDS)
+        if port is None:
+            self._relay_warning("start", f"the obs relay gave no port in {RELAY_START_SECONDS}s; "
+                                         "this call ran with obs off")
+            self._stop_relay(relay)
+            return None
+        relay.url = f"http://127.0.0.1:{port}"
+        relay.forwarder.live()
+        self._relays.add(relay)
+        return relay
+
+    def _stop_relay(self, relay: _Relay) -> str:
+        """Stop the relay and its follower. Returns "relay=up|down
+        follower=up|down" as they were, or "" if the VM didn't say."""
+        try:
+            done = self._call(self.sandbox.run_process, "sh", ["-c", RELAY_STOP, relay.sid_file],
+                              capture_output=True, deadline=RELAY_SECONDS)
+            return (done.stdout or "").strip()
+        except Exception:
+            return ""
+
+    def _close_relay(self, relay: _Relay, reach: bool = True) -> None:
+        """Stop the relay, post what its file holds that the live posts
+        didn't, and record the call's counts and warnings, from this thread.
+        With a VM that has stopped answering (`reach` False), it posts what
+        came live and asks the VM nothing. Never raises: obs never fails a
+        call (decision 39)."""
+        self._relays.discard(relay)
+        try:
+            swept, state = None, ""
+            if reach:
+                state = self._stop_relay(relay)
+                if "relay=down" in state:
+                    self._relay_warning("died", "the obs relay stopped during the call; "
+                                                "the agent's later events never reached it")
+                relay.ended.wait(DRAIN_SECONDS)
+                try:
+                    done = self._call(self.sandbox.run_process, "head",
+                                      ["-c", str(2 * obs_relay.MAX_BYTES), relay.path],
+                                      capture_output=True, deadline=RELAY_SECONDS * 2)
+                    if done.returncode == 0:
+                        swept = done.stdout or ""
+                except Exception as error:
+                    self._relay_warning("sweep", f"the relay's file couldn't be read: {str(error)[-300:]}")
+            live = relay.live and relay.ended.is_set() and "follower=down" not in state
+            relay.forwarder.finish(swept)
+            for kind, why in relay.forwarder.warnings():
+                self._relay_warning(kind, why)
+            self._log("obs_relay", {"vm": self.vm, **relay.forwarder.counts(), "live": live,
+                                    "swept": swept is not None})
+        except Exception as error:
+            try:
+                self._relay_warning("close", str(error)[-300:])
+            except Exception:
+                pass
+
+    def _relay_warning(self, kind: str, why: str) -> None:
+        self._log("obs_relay_warning", {"vm": self.vm, "kind": kind, "why": why})
 
     def exists(self, path) -> bool:
         return self._test("-e", path)

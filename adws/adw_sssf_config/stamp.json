@@ -121,7 +121,7 @@
       "source": "adws/adw_modules/agent_cc.py"
     },
     "adws/adw_modules/agent_pi.py": {
-      "sha256": "820fece6037b59ad8fc1a9ca808d7abaeaf5787d3119525d4693337992ce637b",
+      "sha256": "ffe90a9af9da3417c02935b8a600ed41c270ea3d6734dac469b2ea16c169e80e",
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
@@ -155,6 +155,10 @@
     "adws/adw_modules/kill.py": {
       "sha256": "418194808099f98ef633a144ade19da9c92603f551dfebd4323330b12dced449",
       "source": "adws/adw_modules/kill.py"
+    },
+    "adws/adw_modules/obs_relay.py": {
+      "sha256": "5d8ba256e8e685c7220c384373bba44357960efd6f9056a1042838073ae0a9a3",
+      "source": "adws/adw_modules/obs_relay.py"
     },
     "adws/adw_modules/permissions.py": {
       "sha256": "e97adcd6ab3e17e6237bc193698362f1686d23ec59134be726b3c5cd7203e14e",
@@ -201,7 +205,7 @@
       "source": "adws/adw_modules/sandbox_e2b.py"
     },
     "adws/adw_modules/sandbox_remote.py": {
-      "sha256": "3687de0aea0a12d4f38e00307946609d9c459c78c1bf7fc3bbd0738857c70b2b",
+      "sha256": "c76083472546dde3695df0f839fa0f2fcf5d3fed75f9f4d63dde978b681a4c0b",
       "source": "adws/adw_modules/sandbox_remote.py"
     },
     "adws/adw_modules/sandbox_usage.py": {
@@ -219,6 +223,10 @@
     "adws/adw_modules/silence.py": {
       "sha256": "85409711a0348072e1694645cb8f549af413b369bc5780ec13e6dbdecb5230e7",
       "source": "adws/adw_modules/silence.py"
+    },
+    "adws/adw_modules/sssf_obs_relay.cjs": {
+      "sha256": "af84d676131913e5ffc4fe0c477fb9dece56ac9cc7aea3ccb70ddcee8db067c0",
+      "source": "adws/adw_modules/sssf_obs_relay.cjs"
     },
     "adws/adw_modules/sssf_refuse.py": {
       "sha256": "94983822da7f53c554e7ff81eb475a9d81e4b284656bc0bef44202a22ba1cb15",

@@ -134,10 +134,18 @@ def launching():
 
 
 def _query(db: str, sql: str, *params) -> list[tuple]:
+    """Rows from the trace, or none before the tracer has made its schema.
+    A db can exist without tables: sqlite3 creates an empty file when a trace
+    recipe such as `just sessions` reads it before the first run."""
     if not Path(db).is_file():
         return []
-    with sqlite3.connect(db) as conn:
-        return conn.execute(sql, params).fetchall()
+    try:
+        with sqlite3.connect(db) as conn:
+            return conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e):
+            return []
+        raise
 
 
 def recorded(db: str, adw_id: str) -> dict | None:

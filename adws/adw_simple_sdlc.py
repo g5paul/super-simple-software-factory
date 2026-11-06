@@ -112,6 +112,8 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
         if test.passed:
             break
+        if i == MAX_FIX_LOOPS:
+            break                           # a fix after the last check is never checked
 
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
                                    description="Repair what the checks reported, from their "

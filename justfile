@@ -130,22 +130,22 @@ trial-discard TRIAL:
 
 # the last 10 runs
 sessions:
-    @sqlite3 {{db}} "select adw_id, status, substr(request,1,50), total_tokens, round(total_cost,4) from sessions order by started_at desc limit 10;"
+    @if [ -f {{db}} ]; then sqlite3 {{db}} "select adw_id, status, substr(request,1,50), total_tokens, round(total_cost,4) from sessions order by started_at desc limit 10;"; else echo "no runs yet: {{db}} does not exist"; fi
 
 # phase status in sequence: just phases <adw_id>
 phases ADW_ID:
-    @sqlite3 {{db}} "select seq, name, kind, owner, status, attempt from phases where adw_id='{{ADW_ID}}' order by seq;"
+    @if [ -f {{db}} ]; then sqlite3 {{db}} "select seq, name, kind, owner, status, attempt from phases where adw_id='{{ADW_ID}}' order by seq;"; else echo "no runs yet: {{db}} does not exist"; fi
 
 # the live event tail: just tail <adw_id>
 tail ADW_ID:
-    @sqlite3 {{db}} "select rowid, type, name, started_at from events where adw_id='{{ADW_ID}}' order by rowid desc limit 25;"
+    @if [ -f {{db}} ]; then sqlite3 {{db}} "select rowid, type, name, started_at from events where adw_id='{{ADW_ID}}' order by rowid desc limit 25;"; else echo "no runs yet: {{db}} does not exist"; fi
 
 # what a run has alive right now, with pids: just procs <adw_id>
 procs ADW_ID:
-    @sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"
+    @if [ -f {{db}} ]; then sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"; else echo "no runs yet: {{db}} does not exist"; fi
 
-# what remote VM runs used of Vercel's and E2B's free allowances. Name other
-# repos' traces to add theirs: just sandbox-usage ../other/adws/adw_data/sssf.db
+# Name other repos' traces to add theirs: just sandbox-usage ../other/adws/adw_data/sssf.db
+# what VM runs used of Vercel's and E2B's free allowances
 sandbox-usage *ARGS:
     uv run adws/adw_sandbox_usage.py {{ARGS}} --config {{config}}
 
@@ -238,8 +238,8 @@ sssf-update:
 obs:
     cd .claude/skills/sssf/apps/visualizer && bun install --silent && bunx vite build --logLevel warn && SSSF_DB={{justfile_directory()}}/{{db}} bun run server/index.ts
 
-# one dashboard for every repo SSSF is installed in (install.py and --update
-# record each one in ~/.config/sssf/projects.json); prints its address
+# install.py and --update record each repo in ~/.config/sssf/projects.json.
+# one dashboard for every repo SSSF is installed in; prints its address
 obs-all:
     cd .claude/skills/sssf/apps/visualizer && bun install --silent && bunx vite build --logLevel warn && bun run server/index.ts --all
 

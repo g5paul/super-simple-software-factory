@@ -1,7 +1,7 @@
 {
   "files": {
     ".env.sample": {
-      "sha256": "953284ddaaf8b1b8da11da1743ec4c9ee6d83e45b073e64574277df3ac4d4b3a",
+      "sha256": "567c29441ae1b6be48fcb1b79b523533d309994b75769930594421a2f04412f4",
       "source": "env.sample"
     },
     ".githooks/pre-push": {
@@ -17,7 +17,7 @@
       "source": "adws/adw_build_review.py"
     },
     "adws/adw_build_test.py": {
-      "sha256": "f9cd0da84dfac064b54e66ecf62b4a03baf76d370f16508470a80b8b08458d46",
+      "sha256": "44b0b613b3a3f18575786ad65fce6af072cbe692b3ccec8fbba72a7ec1a30f13",
       "source": "adws/adw_build_test.py"
     },
     "adws/adw_data/harness_engineering/subagents.ts": {
@@ -253,7 +253,7 @@
       "source": "adws/adw_modules/utils.py"
     },
     "adws/adw_modules/worktree.py": {
-      "sha256": "343fc6a4c67168a60a836ed6f68c08d6d6378c593867ab2e4dbb131d121ca43e",
+      "sha256": "a5da3a25f5a2465bdea3572759494dbc2f5a3e7de53f93786d4e92bf62a3570a",
       "source": "adws/adw_modules/worktree.py"
     },
     "adws/adw_plan.py": {
@@ -265,11 +265,11 @@
       "source": "adws/adw_plan_build.py"
     },
     "adws/adw_plan_build_test.py": {
-      "sha256": "9b96f688a6129c1b4fbefc5c9ee3389fd447ecaf93a5ba595ac8a1df7a385e9e",
+      "sha256": "ebf597b435822de8d3c6a9e5f135df937c345233ec421f9cf53f39ff29ca3ec9",
       "source": "adws/adw_plan_build_test.py"
     },
     "adws/adw_plan_build_test_quality.py": {
-      "sha256": "ffe093b68ad5ec668914abbf373892f8e070c51e0bf791796f3d7e8291f40f0e",
+      "sha256": "4d3af7e23367f8b53d7fbe55f95ef22a3f3577f9077420ce41a0730eab16a6a5",
       "source": "adws/adw_plan_build_test_quality.py"
     },
     "adws/adw_prompt.py": {
@@ -289,7 +289,7 @@
       "source": "adws/adw_scout.py"
     },
     "adws/adw_simple_sdlc.py": {
-      "sha256": "9151a5b4fd41bec232caf9d215d6825f787c1d1b4b606d9875138be2e76aedb4",
+      "sha256": "9b051af116e256171cc326b947dab09868d48ec9f3e269d2bc069e4333941377",
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {
@@ -313,7 +313,7 @@
       "source": "adws/adw_worktree.py"
     },
     "justfile": {
-      "sha256": "6b262ac424fded271291825fb2fbd0461988c0826e4e87844029cc9fadbccb2c",
+      "sha256": "1834adad5254ecf3ca04ed50a0c4c388da26258a24df365e218427def216a9f9",
       "source": "justfile"
     }
   }

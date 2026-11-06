@@ -65,6 +65,8 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
         if test.passed:
             break
+        if i == MAX_FIX_LOOPS:
+            break                           # a fix after the last test is never checked
 
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
                                    description="Repair what the suite reported, from its "
@@ -81,7 +83,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
             ph.log(sha=git_helper.commit_all(message), message=message)
 
     return run.finish(accepted=test is not None and test.passed,
-                      reason=f"the suite still failed after {MAX_FIX_LOOPS} fix attempt(s)")
+                      reason=f"the suite still failed after {MAX_FIX_LOOPS - 1} fix attempt(s)")
 
 
 if __name__ == "__main__":

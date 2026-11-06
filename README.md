@@ -12,7 +12,7 @@ SSSF is a Claude Code skill that installs a software factory into a repo. The fa
   <img src="images/01_factory_spine.svg" alt="A run spine: engineer, agent, and code phases on a deterministic rail, every event dropping into a SQLite trace db that the UI polls" width="850">
 </p>
 
-**Kept from upstream:** code owns the loop, agents own the phases, and every run leaves a trace. All 13 starter workflows are still here.
+**Kept from upstream:** code owns the loop, agents own the phases, and every run leaves a trace. All 12 of upstream's workflows are still here, beside two new ones, tickets and trials.
 
 **Changed or added:**
 

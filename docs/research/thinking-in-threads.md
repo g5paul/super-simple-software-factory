@@ -121,3 +121,17 @@ The join breaks in known places:
 - Work done by hand outside SSSF has no runs, so its features show no SSSF cost.
 
 **An explicit label** given at launch and stored on the run, defaulting to the spec's slug or a ticket id, would fix relaunches. It changes the trace's schema in the skill, so every repo updates, and it works only if launches pass it. It waits until the gone bucket shows how much the join misses: if most of gone is relaunched runs, that's the case for it.
+
+### As built
+
+`levers.py --by-type` and `adws/features.py` exist. The first feature report, with `--real --listed`, covers the last two weeks of the listed repos:
+
+| Repo | Features landed | From runs | Landed cost | Per feature | Gone | No commits |
+|---|---|---|---|---|---|---|
+| hub | 25 | 27 | $98.23 | $3.93 | 3 runs, $14.91 | 1 run, $2.86 |
+| pi-agent-observability | 6 | 6 | $2.71 | $0.45 | 1 run, $0.07 | 5 runs, $0.05 |
+| fusion-harness | 0 | 0 | $0 | | | 2 runs, $0.01 |
+
+The `.env` read gap comes out as two features, as it merged: guard-env-read from two runs at $11.04, and guard-cc-denied from two at $5.93. pi-agent-observability's features were found by patch-id and subject, since its main line was rebased.
+
+Every one of the hub's three gone runs was relaunched under a new spec that then landed: two failed runs on a user-level git config change came before d6fb947e, and one on include paths came before d817e62b. So the gone bucket is relaunches, not abandoned work, and the hub's real cost per landed guard change is higher than $3.93: about $4.53 with gone folded in. That is the evidence the plan asked for before an explicit label. The sample is three runs, so it's a lean, not a case.

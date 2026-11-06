@@ -178,13 +178,14 @@ def test_the_breach_message_names_the_agent_rule_and_command():
 REFUSE = PUSH.model_copy(update={"on_match": "refuse"})
 
 
-def forwarder(can_refuse=True, rule=REFUSE):
+def forwarder(can_refuse=True, rule=REFUSE, enforced=None, uncounted=()):
     events, said = [], []
     run = SimpleNamespace(adw_id="r1", tracer=SimpleNamespace(event=events.append),
                           console=SimpleNamespace(advise=said.append))
     interface = SimpleNamespace(ToolCallTracker=lambda: SimpleNamespace(observe=lambda e: []))
     forward = agents._event_forwarder(run, SimpleNamespace(phase_id="r1_01"), "builder",
-                                      interface, [rule], can_refuse=can_refuse)
+                                      interface, [rule] if enforced is None else enforced,
+                                      can_refuse=can_refuse, uncounted=uncounted)
     return forward, events, said
 
 
@@ -241,7 +242,7 @@ def test_results_are_read_from_either_harness():
     assert rules.results(finish("c2", "x")) == [("c2", "x")]
 
 
-def test_pi_loads_the_refusing_extension_only_for_refuse_rules(tmp_path, monkeypatch):
+def test_pi_always_loads_the_refusing_extension_and_passes_rules_only_when_set(tmp_path, monkeypatch):
     seen = tmp_path / "seen"
     script = tmp_path / "pi"
     script.write_text(f'#!/bin/sh\necho "$@" > {seen}\nprintf "%s\\n" "${{SSSF_REFUSE_RULES:-none}}" >> {seen}\n')
@@ -256,7 +257,7 @@ def test_pi_loads_the_refusing_extension_only_for_refuse_rules(tmp_path, monkeyp
         except RuntimeError:
             pass                    # the stand-in prints no turn
         argv, env = seen.read_text().splitlines()
-        assert (str(agent_pi.REFUSE_EXTENSION) in argv) is expect
+        assert str(agent_pi.REFUSE_EXTENSION) in argv
         assert (json.loads(env) == [{"rule": REFUSE.rule, "forbid": REFUSE.forbid}]) if expect else env == "none"
 
 
@@ -457,3 +458,94 @@ def test_a_vm_refuses_other_providers_but_not_pi_extensions():
     sandbox.check_roster("vercel", SimpleNamespace(agents=[
         SimpleNamespace(name="b", coding_agent="pi", model="openai/gpt-6.1-sol",
                         harness_engineering=["x.ts"])]))
+
+
+def test_built_in_refusals_never_stop_the_run():
+    from adw_modules import secret_files
+    builtin = secret_files.shell_rule(["/r/.env"])
+    forward, events, _ = forwarder(enforced=[REFUSE, builtin], uncounted=(builtin,))
+    for i in range(rules.MAX_REFUSALS + 2):
+        forward(announce(f"b{i}", "cat .env"))
+        forward(finish(f"b{i}", f"{rules.REFUSED}, by this repo's rule: x"))
+    assert [e.name for e in events] == ["rule_refused"] * (rules.MAX_REFUSALS + 2)
+    for i in range(rules.MAX_REFUSALS):
+        forward(announce(f"g{i}"))
+        if i < rules.MAX_REFUSALS - 1:
+            forward(finish(f"g{i}", f"{rules.REFUSED}, by this repo's rule: x"))
+    with pytest.raises(rules.RuleBreach) as stop:
+        forward(finish(f"g{rules.MAX_REFUSALS - 1}", f"{rules.REFUSED}, by this repo's rule: x"))
+    assert stop.value.refusals == rules.MAX_REFUSALS
+
+
+def test_a_built_in_match_that_was_not_refused_is_still_a_breach():
+    from adw_modules import secret_files
+    builtin = secret_files.shell_rule(["/r/.env"])
+    forward, _, _ = forwarder(enforced=[builtin], uncounted=(builtin,))
+    forward(announce("b1", "cat .env"))
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(finish("b1", "KEY=value"))
+
+
+def test_a_repo_rule_equal_to_the_built_in_one_still_counts():
+    from adw_modules import secret_files
+    builtin = secret_files.shell_rule(["/r/.env"])
+    twin = builtin.model_copy()
+    assert twin == builtin and twin is not builtin
+    forward, _, _ = forwarder(enforced=[twin], uncounted=(builtin,))
+    with pytest.raises(rules.RuleBreach) as stop:
+        for i in range(rules.MAX_REFUSALS):
+            forward(announce(f"t{i}", "cat .env"))
+            forward(finish(f"t{i}", f"{rules.REFUSED}, by this repo's rule: x"))
+    assert stop.value.refusals == rules.MAX_REFUSALS
+
+
+def test_a_pi_agent_in_a_vm_gets_the_refuse_extension_without_refuse_rules():
+    installed = []
+    vm = SimpleNamespace(install=installed.append, name="vercel", relay_obs=lambda t: None)
+    agent_pi._in_vm({}, vm, [])
+    assert installed == [agent_pi.REFUSE_EXTENSION]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun to load the pi extension")
+def test_the_pi_extension_blocks_secret_file_reads_and_the_built_in_pattern(tmp_path):
+    from adw_modules import secret_files
+    (tmp_path / ".env").write_text("K=v\n")
+    (tmp_path / ".env.sample").write_text("K=\n")
+    files = secret_files.find([tmp_path], [])
+    check = tmp_path / "check.ts"
+    check.write_text(f'''
+import ext from {json.dumps(str(agent_pi.REFUSE_EXTENSION))};
+let handler: any;
+ext({{ on: (name: string, h: any) => {{ if (name === "tool_call") handler = h; }} }} as any);
+const out = [
+  handler({{ toolName: "read", input: {{ path: ".env" }} }}),
+  handler({{ toolName: "read", input: {{ path: "@.env" }} }}),
+  handler({{ toolName: "grep", input: {{ path: ".env", pattern: "K" }} }}),
+  handler({{ toolName: "read", input: {{ path: ".env.sample" }} }}),
+  handler({{ toolName: "bash", input: {{ command: "echo env" }} }}),
+];
+console.log(JSON.stringify(out.map((o) => o ?? null)));
+''')
+    env = {k: v for k, v in os.environ.items() if k != "SSSF_REFUSE_RULES"}
+    env["SSSF_SECRET_FILES"] = json.dumps(files)
+    done = subprocess.run(["bun", str(check)], capture_output=True, text=True, env=env, cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    first, second, third, sample, echo = json.loads(done.stdout)
+    for blocked in (first, second, third):
+        assert blocked["block"] is True and blocked["reason"].startswith(rules.REFUSED)
+    assert sample is None and echo is None
+
+    check.write_text(f'''
+import ext from {json.dumps(str(agent_pi.REFUSE_EXTENSION))};
+let handler: any;
+ext({{ on: (name: string, h: any) => {{ if (name === "tool_call") handler = h; }} }} as any);
+console.log(JSON.stringify([
+  handler({{ toolName: "bash", input: {{ command: "cat .env" }} }}),
+  handler({{ toolName: "bash", input: {{ command: "cat .env.sample" }} }}),
+].map((o) => o ?? null)));
+''')
+    env["SSSF_REFUSE_RULES"] = json.dumps(rules.refusing([secret_files.shell_rule(files)]))
+    done = subprocess.run(["bun", str(check)], capture_output=True, text=True, env=env, cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    cat_env, cat_sample = json.loads(done.stdout)
+    assert cat_env["block"] is True and cat_sample is None

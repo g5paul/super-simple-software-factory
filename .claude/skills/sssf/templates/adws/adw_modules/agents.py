@@ -17,7 +17,7 @@ from typing import Optional
 import yaml
 
 from . import (account, agent_cc, agent_pi, budget, permissions, prices, prompts, repo_settings,
-               rules, sandbox, silence)
+               rules, sandbox, secret_files, silence)
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -162,7 +162,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     variables = prompt_variables(run, phase, call)
     system_text = repo_settings.with_agent_rules(
         prompts.render(agent.prompt_engineering.system, variables), Path.cwd())
-    enforced = repo_settings.load(Path.cwd()).agent_rules
+    settings = repo_settings.load(Path.cwd())
+    protected, builtin = _secret_guard(run)
+    enforced = list(settings.agent_rules)
+    if builtin:
+        enforced.append(builtin)
     user_text = prompts.render(agent.prompt_engineering.user, variables)
     prompts.save(agent_dir / "prompts", "system.md", system_text)
     prompts.save(agent_dir / "prompts", "user.md", user_text)
@@ -222,8 +226,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             stop_on_usage_credits=run.cfg.defaults.rate_limit_stop is not None,
             refuse_rules=rules.refusing(enforced),
             max_silence_seconds=silent_after,
+            secret_files=protected,
+            agent_env=settings.agent_env,
         )
-        forward = _event_forwarder(run, phase, agent.name, interface, enforced)
+        forward = _event_forwarder(run, phase, agent.name, interface, enforced,
+                                   uncounted=(builtin,) if builtin else ())
         try:
             result = interface.run(
                 request,
@@ -461,15 +468,32 @@ def _agent_session_id(run, agent: AgentConfig, key: str) -> str:
     return f"sssf-{run.adw_id}-{agent.name}-{new_id(4)}"
 
 
+def _secret_guard(run) -> tuple[list[str], Optional[rules.AgentRule]]:
+    """The secret files to keep from an agent, and the shell rule that refuses
+    commands naming them. Found at each agent start, in the repo and the run's
+    worktree."""
+    settings = repo_settings.load(Path.cwd())
+    data = run.cfg.defaults.data_dir
+    roots = {Path.cwd().resolve(), Path(run.repo_root).resolve()}
+    files = secret_files.find(roots, settings.secret_files,
+                              skip=[root / data for root in roots])
+    return files, secret_files.shell_rule(files)
+
+
 def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: list = (),
-                     can_refuse: bool = True):
+                     can_refuse: bool = True, uncounted: tuple = ()):
     """One tool_call event per real tool call, with its exact args and result.
     Raises RuleBreach the moment a call breaks a forbid rule; the interface
     then kills the agent before the call can finish.
 
     A refuse rule waits for the call's result instead: sssf_rules.ts refuses
     for pi, sssf_refuse.py for Claude Code. SSSF's refusal there
-    means nothing ran, and the run goes on; any other result means it ran."""
+    means nothing ran, and the run goes on; any other result means it ran.
+
+    Refusals by a rule in `uncounted` (the built-in secret-file rule, by
+    identity) don't count toward MAX_REFUSALS, so a command that only mentions
+    .env never ends a run; the cost caps bound a loop. A call by such a rule
+    whose result isn't the refusal still raises RuleBreach."""
     tracker = interface.ToolCallTracker()
     pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
     refusals = 0
@@ -488,7 +512,8 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
             rule, pattern, command = pending.pop(call_id)
             if not rules.refused(text):
                 raise rules.RuleBreach(agent_name, rule, pattern, command)
-            refusals += 1
+            if not any(rule is u for u in uncounted):
+                refusals += 1
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="log", name="rule_refused",
                                          payload={"agent": agent_name, "rule": rule.rule,

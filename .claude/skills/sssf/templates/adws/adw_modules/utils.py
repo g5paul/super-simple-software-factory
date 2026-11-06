@@ -9,10 +9,27 @@ import secrets
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, find_dotenv, load_dotenv
 
 load_dotenv()
+# Every key .env names, read from the file as dotenv_values does, not from what
+# load_dotenv changed: a `just` recipe (`set dotenv-load`) or a shell export of
+# the same name has already put the key in os.environ, and it is still .env's.
+DOTENV_KEYS = frozenset(dotenv_values(find_dotenv()))
+AGENT_PREFIXES = ("SSSF_", "OBS_")
+AGENT_KEYS = frozenset({"CLAUDE_CODE_OAUTH_TOKEN"})
+
+
+def agent_env(env: dict[str, str], allowed: Iterable[str] = ()) -> dict[str, str]:
+    """env without the keys .env names (however they reached the environment),
+    except SSSF's own (SSSF_*, OBS_*),
+    CLAUDE_CODE_OAUTH_TOKEN and `allowed`. For agents only: quality checks,
+    worktree_setup and git keep operator_env() whole."""
+    keep = set(allowed) | AGENT_KEYS
+    return {k: v for k, v in env.items()
+            if k not in DOTENV_KEYS or k in keep or k.startswith(AGENT_PREFIXES)}
 
 
 def mark_agent(env: dict[str, str], agent_name: str, adw_id: str) -> dict[str, str]:
@@ -43,6 +60,8 @@ def operator_env() -> dict[str, str]:
     Stripping the venv restores parity: `python3` in an agent's bash is the
     same `python3` the engineer gets in their terminal. The ADW's own imports
     are unaffected; this env is only ever handed to child processes.
+
+    Agents get agent_env(operator_env()); everything else gets all of it.
     """
     env = os.environ.copy()
     venv = env.pop("VIRTUAL_ENV", "")

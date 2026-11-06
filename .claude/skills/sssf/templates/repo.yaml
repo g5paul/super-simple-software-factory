@@ -64,3 +64,21 @@ worktree_setup_timeout: 600
 #       forbid: ['\bgit\b(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+push\b']
 #       on_match: refuse
 agent_rules: []
+
+# Files agents must not read, on top of .env and every .env.* but .env.sample
+# and .env.example, anywhere in the repo or a run's worktree. Paths from the
+# repo root or globs; a pattern without / matches a file name anywhere. Found
+# when each agent starts. Claude Code's Read and Grep and pi's read, grep, find
+# and ls refuse them, and so does a shell command that names one. Those
+# refusals never stop the run.
+#   secret_files:
+#     - config/credentials.json
+#     - '*.pem'
+secret_files: []
+# Keys from .env that agents still get. By default an agent gets only SSSF_*,
+# OBS_* and CLAUDE_CODE_OAUTH_TOKEN from .env, and a pi agent its provider
+# keys too. Quality checks are not affected. A shell export passes unless .env
+# names the same key.
+#   agent_env:
+#     - DATABASE_URL
+agent_env: []

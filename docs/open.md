@@ -15,7 +15,6 @@ To add an item, add a row and link the doc that explains it. When an item closes
 
 | Item | Kind | Since | Background |
 |---|---|---|---|
-| Agents can read `.env`. A `forbid` rule refuses shell commands that touch it, but an agent's Read tool or a `grep -r` over the repo still reads it, since SSSF bounds what agents write, not what they read. Close this before a repo that uses such a rule keeps a real secret in `.env` | build | 2026-11-03 | [config.md](../.claude/skills/sssf/references/config.md#rules-for-every-agent--agent_rules), which says a rule reads shell commands only |
 | `worktree_setup` runs every command for every run, even one that touches a single package. Running less needs the run's scope before its first agent, and only the planner knows it, later. It costs about a second today. Reopen if a repo's setup grows slow; the simplest fix is the engineer naming the packages at launch | build | 2026-10-30 | [parallel-worktree-runs.md](designs/parallel-worktree-runs.md#decisions), decision 16 |
 | A narrower VM network: a domain allowlist, and the provider's proxy adding the token instead of SSSF passing it in. Matters only for untrusted code | build | 2026-11-02 | [remote-sandboxes.md](designs/remote-sandboxes.md) |
 | Rebase checks off the host. Today `just rebase` runs its setup and checks on the host | build | 2026-11-02 | [remote-sandboxes.md](designs/remote-sandboxes.md#decisions), decision 11 |

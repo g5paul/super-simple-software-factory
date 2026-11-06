@@ -86,6 +86,8 @@ SSSF prices each call from `adws/adw_modules/prices.json`. A run warns about a m
 | `max_daily_cost` | off | dollars the repo's runs may spend in a rolling 24 hours |
 | `max_silence_minutes` | 15 | how long an agent may write nothing before it and the run are stopped |
 | `agent_rules` | `[]` | rules every agent gets |
+| `secret_files` | `[]` | files agents must not read, on top of `.env` and `.env.*` (but `.env.sample`, `.env.example`) |
+| `agent_env` | `[]` | `.env` keys agents still get, besides `SSSF_*`, `OBS_*`, `CLAUDE_CODE_OAUTH_TOKEN` and pi's provider keys |
 
 To cap every repo on the machine together, write `max_daily_cost: 40.00`, with your own number, in `~/.config/sssf/limits.yaml`.
 

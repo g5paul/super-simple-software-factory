@@ -291,14 +291,20 @@ def test_the_refuse_extension_loads_after_every_user_extension(tmp_path, monkeyp
         got["command"], got["env"] = command, env
         raise Stop
 
-    vm = SimpleNamespace(install=lambda path: None, start=start, name="vercel")
+    asked = []
+    vm = SimpleNamespace(install=lambda path: None, start=start, name="vercel",
+                         relay_obs=asked.append)
     monkeypatch.setattr(sandbox, "current", lambda: vm)
     monkeypatch.setattr(agent_pi, "vm_token", lambda: "eyJ-access")
+    for name in ("OBS_DISABLE", "OBS_SERVER_URL", "OBS_TAG", "OBS_POOL"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OBS_AUTH_TOKEN", "secret")
     with pytest.raises(Stop):
         agent_pi.run(req)
     assert loaded(got["command"]) == want
-    assert got["env"]["OBS_DISABLE"] == "1" and "OBS_AUTH_TOKEN" not in got["env"]
+    assert got["env"]["OBS_DISABLE"] == "true" and "OBS_AUTH_TOKEN" not in got["env"] \
+        and "secret" not in json.dumps(got)
+    assert [t.token for t in asked] == ["secret"]
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun to load the pi extension")
@@ -429,12 +435,12 @@ def test_a_pi_agent_in_a_vm_gets_a_token_and_the_refuse_extension(tmp_path, monk
     installed = []
     vm = SimpleNamespace(install=installed.append)
     env = agent_pi._in_vm({}, vm, rules.refusing([REFUSE]))
-    assert env == {"SSSF_PI_TOKEN": "eyJ-access", "OBS_DISABLE": "1"} and installed == [agent_pi.REFUSE_EXTENSION]
+    assert env == {"SSSF_PI_TOKEN": "eyJ-access", "OBS_DISABLE": "true"} and installed == [agent_pi.REFUSE_EXTENSION]
     assert agent_pi._in_vm({}, sandbox.LOCAL, rules.refusing([REFUSE])) == {}
     obs = {"OBS_AUTH_TOKEN": "secret", "OBS_NAME": "builder", "OBS_POOL": "p"}
     in_vm = agent_pi._in_vm(dict(obs), vm, [])
     assert "OBS_AUTH_TOKEN" not in in_vm
-    assert in_vm["OBS_NAME"] == "builder" and in_vm["OBS_POOL"] == "p" and in_vm["OBS_DISABLE"] == "1"
+    assert in_vm["OBS_NAME"] == "builder" and in_vm["OBS_POOL"] == "p" and in_vm["OBS_DISABLE"] == "true"
     assert agent_pi._in_vm(dict(obs), sandbox.LOCAL, []) == obs
 
 

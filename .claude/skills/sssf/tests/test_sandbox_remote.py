@@ -656,7 +656,8 @@ def test_a_pi_agents_obs_token_stays_on_the_host_and_obs_is_disabled(box, monkey
     env = agent_pi._in_vm({"OBS_AUTH_TOKEN": "secret", "OBS_NAME": "builder", "SSSF_ADW_ID": "x"}, box, [])
     passed = box._env(env)
     assert "OBS_AUTH_TOKEN" not in passed
-    assert passed["OBS_DISABLE"] == "1"
+    assert passed["OBS_DISABLE"] == "true"
+    assert box._obs_target is None
     assert passed["OBS_NAME"] == "builder"
     assert passed["OPENAI_API_KEY"] == "eyJ-access"
 
@@ -955,6 +956,34 @@ def test_the_agent_gets_the_relay_on_loopback_and_never_the_obs_token(relaying):
     assert "OBS_DISABLE" not in out and "obs-secret" not in out
     start = [c for c in box.raw.calls if c.get("start") and "OBS_SERVER_URL" in json.dumps(c.get("env"))]
     assert start and all("obs-secret" not in json.dumps(c) for c in box.raw.calls)
+
+
+def test_a_pi_call_with_an_extension_and_the_obs_token_is_relayed_without_the_token(relaying, monkeypatch):
+    from adw_modules import agent_pi
+    box, obs, _ = relaying
+    monkeypatch.setattr(agent_pi, "vm_token", lambda: "eyJ-access")
+    env = agent_pi._in_vm({"OBS_AUTH_TOKEN": "obs-secret", "OBS_SERVER_URL": obs.url, "OBS_NAME": "builder",
+                           "OBS_POOL": "sssf-abc", "OBS_TAG": "sssf,adw-abc", "SSSF_ADW_ID": "abc"},
+                          box, [], ["obs.ts"])
+    assert box._obs_target.token == "obs-secret" and box._obs_target.server == obs.url
+    lines, _, _, _ = _read(box.start(["sh", "-c", "env | grep ^OBS_ || true"], env=env))
+    out = "".join(lines)
+    assert re.search(r"^OBS_SERVER_URL=http://127\.0\.0\.1:\d+$", out, re.M)
+    assert "OBS_DISABLE" not in out
+    assert all("obs-secret" not in json.dumps(c) for c in box.raw.calls)
+    assert "obs-secret" not in json.dumps(box.events)
+
+
+def test_a_pi_call_that_obs_couldnt_post_from_gets_obs_disable_true_and_no_relay(box, monkeypatch):
+    from adw_modules import agent_pi
+    monkeypatch.setattr(agent_pi, "vm_token", lambda: "eyJ-access")
+    env = agent_pi._in_vm({"OBS_AUTH_TOKEN": "obs-secret", "OBS_NAME": "builder", "SSSF_ADW_ID": "abc"},
+                          box, [], [])
+    lines, _, _, _ = _read(box.start(["sh", "-c", "env | grep ^OBS_ || true"], env=env))
+    out = "".join(lines)
+    assert "OBS_DISABLE=true" in out and "obs-secret" not in out
+    assert all("obs-secret" not in json.dumps(c) for c in box.raw.calls)
+    assert not _relays(box)
 
 
 def test_a_call_with_no_relay_asked_is_unchanged(relaying):

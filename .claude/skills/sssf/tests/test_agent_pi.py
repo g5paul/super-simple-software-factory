@@ -22,13 +22,14 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agent_pi, agents, sandbox
+from adw_modules import agent_pi, agents, obs_relay, sandbox
 from adw_modules.data_types import AgentRequest
 
 KEYS = {"OPENAI_API_KEY": "sk-x", "ANTHROPIC_API_KEY": "sk-y", "OPENROUTER_API_KEY": "sk-z"}
@@ -687,3 +688,74 @@ def test_a_claude_code_roster_never_asks_the_broker(broker, catalog, tmp_path, m
     cfg, names = _shipped(tmp_path, monkeypatch, "sssf.config.claude_code.yaml")
     agents.validate(cfg, names)
     assert not (tmp_path / "ran").exists()
+
+
+# --- a pi agent in a VM: the obs relay ask (design decisions 40 and 46) --------
+
+OBS_BASE = {"OBS_AUTH_TOKEN": "obs", "OBS_NAME": "builder", "OBS_POOL": "sssf-abc",
+            "OBS_TAG": " sssf, ,adw-abc ,"}
+
+
+def _vm_tree(monkeypatch):
+    monkeypatch.setattr(agent_pi, "vm_token", lambda: "eyJ-access")
+    asked = []
+    return SimpleNamespace(install=lambda p: None, relay_obs=asked.append), asked
+
+
+def test_a_vm_call_with_an_extension_and_the_obs_token_asks_for_a_relay(monkeypatch):
+    vm, asked = _vm_tree(monkeypatch)
+    env = agent_pi._in_vm(dict(OBS_BASE), vm, [], ["obs.ts"])
+    [target] = asked
+    assert (target.token, target.server, target.name, target.pool, target.tags) == \
+        ("obs", obs_relay.DEFAULT_SERVER, "builder", "sssf-abc", ["sssf", "adw-abc"])
+    assert env["OBS_DISABLE"] == "true" and "OBS_AUTH_TOKEN" not in env
+    assert "obs" not in env.values() and "obs" not in repr(target)
+
+
+@pytest.mark.parametrize("url,want", [("http://host:9", "http://host:9"), ("", obs_relay.DEFAULT_SERVER)])
+def test_the_relay_posts_to_the_hosts_obs_server_url(monkeypatch, url, want):
+    vm, asked = _vm_tree(monkeypatch)
+    agent_pi._in_vm({**OBS_BASE, "OBS_SERVER_URL": url}, vm, [], ["obs.ts"])
+    assert [t.server for t in asked] == [want]
+
+
+@pytest.mark.parametrize("change,extensions", [
+    ({}, []),
+    ({}, [str(agent_pi.REFUSE_EXTENSION)]),
+    ({"OBS_AUTH_TOKEN": None}, ["obs.ts"]),
+    ({"OBS_AUTH_TOKEN": ""}, ["obs.ts"]),
+    ({"OBS_DISABLE": "true"}, ["obs.ts"]),
+])
+def test_no_relay_is_asked_for_when_obs_couldnt_post(monkeypatch, change, extensions):
+    vm, asked = _vm_tree(monkeypatch)
+    env = {**OBS_BASE, **change}
+    env = {k: v for k, v in env.items() if v is not None}
+    out = agent_pi._in_vm(env, vm, [], extensions)
+    assert asked == [] and out["OBS_DISABLE"] == "true" and "OBS_AUTH_TOKEN" not in out
+
+
+def test_an_operator_obs_disable_other_than_true_still_relays(monkeypatch):
+    vm, asked = _vm_tree(monkeypatch)
+    env = agent_pi._in_vm({**OBS_BASE, "OBS_DISABLE": "1"}, vm, [], ["obs.ts"])
+    assert len(asked) == 1 and env["OBS_DISABLE"] == "true"
+
+
+def test_a_local_tree_never_asks_for_a_relay():
+    env = agent_pi._in_vm(dict(OBS_BASE), sandbox.LOCAL, [], ["obs.ts"])
+    assert env == OBS_BASE
+
+
+def test_run_passes_the_calls_extensions_to_in_vm(tmp_path, monkeypatch):
+    seen = []
+
+    def spy(env, tree, refuse_rules, extensions=()):
+        seen.append(extensions)
+        return env
+    req = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi")).model_copy(update={"extensions": ["a.ts"]})
+    monkeypatch.setattr(agent_pi, "_in_vm", spy)
+    monkeypatch.setattr(sandbox, "current", lambda: sandbox.LOCAL)
+    try:
+        agent_pi.run(req)
+    except RuntimeError:
+        pass
+    assert seen == [["a.ts"]]

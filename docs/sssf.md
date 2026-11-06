@@ -131,4 +131,8 @@ an agent run's engineer phase or a merge commit, so it measures sessions'
 launches as much as the engineer's attention; the script's docstring says
 what each column counts. `--weeks N` sets the window, `--by-repo` adds a
 table per repo, and `--listed` leaves out private repos as `check_projects.py`
-does. It only reads, and it is hub-only.
+does. Accepted, $/accepted and longest show yield: runs whose status is
+`success`, the week's spend per one, and the longest agent run. `--real`
+leaves out quality-only runs and the repos `.git/sssf-test-beds` names, one
+per line; the file lives in `.git`, so no name is committed. It only reads,
+and it is hub-only.

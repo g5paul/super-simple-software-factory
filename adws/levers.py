@@ -16,6 +16,13 @@ per ISO week:
   attention  touches: the engineer phases of agent runs plus merge commits on
              each repo's current branch; and agent tool calls per touch, the
              article's "tool calls per unit of your attention"
+  yield      agent runs accepted, meaning status success, which Run.finish
+             sets only when every phase passed and the ADW's acceptance test
+             held; the week's spend per accepted run; and the longest agent
+             run in minutes
+
+Cost is not a lever: it rises with each of them. It is here as spend per
+accepted run, the price of what landed (docs/research/thinking-in-threads.md).
 
 An agent run is one with at least one agent phase; a quality-only run counts
 toward width and nothing else, since a session usually launches it as a check.
@@ -28,6 +35,12 @@ Usage, from the hub root:
     uv run adws/levers.py                  # the last 8 weeks, all repos
     uv run adws/levers.py --weeks 4 --by-repo
     uv run adws/levers.py --listed         # output safe to paste anywhere
+    uv run adws/levers.py --real           # agent runs only, test beds left out
+
+--real leaves out quality-only runs, and every repo the hub's
+.git/sssf-test-beds names, one per line, # for comments, matched the way
+--listed matches .git/sssf-private-names. The file lives in .git, so no repo
+name is committed.
 """
 
 from __future__ import annotations
@@ -54,6 +67,8 @@ class Run:
     agents: int = 0
     tool_calls: int = 0
     engineer: int = 0
+    status: str = ""
+    cost: float = 0.0
 
 
 @dataclass
@@ -76,7 +91,8 @@ def week_of(moment: datetime) -> str:
 
 def runs(db: Path, since: datetime) -> list[Run]:
     with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
-        rows = conn.execute("select adw_id, started_at, ended_at from sessions").fetchall()
+        rows = conn.execute("select adw_id, started_at, ended_at, status, total_cost "
+                            "from sessions").fetchall()
         agents = dict(conn.execute("select adw_id, count(distinct owner) from phases "
                                    "where kind = 'agent' group by adw_id"))
         engineer = dict(conn.execute("select adw_id, count(*) from phases "
@@ -84,12 +100,23 @@ def runs(db: Path, since: datetime) -> list[Run]:
         calls = dict(conn.execute("select adw_id, count(*) from events where type = 'tool_call' "
                                   "and name not like 'quality%' group by adw_id"))
     out = []
-    for adw_id, started, ended in rows:
+    for adw_id, started, ended, status, cost in rows:
         start = _when(started)
         if start and start >= since:
             out.append(Run(adw_id, start, _when(ended), agents.get(adw_id, 0),
-                           calls.get(adw_id, 0), engineer.get(adw_id, 0)))
+                           calls.get(adw_id, 0), engineer.get(adw_id, 0),
+                           status or "", cost or 0.0))
     return out
+
+
+def test_beds(hub: Path) -> list[str]:
+    """The names in the hub's .git/sssf-test-beds; none when it doesn't exist."""
+    path = Path(cp.git(hub, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    path = path / "sssf-test-beds"
+    if not path.is_file():
+        return []
+    return [line.strip().lower() for line in path.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")]
 
 
 def merges(root: Path, since: datetime) -> list[datetime]:
@@ -115,6 +142,8 @@ def row(week: Week) -> dict:
     minutes = [((r.end - r.start).total_seconds() / 60) for r in agent_runs if r.end]
     calls = sum(r.tool_calls for r in agent_runs)
     touches = sum(r.engineer for r in agent_runs) + week.merges
+    accepted = sum(r.status == "success" for r in agent_runs)
+    spend = sum(r.cost for r in week.runs)
     return {
         "runs": len(week.runs),
         "at_once": most_at_once(week.runs),
@@ -124,16 +153,21 @@ def row(week: Week) -> dict:
         "agents": statistics.median([r.agents for r in agent_runs]) if agent_runs else 0,
         "touches": touches,
         "per_touch": calls / touches if touches else 0.0,
+        "accepted": accepted,
+        "per_accepted": spend / accepted if accepted else 0.0,
+        "longest": max(minutes) if minutes else 0.0,
     }
 
 
 HEADER = (f"{'week':9} {'runs':>5} {'at once':>7} {'agent runs':>10} {'min/run':>8} "
-          f"{'calls/run':>9} {'agents':>6} {'touches':>7} {'calls/touch':>11}")
+          f"{'calls/run':>9} {'agents':>6} {'touches':>7} {'calls/touch':>11} "
+          f"{'accepted':>8} {'$/accepted':>10} {'longest':>7}")
 
 
 def line(label: str, r: dict) -> str:
     return (f"{label:9} {r['runs']:5} {r['at_once']:7} {r['agent_runs']:10} {r['minutes']:8.1f} "
-            f"{r['calls']:9.1f} {r['agents']:6g} {r['touches']:7} {r['per_touch']:11.1f}")
+            f"{r['calls']:9.1f} {r['agents']:6g} {r['touches']:7} {r['per_touch']:11.1f} "
+            f"{r['accepted']:8} {r['per_accepted']:10.2f} {r['longest']:7.1f}")
 
 
 def table(weeks: dict[str, Week], labels: list[str]) -> list[str]:
@@ -146,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--by-repo", action="store_true", help="a table per repo after the total")
     parser.add_argument("--listed", action="store_true",
                         help="leave out the repos in the hub's .git/sssf-private-names")
+    parser.add_argument("--real", action="store_true",
+                        help="agent runs only, and leave out the hub's .git/sssf-test-beds")
     parser.add_argument("--hub", type=Path, default=cp.HUB, help=argparse.SUPPRESS)
     parser.add_argument("--registry", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--now", default=None, help=argparse.SUPPRESS)
@@ -163,6 +199,12 @@ def main(argv: list[str] | None = None) -> int:
         kept = {n: e for n, e in entries.items() if not cp.unlisted(n, e, names)}
         hidden, entries = len(entries) - len(kept), kept
 
+    beds = 0
+    if args.real:
+        names = test_beds(args.hub)
+        kept = {n: e for n, e in entries.items() if not cp.unlisted(n, e, names)}
+        beds, entries = len(entries) - len(kept), kept
+
     now = _when(args.now) if args.now else datetime.now(timezone.utc)
     monday = (now - timedelta(days=now.astimezone(timezone.utc).weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0)
@@ -177,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
         repo_weeks: dict[str, Week] = defaultdict(Week)
         if db.is_file():
             for run in runs(db, since):
+                if args.real and not run.agents:
+                    continue
                 repo_weeks[week_of(run.start)].runs.append(run)
                 total[week_of(run.start)].runs.append(run)
         if (root / ".git").exists():
@@ -191,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         for name, repo_weeks in per_repo.items():
             print(f"\n{name}")
             print("\n".join(table(repo_weeks, labels)))
+    if args.real:
+        print(f"\nquality-only runs left out; {beds} test bed(s) left out")
     if hidden:
         print(f"\n{hidden} unlisted repo(s) left out")
     return 0

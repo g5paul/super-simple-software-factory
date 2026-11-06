@@ -80,7 +80,7 @@ The hub's $116 is its 31 guard-chain runs that week.
 
 ### Why cost isn't one of the article's levers
 
-The levers are things to push up: more threads, longer, thicker, fewer checkpoints. Cost rises with every one of them, so it's what the levers cost rather than a lever. The article also takes plentiful compute as given. This fork can't: its dollars are list-price estimates on a subscription, the real limit is the usage window, and budgets, `max_run_cost` and the usage and rate-limit stops exist for it. So cost belongs in the report as a ratio, cost per thing that landed. The hub's $116 bought five merged guard changes, about $23 each, which is the number to weigh when deciding how many guard runs to make.
+The levers are things to push up: more threads, longer, thicker, fewer checkpoints. Cost rises with every one of them, so it's what the levers cost rather than a lever. The article also takes plentiful compute as given. This fork can't: its dollars are list-price estimates on a subscription, the real limit is the usage window, and budgets, `max_run_cost` and the usage and rate-limit stops exist for it. So cost belongs in the report as a ratio, cost per thing that landed. The hub's $116 bought 27 accepted guard-chain runs over four days, $4.30 each; a change can take several runs, as the `.env` read gap took four, so cost per merged change is higher and isn't in the trace.
 
 ### What else is missing
 
@@ -93,3 +93,14 @@ The levers are things to push up: more threads, longer, thicker, fewer checkpoin
 ### What to add first
 
 Accepted agent runs, meaning runs whose status is `success`, which `Run.finish` sets only when every phase passed and the ADW's acceptance test held; cost per accepted run; the longest run in minutes; and `--real`, leaving out quality-only runs and the hub's test beds. Fix rounds and review findings need more parsing and wait.
+
+### As built
+
+`levers.py` now adds three columns, accepted, $/accepted and longest, and `--real`, which leaves out quality-only runs and the repos the hub's `.git/sssf-test-beds` names. The file lives in `.git`, like `.git/sssf-private-names`, so no repo name is committed. The first `--real` run, with sssf-sandbox as the test bed, all repos included:
+
+| Week | Runs | At once | Min/run | Calls/run | Accepted | $/accepted | Longest |
+|---|---|---|---|---|---|---|---|
+| 2026-W44 | 40 | 1 | 4.7 | 39.2 | 37 | 1.06 | 18.4 |
+| 2026-W45 | 50 | 2 | 15.0 | 50.7 | 44 | 2.92 | 39.5 |
+
+Without the test bed and the quality checks, the median run is 5 to 15 minutes, not under one, and the longest is 40 minutes: still far from the article's L-threads. Accepted counts runs, not what merged, so it's an upper bound on what landed.

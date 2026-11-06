@@ -39,3 +39,21 @@ def no_dotenv_keys(monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "templates" / "adws"))
     from adw_modules import utils
     monkeypatch.setattr(utils, "DOTENV_KEYS", frozenset())
+
+
+SKILL_ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
+_CACHES = {".pytest_cache", ".ruff_cache", "__pycache__"}
+
+
+@pytest.fixture(autouse=True, scope="session")
+def no_stray_files():
+    """Fail the run if a test leaves a new file in the skill's folder or in
+    the folder pytest ran from. A test that passed a bare relative path once
+    wrote an empty `r` there, and two guard builds shipped it in the skill."""
+    import os
+    roots = {SKILL_ROOT, __import__("pathlib").Path(os.getcwd()).resolve()}
+    before = {root: set(os.listdir(root)) for root in roots}
+    yield
+    stray = sorted(f"{root}/{name}" for root in roots
+                   for name in set(os.listdir(root)) - before[root] - _CACHES)
+    assert not stray, f"tests left files behind: {stray}"

@@ -106,16 +106,19 @@ def test_the_container_login_check_reads_the_dir_the_pi_agent_gets(tmp_path, mon
         agent_pi._in_container(env, sandbox.LOCAL)
 
 
-def request_with(files: list[str]) -> AgentRequest:
+def request_with(files: list[str], tmp: Path) -> AgentRequest:
+    # Paths under tmp: a bare "r" here once wrote a file named r into
+    # whatever folder pytest ran in, and two guard builds committed it.
     return AgentRequest(prompt="go", system_prompt="", model="anthropic/claude-sonnet-5-5",
                         session_id="f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
-                        session_dir="s", raw_output_path="r", secret_files=files)
+                        session_dir=str(tmp / "s"), raw_output_path=str(tmp / "r"),
+                        secret_files=files)
 
 
 def test_claude_code_denies_read_of_each_file_once_with_the_double_slash_form(tmp_path):
     make_repo(tmp_path)
     files = find(tmp_path)
-    cmd = agent_cc._command(request_with(files), resume=False)
+    cmd = agent_cc._command(request_with(files, tmp_path), resume=False)
     values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--disallowedTools"]
     assert values == [agent_cc.deny_rule(f) for f in files] and len(values) == 3
     assert all(v.startswith("Read(//") and "*" not in v and ".env.sample" not in v for v in values)
@@ -127,9 +130,9 @@ def test_deny_rule_escapes_gitignore_pattern_characters():
     assert agent_cc.deny_rule("/home/u/repo/sub/.env.local") == "Read(//home/u/repo/sub/.env.local)"
 
 
-def test_command_denies_a_weird_and_an_ordinary_path_one_rule_each():
+def test_command_denies_a_weird_and_an_ordinary_path_one_rule_each(tmp_path):
     p1, p2 = "/abs/weird [x] dir/.env", "/home/u/repo/.env"
-    cmd = agent_cc._command(request_with([p1, p2]), resume=False)
+    cmd = agent_cc._command(request_with([p1, p2], tmp_path), resume=False)
     values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--disallowedTools"]
     assert values == [agent_cc.deny_rule(p1), agent_cc.deny_rule(p2)]
 
@@ -250,7 +253,7 @@ def test_the_refuse_extension_is_the_last_pi_extension_without_refuse_rules(tmp_
     monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
     monkeypatch.setattr(agent_pi, "resolve_model", lambda model: ("openai", "gpt"))
     monkeypatch.setattr(agent_pi, "context_window", lambda provider, model_id: 0)
-    req = request_with([]).model_copy(update={"extensions": ["first.ts"], "cwd": str(tmp_path)})
+    req = request_with([], tmp_path).model_copy(update={"extensions": ["first.ts"], "cwd": str(tmp_path)})
     try:
         agent_pi.run(req)
     except RuntimeError:

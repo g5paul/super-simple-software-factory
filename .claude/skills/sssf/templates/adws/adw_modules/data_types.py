@@ -9,6 +9,7 @@ that its final JSON response is parsed against. No untyped handoffs.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Literal, Optional, Type
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -82,6 +83,15 @@ class GenericOutput(EnvelopeBase):
     pass
 
 
+# A command that passes only when git sees no uncommitted change: `git diff`
+# with --exit-code or --quiet, `git diff-index` with either, `git status` with
+# --porcelain or --short. A --cached or --staged diff is left alone, since
+# verify never stages.
+_GIT_CLEAN_TREE = re.compile(
+    r"\bgit\b(?:\s+-C\s+\S+)?\s+(?:"
+    r"(?:diff|diff-index)\b(?![^;&|]*--(?:cached|staged)\b)[^;&|]*--(?:exit-code|quiet)\b"
+    r"|status\b[^;&|]*(?:--porcelain|--short|\s-s\b))")
+
 class PlanOutput(EnvelopeBase):
     # Subject for committing the PLAN — the spec file the planner wrote, not the
     # implementation it describes. Each agent's commit_message covers its own
@@ -93,6 +103,24 @@ class PlanOutput(EnvelopeBase):
     # them as code beside the blocks, so a check the plan requires cannot pass
     # on a reviewer's reading alone (pi-agent-observability 0e822c23).
     checks: list[str] = Field(default_factory=list)
+
+    @field_validator("checks")
+    @classmethod
+    def _checks_must_be_passable(cls, value: list[str]) -> list[str]:
+        """Verify runs the checks before the build is committed, so a check
+        that wants a clean tree against HEAD fails on every build that does its
+        job. A project's run spent two fix rounds on `... && git diff
+        --exit-code config.toml.example` for a file the build had to change.
+        Rejecting it here sends the error back to the planner, in its own
+        session, to rewrite the check before anything is built."""
+        for command in value:
+            if _GIT_CLEAN_TREE.search(command):
+                raise ValueError(
+                    f"check `{command}` compares the tree with git, but verify runs the checks "
+                    f"before the build is committed, so it can never pass once the build "
+                    f"changes that file. Check the content instead, for example by "
+                    f"regenerating to a temp file and comparing it with `diff`.")
+        return value
 
 
 class BuildOutput(EnvelopeBase):

@@ -67,3 +67,60 @@ def test_every_plan_chain_runs_the_plans_checks():
 
 def test_the_planner_is_asked_for_them():
     assert '"checks"' in (SKILL / "templates/prompt_engineering/planner/user.md").read_text()
+
+
+# A project's run c6cba6d3 spent two fix rounds on a check ending in
+# `git diff --exit-code config.toml.example`: verify runs before the build is
+# committed, so it could never pass once the build changed that file.
+import pytest
+from pydantic import ValidationError
+
+from adw_modules.data_types import PlanOutput
+
+
+@pytest.mark.parametrize("check", [
+    "uv run python tests/test_config.py --regenerate && git diff --exit-code config.toml.example",
+    "git diff --quiet",
+    "git -C web diff --exit-code -- src",
+    "test -z \"$(git status --porcelain)\"",
+    "git status --short | wc -l",
+    "git diff-index --quiet HEAD --",
+])
+def test_a_check_that_compares_the_tree_with_git_is_rejected(check):
+    with pytest.raises(ValidationError, match="before the build is committed"):
+        PlanOutput(status="success", summary="s", checks=["bun x.ts", check])
+
+
+@pytest.mark.parametrize("check", [
+    "bun scripts/validate.ts",
+    "python gen.py > /tmp/x && diff /tmp/x config.toml.example",
+    "git diff --cached --exit-code",
+    "git log --oneline -1",
+    "git status",
+    "git diff > /tmp/d; test -s /tmp/d",
+])
+def test_other_checks_pass(check):
+    assert PlanOutput(status="success", summary="s", checks=[check]).checks == [check]
+
+
+def test_the_planner_is_told_why_and_its_rewritten_check_is_kept():
+    """The rejection rides the envelope correction: the planner's own session
+    gets the reason, and its next answer is the plan that goes on."""
+    import json
+    from adw_modules import agents
+    bad = {"status": "success", "summary": "s", "checks": ["gen && git diff --exit-code a.toml"]}
+    good = dict(bad, checks=["gen > /tmp/a && diff /tmp/a a.toml"])
+    sent = []
+
+    def send(message):
+        sent.append(message)
+        return SimpleNamespace(text=json.dumps(good))
+
+    run = SimpleNamespace(tracer=SimpleNamespace(envelope_row=lambda *a: None),
+                          console=SimpleNamespace(retry=lambda *a: None))
+    phase = SimpleNamespace(params=SimpleNamespace(owner="planner"))
+    call = SimpleNamespace(output_type=PlanOutput)
+    plan, attempt = agents._parse_with_retries(run, phase, call,
+                                               SimpleNamespace(text=json.dumps(bad)), send)
+    assert attempt == 2 and plan.checks == good["checks"]
+    assert len(sent) == 1 and "before the build is committed" in sent[0]

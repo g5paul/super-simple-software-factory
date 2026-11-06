@@ -32,20 +32,48 @@ class FakeObs:
         self.headers: list[dict] = []
         self.status = 200
         self.reject: set[str] = set()
+        self.bad: set[str] = set()          # a batch holding one of these gets a 400
+        self.delay = 0.0
+        self.trickle = False                # answer a byte at a time, slowly
+        self.redirect = ""                  # answer 302 to this URL
+        self.answer = None                  # a raw answer body, in place of the usual
+        self.threads: set[str] = set()
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("content-length", 0)))
+                fake.headers.append(dict(self.headers))
+                if fake.delay:
+                    __import__("time").sleep(fake.delay)
+                if fake.redirect:
+                    self.send_response(302)
+                    self.send_header("location", fake.redirect)
+                    self.end_headers()
+                    return
+                if fake.trickle:
+                    self.send_response(200)
+                    self.send_header("content-length", "100")
+                    self.end_headers()
+                    for _ in range(100):
+                        self.wfile.write(b" ")
+                        self.wfile.flush()
+                        __import__("time").sleep(0.5)
+                    return
                 if fake.status != 200:
                     self.send_response(fake.status)
                     self.end_headers()
                     return
                 events = json.loads(body)
+                if any(e["event_id"] in fake.bad for e in events):
+                    self.send_response(400)
+                    self.end_headers()
+                    return
                 fake.batches.append(events)
-                fake.headers.append(dict(self.headers))
                 rejected = [e["event_id"] for e in events if e["event_id"] in fake.reject]
                 out = json.dumps({"ingested": len(events) - len(rejected), "rejected": rejected}).encode()
+                if fake.answer is not None:
+                    out = fake.answer
                 self.send_response(200)
                 self.send_header("content-type", "application/json")
                 self.end_headers()
@@ -89,10 +117,13 @@ def _line(event) -> str:
     return json.dumps(event) + "\n"
 
 
-def _forwarder(obs, warnings=None, **kw):
+def _forwarder(obs, **kw):
     from adw_modules import obs_relay
-    warns = [] if warnings is None else warnings
-    return obs_relay.Forwarder(_target(obs, **kw), warn=lambda kind, why: warns.append((kind, why)))
+    return obs_relay.Forwarder(_target(obs, **kw))
+
+
+def _kinds(fwd) -> list[str]:
+    return [kind for kind, _ in fwd.warnings()]
 
 
 # --- what the host posts ------------------------------------------------------
@@ -154,49 +185,44 @@ def test_an_event_too_big_for_a_batch_is_dropped(obs, monkeypatch):
 def test_past_the_event_cap_the_call_stops_posting_and_warns_once(obs, monkeypatch):
     from adw_modules import obs_relay
     monkeypatch.setattr(obs_relay, "MAX_EVENTS", 5)
-    warnings = []
-    fwd = _forwarder(obs, warnings)
+    fwd = _forwarder(obs)
     fwd.finish("".join(_line(_event(n)) for n in range(9)))
     assert len(obs.events) == 5 and fwd.counts()["dropped"] == 4
-    assert [k for k, _ in warnings] == ["cap"]
+    assert _kinds(fwd) == ["cap"]
 
 
 def test_past_the_byte_cap_the_call_stops_posting(obs, monkeypatch):
     from adw_modules import obs_relay
     one = len(json.dumps(_event(1, pool="sssf-abc", agent_name="builder", tags=["sssf", "adw-abc"])))
     monkeypatch.setattr(obs_relay, "MAX_BYTES", one * 3)        # as posted, after the rewrite
-    warnings = []
-    fwd = _forwarder(obs, warnings)
+    fwd = _forwarder(obs)
     fwd.finish("".join(_line(_event(n)) for n in range(6)))
-    assert len(obs.events) == 3 and [k for k, _ in warnings] == ["cap"]
+    assert len(obs.events) == 3 and _kinds(fwd) == ["cap"]
 
 
 def test_obs_that_is_down_warns_once_and_never_raises(obs):
     obs.status = 500
-    warnings = []
-    fwd = _forwarder(obs, warnings)
+    fwd = _forwarder(obs)
     fwd.live()
     fwd.feed(_line(_event(1)))
     fwd.finish("".join(_line(_event(n)) for n in range(3)))
     assert fwd.counts() == {"posted": 0, "rejected": 0, "dropped": 0, "unposted": 3}
-    assert [k for k, _ in warnings] == ["post"]
+    assert _kinds(fwd) == ["post"]
 
 
 def test_obs_that_is_not_listening_warns_and_never_raises(obs):
     obs.close()
-    warnings = []
-    fwd = _forwarder(obs, warnings)
+    fwd = _forwarder(obs)
     fwd.finish(_line(_event(1)))
-    assert fwd.counts()["unposted"] == 1 and [k for k, _ in warnings] == ["post"]
+    assert fwd.counts()["unposted"] == 1 and _kinds(fwd) == ["post"]
 
 
 def test_events_obs_rejects_are_counted(obs):
     obs.reject = {"e1"}
-    warnings = []
-    fwd = _forwarder(obs, warnings)
+    fwd = _forwarder(obs)
     fwd.finish("".join(_line(_event(n)) for n in range(3)))
     assert fwd.counts() == {"posted": 2, "rejected": 1, "dropped": 0, "unposted": 0}
-    assert [k for k, _ in warnings] == ["rejected"]
+    assert _kinds(fwd) == ["rejected"]
 
 
 def test_live_posting_sends_events_before_the_call_ends(obs):
@@ -213,9 +239,9 @@ def test_live_posting_sends_events_before_the_call_ends(obs):
 
 def test_the_token_never_appears_in_a_warning(obs):
     obs.status = 401
-    warnings = []
-    _forwarder(obs, warnings).finish(_line(_event(1)))
-    assert warnings and all("obs-secret" not in why for _, why in warnings)
+    fwd = _forwarder(obs)
+    fwd.finish(_line(_event(1)))
+    assert fwd.warnings() and all("obs-secret" not in why for _, why in fwd.warnings())
 
 
 # --- the relay script, under this machine's Node ------------------------------
@@ -256,13 +282,26 @@ def test_the_relay_answers_health_and_writes_each_event_as_a_line(relay):
     assert status == 200
     lines = events.read_text().splitlines()
     assert [json.loads(l)["event_id"] for l in lines] == ["e1", "e2", "e3"]
-    assert [json.loads(proc.stdout.readline())["event_id"] for _ in range(3)] == ["e1", "e2", "e3"]
 
 
 @node
 def test_the_relay_listens_on_loopback_only(relay):
+    import socket
     url, _, _ = relay
-    assert url.startswith("http://127.0.0.1:")
+    port = int(url.rsplit(":", 1)[1])
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))                # picks this machine's own address; sends nothing
+        others = {probe.getsockname()[0]} - {"0.0.0.0", "127.0.0.1"}
+    except OSError:
+        others = set()
+    finally:
+        probe.close()
+    if not others:
+        pytest.skip("no address but loopback here")
+    for address in others:
+        with pytest.raises(OSError):
+            socket.create_connection((address, port), timeout=2).close()
 
 
 @node
@@ -272,3 +311,163 @@ def test_the_relay_refuses_bad_json_and_oversized_bodies(relay):
     assert _post(url, b"[" + b" " * (5 * 1024 * 1024) + b"]")[0] == 413
     assert _post(url, b"[]", path="/other")[0] == 404
     assert not events.exists() or events.read_text() == ""
+
+
+# --- the review's findings ----------------------------------------------------
+
+def _wait_for(check, seconds=5):
+    import time
+    end = time.monotonic() + seconds
+    while not check() and time.monotonic() < end:
+        time.sleep(0.05)
+
+
+def test_live_and_sweep_never_post_one_event_twice(obs, monkeypatch):
+    from adw_modules import obs_relay
+    monkeypatch.setattr(obs_relay, "POST_SECONDS", 2.0)
+    obs.delay = 0.3
+    fwd = _forwarder(obs)
+    fwd.live()
+    lines = "".join(_line(_event(n)) for n in range(300))
+    for line in lines.splitlines():
+        fwd.feed(line)
+    fwd.finish(lines)
+    ids = [e["event_id"] for e in obs.events]
+    assert len(ids) == len(set(ids))
+    counts = fwd.counts()
+    assert counts["posted"] == len(ids) and counts["posted"] + counts["unposted"] == 300
+
+
+def test_the_sweep_has_one_deadline(obs, monkeypatch):
+    import time
+    from adw_modules import obs_relay
+    monkeypatch.setattr(obs_relay, "SWEEP_SECONDS", 1.0)
+    monkeypatch.setattr(obs_relay, "POST_SECONDS", 2.0)
+    obs.delay = 0.4
+    fwd = _forwarder(obs)
+    started = time.monotonic()
+    fwd.finish("".join(_line(_event(n)) for n in range(500)))
+    assert time.monotonic() - started < 4
+    counts = fwd.counts()
+    assert 0 < counts["posted"] < 500 and counts["posted"] + counts["unposted"] == 500
+
+
+def test_a_server_answering_a_byte_at_a_time_cant_hold_a_post(obs, monkeypatch):
+    import time
+    from adw_modules import obs_relay
+    monkeypatch.setattr(obs_relay, "POST_SECONDS", 1.0)
+    monkeypatch.setattr(obs_relay, "SWEEP_SECONDS", 1.5)
+    obs.trickle = True
+    fwd = _forwarder(obs)
+    started = time.monotonic()
+    fwd.finish(_line(_event(1)))
+    assert time.monotonic() - started < 3 and fwd.counts()["unposted"] == 1
+    assert _kinds(fwd) == ["post"]
+
+
+def test_events_obs_cant_store_are_dropped_here(obs):
+    fwd = _forwarder(obs)
+    no_ts = {k: v for k, v in _event(1).items() if k != "ts"}
+    lines = [_line(no_ts), _line(_event(2, ts=None)), _line(_event(3, ts="")),
+             '{"event_id":"e4","type":"t","session_id":"s","ts":"x","payload":NaN}\n',
+             '{"event_id":"e5","type":"t","session_id":"s","ts":"x","payload":Infinity}\n',
+             _line(_event(6))]
+    fwd.finish("".join(lines))
+    assert [e["event_id"] for e in obs.events] == ["e6"] and fwd.counts()["dropped"] == 5
+
+
+def test_a_batch_obs_refuses_is_dropped_and_the_rest_still_go(obs):
+    obs.bad = {"e3"}
+    fwd = _forwarder(obs)
+    fwd.finish("".join(_line(_event(n)) for n in range(120)))
+    assert len(obs.events) == 70 and "e3" not in {e["event_id"] for e in obs.events}
+    assert fwd.counts() == {"posted": 70, "rejected": 0, "dropped": 50, "unposted": 0}
+    assert _kinds(fwd) == ["bad"]
+
+
+def test_past_the_cap_the_host_holds_no_more_ids(obs, monkeypatch):
+    from adw_modules import obs_relay
+    monkeypatch.setattr(obs_relay, "MAX_EVENTS", 10)
+    fwd = _forwarder(obs)
+    for n in range(5000):
+        fwd.feed(_line(_event(n)))
+    assert len(fwd._seen) == 10 and len(fwd._pending) == 10
+    fwd.finish(None)
+    assert fwd.counts()["dropped"] == 4990
+
+
+def test_odd_lines_and_answers_never_raise(obs):
+    deep = "[" * 100_000 + "]" * 100_000 + "\n"
+    obs.answer = json.dumps({"rejected": [["not", "hashable"], {"a": 1}, "e1"]}).encode()
+    fwd = _forwarder(obs)
+    fwd.live()
+    fwd.feed(deep)
+    fwd.finish(deep + _line(_event(1)) + _line(_event(2)))
+    assert fwd.counts() == {"posted": 1, "rejected": 1, "dropped": 1, "unposted": 0}
+
+
+def test_a_bad_answer_from_obs_never_raises(obs):
+    obs.answer = b"HTTP garbage {"
+    fwd = _forwarder(obs)
+    fwd.finish(_line(_event(1)))
+    assert fwd.counts()["unposted"] == 1 and _kinds(fwd) == ["post"]
+
+
+def test_a_malformed_line_seen_live_and_swept_counts_once(obs):
+    fwd = _forwarder(obs)
+    fwd.feed("junk\n")
+    fwd.finish("junk\n" + _line(_event(1)))
+    assert fwd.counts()["dropped"] == 1
+
+
+def test_a_post_that_ran_out_of_time_but_landed_isnt_called_rejected(obs, monkeypatch):
+    from adw_modules import obs_relay
+    monkeypatch.setattr(obs_relay, "POST_SECONDS", 0.3)
+    monkeypatch.setattr(obs_relay, "SWEEP_SECONDS", 0.5)
+    obs.delay = 0.6
+    fwd = _forwarder(obs)
+    fwd.finish(_line(_event(1)))                       # times out here, lands at obs
+    _wait_for(lambda: obs.events)
+    obs.delay, obs.reject = 0, {"e1"}                  # obs ignores it the second time
+    fwd2 = obs_relay.Forwarder(fwd.target)
+    fwd2._maybe = set(fwd._maybe)
+    fwd2.finish(_line(_event(1)))
+    assert fwd2.counts()["posted"] == 1 and fwd2.counts()["rejected"] == 0
+
+
+def test_the_token_never_follows_a_redirect(obs):
+    other = FakeObs()
+    try:
+        obs.redirect = other.url + "/events"
+        fwd = _forwarder(obs)
+        fwd.finish(_line(_event(1)))
+        assert not other.headers and fwd.counts()["unposted"] == 1
+    finally:
+        other.close()
+
+
+def test_posts_skip_any_proxy(obs, monkeypatch):
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    fwd = _forwarder(obs)
+    fwd.finish(_line(_event(1)))
+    assert fwd.counts()["posted"] == 1
+
+
+@node
+def test_the_relay_answers_while_nobody_reads_its_stdout(tmp_path):
+    from adw_modules import obs_relay
+    events = tmp_path / "events.jsonl"
+    proc = subprocess.Popen(["node", str(obs_relay.RELAY_SCRIPT), str(events)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        url = f"http://127.0.0.1:{json.loads(proc.stdout.readline())['sssf_obs_relay']}"
+        big = json.dumps([_event(n, payload={"pad": "x" * 1000}) for n in range(1000)]).encode()
+        for _ in range(3):                             # far past a pipe's 64 KB
+            assert _post(url, big)[0] == 200
+        assert len(events.read_text().splitlines()) == 3000
+    finally:
+        proc.kill()
+        proc.wait()

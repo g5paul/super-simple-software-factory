@@ -1032,11 +1032,10 @@ def test_a_relay_that_wont_start_leaves_obs_off_and_warns(relaying, monkeypatch,
 def test_the_sweep_posts_what_the_live_stream_missed(relaying, monkeypatch, tmp_path):
     from adw_modules import obs_relay
     box, obs, target = relaying
-    quiet = tmp_path / "quiet.cjs"
-    script = obs_relay.RELAY_SCRIPT.read_text()
-    assert "process.stdout.write(text)" in script
-    quiet.write_text(script.replace("process.stdout.write(text)", "void 0"))
-    monkeypatch.setattr(obs_relay, "RELAY_SCRIPT", quiet)
+    from adw_modules import sandbox_remote
+    tail = 'exec tail -n +1 -F "$2" 2>/dev/null'
+    assert tail in sandbox_remote.RELAY_SHELL
+    monkeypatch.setattr(sandbox_remote, "RELAY_SHELL", sandbox_remote.RELAY_SHELL.replace(tail, "exec sleep 600"))
     box.relay_obs(target)
     _read(box.start(_poster([_event(n) for n in range(4)]), env={"OBS_DISABLE": "true"}))
     assert sorted(e["event_id"] for e in obs.events) == ["e0", "e1", "e2", "e3"]
@@ -1083,3 +1082,43 @@ def test_a_stopped_agent_still_gets_its_events_posted(relaying, quick, tmp_path)
             process.stop_tree()
     process.wait()
     assert [e["event_id"] for e in obs.events] == ["e1"], box.events
+
+
+def test_relay_warnings_are_logged_from_the_runners_thread(relaying):
+    box, obs, target = relaying
+    obs.status = 503
+    threads = []
+    tracer = box.run_.tracer
+    box.run_.tracer = types.SimpleNamespace(
+        event=lambda e: (threads.append(threading.current_thread()), tracer.event(e)))
+    box.relay_obs(target)
+    _read(box.start(_poster([_event(1)]), env={"OBS_DISABLE": "true"}))
+    assert [p["kind"] for n, p in box.events if n == "obs_relay_warning"] == ["post"]
+    assert set(threads) == {threading.main_thread()}
+
+
+def test_a_vm_gone_silent_gets_no_relay_stop_or_sweep(relaying):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    process = box.start(_poster([_event(1)]), env={"OBS_DISABLE": "true"})
+    list(process.stdout)
+    time.sleep(1)                                      # the live posts land
+    process._silent = True                             # as the probe leaves it
+    before = len(box.raw.calls)
+    started = time.monotonic()
+    process.wait()
+    assert time.monotonic() - started < 5
+    assert not any("pkill" in _words(c) or _words(c).startswith("head") for c in box.raw.calls[before:])
+    [summary] = _relays(box)
+    assert summary["swept"] is False and summary["posted"] == 1
+
+
+def test_a_vm_that_lost_tmp_still_gets_a_relay(relaying):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    _read(box.start(_poster([_event(1)]), env={"OBS_DISABLE": "true"}))
+    shutil.rmtree(box._obs_dir)                        # as a resume without /tmp would
+    box.relay_obs(target)
+    _read(box.start(_poster([_event(2)]), env={"OBS_DISABLE": "true"}))
+    assert sorted(e["event_id"] for e in obs.events) == ["e1", "e2"]
+    assert not [p for n, p in box.events if n == "obs_relay_warning"]

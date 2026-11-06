@@ -203,10 +203,29 @@ What this build settled that decisions 20 to 27 left open:
 - `OBS_AUTH_TOKEN` is held back from every VM command, checks and agents of both harnesses (`sandbox_remote.HELD`).
 - Decision 27's VM proof is still to run.
 
+## As built: the obs relay
+
+Decisions 37 to 50. `agent_pi._in_vm` (guard chain run c620f362, 8eb2d71) drops `OBS_AUTH_TOKEN`, sets `OBS_DISABLE=true`, and, when the call loads a roster extension and the host has the token, hands the tree an `obs_relay.Target` through `Remote.relay_obs`, for the next start only. `Remote.start` writes `sssf_obs_relay.cjs` into a folder under the VM's `/tmp` for each call, so a VM that loses `/tmp` across a refresh still gets one, and starts it under `setsid` with `tail -F` on its file as the live stream (`RELAY_SHELL`). One pkill stops both. The relay answers a post only after the events are in its file, and writes nothing else to stdout, so a host that stops reading blocks only `tail`. When the relay gives its port, the agent's `OBS_SERVER_URL` points at it and `OBS_DISABLE` goes; when it doesn't, in `RELAY_START_SECONDS`, the call runs with obs off.
+
+`RemoteProcess.wait` closes the call's relay after the agent exits: it stops the relay, reads its file with `head -c` 40 MB, and has the call's `obs_relay.Forwarder` post what the live posts didn't. If the probe found the VM silent, it asks the VM nothing and posts only what came live. `Remote.close` closes a relay the runner left open.
+
+The Forwarder, after the first review (eleven findings, all fixed):
+- Only one thread posts at a time. A post gets `POST_SECONDS` of wall time in a thread of its own, so a server that answers a byte at a time can't hold it, and the sweep gets `SWEEP_SECONDS` in all.
+- Warnings wait in the Forwarder and are logged by the runner's thread, since the tracer's SQLite connection is that thread's.
+- An event needs a non-empty `ts`, because obs's session row needs `first_ts`, and JSON with `NaN` or `Infinity` is dropped, since obs's `JSON.parse` refuses it. A batch obs refuses with a 4xx other than auth or rate limiting is dropped, so the rest still go.
+- Past the cap it keeps no more events or ids.
+- It posts with no proxy and follows no redirect, so the token goes only to the obs server named.
+- A post that ran out of time but landed isn't counted as rejected when it goes again.
+
+Known limits:
+- The extension flushes at most one batch of 50 as pi exits, and none if a post is already under way. Events still queued in pi then never reach the relay.
+- A refuse extension listed in the roster under another spelling counts as a roster extension. The guard chain's report found it; the only effect is a relay the call didn't need.
+- `live` in the `obs_relay` event is false only when the host's read of the stream raised. A stream that ended early on its own still reads as true; the sweep covers it either way.
+
 ## Open
 
 - **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
-- **Obs events from a VM run: being built.** Decisions 37 to 50, settled on 2026-11-05.
+- **Obs events from a VM run: built, waiting on the proof.** Decisions 37 to 50; see "As built: the obs relay". Decision 49's runs on both providers, and pi-agent-observability's, are next.
 - **An agent's output stream with no deadline: built and proven.** Decisions 28 to 36, settled on 2026-11-05. `RemoteProcess` reads the stream in a thread of its own, probes the VM after `QUIET_SECONDS` of quiet, and ends the read through the silence watchdog (`Watchdog.lose`), so `agent_cc` and `agent_pi` raise `SilentStop` with the call priced as before; `SilentStop.lost` makes `agents.py` record `agent_stream_lost`. The probe reads `/proc` for a live process in the agent's session, so it needs no `ps`; a zombie doesn't count, since the agent's own would read as alive until the provider reaps it, and a probe that can't tell counts as alive. The tests stand in for a dead stream with a real pipe held open by a grandchild in a session of its own, and for a VM that stops answering with a `run_process` that never returns.
 - **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on one project), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.

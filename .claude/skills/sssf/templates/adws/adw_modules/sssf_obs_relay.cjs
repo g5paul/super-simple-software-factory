@@ -4,8 +4,10 @@
 // The pi-observability extension posts its events here instead of to the
 // engineer's obs server, which the VM can't reach and whose token stays on
 // the host. Each event goes to the file named in argv[2], one JSON line each,
-// and to stdout, which the host reads live; the host checks them and posts
-// them to obs. The first stdout line is {"sssf_obs_relay": <port>}.
+// before the post is answered. The host follows the file with `tail`, so a
+// host that stops reading never holds up the relay, and reads it whole after
+// the call; it checks the events and posts them to obs. The relay's one line
+// of stdout, once it listens, is {"sssf_obs_relay": <port>}.
 //
 // No dependencies: it runs with the Node the VM already has for pi.
 "use strict";
@@ -54,12 +56,12 @@ const server = http.createServer((req, res) => {
       } catch (err) {
         return answer(res, 500, { error: String(err && err.message) });
       }
-      process.stdout.write(text);
     }
     answer(res, 200, { ingested: events.length, rejected: [] });
   });
 });
 
+fs.writeFileSync(file, "", { flag: "a" });   // there for `tail` from the start
 server.listen(0, "127.0.0.1", () => {
   process.stdout.write(JSON.stringify({ sssf_obs_relay: server.address().port }) + "\n");
 });

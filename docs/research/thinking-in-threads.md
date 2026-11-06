@@ -104,3 +104,20 @@ Accepted agent runs, meaning runs whose status is `success`, which `Run.finish` 
 | 2026-W45 | 50 | 2 | 15.0 | 50.7 | 44 | 2.92 | 39.5 |
 
 Without the test bed and the quality checks, the median run is 5 to 15 minutes, not under one, and the longest is 40 minutes: still far from the article's L-threads. Accepted counts runs, not what merged, so it's an upper bound on what landed.
+
+## 2026-11-06: by run type and by feature
+
+Accepted runs stand in for output, and the stand-in is weak: a feature can take several runs, and a run can be thrown away. Two finer cuts follow.
+
+**By run type.** Each run records its chain in `adw_name`, so a table per repo and chain needs no new data. Chains differ: the hub runs `adw_guard_change` and `adw_quality`, project repos mostly `adw_simple_sdlc`, with `adw_tickets`, `adw_scout` and `adw_prompt` besides. A chain's cost per accepted run, length and failure rate say whether that chain is worth what it costs. A chain still isn't a feature.
+
+**By feature.** Every commit phase logs its sha, so the trace joins to git. A feature is a change that reached the repo's main line: take each run's commits, walk the main line by first parent to find where each landed, a merge commit or, after a fast-forward, the commit itself, and group the runs by that landing point. The feature's cost is all of its runs, its run count is the rework, and its lead time runs from the first run to landing. Runs whose commits never landed split two ways: pending, still on a branch, and gone, discarded. Gone is the waste the levers can't see.
+
+The join breaks in known places:
+
+- `just rebase` rewrites shas. Matching by `git patch-id`, then by subject, recovers most of them.
+- A discarded run that was relaunched leaves no commits, so its cost lands in gone rather than in the feature it was retried for. A project's run lost to an impossible plan check is one.
+- The main line differs by repo, `sssf-run` in some and `main` or `master` in others. The current branch is the default.
+- Work done by hand outside SSSF has no runs, so its features show no SSSF cost.
+
+**An explicit label** given at launch and stored on the run, defaulting to the spec's slug or a ticket id, would fix relaunches. It changes the trace's schema in the skill, so every repo updates, and it works only if launches pass it. It waits until the gone bucket shows how much the join misses: if most of gone is relaunched runs, that's the case for it.

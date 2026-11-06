@@ -940,6 +940,7 @@ def test_a_relayed_call_reaches_obs_with_the_calls_names(relaying):
     assert code == 0 and lines[-1].strip() == "posted 3"
     assert sorted(e["event_id"] for e in obs.events) == ["e0", "e1", "e2"]
     assert all(e["pool"] == "sssf-abc" and e["agent_name"] == "builder" for e in obs.events)
+    assert all(e["session_id"].startswith("sssf-abc-") for e in obs.events)   # the run's sessions only
     assert all(h["Authorization"] == "Bearer obs-secret" for h in obs.headers)
     [summary] = _relays(box)
     assert summary["posted"] == 3 and summary["dropped"] == 0 and summary["live"] is True

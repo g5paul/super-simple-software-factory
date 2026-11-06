@@ -141,6 +141,13 @@ def test_events_go_to_obs_with_the_host_token_and_the_calls_own_names(obs):
     assert fwd.counts() == {"posted": 3, "rejected": 0, "dropped": 0, "unposted": 0}
 
 
+def test_the_run_prefix_goes_on_every_session_id(obs):
+    from adw_modules import obs_relay
+    fwd = obs_relay.Forwarder(obs_relay.Target(server=obs.url, token="obs-secret", session_prefix="sssf-abc-"))
+    fwd.finish(_line(_event(1)) + _line({**_event(2), "session_id": "a-host-session"}))
+    assert [e["session_id"] for e in obs.events] == ["sssf-abc-s1", "sssf-abc-a-host-session"]
+
+
 def test_malformed_lines_and_events_are_dropped(obs):
     fwd = _forwarder(obs)
     bad = ["not json\n", "[1, 2]\n", _line({"type": "x", "session_id": "s"}),

@@ -27,6 +27,7 @@ SSSF_SANDBOX_SESSION_MINUTES shortens the session, for tests.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import importlib
 import io
 import json
@@ -619,6 +620,7 @@ class Remote:
         except Exception as error:
             self._relay_warning("start", f"the obs relay didn't start: {str(error)[-300:]}")
             return None
+        target = dataclasses.replace(target, session_prefix=f"sssf-{self.run_.adw_id}-")
         relay = _Relay(process, sid_file, path, obs_relay.Forwarder(target))
         port = relay.wait_port(RELAY_START_SECONDS)
         if port is None:

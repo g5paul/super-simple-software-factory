@@ -9,7 +9,8 @@ enters the VM. A Forwarder does the host's part for one call:
 
 - It keeps only well-formed events that obs can store, and sets pool,
   agent_name and tags to the call's own (Target), since the agent can write
-  anything into the file.
+  anything into the file. It puts the run's prefix on each session_id, so a
+  VM's events reach only sessions of their own, never one from the host.
 - It posts each event once: obs keys events by event_id, so the sweep after
   the call sends only what the live posts didn't.
 - It caps a call at MAX_EVENTS and MAX_BYTES, and past the cap holds no more
@@ -53,6 +54,7 @@ class Target:
     name: str = ""
     pool: str = ""
     tags: list[str] = field(default_factory=list)
+    session_prefix: str = ""      # set by the VM wiring: sssf-<adw_id>-
 
 
 def _no_constant(name: str):
@@ -138,6 +140,7 @@ class Forwarder:
                 return
             event["pool"], event["agent_name"] = self.target.pool, self.target.name
             event["tags"] = list(self.target.tags)
+            event["session_id"] = self.target.session_prefix + event["session_id"]
             text = json.dumps(event)
             size = len(text.encode())
             if size + 2 > BATCH_BYTES:

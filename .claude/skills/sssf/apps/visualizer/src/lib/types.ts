@@ -47,6 +47,8 @@ export type {
   LimitWindow,
   SpendRow,
   SpendWindow,
+  SpanSpend,
+  SpendPeak,
   SessionStatus,
   PhaseStatus,
   PhaseKind,

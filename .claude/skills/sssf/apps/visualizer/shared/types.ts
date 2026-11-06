@@ -574,6 +574,34 @@ export interface SpendWindow {
   unpriced_models: string[];
 }
 
+/** One of the busiest 5-hour stretches in a span: what a 5-hour limit would have seen. */
+export interface SpendPeak {
+  start: string;
+  end: string;
+  calls: number;
+  est_usd: number;
+}
+
+/** Spend over the span the card's picker chose. */
+export interface SpanSpend {
+  span: import("./spans.ts").Span;
+  /** five_hour: the account's live 5-hour window; rolling: the span back from now. */
+  basis: "five_hour" | "rolling";
+  start: string;
+  end: string;
+  calls: number;
+  est_usd: number;
+  /** Claude only: SSSF agents against interactive sessions. */
+  by_kind: SpendRow[];
+  by_project: SpendRow[];
+  by_model: SpendRow[];
+  unpriced_models: string[];
+  /** When the data starts inside the span, the first call's time: older transcripts are gone. */
+  data_from: string | null;
+  /** The busiest non-overlapping 5-hour stretches, busiest first; none for the 5h span. */
+  peaks: SpendPeak[];
+}
+
 /** One Pi agent call from a project's trace db. Cost is Pi's list-price figure. */
 export interface PiCall {
   at: string;
@@ -605,9 +633,11 @@ export interface AccountUsage {
   sample: LimitSample | null;
   window: SpendWindow;
   week: SpendWindow;
+  /** Claude spend over the span asked for, ?span= (default 5h). */
+  span: SpanSpend;
   transcripts: string;
-  /** SSSF's own Pi agents, from every registered project's trace db. */
-  pi: { window: PiSpendWindow; week: PiSpendWindow; limit_hit?: PiLimitHit | null };
+  /** SSSF's own Pi agents, from every registered project's trace db; span is ?pi_span=. */
+  pi: { window: PiSpendWindow; week: PiSpendWindow; span: SpanSpend; limit_hit?: PiLimitHit | null };
 }
 
 /** The trial a run belongs to, as an attempt or as its panel (trials.md decision 24). */

@@ -16,6 +16,7 @@ import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
 import { Account, type PiCallAt } from "./account.ts";
+import { SPAN_MS, isSpan, type Span } from "../shared/spans.ts";
 import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
 import { liveSpend, readLiveCap } from "./live.ts";
 import { machineDay, readMachineCap } from "./machine.ts";
@@ -217,9 +218,12 @@ const server = listen((port) => Bun.serve({
     ),
 
     // The Claude account behind every project: limits and where spend went.
-    "/api/account": safely(() => {
+    "/api/account": safely((req) => {
       const now = Date.now();
-      const since = new Date(now - 7 * 24 * 3_600_000).toISOString();
+      const query = new URL(req.url).searchParams;
+      const span = isSpan(query.get("span")) ? query.get("span") as Span : "5h";
+      const piSpan = isSpan(query.get("pi_span")) ? query.get("pi_span") as Span : "5h";
+      const since = new Date(now - Math.max(SPAN_MS["7d"], SPAN_MS[piSpan])).toISOString();
       const sessions = new Set<string>();
       const piCalls: PiCallAt[] = [];
       let limitHit: PiLimitHit | null = null;
@@ -231,7 +235,7 @@ const server = listen((port) => Bun.serve({
         const hit = db?.piLimitHit(new Date(now - 5 * 3_600_000).toISOString());
         if (hit && (!limitHit || hit.at > limitHit.at)) limitHit = { ...hit, project: p.name };
       }
-      const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls);
+      const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls, span, piSpan);
       usage.pi.limit_hit = limitHit;
       return json(usage satisfies AccountUsage);
     }),

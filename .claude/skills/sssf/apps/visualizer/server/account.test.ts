@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Account, estimateCost, piSpend } from "./account.ts";
+import { Account, estimateCost, peaks, piSpanSpend, piSpend } from "./account.ts";
 
 const NOW = Date.parse("2026-10-29T16:00:00Z");
 const RESET_5H = Date.parse("2026-10-29T17:30:00Z") / 1000;
@@ -174,5 +174,49 @@ describe("Pi agents' spend", () => {
   test("no Pi calls means empty windows, not an error", () => {
     const spend = piSpend([], NOW);
     expect([spend.window.calls, spend.week.calls]).toEqual([0, 0]);
+  });
+});
+
+describe("spend over a chosen span", () => {
+  test("a 30-day span counts older calls and says when the transcripts start", () => {
+    const f = join(transcripts, "-repos-yt", "a.jsonl");
+    writeFileSync(f, call({ id: "1", at: "2026-10-20T09:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-29T15:00:00Z", session: "agent", cwd: "/repos/yt" }));
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(["agent"]), projectOf, [], "30d");
+    expect(usage.span.span).toBe("30d");
+    expect(usage.span.calls).toBe(2);
+    expect(usage.span.by_kind.map((r) => r.key).toSorted()).toEqual(["interactive", "sssf"]);
+    expect(usage.span.data_from).toBe("2026-10-20T09:00:00.000Z");
+    expect(usage.window.calls).toBe(1);
+  });
+
+  test("the 5h span is the live 5-hour window, and has no peaks", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "1", at: "2026-10-29T12:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-29T13:00:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.2);
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.span.basis).toBe("five_hour");
+    expect(usage.span.calls).toBe(1);
+    expect(usage.span.peaks).toEqual([]);
+  });
+
+  test("peaks are the busiest 5-hour stretches, busiest first, never overlapping", () => {
+    const at = (iso: string, cost: number) => ({ at: Date.parse(iso), cost });
+    const found = peaks([
+      at("2026-10-01T10:00:00Z", 1), at("2026-10-01T12:00:00Z", 2), at("2026-10-01T16:00:00Z", 4),
+      at("2026-10-03T09:00:00Z", 5),
+    ]);
+    expect(found.map((p) => [p.start.slice(0, 13), p.est_usd, p.calls])).toEqual([
+      ["2026-10-01T12", 6, 2], ["2026-10-03T09", 5, 1],
+    ]);
+  });
+
+  test("pi's span spend adds up the span by project and model", () => {
+    const pi = (at: string, cost: number) =>
+      ({ at: Date.parse(at), project: "yt", model: "openai/gpt-6.1-sol", cost, input_tokens: 1, output_tokens: 1 });
+    const spend = piSpanSpend([pi("2026-10-01T09:00:00Z", 2), pi("2026-10-29T15:00:00Z", 1)], NOW, "30d");
+    expect([spend.calls, spend.est_usd, spend.data_from, spend.by_kind]).toEqual([2, 3, null, []]);
+    expect(spend.peaks[0].est_usd).toBe(2);
   });
 });

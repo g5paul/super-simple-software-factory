@@ -134,6 +134,7 @@ export function fetchProjects(): Promise<ProjectsResponse> {
   return getJson('/api/projects') as Promise<ProjectsResponse>
 }
 
-export function fetchAccount(): Promise<AccountUsage> {
-  return getJson('/api/account') as Promise<AccountUsage>
+export function fetchAccount(span = '5h', piSpan = '5h'): Promise<AccountUsage> {
+  const query = new URLSearchParams({ span, pi_span: piSpan })
+  return getJson(`/api/account?${query}`) as Promise<AccountUsage>
 }

@@ -19,7 +19,8 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AccountUsage, LimitSample, LimitWindow, PiSpendWindow, SpendRow, SpendWindow } from "../shared/types.ts";
+import type { AccountUsage, LimitSample, LimitWindow, PiSpendWindow, SpanSpend, SpendPeak, SpendRow, SpendWindow } from "../shared/types.ts";
+import { SPAN_MS, type Span } from "../shared/spans.ts";
 import { registryPath } from "./projects.ts";
 import prices from "../../../templates/adws/adw_modules/prices.json";
 
@@ -33,8 +34,8 @@ const PRICES = prices.models as Record<string, Rates & { long_prompt?: Rates & {
 
 const HOUR = 3_600_000;
 const WINDOW_MS = { five_hour: 5 * HOUR, seven_day: 7 * 24 * HOUR };
-// Older transcripts cannot fall in a 7-day window; skip them unread.
-const KEEP_MS = 8 * 24 * HOUR;
+// Older transcripts cannot fall in the longest span; skip them unread.
+const KEEP_MS = SPAN_MS["90d"] + 24 * HOUR;
 
 export interface Tokens {
   input: number;
@@ -157,6 +158,78 @@ function rows(calls: Call[], keyOf: (c: Call) => string): SpendRow[] {
   return [...by.values()].toSorted((a, b) => b.est_usd - a.est_usd || a.key.localeCompare(b.key));
 }
 
+/** A priced call from either source, for the span tables and the peaks. */
+interface Spent {
+  at: number;
+  cost: number;
+  kind: string;
+  project: string;
+  model: string;
+  priced: boolean;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+function spentRows(items: Spent[], keyOf: (c: Spent) => string): SpendRow[] {
+  const by = new Map<string, SpendRow>();
+  for (const c of items) {
+    const key = keyOf(c);
+    const row = by.get(key) ?? { key, calls: 0, est_usd: 0, output_tokens: 0, input_tokens: 0 };
+    row.calls += 1;
+    row.est_usd += c.cost;
+    row.output_tokens += c.output_tokens;
+    row.input_tokens += c.input_tokens;
+    by.set(key, row);
+  }
+  return [...by.values()].toSorted((a, b) => b.est_usd - a.est_usd || a.key.localeCompare(b.key));
+}
+
+const PEAK_MS = 5 * HOUR;
+
+/**
+ * The busiest non-overlapping 5-hour stretches among calls sorted by time.
+ * Each stretch starts at a call, which is where a busiest one always can.
+ */
+export function peaks(sorted: { at: number; cost: number }[], count = 3): SpendPeak[] {
+  const sums: { i: number; j: number; cost: number }[] = [];
+  let j = 0;
+  let cost = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    while (j < sorted.length && sorted[j].at < sorted[i].at + PEAK_MS) cost += sorted[j++].cost;
+    sums.push({ i, j, cost });
+    cost -= sorted[i].cost;
+  }
+  const out: SpendPeak[] = [];
+  const taken: [number, number][] = [];
+  for (const s of sums.toSorted((a, b) => b.cost - a.cost)) {
+    if (out.length >= count || s.cost <= 0) break;
+    const start = sorted[s.i].at;
+    if (taken.some(([a, b]) => start < b && a < start + PEAK_MS)) continue;
+    taken.push([start, start + PEAK_MS]);
+    out.push({ start: new Date(start).toISOString(), end: new Date(start + PEAK_MS).toISOString(),
+      calls: s.j - s.i, est_usd: s.cost });
+  }
+  return out;
+}
+
+function spanSpend(items: Spent[], span: Span, start: number, end: number, basis: SpanSpend["basis"], earliest: number | null): SpanSpend {
+  const inside = items.filter((c) => c.at >= start && c.at <= end).toSorted((a, b) => a.at - b.at);
+  return {
+    span,
+    basis,
+    start: new Date(start).toISOString(),
+    end: new Date(end).toISOString(),
+    calls: inside.length,
+    est_usd: inside.reduce((sum, c) => sum + c.cost, 0),
+    by_kind: inside.some((c) => c.kind) ? spentRows(inside, (c) => c.kind) : [],
+    by_project: spentRows(inside, (c) => c.project),
+    by_model: spentRows(inside, (c) => c.model),
+    unpriced_models: [...new Set(inside.filter((c) => !c.priced).map((c) => c.model))].toSorted(),
+    data_from: earliest !== null && earliest > start ? new Date(earliest).toISOString() : null,
+    peaks: span === "5h" ? [] : peaks(inside),
+  };
+}
+
 /** A Pi call placed in its project, with its time parsed. */
 export interface PiCallAt {
   at: number;
@@ -202,6 +275,13 @@ export function piSpend(calls: PiCallAt[], now: number): { window: PiSpendWindow
   return { window: span(WINDOW_MS.five_hour), week: span(WINDOW_MS.seven_day) };
 }
 
+/** Pi agents' spend over a span. The traces keep every call, so there is no data_from. */
+export function piSpanSpend(calls: PiCallAt[], now: number, span: Span): SpanSpend {
+  const items = calls.map((c) => ({ at: c.at, cost: c.cost, kind: "", project: c.project, model: c.model,
+    priced: true, input_tokens: c.input_tokens, output_tokens: c.output_tokens }));
+  return spanSpend(items, span, now - SPAN_MS[span], now, "rolling", null);
+}
+
 export class Account {
   private readonly files = new Map<string, FileState>();
   private readonly seen = new Set<string>();
@@ -244,9 +324,13 @@ export class Account {
     return [...this.files.values()].flatMap((s) => s.calls);
   }
 
-  summary(now: number, sssfSessions: Set<string>, projectOf: (cwd: string) => string, piCalls: PiCallAt[] = []): AccountUsage {
+  summary(now: number, sssfSessions: Set<string>, projectOf: (cwd: string) => string, piCalls: PiCallAt[] = [],
+    spanArg: Span = "5h", piSpan: Span = "5h"): AccountUsage {
     const calls = this.refresh(now);
     const sample = readSample(this.ratesFile, now);
+    // Many calls share a cwd, and placing one in its project resolves paths.
+    const placed = new Map<string, string>();
+    const place = (cwd: string) => placed.get(cwd) ?? placed.set(cwd, projectOf(cwd)).get(cwd)!;
     const span = (live: LimitWindow | null, kind: "five_hour" | "seven_day"): SpendWindow => {
       const end = live ? Date.parse(live.resets_at) : now;
       const start = end - WINDOW_MS[kind];
@@ -259,17 +343,29 @@ export class Account {
         calls: inside.length,
         est_usd: inside.reduce((sum, c) => sum + (estimateCost(c.model, c) ?? 0), 0),
         by_kind: rows(inside, (c) => (sssfSessions.has(c.session) ? "sssf" : "interactive")),
-        by_project: rows(inside, (c) => projectOf(c.cwd)),
+        by_project: rows(inside, (c) => place(c.cwd)),
         by_model: rows(inside, (c) => c.model),
         unpriced_models: unpriced.toSorted(),
       };
     };
+    const items: Spent[] = calls.map((c) => {
+      const cost = estimateCost(c.model, c);
+      return { at: c.at, cost: cost ?? 0, kind: sssfSessions.has(c.session) ? "sssf" : "interactive",
+        project: place(c.cwd), model: c.model, priced: cost !== null,
+        input_tokens: c.input + c.cacheRead + c.cacheWrite5m + c.cacheWrite1h, output_tokens: c.output };
+    });
+    const earliest = calls.length ? calls.reduce((min, c) => Math.min(min, c.at), Infinity) : null;
+    // The 5h span is the account's live 5-hour window when there is one, as the meters are.
+    const live5h = spanArg === "5h" ? sample?.five_hour ?? null : null;
+    const spanEnd = live5h ? Math.min(Date.parse(live5h.resets_at), now) : now;
+    const spanStart = live5h ? Date.parse(live5h.resets_at) - SPAN_MS["5h"] : now - SPAN_MS[spanArg];
     return {
       sample,
       window: span(sample?.five_hour ?? null, "five_hour"),
       week: span(sample?.seven_day ?? null, "seven_day"),
+      span: spanSpend(items, spanArg, spanStart, spanEnd, live5h ? "five_hour" : "rolling", earliest),
       transcripts: this.transcripts,
-      pi: piSpend(piCalls, now),
+      pi: { ...piSpend(piCalls, now), span: piSpanSpend(piCalls, now, piSpan) },
     };
   }
 }

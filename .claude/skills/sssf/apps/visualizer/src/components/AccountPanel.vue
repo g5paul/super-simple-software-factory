@@ -1,26 +1,58 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import type { AccountUsage, LimitWindow } from '../lib/types'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import type { AccountUsage, LimitWindow, SpanSpend } from '../lib/types'
+import { isSpan, SPAN_MS, type Span } from '@shared/spans'
 import { fetchAccount } from '../lib/api'
 import { fmtCost, fmtDate } from '../lib/format'
 import { modelName } from '../lib/models'
 import MachineGauge from './MachineGauge.vue'
 import SandboxGauge from './SandboxGauge.vue'
 import SpendTables from './SpendTables.vue'
+import SpanPicker from './SpanPicker.vue'
 
 const usage = shallowRef<AccountUsage | null>(null)
 const error = ref<string | null>(null)
 
+// Each card's span, remembered in this browser only.
+function remembered(key: string): Span {
+  try {
+    const saved = localStorage.getItem(key)
+    return isSpan(saved) ? saved : '5h'
+  } catch {
+    return '5h'
+  }
+}
+const claudeSpan = ref<Span>(remembered('sssf.account.span'))
+const piSpan = ref<Span>(remembered('sssf.account.pi_span'))
+watch([claudeSpan, piSpan], ([c, p]) => {
+  try {
+    localStorage.setItem('sssf.account.span', c)
+    localStorage.setItem('sssf.account.pi_span', p)
+  } catch {
+    // a blocked store just forgets the choice
+  }
+  void tick()
+})
+
 let timer: ReturnType<typeof setInterval> | undefined
 let inflight = false
+let again = false
 
-// Slow on purpose: each tick reads whatever the transcripts appended.
+// Slow on purpose: each tick reads whatever the transcripts appended. A span
+// picked while a fetch runs asks again once it ends, so no pick is lost.
 async function tick() {
-  if (inflight) return
+  if (inflight) {
+    again = true
+    return
+  }
   inflight = true
   try {
-    usage.value = await fetchAccount()
-    error.value = null
+    do {
+      again = false
+      const got = await fetchAccount(claudeSpan.value, piSpan.value)
+      if (!again) usage.value = got
+      error.value = null
+    } while (again)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -52,9 +84,39 @@ function age(s: number): string {
   return `${Math.round(s / 86_400)}d ago`
 }
 
-// The week's list holds the window's; a model in neither has a price.
+// A model in none of the lists has a price.
 const unlisted = computed(() =>
-  [...new Set([...(usage.value?.window.unpriced_models ?? []), ...(usage.value?.week.unpriced_models ?? [])])].toSorted())
+  [...new Set([...(usage.value?.span.unpriced_models ?? []), ...(usage.value?.week.unpriced_models ?? [])])].toSorted())
+
+const NAMES: Record<Span, string> = {
+  '5h': '5 hours', '24h': '24 hours', '7d': '7 days', '30d': '30 days', '60d': '60 days', '90d': '90 days',
+}
+
+function spanLabel(s: SpanSpend): string {
+  return s.basis === 'five_hour' ? 'This 5-hour window' : `Last ${NAMES[s.span]}`
+}
+
+function spentWhere(s: SpanSpend): string {
+  return s.basis === 'five_hour' ? "Where this 5-hour window's spend went" : `Where the last ${NAMES[s.span]}' spend went`
+}
+
+// Older transcripts are gone, so the span starts before the data does.
+function coverage(s: SpanSpend): string {
+  if (!s.data_from) return ''
+  const from = Date.parse(s.data_from)
+  const days = Math.max(1, Math.round((Date.parse(s.end) - from) / 86_400_000))
+  const start = `Claude Code's transcripts start ${new Date(s.data_from).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+  return SPAN_MS[s.span] >= 86_400_000
+    ? `Covers ${days} of ${Math.round(SPAN_MS[s.span] / 86_400_000)} days. ${start}.`
+    : `${start}.`
+}
+
+function stretch(p: { start: string, end: string }): string {
+  const day = (iso: string) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const hm = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+  const across = day(p.start) === day(p.end) ? '' : `${day(p.end)} `
+  return `${day(p.start)} ${hm(p.start)} to ${across}${hm(p.end)}`
+}
 
 const windows = computed(() => {
   const s = usage.value?.sample
@@ -94,24 +156,36 @@ const windows = computed(() => {
       </div>
 
       <div v-if="usage" class="spend">
-        <div class="totals">
-          <span>
-            {{ usage.window.basis === 'five_hour' ? 'This 5-hour window' : 'Last 5 hours' }}:
-            <b>{{ fmtCost(usage.window.est_usd) }}</b> est. over {{ usage.window.calls }} calls
-          </span>
-          <span>
-            {{ usage.week.basis === 'seven_day' ? 'This 7-day window' : 'Last 7 days' }}:
-            <b>{{ fmtCost(usage.week.est_usd) }}</b> est.
-          </span>
+        <div class="spend-bar">
+          <div class="totals">
+            <span>
+              {{ spanLabel(usage.span) }}:
+              <b>{{ fmtCost(usage.span.est_usd) }}</b> est. over {{ usage.span.calls }} calls
+            </span>
+            <span>
+              {{ usage.week.basis === 'seven_day' ? 'This 7-day window' : 'Last 7 days' }}:
+              <b>{{ fmtCost(usage.week.est_usd) }}</b> est.
+            </span>
+          </div>
+          <SpanPicker v-model="claudeSpan" />
+        </div>
+        <div v-if="coverage(usage.span)" class="coverage">{{ coverage(usage.span) }}</div>
+        <div v-if="usage.span.peaks.length" class="peaks">
+          <div class="caption">Busiest 5-hour stretches, what a 5-hour limit would have seen</div>
+          <ol>
+            <li v-for="p in usage.span.peaks" :key="p.start">
+              <b>{{ fmtCost(p.est_usd) }}</b> over {{ p.calls }} calls, {{ stretch(p) }}
+            </li>
+          </ol>
         </div>
         <SpendTables
-          :caption="usage.window.basis === 'five_hour' ? 'Where this 5-hour window\'s spend went' : 'Where the last 5 hours\' spend went'"
-          :total="usage.window.est_usd"
-          empty="no calls in this window"
+          :caption="spentWhere(usage.span)"
+          :total="usage.span.est_usd"
+          empty="no calls in this span"
           :tables="[
-            { name: 'by kind', rows: usage.window.by_kind },
-            { name: 'by project', rows: usage.window.by_project },
-            { name: 'by model', rows: usage.window.by_model, label: modelName },
+            { name: 'by kind', rows: usage.span.by_kind },
+            { name: 'by project', rows: usage.span.by_project },
+            { name: 'by model', rows: usage.span.by_model, label: modelName },
           ]"
         />
         <div class="faint small">
@@ -126,7 +200,7 @@ const windows = computed(() => {
       </div>
     </div>
 
-    <div v-if="usage?.pi.limit_hit || usage?.pi.week.calls" class="meter-card">
+    <div v-if="usage?.pi.limit_hit || usage?.pi.week.calls || usage?.pi.span.calls" class="meter-card">
       <div class="card-head">
         <span class="card-title">pi agents</span>
         <span class="dim">ChatGPT and the other pi providers</span>
@@ -139,18 +213,29 @@ const windows = computed(() => {
         <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener">check its usage</a>.
       </div>
 
-      <template v-if="usage.pi.week.calls">
-        <div class="totals">
-          <span>Last 5 hours: <b>{{ fmtCost(usage.pi.window.est_usd) }}</b> est. over {{ usage.pi.window.calls }} calls</span>
-          <span>Last 7 days: <b>{{ fmtCost(usage.pi.week.est_usd) }}</b> est.</span>
+      <template v-if="usage.pi.week.calls || usage.pi.span.calls">
+        <div class="spend-bar">
+          <div class="totals">
+            <span>{{ spanLabel(usage.pi.span) }}: <b>{{ fmtCost(usage.pi.span.est_usd) }}</b> est. over {{ usage.pi.span.calls }} calls</span>
+            <span>Last 7 days: <b>{{ fmtCost(usage.pi.week.est_usd) }}</b> est.</span>
+          </div>
+          <SpanPicker v-model="piSpan" />
+        </div>
+        <div v-if="usage.pi.span.peaks.length" class="peaks">
+          <div class="caption">Busiest 5-hour stretches</div>
+          <ol>
+            <li v-for="p in usage.pi.span.peaks" :key="p.start">
+              <b>{{ fmtCost(p.est_usd) }}</b> over {{ p.calls }} calls, {{ stretch(p) }}
+            </li>
+          </ol>
         </div>
         <SpendTables
-          caption="Where the last 5 hours' spend went"
-          :total="usage.pi.window.est_usd"
-          empty="no pi calls in the last 5 hours"
+          :caption="spentWhere(usage.pi.span)"
+          :total="usage.pi.span.est_usd"
+          :empty="`no pi calls in the last ${NAMES[usage.pi.span.span]}`"
           :tables="[
-            { name: 'by project', rows: usage.pi.window.by_project },
-            { name: 'by model', rows: usage.pi.window.by_model },
+            { name: 'by project', rows: usage.pi.span.by_project },
+            { name: 'by model', rows: usage.pi.span.by_model },
           ]"
         />
         <div class="faint small">
@@ -241,6 +326,34 @@ const windows = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.spend-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+}
+
+.coverage {
+  font-size: 13px;
+  color: var(--amber);
+}
+
+.caption {
+  font-size: 13px;
+  color: var(--faint);
+  margin-bottom: 4px;
+}
+
+.peaks ol {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .totals {

@@ -61,8 +61,8 @@ A run opens as swim lanes, one per owner, on a time axis. Click a phase to see i
 Above the projects, `just obs-all` shows the accounts every repo shares:
 
 - **Claude's usage windows:** how full the 5-hour and 7-day windows are, and when each resets. Claude Code reports them on every SSSF agent call. Your interactive sessions don't, so the panel says how old the reading is; `/usage` in any Claude Code session gives the current figure.
-- **Where Claude spend went** in the current 5-hour window: SSSF agents against interactive sessions, by project and by model, at list price.
-- **pi agents' spend** over the last 5 hours and 7 days, by project and model. ChatGPT sends no usage windows, so there are none to show. When a run hits the ChatGPT plan's limit, the panel shows it for 5 hours.
+- **Where Claude spend went**: SSSF agents against interactive sessions, by project and by model, at list price. A picker sets the span, from 5 hours to 90 days; the browser remembers it. For a span of a day or more, the card also lists the three busiest 5-hour stretches, which is what a plan with a 5-hour limit would have seen. Claude Code deletes transcripts after `cleanupPeriodDays`, 30 by default, so a span longer than that needs the setting raised; the card says when the data starts inside the span.
+- **pi agents' spend**, by project and model, with its own span picker. The traces keep every pi call, so any span is complete. ChatGPT sends no usage windows, so there are none to show. When a run hits the ChatGPT plan's limit, the panel shows it for 5 hours.
 - **The machine's cap**, when `~/.config/sssf/limits.yaml` sets one.
 
 ## With SQL

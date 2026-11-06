@@ -4,9 +4,9 @@ The repos this hub has set SSSF up in. Each one's own Claude session owns its re
 
 | Repo | SSSF branch | Skill | Agent rules |
 |---|---|---|---|
-| pi-agent-observability | `main` | 7decd41 (68fcf9b). Has the operator container, with bun added for its `quality.py`; its pi roster ran there with obs on, in run a97a2d4b. In a VM its obs events reach the engineer's obs through the relay, as in run 0939000a on Vercel | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
-| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 7decd41 (1da5ef5) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
-| sssf-sandbox | `master` | 7decd41 (3d8c726). Has the operator container | The hub's own test bed. None |
+| pi-agent-observability | `main` | 35f675a (c1b3b9f). Has the operator container, with bun added for its `quality.py`; its pi roster ran there with obs on, in run a97a2d4b. In a VM its obs events reach the engineer's obs through the relay, as in run 0939000a on Vercel | Leave the obs server alone. The rule is a plain string; since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
+| fusion-harness | `sssf-run` (`main` feeds the patches and stays clean) | 35f675a (4956d66) | Never run the stack recipes or start `pi`, never read `.env`. The recipe rule is enforced by `forbid` and by an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432 a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
+| sssf-sandbox | `master` | 35f675a (25cca2c). Has the operator container | The hub's own test bed. None |
 | super-simple-software-factory | `main` | Stamped from the skill on `main`, see `docs/sssf.md` | The hub itself, for the guard-change chain. A `forbid` rule with `on_match: refuse` refuses `git push` and the `gh` commands that write to GitHub |
 
 ## Unlisted projects

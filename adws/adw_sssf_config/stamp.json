@@ -289,7 +289,7 @@
       "source": "adws/adw_scout.py"
     },
     "adws/adw_simple_sdlc.py": {
-      "sha256": "9b051af116e256171cc326b947dab09868d48ec9f3e269d2bc069e4333941377",
+      "sha256": "0c35bc50ae2df56f1ac4423c9396d7e6d8eca975b298ccb21b973a319cb25325",
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {

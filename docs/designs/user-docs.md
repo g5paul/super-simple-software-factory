@@ -1,6 +1,6 @@
 # Docs for people who use this fork
 
-Status: done on 2026-11-05. The worktree bug, the images and the docs are merged. The review in decision 10 found 19 problems: 16 in the docs, all fixed, and three bugs in the code, fixed in 338e80b. One question stays open: adw_simple_sdlc still sends a build that stayed red to review.
+Status: done on 2026-11-05. The worktree bug, the images and the docs are merged. The review in decision 10 found 19 problems: 16 in the docs, all fixed, and three bugs in the code, fixed in 338e80b. adw_simple_sdlc used to send a build that stayed red to review. The engineer chose to end the run there instead, done in b91b56f.
 
 ## The gap
 

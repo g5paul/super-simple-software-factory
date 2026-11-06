@@ -17,7 +17,7 @@
       "source": "adws/adw_build_review.py"
     },
     "adws/adw_build_test.py": {
-      "sha256": "daca1befd7e0c6bccaa21cba1869831d1510b2f9aff9523682f69404ab43dbe7",
+      "sha256": "f9cd0da84dfac064b54e66ecf62b4a03baf76d370f16508470a80b8b08458d46",
       "source": "adws/adw_build_test.py"
     },
     "adws/adw_data/harness_engineering/subagents.ts": {
@@ -253,7 +253,7 @@
       "source": "adws/adw_modules/utils.py"
     },
     "adws/adw_modules/worktree.py": {
-      "sha256": "8f495d1522d28b067ac482ea97ff439372a5e8355331477ad7fc6687afd95d19",
+      "sha256": "343fc6a4c67168a60a836ed6f68c08d6d6378c593867ab2e4dbb131d121ca43e",
       "source": "adws/adw_modules/worktree.py"
     },
     "adws/adw_plan.py": {
@@ -309,11 +309,11 @@
       "source": "adws/adw_trial.py"
     },
     "adws/adw_worktree.py": {
-      "sha256": "8c6a510eaa6731c4631e8a4d98e3896b816266073e23de661c606e66db474370",
+      "sha256": "ed71d8301c91635d2abc538722a7f3105b9f9a836ddc75d388aabfc239bc605a",
       "source": "adws/adw_worktree.py"
     },
     "justfile": {
-      "sha256": "38a1e53e712b79fc2b37856501b4cea937dcc720ddaee2c7c44b53a92279b216",
+      "sha256": "6b262ac424fded271291825fb2fbd0461988c0826e4e87844029cc9fadbccb2c",
       "source": "justfile"
     }
   }

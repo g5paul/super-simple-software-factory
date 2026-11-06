@@ -11,10 +11,12 @@ Usage:
 
 merge: only a successful run. Fast-forward when it can, a merge commit when the
 launch branch moved on, never a rebase. A conflict aborts and keeps the branch.
+It refuses a worktree with uncommitted changes, which the merge would lose.
 --ff-only refuses a merge commit, for a repo that keeps a linear history. So
 does `merge: ff_only` in adws/adw_sssf_config/repo.yaml, unless this machine's
 .env sets SSSF_MERGE_FF_ONLY=0.
-discard: removes the run's worktree and branch, whatever state they are in.
+discard: removes the run's worktree and branch, whatever state they are in, and
+says how many uncommitted files went with them.
 rebase: only when the engineer asks, for a fast-forward-only repo. Moves a
 successful run's branch onto the launch branch's tip and reruns adw_quality in
 its worktree. A conflict or a failed check puts the branch back as it was.

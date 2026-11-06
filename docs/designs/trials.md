@@ -70,9 +70,9 @@ A read-only survey of the skill before the decisions:
 29. **Proof in sssf-sandbox.** A real trial of `main` (Claude Code) against `chatgpt`, on a small request: the panel, the scorecard checked against each run's trace, `just trial-merge`, and the leaderboard. Before that, tests cover the refusals: too few slots, and a roster that isn't signed in. About $1 to $2 of Claude estimate, plus some ChatGPT plan usage.
 30. **Each roster shows with what its agents run on**, as `main (Claude Code)` and `chatgpt (pi)`, or `Claude Code + pi` for a roster that mixes them. `just trial` records the coding agent in each attempt's tag at launch, and the scorecard, the run summary, the trial page, and the leaderboard show it. The panel never sees it, since it judges blind. A trial from before this shows the bare name. Added 2026-11-01 at the engineer's request, so a bare `main` no longer hides what it runs.
 
-## Open
+## Follow-ups
 
-- A judge that picks the winner on its own, once enough scorecards show whether its picks match the engineer's.
+Open items for this design are in [open.md](../open.md).
 
 ## Log
 

@@ -24,6 +24,7 @@ These pages are about how this repo runs SSSF, and a fork can delete them.
 | Page | For |
 |---|---|
 | [sssf.md](sssf.md) | how this hub runs SSSF on itself, and the guard-change chain |
+| [open.md](open.md) | every open SSSF item, each linked to its design |
 | [projects.md](projects.md) | the repos this hub has installed SSSF in, and the skill commit each is on |
 | [designs/](designs/) | one design per feature: the decisions and why |
 | [research/](research/) | notes on outside tools and services, with sources |

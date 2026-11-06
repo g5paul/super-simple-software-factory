@@ -15,7 +15,7 @@ This page lists only the repos the engineer chose to name in public. Unlisted is
 
 ## Open items
 
-None as of 2026-11-03.
+A listed project's open items are in [open.md](open.md#projects).
 
 ## If the hub session goes to the background
 

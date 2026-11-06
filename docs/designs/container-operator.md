@@ -52,7 +52,9 @@ The container covers the sandbox, and only the sandbox. Runs still commit to wha
 | 2026-11-05 | sssf-sandbox | pi in the container: build_test with the extension roster (211bfc7f, $0.016) and the Claude Code roster (abd8bd30, $0.019) | both success, from hostname sssf-operator-sssf-sandbox. pi's builder ran openai/gpt-6.1-sol on the broker's token (the container's `auth.json` holds no login); `vm_marker` returned SSSF-VM-EXT-7f3a from the file it imports; `echo SSSF-REFUSE-PROBE` got "SSSF refused this command"; the `OBS_` names were NAME, POOL and TAG, with no `OBS_DISABLE`. The host's pi still minted a token afterward |
 | 2026-11-05 | pi-agent-observability | pi in the container with the obs extension: build_test (a97a2d4b, $0.014) | success, from hostname sssf-operator-pi-agent-observability. pi's builder ran openai/gpt-6.1-sol on the broker's token; the host's obs recorded its session in pool sssf-a97a2d4b with 33 events, through run.sh's pasta forward. The image adds bun for that repo's quality.py |
 
-## Open
+## Follow-ups
+
+Open items for this design are in [open.md](../open.md). This section keeps the follow-ups that closed.
 
 - **First real use: done.** A project runs from the container. Its first run exposed the missing compiler and tzdata, and the doc gaps its setup found are closed. Its second run, after the fix, passed every check on the first round.
 - **Branch per run and a merge back: done.** Built to [branch-per-run.md](branch-per-run.md) on 2026-10-30, proven in sssf-sandbox on the host and in this container (run d8fc85aa), and rolled out to both projects. The sandbox seam it left open is now built; see "The sandbox seam" below.

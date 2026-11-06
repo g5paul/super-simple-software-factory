@@ -226,17 +226,14 @@ Known limits:
 - A refuse extension listed in the roster under another spelling counts as a roster extension. The guard chain's report found it; the only effect is a relay the call didn't need.
 - `live` in the `obs_relay` event is false only when the host's read of the stream raised. A stream that ended early on its own still reads as true; the sweep covers it either way.
 
-## Open
+## Follow-ups
+
+Open items for this design are in [open.md](../open.md). This section keeps the follow-ups that closed.
 
 - **A ChatGPT roster in the VM: built in 51d54f6 and 673a70d.** Before each pi call the host runs `pi auth print-bearer-token --provider openai --min-expiry 35m`, and the token crosses as `SSSF_PI_TOKEN`, which becomes `OPENAI_API_KEY` only in the VM, so a host API key never does. The refuse extension is copied in. Still refused in a VM: pi on a provider other than `openai/`, whose key would have to go in. Vercel's image installs the latest pi, unpinned; the roster ran there too, in b7487076.
-- **Whether `/tmp` lasts across a Vercel refresh.** The obs relay (decisions 37 to 50) is done and proven, but no proof run refreshed its VM. The relay installs its script again on each call, so a lost `/tmp` should cost nothing; a run long enough to refresh would show it.
 - **An agent's output stream with no deadline: built and proven.** Decisions 28 to 36, settled on 2026-11-05. `RemoteProcess` reads the stream in a thread of its own, probes the VM after `QUIET_SECONDS` of quiet, and ends the read through the silence watchdog (`Watchdog.lose`), so `agent_cc` and `agent_pi` raise `SilentStop` with the call priced as before; `SilentStop.lost` makes `agents.py` record `agent_stream_lost`. The probe reads `/proc` for a live process in the agent's session, so it needs no `ps`; a zombie doesn't count, since the agent's own would read as alive until the provider reaps it, and a probe that can't tell counts as alive. The tests stand in for a dead stream with a real pipe held open by a grandchild in a session of its own, and for a VM that stops answering with a `run_process` that never returns.
-- **A narrower network.** A domain allowlist, and the token added by the provider's proxy instead of passed in. Matters only for untrusted code, like rebase checks off the host.
 - **VM cost in the caps: not needed.** Decision 13 waited for real numbers, and they're in: a run's VM costs about 1% of its Claude usage ($0.016 against $1.46 and $1.94 on one project), so the Claude caps already bound a run. Revisit only if a repo's VM time grows far past its agent time.
 - **`--sandbox` for tickets and trials** was built after the dashboard; see "As built: tickets and trials".
-- **Rebase checks off the host.** Per decision 11.
-- **Vercel's Hobby limits beyond the allowance.** Resuming is rate-limited to 40 vCPUs a minute, and snapshot storage is capped; past the cap, Vercel refuses every new VM until the month resets or snapshots are deleted. Both were hit in the proof, by a bug since fixed. How far a day of real runs is from either is not known.
-- **Not yet known:** which exception Vercel's SDK raises when a session ends mid-stream. The trace will show it when it happens; nothing to build until then.
 
 ## Log
 

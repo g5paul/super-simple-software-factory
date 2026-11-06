@@ -29,9 +29,9 @@ A pi agent signed in with ChatGPT runs on the plan's usage. When the plan runs o
 10. **No check of pi's provider-retry setting.** `references/config.md` says to leave `retry.provider.maxRetries` at 0. A check would guard against an edit nobody has made.
 11. **Only this code is matched.** Pi's legacy `openai-codex` provider reports `usage_limit_reached`, and pi can sign in to a Claude plan. No SSSF roster uses either, and matching their errors means guessing at text. Another provider gets its own stop when a roster first uses it.
 
-## Open
+## Follow-ups
 
-- Whether a real 429 reads the way pi's source says. The first one gets a log row.
+Open items for this design are in [open.md](../open.md).
 
 ## Log
 

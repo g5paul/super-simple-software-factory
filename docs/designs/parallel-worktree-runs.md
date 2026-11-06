@@ -1,6 +1,6 @@
 # Design: parallel worktree runs
 
-Status: done. Settled in two grilling sessions on 2026-10-30, built, proven in sssf-sandbox (all seven cases of decision 12, the three setup cases of decision 22, the three spend-cap cases of decision 48, the three daily-cap cases of decision 57, and the gauge's checks of decision 65), proven on a real worktree run in pi-agent-observability (70f9e62e), and rolled out to the project repos. What is still open is under "Open", below the decisions. Where the text and a decision disagree, the decision wins.
+Status: done. Settled in two grilling sessions on 2026-10-30, built, proven in sssf-sandbox (all seven cases of decision 12, the three setup cases of decision 22, the three spend-cap cases of decision 48, the three daily-cap cases of decision 57, and the gauge's checks of decision 65), proven on a real worktree run in pi-agent-observability (70f9e62e), and rolled out to the project repos. What is still open is in [open.md](../open.md). Where the text and a decision disagree, the decision wins.
 
 [Branch per run](branch-per-run.md) gave each run its own branch and folder, but only one at a time: its decision 12 refused a second worktree run while one was alive, because in the container every run shared one project environment, and that was untested. This design lifts that limit, so a repo can have more than one `--worktree` run going at once.
 
@@ -156,11 +156,9 @@ Settled in an eighth grilling session on 2026-11-01. `max_daily_cost` holds one 
 81. **A repo that can't be read counts $0.** A moved or deleted repo, or a trace that won't open, doesn't block every launch on the machine. The message lists the repos it read.
 82. **Proof.** Under a temporary `$SSSF_REGISTRY` for sandbox runs only, so the real repos are never capped: a launch refused at the machine's real total, at $0; a cheap two-agent run stopped before its builder; a run with no file, as today; and the account panel's line against the Python message, with screenshots. About $0.25.
 
-## Open
+## Follow-ups
 
-Known, and not built. None of them blocks a run.
-
-- **Setup is all or nothing: decided, not built.** Every worktree run runs all of `worktree_setup`, even when it touches one package. Running less needs the run's scope before its first agent, and nothing knows it then: the planner decides it later, and the builder needs its packages installed while it works. Today it costs about a second, in pi-agent-observability's four bun installs. Reopen this if a repo's setup grows slow. Then the engineer naming the packages at launch is the simplest fix.
+Open items for this design are in [open.md](../open.md).
 
 ## Log
 

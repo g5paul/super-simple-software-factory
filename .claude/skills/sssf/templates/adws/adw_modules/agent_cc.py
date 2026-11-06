@@ -17,7 +17,10 @@ Agents run isolated from the operator's own Claude Code setup: `--safe-mode`
 drops their CLAUDE.md, skills, plugins, hooks, and MCP servers, so a factory
 agent sees its system.md and nothing else. Safe mode keeps environment
 variables, so a repo's refuse rules reach the agent as a shell prefix,
-sssf_refuse.py, not as a hook. Auth stays on the operator's
+sssf_refuse.py, not as a hook. Protected secret files (secret_files.py) are
+denied to Read and Grep with `--disallowedTools "Read(//<abs>)"`, one per
+file, which --safe-mode and bypassPermissions keep; checked by hand on
+claude 2.1.319. Keys .env set don't reach the agent (utils.agent_env). Auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """
 
@@ -32,7 +35,7 @@ from typing import Callable, Optional
 from . import account, budget, prices, rules, sandbox, silence
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
-from .utils import mark_agent, operator_env
+from .utils import agent_env, mark_agent, operator_env
 
 CLAUDE_PATH = os.environ.get("CLAUDE_CODE_PATH", "claude")
 # subscription: strip API keys from the child so the operator's login pays,
@@ -111,8 +114,11 @@ def check_login() -> None:
     _logged_in = True
 
 
-def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
-    env = mark_agent(operator_env(), agent_name, adw_id)
+def child_env(agent_name: str = "", adw_id: str = "", allowed=()) -> dict[str, str]:
+    """The operator's environment less the keys .env set (utils.agent_env),
+    except SSSF_*, OBS_*, CLAUDE_CODE_OAUTH_TOKEN and `allowed` (repo.yaml
+    agent_env). Claude Code gets no provider keys beyond those."""
+    env = mark_agent(agent_env(operator_env(), allowed), agent_name, adw_id)
     if AUTH == "subscription":
         for var in API_KEY_VARS:
             env.pop(var, None)
@@ -200,6 +206,9 @@ def _command(request: AgentRequest, resume: bool) -> list[str]:
     tools = map_tools(request.tools)
     if tools is not None:
         cmd += ["--tools", ",".join(tools)]
+    for path in request.secret_files:
+        # One deny per file, in Claude Code's //<absolute path> form.
+        cmd += ["--disallowedTools", f"Read(/{path})"]
     if request.max_cost is not None:
         cmd += ["--max-budget-usd", str(request.max_cost)]
     return cmd
@@ -262,7 +271,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     # sandbox.start gives the child a DEVNULL stdin, for the reason agent_pi gives.
     tree = sandbox.current()
     process = tree.start(cmd, cwd=request.cwd,
-                         env=_with_refusals(child_env(request.agent_name, request.adw_id),
+                         env=_with_refusals(child_env(request.agent_name, request.adw_id,
+                                                   request.agent_env),
                                             request.refuse_rules, tree))
     if on_spawn:
         on_spawn(process.pid)

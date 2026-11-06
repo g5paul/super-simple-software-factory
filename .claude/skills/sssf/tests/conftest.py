@@ -28,3 +28,14 @@ def claude_logged_in(monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "templates" / "adws"))
     from adw_modules import agent_cc
     monkeypatch.setattr(agent_cc, "_logged_in", True)
+
+
+@pytest.fixture(autouse=True)
+def no_dotenv_keys(monkeypatch):
+    """A developer's own .env must never change the suite: no key counts as
+    one .env set unless the test says so."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "templates" / "adws"))
+    from adw_modules import utils
+    monkeypatch.setattr(utils, "DOTENV_KEYS", frozenset())

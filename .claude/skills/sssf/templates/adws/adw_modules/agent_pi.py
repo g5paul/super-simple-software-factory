@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from . import obs_relay, rules, sandbox, silence
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
-from .utils import mark_agent, now_iso, operator_env
+from .utils import agent_env, mark_agent, now_iso, operator_env
 
 PI_PATH = os.environ.get("PI_PATH", "pi")
 
@@ -581,22 +581,47 @@ def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict],
     target = _obs_target(env, token, extensions)
     env["OBS_DISABLE"] = "true"             # the only value the obs extension reads as off
     env["SSSF_PI_TOKEN"] = vm_token()
-    if refuse_rules:
-        tree.install(REFUSE_EXTENSION)
+    tree.install(REFUSE_EXTENSION)          # every pi agent loads it
     if target is not None:
         tree.relay_obs(target)              # for the next start only
     return env
 
 
-def _with_refusals(env: dict[str, str], refuse_rules: list[dict]) -> dict[str, str]:
+def _with_refusals(env: dict[str, str], refuse_rules: list[dict],
+                   secret_files=()) -> dict[str, str]:
     if refuse_rules:
         env["SSSF_REFUSE_RULES"] = json.dumps(refuse_rules)
+    if secret_files:
+        env["SSSF_SECRET_FILES"] = json.dumps(list(secret_files))
     return env
 
 
-def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
-    """The operator's environment, less the subscription providers' keys when
-    SSSF_PI_AUTH=subscription. Read per call, since .env loads after import.
+# The provider key names pi reads, from pi-ai's env-api-keys.js. AWS credentials
+# are left out on purpose: they are general cloud credentials, so a repo that
+# uses Bedrock lists them under `agent_env`. A key pi learns later goes in
+# `agent_env` until this list catches up.
+PI_PROVIDER_KEYS = (
+    "AI_GATEWAY_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_OAUTH_TOKEN", "ANT_LING_API_KEY", "AZURE_OPENAI_API_KEY",
+    "BASETEN_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY",
+    "COPILOT_GITHUB_TOKEN", "DEEPSEEK_API_KEY", "FIREWORKS_API_KEY",
+    "GEMINI_API_KEY", "GOOGLE_CLOUD_API_KEY", "GROQ_API_KEY", "HF_TOKEN",
+    "KIMI_API_KEY", "META_API_KEY", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY",
+    "MISTRAL_API_KEY", "MOONSHOT_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY",
+    "OPENCODE_API_KEY", "OPENROUTER_API_KEY", "QWEN_TOKEN_PLAN_API_KEY",
+    "QWEN_TOKEN_PLAN_CN_API_KEY", "RADIUS_API_KEY", "TOGETHER_API_KEY",
+    "TYPESAFE_API_KEY", "XAI_API_KEY", "XIAOMI_API_KEY",
+    "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+    "XIAOMI_TOKEN_PLAN_SGP_API_KEY", "ZAI_API_KEY", "ZAI_CODING_CN_API_KEY",
+)
+
+
+def child_env(agent_name: str = "", adw_id: str = "", allowed=()) -> dict[str, str]:
+    """The operator's environment, less the keys .env set (utils.agent_env)
+    except SSSF_*, OBS_*, CLAUDE_CODE_OAUTH_TOKEN, pi's provider keys
+    (PI_PROVIDER_KEYS) and `allowed` (repo.yaml agent_env), and less the
+    subscription providers' keys when SSSF_PI_AUTH=subscription. Read per call,
+    since .env loads after import.
 
     The rest is for the pi-observability extension. OBS_NAME is the roster
     name, so the dashboard shows "builder" rather than an unnamed session.
@@ -605,7 +630,8 @@ def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
     "sssf" and "adw-<adw_id>", added to the operator's tags, not replacing them.
     SSSF_ADW_ID and SSSF_AGENT mark the agent for the repo's scripts (mark_agent).
     """
-    env = mark_agent(operator_env(), agent_name, adw_id)
+    env = mark_agent(agent_env(operator_env(), (*PI_PROVIDER_KEYS, *allowed)),
+                     agent_name, adw_id)
     if agent_name:
         env["OBS_NAME"] = agent_name
     if adw_id:
@@ -642,10 +668,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         cmd += ["--tools", ",".join(request.tools)]
     for extension in request.extensions:
         cmd += ["-e", extension]
-    if request.refuse_rules:
-        # Last, so it checks a command after every other extension has had its
-        # turn (design decision 24). A test pins this.
-        cmd += ["-e", str(REFUSE_EXTENSION)]
+    # Last, so it checks a command after every other extension has had its
+    # turn (design decision 24). A test pins this.
+    cmd += ["-e", str(REFUSE_EXTENSION)]
     cmd.append(request.prompt)
 
     raw_path = Path(request.raw_output_path)
@@ -664,7 +689,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     # the last turn says whether the call failed.
     last_stop, last_error = None, ""
     tree = sandbox.current()
-    env = _with_refusals(child_env(request.agent_name, request.adw_id), request.refuse_rules)
+    env = _with_refusals(
+        child_env(request.agent_name, request.adw_id, request.agent_env),
+        request.refuse_rules, request.secret_files)
     env = _in_vm(env, tree, request.refuse_rules, request.extensions)
     env = _in_container(env, tree)
     process = tree.start(cmd, cwd=request.cwd, env=env)

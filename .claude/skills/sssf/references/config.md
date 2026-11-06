@@ -104,7 +104,7 @@ That is `agents.validate()` doing its job — it fails before anything spawns ra
 
 Other consequences worth knowing:
 
-- **A subscription sign-in.** Pi can sign into some providers with a subscription instead of a key: `openai` with a ChatGPT login, `anthropic` with a Claude login. `pi auth check --provider openai --json` reports `"authType": "oauth"` when it has. Pi prefers that sign-in over a key in the environment, but falls back to the key when the sign-in lapses, and then bills the API. Set `SSSF_PI_AUTH=subscription` in `.env` and `agent_pi` keeps `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from Pi agents, so a lapsed sign-in fails the call instead. Keys for other providers still reach Pi. The cost Pi reports is list price, not a charge, the same as on Claude Code.
+- **A subscription sign-in.** Pi can sign into some providers with a subscription instead of a key: `openai` with a ChatGPT login, `anthropic` with a Claude login. `pi auth check --provider openai --json` reports `"authType": "oauth"` when it has. Pi prefers that sign-in over a key in the environment, but falls back to the key when the sign-in lapses, and then bills the API. Set `SSSF_PI_AUTH=subscription` in `.env` and `agent_pi` keeps `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from Pi agents, so a lapsed sign-in fails the call instead. Keys for other providers still reach Pi. Pi agents get provider keys from `.env` only through SSSF's list of pi's provider keys (`PI_PROVIDER_KEYS`), plus `agent_env`. The cost Pi reports is list price, not a charge, the same as on Claude Code.
 - A model must be in the catalog before any agent can name it. An unknown id fails at resolution, before spawn. `pi --list-models` is the catalog the resolver actually reads (in the operator container it reads it with the broker's token).
 - **Ambiguity can appear without you touching the config.** Registering a new provider that carries a model you already use turns a formerly-fine bare pattern ambiguous. If a roster stops validating and nobody edited it, that is why.
 - Provider credentials come from the environment, not the config — the key that matches the provider you named (`GEMINI_API_KEY` for `google/...`, `OPENROUTER_API_KEY` for `openrouter/...`).
@@ -406,7 +406,23 @@ fh-stack:
 
 The agent reads the refusal and carries on, and the run isn't stopped. An agent can unset the variable, so keep the `forbid` rule as the backstop.
 
-It reads shell commands only. A command another tool runs, such as a pi extension's own tool, isn't checked. A pattern matches text, so a loose one catches ordinary commands: `\bgit\b.*\bpush\b` also stops `git stash push` and `git log --grep push`. The push pattern above allows only git's own options between `git` and `push`. Test a pattern with `re.search` against the commands agents really run before you add it. What an agent may change is enforced by `writes` and `protected_files`.
+It reads shell commands only. A command another tool runs, such as a pi extension's own tool, isn't checked. A pattern matches text, so a loose one catches ordinary commands: `\bgit\b.*\bpush\b` also stops `git stash push` and `git log --grep push`. The push pattern above allows only git's own options between `git` and `push`. Test a pattern with `re.search` against the commands agents really run before you add it. What an agent may change is enforced by `writes` and `protected_files`. For files agents must not read, see [Secret files](#secret-files--secret_files-and-agent_env). The three-refusal stop described above applies to the repo's own rules.
+
+## Secret files — `secret_files` and `agent_env`
+
+Agents must not read the repo's secret files. The protected set is `.env` and every `.env.*` except `.env.sample` and `.env.example`, anywhere in the repo or a run's worktree. `secret_files` in `repo.yaml` adds more. An entry with no `/` is a glob matched against a file name anywhere (`'*.pem'`). An entry with a `/` is a path or glob from the repo root (`config/credentials.json`). The data dir and `.git`, `node_modules`, `.venv`, `venv` and `__pycache__` are not searched.
+
+SSSF finds the files when each agent starts, so a file created later isn't covered. Three routes keep them out:
+
+- **Claude Code:** one `--disallowedTools "Read(//<abs>)"` per file, so Read and Grep refuse it.
+- **pi:** `sssf_rules.ts`, loaded into every pi agent, blocks `read`, `grep`, `find` and `ls` on the file's path.
+- **Shell:** a built-in refuse rule refuses any command that names one of the files by name or path.
+
+Refusals by the built-in rule never count toward the three-refusal stop, so a command that only mentions `.env` is refused and the run goes on. The cost caps bound a loop, and the stream check still backstops the rule: a matching call that wasn't refused stops the run.
+
+`.env` keys don't reach agents. An agent gets only `SSSF_*`, `OBS_*` and `CLAUDE_CODE_OAUTH_TOKEN` from `.env`, plus pi's provider keys for pi agents. List any other key under `agent_env` to keep it. This includes an operator's `CLAUDE_CODE_SHELL_PREFIX` or any other Claude Code setting kept in `.env`. Quality checks, `worktree_setup` and git keep the full environment, and so do keys exported in your shell, direnv included.
+
+This stops accidental exposure, not an agent set on a secret. Agents run as the engineer's user, so one can build a path at runtime or read `/proc/<pid>/environ`. The container and VMs are the boundary, since `.env` never enters them. Also left open: obfuscated shell access, keys exported before the ADW starts, a grep over a whole folder, Edit and Write reading a file to edit it, and files under the pruned folders.
 
 ## Harness engineering
 
@@ -488,7 +504,7 @@ How the roster maps onto `claude`:
 
 **Permissions.** Runs use `--permission-mode bypassPermissions`, since nobody is there to answer a prompt. The boundary is `writes` and `protected_files`, enforced by `permissions.py` after the call, the same as on Pi.
 
-**Auth.** The default is the operator's subscription login. `agent_cc` removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the child's environment, because `.env` is loaded into every ADW and Claude prefers an API key when one is present. If the run's `init` event still reports an API key source (an `apiKeyHelper` in project settings, say), the run stops before the model is called. Set `SSSF_CLAUDE_AUTH=api_key` in `.env` to bill the API instead. `--bare` is never used, because it ignores OAuth.
+**Auth.** The default is the operator's subscription login. `agent_cc` removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the child's environment, because `.env` is loaded into every ADW and Claude prefers an API key when one is present. If the run's `init` event still reports an API key source (an `apiKeyHelper` in project settings, say), the run stops before the model is called. Set `SSSF_CLAUDE_AUTH=api_key` to bill the API instead. `.env` keys no longer reach Claude Code agents, so export `ANTHROPIC_API_KEY` in your shell or list it under `agent_env`. `--bare` is never used, because it ignores OAuth.
 
 **Sessions.** Claude needs a UUID session id, creates a session with `--session-id`, and continues one with `--resume`. `agent_cc` keeps a ledger file per session in `{agent}/claude_code_sessions/{uuid}.json`. If the file exists, the send resumes. That covers JSON retries, gate corrections, and a later phase rejoining the agent through `agent_map.json`. Claude stores the conversation itself under `~/.claude/projects/`, so factory sessions show up in `claude --resume` for that repo.
 

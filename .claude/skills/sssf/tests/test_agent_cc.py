@@ -215,6 +215,71 @@ def test_tool_result_content_may_be_a_block_list():
     assert record["ok"] is True
 
 
+def _stream(tmp_path, name, middle) -> tuple[Path, dict]:
+    """cc_turn1's init and result lines around `middle`; no new fixture file."""
+    lines = (FIXTURES / "cc_turn1.jsonl").read_text().splitlines()
+    result = json.loads(lines[-1])
+    path = tmp_path / name
+    path.write_text("".join(json.dumps(e) + "\n" for e in [json.loads(lines[0]), *middle, result]))
+    return path, result
+
+
+def test_a_denied_read_is_a_failed_call_and_the_call_goes_on(tmp_path, fake):
+    from adw_modules import rules
+    usage = next(json.loads(line) for line in (FIXTURES / "cc_turn1.jsonl").read_text().splitlines()
+                 if json.loads(line).get("type") == "assistant")["message"]["usage"]
+    call_id = "toolu_01BdBmiNqfMBM4JPshZVxodW"
+    path, result = _stream(tmp_path, "denied.jsonl", [
+        {"type": "assistant", "message": {
+            "id": "msg_denied", "model": "claude-haiku-5-5", "role": "assistant", "usage": usage,
+            "content": [{"type": "tool_use", "id": call_id, "name": "Read",
+                         "input": {"file_path": "/repo/.env"}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": call_id, "is_error": True,
+             "content": "<tool_use_error>File is in a directory that is denied by your "
+                        "permission settings.</tool_use_error>"}]}},
+        {"type": "system", "subtype": "permission_denied", "tool_name": "Grep",
+         "tool_use_id": call_id, "decision_reason_type": "rule",
+         "message": "Permission to read /repo/.env has been denied.",
+         "uuid": "bacf0074-14fc-4c40-9871-972f71ae02f7",
+         "session_id": "2b34dc8b-a340-4c0c-82bb-046a7632da0a"},
+        {"type": "system", "subtype": "permission_denied", "tool_name": "Bash",
+         "tool_use_id": "toolu_011E3m58bgpqe7LGELGbwmZ2", "decision_reason_type": "rule",
+         "message": "Permission to use Bash with command cat .env has been denied.",
+         "session_id": "2b34dc8b-a340-4c0c-82bb-046a7632da0a"},
+    ])
+    fake(path)
+    tracker = agent_cc.ToolCallTracker()
+    records = []
+
+    def on_event(event):
+        records.extend(tracker.observe(event))
+        rules.calls(event)
+        rules.results(event)
+
+    outcome = agent_cc.run(request(tmp_path), on_event=on_event)
+
+    assert outcome.text == result["result"]
+    assert len(records) == 1
+    assert records[0]["tool"] == "Read"
+    assert records[0]["ok"] is False
+    assert "denied by your permission settings" in records[0]["result_snippet"]
+
+
+def test_an_assistant_message_that_is_not_a_dict_does_not_raise(tmp_path, fake):
+    tracker = agent_cc.ToolCallTracker()
+    assert tracker.observe({"type": "assistant", "message": "oops"}) == []
+    assert tracker.observe({"type": "user", "message": "oops"}) == []
+    assert tracker.observe({"type": "system", "subtype": "permission_denied",
+                            "message": "Permission to read /repo/.env has been denied."}) == []
+
+    path, _ = _stream(tmp_path, "odd.jsonl", [
+        {"type": "assistant", "message": "oops"},
+        {"type": "stream_event", "event": {"type": "message_start", "message": "oops"}}])
+    fake(path)
+    agent_cc.run(request(tmp_path), on_event=lambda e: tracker.observe(e))
+
+
 # ── failures ─────────────────────────────────────────────────────────────────
 
 def _rewrite(tmp_path, name, edit) -> Path:

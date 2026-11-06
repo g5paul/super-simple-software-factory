@@ -414,7 +414,7 @@ Agents must not read the repo's secret files. The protected set is `.env` and ev
 
 SSSF finds the files when each agent starts, so a file created later isn't covered. Three routes keep them out:
 
-- **Claude Code:** one `--disallowedTools "Read(//<abs>)"` per file, with `[ ] * ? ! \` and space in the path escaped by a backslash, since Claude Code reads the rule as a gitignore-style pattern. Read and Grep refuse it.
+- **Claude Code:** one `--disallowedTools "Read(//<abs>)"` per file, with `[ ] * ? ! \` and space in the path escaped by a backslash, since Claude Code reads the rule as a gitignore-style pattern. Read and Grep refuse it. Claude Code also emits a `permission_denied` system event for each refusal; SSSF ignores it, the agent reads the refusal and goes on, and the trace records the call as a failed tool call.
 - **pi:** `sssf_rules.ts`, loaded into every pi agent, blocks `read`, `grep`, `find` and `ls` on the file's path.
 - **Shell:** a built-in refuse rule refuses any command that names one of the files by name or path.
 

@@ -415,8 +415,8 @@ Agents must not read the repo's secret files. The protected set is `.env` and ev
 SSSF finds the files when each agent starts, so a file created later isn't covered. Three routes keep them out:
 
 - **Claude Code:** one `--disallowedTools "Read(//<abs>)"` per file, with `[ ] * ? ! \` and space in the path escaped by a backslash, since Claude Code reads the rule as a gitignore-style pattern. Claude Code may deny a protected-file read itself, in any tool: Read, Grep, and a Bash `cat .env` too, before SSSF's shell prefix sees it. Each denial arrives as a `permission_denied` system event naming the call. SSSF counts that call as refused, as if its own refusal were the result, matching by the call's id and never the message. The agent reads the denial and goes on. A Bash call a refuse rule matched records `rule_refused`, and the trace records the call as a failed tool call.
-- **pi:** `sssf_rules.ts`, loaded into every pi agent, blocks `read`, `grep`, `find` and `ls` on the file's path.
-- **Shell:** a built-in refuse rule refuses any command that names one of the files by name or path.
+- **pi:** `sssf_rules.ts`, loaded into every pi agent, blocks `read`, `grep`, `find` and `ls` on the file's path. The agent reads "SSSF refused this read call: .env is one of this repo's secret files…" (or grep, find, ls), and nothing is read.
+- **Shell:** a built-in refuse rule refuses any command that names one of the files by name or path. Its refusal reads "SSSF refused this command, by SSSF's secret-file rule: …", so the agent can tell it from a repo's own rule.
 
 Refusals by the built-in rule never count toward the three-refusal stop, so a command that only mentions `.env` is refused and the run goes on. The cost caps bound a loop, and the stream check still backstops the rule: a matching call that neither SSSF nor Claude Code refused stops the run.
 

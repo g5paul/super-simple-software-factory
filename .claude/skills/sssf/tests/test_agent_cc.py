@@ -459,7 +459,7 @@ DENIED_TEXT = "Permission to use Bash with command cat .env has been denied."
 CAT_RULE = {"rule": "Never cat .env.", "forbid": [r"\bcat\s+\.env\b"]}
 
 
-def _guarded(root, agent_rules=()):
+def _guarded(root, agent_rules=(), can_refuse=True):
     """The forwarder agents.py builds, from the shipped repo.yaml."""
     root.mkdir(parents=True, exist_ok=True)
     (root / ".env").write_text("APP_CANARY=x\n")
@@ -472,7 +472,8 @@ def _guarded(root, agent_rules=()):
     run = SimpleNamespace(adw_id="r1", tracer=SimpleNamespace(event=events.append),
                           console=SimpleNamespace(advise=said.append))
     forward = agents._event_forwarder(run, SimpleNamespace(phase_id="r1_01"), "builder",
-                                      agent_cc, enforced, uncounted=(builtin,))
+                                      agent_cc, enforced, can_refuse=can_refuse,
+                                      uncounted=(builtin,))
     return forward, events, builtin
 
 
@@ -545,6 +546,31 @@ def test_three_denials_by_claude_code_stop_at_max_refusals(tmp_path, fake):
         caught.append(stop.value)
     assert caught[0].refusals == caught[1].refusals == rules.MAX_REFUSALS
     assert caught[0].partial is not None
+    assert "times for this repo's rule: Never cat .env." in str(caught[0])
+
+
+def test_a_breach_names_the_built_in_rule_as_sssfs_and_a_repo_rule_as_the_repos(tmp_path):
+    forward, _, builtin = _guarded(tmp_path / "a")
+    forward(_bash_call("t1"))
+    with pytest.raises(rules.RuleBreach) as stop:
+        forward(_result("t1", "APP_CANARY=x"))
+    assert "which SSSF's secret-file rule forbids: " + secret_files.RULE_TEXT in str(stop.value)
+    assert "this repo's rule" not in str(stop.value)
+    assert stop.value.builtin is True
+
+    forward, _, _ = _guarded(tmp_path / "b", can_refuse=False)
+    with pytest.raises(rules.RuleBreach, match="SSSF's secret-file rule forbids"):
+        forward(_bash_call("t2"))
+
+    forward, _, _ = _guarded(tmp_path / "c", agent_rules=[{**CAT_RULE, "on_match": "refuse"}])
+    forward(_bash_call("t3"))
+    with pytest.raises(rules.RuleBreach) as stop:
+        forward(_result("t3", "APP_CANARY=x"))
+    assert str(stop.value) == (
+        f"builder ran `cat .env`, which this repo's rule forbids: Never cat .env. "
+        f"(matched {CAT_RULE['forbid'][0]!r}). SSSF killed the agent and everything it started, "
+        "but the command may have run first: check what it did before resuming.")
+    assert stop.value.builtin is False
 
 
 def test_three_denials_under_the_builtin_rule_never_stop_the_run(tmp_path, fake):

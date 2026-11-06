@@ -39,31 +39,36 @@ from pydantic import BaseModel, ConfigDict, field_validator
 # The shell tool's name in each harness: Claude Code's `Bash`, pi's `bash`.
 SHELL_TOOLS = {"Bash", "bash"}
 
-# How sssf_rules.ts and sssf_refuse.py start a refusal, so the stream check can
-# tell it from output. Claude Code puts the exit line first.
+# How sssf_rules.ts and sssf_refuse.py start a shell refusal, so the stream check
+# can tell it from output. Claude Code puts the exit line first. A pi file-tool
+# refusal says "this <tool> call" instead, and never reaches the stream check:
+# only shell calls are.
 REFUSED = "SSSF refused this command"
+BUILTIN_RULE = "SSSF's secret-file rule"   # how a refusal or breach names secret_files.shell_rule's rule
 _CLAUDE_REFUSED = re.compile(r"Exit code 126\n" + re.escape(REFUSED))
 # An agent refused this many times in one call is looping: stop the run.
 MAX_REFUSALS = 3
 
 
 class RuleBreach(RuntimeError):
-    """An agent ran a command one of this repo's agent_rules forbids."""
+    """An agent ran a command one of this repo's agent_rules, or SSSF's built-in secret-file rule, forbids."""
 
     def __init__(self, agent: str, rule: "AgentRule", pattern: str, command: str,
-                 refusals: int = 0):
+                 refusals: int = 0, *, builtin: bool = False):
         self.agent, self.rule, self.pattern, self.command = agent, rule.rule, pattern, command
         self.refusals = refusals
+        self.builtin = builtin
+        whose = BUILTIN_RULE if builtin else "this repo's rule"
         self.partial = None         # the AgentResult so far, set by the interface that killed it
         if refusals:
             super().__init__(
-                f"SSSF refused {agent} {refusals} times for this repo's rule: {rule.rule} "
+                f"SSSF refused {agent} {refusals} times for {whose}: {rule.rule} "
                 f"(matched {pattern!r}; last `{command[:300]}`). Nothing refused ran. SSSF "
                 "stopped the agent so it doesn't keep trying: give it another way, or do "
                 "that step yourself.")
         else:
             super().__init__(
-                f"{agent} ran `{command[:300]}`, which this repo's rule forbids: {rule.rule} "
+                f"{agent} ran `{command[:300]}`, which {whose} forbids: {rule.rule} "
                 f"(matched {pattern!r}). SSSF killed the agent and everything it started, but "
                 "the command may have run first: check what it did before resuming.")
 
@@ -163,10 +168,12 @@ def refused(text: str) -> bool:
     return text.startswith(REFUSED) or bool(_CLAUDE_REFUSED.match(text))
 
 
-def refusing(rules: list) -> list[dict]:
+def refusing(rules: list, builtin: Optional["AgentRule"] = None) -> list[dict]:
     """The refuse rules, as sssf_rules.ts and sssf_refuse.py read them from
-    SSSF_REFUSE_RULES."""
-    return [{"rule": rule.rule, "forbid": rule.forbid} for rule in rules
+    SSSF_REFUSE_RULES. `builtin` (secret_files.shell_rule's rule, by identity)
+    is marked so the refusal names it as SSSF's."""
+    return [{"rule": rule.rule, "forbid": rule.forbid, **({"builtin": True} if rule is builtin else {})}
+            for rule in rules
             if isinstance(rule, AgentRule) and rule.on_match == "refuse" and rule.forbid]
 
 

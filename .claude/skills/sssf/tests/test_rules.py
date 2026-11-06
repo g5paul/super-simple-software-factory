@@ -26,7 +26,7 @@ from pydantic import ValidationError
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agent_cc, agent_pi, agents, repo_settings, rules
+from adw_modules import agent_cc, agent_pi, agents, repo_settings, rules, secret_files
 from adw_modules.data_types import AgentRequest
 
 PUSH = rules.AgentRule(rule="Never run `git push`.", forbid=[r"\bgit\b(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+push\b"])
@@ -347,7 +347,70 @@ console.log(JSON.stringify(out));
     blocked, spared, other = json.loads(done.stdout)
     assert blocked["block"] is True and blocked["reason"].startswith(rules.REFUSED)
     assert REFUSE.rule in blocked["reason"]
+    assert blocked["reason"] == (
+        f"{rules.REFUSED}, by this repo's rule: {REFUSE.rule} (it matches {json.dumps(REFUSE.forbid[0])}). "
+        "Nothing ran. Don't try it another way: do the task without it, or say in your report "
+        "that the task needs it.")
     assert spared is None and other is None
+
+
+def test_the_prefix_names_the_built_in_rule_as_sssfs():
+    builtin = secret_files.shell_rule(["/r/.env"])
+    done = prefix(claude_line("cat .env"), json.dumps(rules.refusing([builtin], builtin=builtin)))
+    assert done.returncode == 126
+    assert done.stderr.startswith(
+        rules.REFUSED + ", by SSSF's secret-file rule: " + secret_files.RULE_TEXT + " Nothing ran.")
+    assert "this repo's rule" not in done.stderr
+    assert rules.refused(f"Exit code 126\n{done.stderr}")
+    twin = builtin.model_copy()
+    done = prefix(claude_line("cat .env"), json.dumps(rules.refusing([twin], builtin=builtin)))
+    assert ", by this repo's rule: " in done.stderr
+
+
+def test_the_prefix_keeps_a_repo_rules_wording():
+    done = prefix(claude_line("git push"), json.dumps(rules.refusing([REFUSE])))
+    assert done.stderr == (
+        f"{rules.REFUSED}, by this repo's rule: {REFUSE.rule} (it matches {json.dumps(REFUSE.forbid[0])}). "
+        "Nothing ran. Don't try it another way: do the task without it, or say in your report "
+        "that the task needs it.\n")
+
+
+def test_refusing_marks_only_the_built_in_rule():
+    builtin = secret_files.shell_rule(["/r/.env"])
+    twin = builtin.model_copy()
+    assert rules.refusing([REFUSE, builtin, twin], builtin=builtin) == [
+        {"rule": REFUSE.rule, "forbid": REFUSE.forbid},
+        {"rule": builtin.rule, "forbid": builtin.forbid, "builtin": True},
+        {"rule": twin.rule, "forbid": twin.forbid}]
+    assert all("builtin" not in r for r in rules.refusing([REFUSE]))
+
+
+def test_a_breach_message_names_the_built_in_rule_as_sssfs():
+    builtin = secret_files.shell_rule(["/r/.env"])
+    text = str(rules.RuleBreach("builder", builtin, builtin.forbid[0], "cat .env", builtin=True))
+    assert "which SSSF's secret-file rule forbids: " in text and "this repo's rule" not in text
+    text = str(rules.RuleBreach("builder", builtin, builtin.forbid[0], "cat .env", refusals=3, builtin=True))
+    assert "times for SSSF's secret-file rule: " in text
+    assert str(rules.RuleBreach("builder", PUSH, PUSH.forbid[0], "git push origin main")) == (
+        f"builder ran `git push origin main`, which this repo's rule forbids: {PUSH.rule} "
+        f"(matched {PUSH.forbid[0]!r}). SSSF killed the agent and everything it started, but the "
+        "command may have run first: check what it did before resuming.")
+    assert str(rules.RuleBreach("builder", PUSH, PUSH.forbid[0], "git push origin main", refusals=3)) == (
+        f"SSSF refused builder 3 times for this repo's rule: {PUSH.rule} "
+        f"(matched {PUSH.forbid[0]!r}; last `git push origin main`). Nothing refused ran. SSSF "
+        "stopped the agent so it doesn't keep trying: give it another way, or do that step yourself.")
+
+
+def test_a_file_tool_refusal_never_reaches_the_stream_check():
+    builtin = secret_files.shell_rule(["/r/.env"])
+    forward, events, _ = forwarder(enforced=[builtin], uncounted=(builtin,))
+    forward({"type": "tool_execution_start", "toolCallId": "r1", "toolName": "read",
+             "args": {"path": ".env"}})
+    forward({"type": "tool_execution_end", "toolCallId": "r1", "toolName": "read",
+             "result": {"content": [{"type": "text", "text": (
+                 "SSSF refused this read call: .env is one of this repo's secret files, which SSSF "
+                 "keeps from agents. Nothing was read.")}]}, "isError": True})
+    assert events == []
 
 
 def test_a_claude_code_refusal_is_read_past_its_exit_line():
@@ -550,8 +613,13 @@ console.log(JSON.stringify(out.map((o) => o ?? null)));
     done = subprocess.run(["bun", str(check)], capture_output=True, text=True, env=env, cwd=tmp_path)
     assert done.returncode == 0, done.stderr
     first, second, third, sample, echo = json.loads(done.stdout)
-    for blocked in (first, second, third):
-        assert blocked["block"] is True and blocked["reason"].startswith(rules.REFUSED)
+    assert all(b["block"] is True for b in (first, second, third))
+    assert first["reason"] == ("SSSF refused this read call: .env is one of this repo's secret files, "
+                               "which SSSF keeps from agents. Nothing was read. Don't try it another "
+                               "way: do the task without it, or say in your report that the task needs it.")
+    assert second["reason"].startswith("SSSF refused this read call: @.env is one of this repo's secret files")
+    assert third["reason"].startswith("SSSF refused this grep call: .env is one of this repo's secret files")
+    assert all("command" not in b["reason"] for b in (first, second, third))
     assert sample is None and echo is None
 
     check.write_text(f'''
@@ -563,8 +631,12 @@ console.log(JSON.stringify([
   handler({{ toolName: "bash", input: {{ command: "cat .env.sample" }} }}),
 ].map((o) => o ?? null)));
 ''')
-    env["SSSF_REFUSE_RULES"] = json.dumps(rules.refusing([secret_files.shell_rule(files)]))
+    rule = secret_files.shell_rule(files)
+    env["SSSF_REFUSE_RULES"] = json.dumps(rules.refusing([rule], builtin=rule))
     done = subprocess.run(["bun", str(check)], capture_output=True, text=True, env=env, cwd=tmp_path)
     assert done.returncode == 0, done.stderr
     cat_env, cat_sample = json.loads(done.stdout)
     assert cat_env["block"] is True and cat_sample is None
+    assert cat_env["reason"].startswith(
+        rules.REFUSED + ", by SSSF's secret-file rule: " + secret_files.RULE_TEXT + " Nothing ran.")
+    assert "this repo's rule" not in cat_env["reason"]

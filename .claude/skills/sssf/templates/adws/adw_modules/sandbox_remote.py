@@ -67,11 +67,24 @@ POLL_SECONDS = 1.0
 # and how long it may take to say which port it listens on.
 OBS_ROOT = "/tmp"
 RELAY_START_SECONDS = 10
-# The relay, then `tail` on its file as the live stream, in one session of
-# their own: one pkill stops both. The relay's port line comes first; a tail
-# the host stops reading blocks only itself.
-RELAY_SHELL = ('echo $$ > "$0"; node "$1" "$2" & '
-               'while [ ! -e "$2" ]; do sleep 0.1; done; exec tail -n +1 -F "$2" 2>/dev/null')
+RELAY_SECONDS = 30          # each of the relay's own SDK calls
+# The relay, then its follower on the relay's file as the live stream, in one
+# session of their own: one pkill stops both. The relay's port line comes
+# first. Both are the same Node script, which waits on the pipe before it
+# writes more; `tail` died on the first full pipe, since node makes the
+# shared pipe non-blocking. The relay's pid goes beside the session id, so
+# the host can tell at the end whether it died during the call.
+RELAY_SHELL = ('echo $$ > "$0"; node "$1" "$2" & echo $! > "$0.relay"; '
+               'exec node "$1" --follow "$2"')
+# Run at the end of a call: says whether the relay and its follower were
+# still up, then stops both.
+# A zombie counts as down: the relay's parent is the follower, which never
+# reaps it. The state is the field after the last ")" in /proc/<pid>/stat.
+RELAY_STOP = ('up() { p=$(cat "$1" 2>/dev/null) || return 1; '
+              's=$(sed "s/.*) //" "/proc/$p/stat" 2>/dev/null | cut -d" " -f1); '
+              '[ -n "$s" ] && [ "$s" != Z ]; }; '
+              'r=down; up "$0.relay" && r=up; f=down; up "$0" && f=up; '
+              'echo "relay=$r follower=$f"; pkill -KILL -s "$(cat "$0")"')
 # The tools a VM must have, by what the roster runs (docs/designs/remote-sandboxes.md,
 # "As built: the tool check"). `min` is the oldest version SSSF has run on, or
 # the tool's own floor; a VM below it fails before any agent starts. `tested`
@@ -293,16 +306,17 @@ class RemoteProcess:
         # be: a short wait, and no error of its own to hide why the call ended.
         # Otherwise, past the session's end the provider has stopped the VM.
         quick = self._abandoned or self._stopped.is_set()
+        reach = not self._silent
         try:
             code = self._box._call(self._process.wait,
                                    deadline=CALL_SECONDS if quick else self._box.limit + CALL_SECONDS)
         except Exception:
+            reach = False                   # the VM may be gone: ask it nothing more for obs
             if not quick:
+                self._close_relay(reach)
                 raise
             code = -1
-        if self._relay is not None:         # the agent has exited, so its extension has flushed
-            relay, self._relay = self._relay, None
-            self._box._close_relay(relay, reach=not self._silent)
+        self._close_relay(reach)            # the agent has exited, so its extension has flushed
         if not self._done:
             self._done = True
             try:
@@ -311,6 +325,11 @@ class RemoteProcess:
                 if not (self._dog is not None and self._dog.hung):
                     raise           # a call that keeps its result needs its handoff
         return code
+
+    def _close_relay(self, reach: bool) -> None:
+        if self._relay is not None:
+            relay, self._relay = self._relay, None
+            self._box._close_relay(relay, reach=reach)
 
     def kill(self) -> None:
         self.stop_tree()
@@ -553,13 +572,13 @@ class Remote:
         return subprocess.CompletedProcess(command, done.returncode, out, err)
 
     def start(self, command: list[str], *, cwd=None, env=None) -> RemoteProcess:
+        target, self._obs_target = self._obs_target, None    # this start's, used or not
         argv = list(command)
         if Path(argv[0]).is_absolute():
             argv[0] = Path(argv[0]).name        # the host's install path means nothing in the VM
         self._refresh(AGENT_SECONDS)
         self.handoff_in()
         self.processes += 1
-        target, self._obs_target = self._obs_target, None
         relay = self._open_relay(target) if target is not None else None
         sid_file = f"/tmp/sssf-{uuid.uuid4().hex}.sid"
         agent_env = {**self._env(env), "CLAUDE_CODE_OAUTH_TOKEN": self._token}
@@ -612,12 +631,15 @@ class Remote:
         self._relays.add(relay)
         return relay
 
-    def _stop_relay(self, relay: _Relay) -> None:
+    def _stop_relay(self, relay: _Relay) -> str:
+        """Stop the relay and its follower. Returns "relay=up|down
+        follower=up|down" as they were, or "" if the VM didn't say."""
         try:
-            self._call(self.sandbox.run_process, "sh", ["-c", f'pkill -KILL -s "$(cat {relay.sid_file})"'],
-                       capture_output=True, deadline=CALL_SECONDS)
+            done = self._call(self.sandbox.run_process, "sh", ["-c", RELAY_STOP, relay.sid_file],
+                              capture_output=True, deadline=RELAY_SECONDS)
+            return (done.stdout or "").strip()
         except Exception:
-            pass
+            return ""
 
     def _close_relay(self, relay: _Relay, reach: bool = True) -> None:
         """Stop the relay, post what its file holds that the live posts
@@ -627,19 +649,22 @@ class Remote:
         call (decision 39)."""
         self._relays.discard(relay)
         try:
-            swept = None
+            swept, state = None, ""
             if reach:
-                self._stop_relay(relay)
+                state = self._stop_relay(relay)
+                if "relay=down" in state:
+                    self._relay_warning("died", "the obs relay stopped during the call; "
+                                                "the agent's later events never reached it")
                 relay.ended.wait(DRAIN_SECONDS)
                 try:
                     done = self._call(self.sandbox.run_process, "head",
                                       ["-c", str(2 * obs_relay.MAX_BYTES), relay.path],
-                                      capture_output=True, deadline=CALL_SECONDS)
+                                      capture_output=True, deadline=RELAY_SECONDS * 2)
                     if done.returncode == 0:
                         swept = done.stdout or ""
                 except Exception as error:
                     self._relay_warning("sweep", f"the relay's file couldn't be read: {str(error)[-300:]}")
-            live = relay.live and relay.ended.is_set()
+            live = relay.live and relay.ended.is_set() and "follower=down" not in state
             relay.forwarder.finish(swept)
             for kind, why in relay.forwarder.warnings():
                 self._relay_warning(kind, why)

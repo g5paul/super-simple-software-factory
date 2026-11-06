@@ -1033,9 +1033,9 @@ def test_the_sweep_posts_what_the_live_stream_missed(relaying, monkeypatch, tmp_
     from adw_modules import obs_relay
     box, obs, target = relaying
     from adw_modules import sandbox_remote
-    tail = 'exec tail -n +1 -F "$2" 2>/dev/null'
-    assert tail in sandbox_remote.RELAY_SHELL
-    monkeypatch.setattr(sandbox_remote, "RELAY_SHELL", sandbox_remote.RELAY_SHELL.replace(tail, "exec sleep 600"))
+    follow = 'exec node "$1" --follow "$2"'
+    assert follow in sandbox_remote.RELAY_SHELL
+    monkeypatch.setattr(sandbox_remote, "RELAY_SHELL", sandbox_remote.RELAY_SHELL.replace(follow, "exec sleep 600"))
     box.relay_obs(target)
     _read(box.start(_poster([_event(n) for n in range(4)]), env={"OBS_DISABLE": "true"}))
     assert sorted(e["event_id"] for e in obs.events) == ["e0", "e1", "e2", "e3"]
@@ -1122,3 +1122,85 @@ def test_a_vm_that_lost_tmp_still_gets_a_relay(relaying):
     _read(box.start(_poster([_event(2)]), env={"OBS_DISABLE": "true"}))
     assert sorted(e["event_id"] for e in obs.events) == ["e1", "e2"]
     assert not [p for n, p in box.events if n == "obs_relay_warning"]
+
+
+def test_big_batches_arrive_live_and_the_follower_stays_up(relaying, tmp_path):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    batch = [_event(n, payload={"pad": "x" * 2500}) for n in range(50)]
+    events = batch + [_event(100 + n) for n in range(5)]
+    data = tmp_path / "events.json"                   # too long for one argument
+    data.write_text(json.dumps(events))
+    poster = POSTER.replace("JSON.parse(process.argv[process.argv.length - 1])",
+                            "JSON.parse(require('fs').readFileSync(process.argv[process.argv.length - 1], 'utf8'))")
+    process = box.start(["sh", "-c", 'node -e "$0" "$1"; sleep 3', poster, str(data)],
+                        env={"OBS_DISABLE": "true"})
+    for line in process.stdout:
+        if "posted" in line:
+            break
+    deadline = time.monotonic() + 5
+    while len(obs.events) < 55 and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert len(obs.events) == 55                       # live, before the call ends
+    list(process.stdout)
+    process.wait()
+    [summary] = _relays(box)
+    assert summary["live"] is True and summary["posted"] == 55
+
+
+def test_a_line_with_no_end_in_the_file_is_skipped(relaying, tmp_path):
+    box, obs, target = relaying
+    box._obs_dir = str(tmp_path / "obsdir")           # so the agent can find the relay's file
+    box.relay_obs(target)
+    flood = ('f=$(ls "$2"/*.jsonl | head -1); head -c 8000000 /dev/zero | tr "\\0" a >> "$f"; '
+             'echo >> "$f"; node -e "$0" "$1"')
+    process = box.start(["sh", "-c", flood, POSTER, json.dumps([_event(1)]), box._obs_dir],
+                        env={"OBS_DISABLE": "true"})
+    list(process.stdout)
+    process.wait()
+    [summary] = _relays(box)
+    assert [e["event_id"] for e in obs.events] == ["e1"] and summary["dropped"] == 1
+
+
+def test_a_relay_that_died_in_the_call_is_named(relaying, tmp_path):
+    box, obs, target = relaying
+    box._obs_dir = str(tmp_path / "obsdir")
+    box.relay_obs(target)
+    process = box.start(["sh", "-c", 'kill "$(cat "$0"/*.sid.relay)"', box._obs_dir],
+                        env={"OBS_DISABLE": "true"})
+    list(process.stdout)
+    process.wait()
+    assert "died" in [p["kind"] for n, p in box.events if n == "obs_relay_warning"]
+
+
+def test_a_failed_wait_asks_the_vm_nothing_for_obs(relaying, quick):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    process = box.start(_poster([_event(1)]), env={"OBS_DISABLE": "true"})
+    list(process.stdout)
+    time.sleep(1)
+
+    def gone():
+        raise OSError("the VM is gone")
+    process._process.wait = gone
+    process.stop_tree()                                # quick path, as after a stop
+    before = len(box.raw.calls)
+    process.wait()
+    assert not any("pkill -KILL -s" in _words(c) and "relay" in _words(c) or _words(c).startswith("head")
+                   for c in box.raw.calls[before:])
+    assert _relays(box)[0]["swept"] is False
+
+
+def test_a_start_that_fails_early_uses_up_its_relay_request(relaying):
+    box, obs, target = relaying
+    box.relay_obs(target)
+
+    def broken(need):
+        raise OSError("refresh failed")
+    real = box._refresh
+    box._refresh = broken
+    with pytest.raises(OSError):
+        box.start(["true"], env={"OBS_DISABLE": "true"})
+    box._refresh = real
+    process = box.start(["sh", "-c", "echo ${OBS_DISABLE:-on}"], env={"OBS_DISABLE": "true"})
+    assert _read(process)[0] == ["true\n"]

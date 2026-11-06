@@ -42,6 +42,7 @@ SWEEP_SECONDS = 30.0                          # all of the sweep's posts
 LIVE_SECONDS = 0.5                            # how often the live poster sends
 RETRY_SECONDS = 5.0                           # after a failed live post
 LINE_BYTES = BATCH_BYTES                      # a longer line can't fit a batch
+SCALARS = ("provider", "model", "cwd", "session_file", "agent_name", "pool")
 
 
 @dataclass
@@ -78,7 +79,11 @@ def _well_formed(event) -> bool:
         if not isinstance(value, str) or not value or len(value) > 200:
             return False
     seq = event.get("seq")
-    return seq is None or (isinstance(seq, int) and not isinstance(seq, bool))
+    if seq is not None and (isinstance(seq, bool) or not isinstance(seq, int)):
+        return False
+    # obs binds these straight into SQLite, which throws on an object or list,
+    # and the whole batch fails
+    return all(event.get(key) is None or isinstance(event.get(key), str) for key in SCALARS)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -109,6 +114,7 @@ class Forwarder:
         self._wake = threading.Event()
         self._ending = threading.Event()
         self._poster: threading.Thread | None = None
+        self._inflight: threading.Thread | None = None
 
     # --- taking events ------------------------------------------------------
 
@@ -179,9 +185,8 @@ class Forwarder:
             for line in swept.splitlines():
                 self.feed(line, "sweep")
         if not self._sending.acquire(timeout=POST_SECONDS + 1):
-            with self._lock:
+            with self._lock:                   # can't happen: a live post takes POST_SECONDS at most
                 self.unposted += len(self._pending)
-                self._pending = []
             return
         try:
             self._send(time.monotonic() + SWEEP_SECONDS, live=False, locked=True)
@@ -232,15 +237,19 @@ class Forwarder:
         """("ok", rejected ids), ("bad", []) or ("down", []). The post runs in a
         thread of its own so a server that answers a byte at a time can't
         hold it past `seconds`; that thread is left, a daemon, if it does."""
+        if self._inflight is not None and self._inflight.is_alive():
+            self._inflight.join(seconds)          # one post thread at most, ever
+            if self._inflight.is_alive():
+                return "down", []
         body = ("[" + ",".join(text for _, text in batch) + "]").encode()
-        req = urllib.request.Request(
-            self.target.server.rstrip("/") + "/events", data=body, method="POST",
-            headers={"content-type": "application/json",
-                     "authorization": f"Bearer {self.target.token}"})
         out: dict = {}
 
         def call() -> None:
             try:
+                req = urllib.request.Request(
+                    self.target.server.rstrip("/") + "/events", data=body, method="POST",
+                    headers={"content-type": "application/json",
+                             "authorization": f"Bearer {self.target.token}"})
                 with _OPENER.open(req, timeout=seconds) as res:
                     out["answer"] = json.loads(res.read() or b"{}")
             except urllib.error.HTTPError as error:
@@ -249,6 +258,7 @@ class Forwarder:
                 out["error"] = type(error).__name__
 
         worker = threading.Thread(target=call, daemon=True, name="sssf-obs-post")
+        self._inflight = worker
         worker.start()
         worker.join(seconds)
         if worker.is_alive():

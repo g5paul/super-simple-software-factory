@@ -37,7 +37,7 @@ class FakeObs:
         self.trickle = False                # answer a byte at a time, slowly
         self.redirect = ""                  # answer 302 to this URL
         self.answer = None                  # a raw answer body, in place of the usual
-        self.threads: set[str] = set()
+        self.dedupe = False                 # reject an event_id already stored, as obs does
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -70,7 +70,8 @@ class FakeObs:
                     self.end_headers()
                     return
                 fake.batches.append(events)
-                rejected = [e["event_id"] for e in events if e["event_id"] in fake.reject]
+                stored = {e["event_id"] for e in fake.events[:-len(events)]} if fake.dedupe else set()
+                rejected = [e["event_id"] for e in events if e["event_id"] in fake.reject | stored]
                 out = json.dumps({"ingested": len(events) - len(rejected), "rejected": rejected}).encode()
                 if fake.answer is not None:
                     out = fake.answer
@@ -421,18 +422,19 @@ def test_a_malformed_line_seen_live_and_swept_counts_once(obs):
 
 
 def test_a_post_that_ran_out_of_time_but_landed_isnt_called_rejected(obs, monkeypatch):
+    import time
     from adw_modules import obs_relay
     monkeypatch.setattr(obs_relay, "POST_SECONDS", 0.3)
-    monkeypatch.setattr(obs_relay, "SWEEP_SECONDS", 0.5)
-    obs.delay = 0.6
+    monkeypatch.setattr(obs_relay, "RETRY_SECONDS", 0.2)
+    obs.dedupe, obs.delay = True, 0.6
     fwd = _forwarder(obs)
-    fwd.finish(_line(_event(1)))                       # times out here, lands at obs
+    fwd.live()
+    fwd.feed(_line(_event(1)))                         # the live post times out, and lands
     _wait_for(lambda: obs.events)
-    obs.delay, obs.reject = 0, {"e1"}                  # obs ignores it the second time
-    fwd2 = obs_relay.Forwarder(fwd.target)
-    fwd2._maybe = set(fwd._maybe)
-    fwd2.finish(_line(_event(1)))
-    assert fwd2.counts()["posted"] == 1 and fwd2.counts()["rejected"] == 0
+    obs.delay = 0
+    time.sleep(0.5)                                    # the live retry: obs calls it a repeat
+    fwd.finish(_line(_event(1)))
+    assert fwd.counts() == {"posted": 1, "rejected": 0, "dropped": 0, "unposted": 0}
 
 
 def test_the_token_never_follows_a_redirect(obs):
@@ -468,6 +470,56 @@ def test_the_relay_answers_while_nobody_reads_its_stdout(tmp_path):
         for _ in range(3):                             # far past a pipe's 64 KB
             assert _post(url, big)[0] == 200
         assert len(events.read_text().splitlines()) == 3000
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_fields_obs_binds_as_scalars_must_be_scalars(obs):
+    fwd = _forwarder(obs)
+    fwd.finish(_line(_event(1, model={"id": "x"})) + _line(_event(2, provider=["a"]))
+               + _line(_event(3, cwd=1)) + _line(_event(4, session_file={})) + _line(_event(5, model="m")))
+    assert [e["event_id"] for e in obs.events] == ["e5"] and fwd.counts()["dropped"] == 4
+
+
+def test_a_server_url_with_no_scheme_never_raises(obs):
+    from adw_modules import obs_relay
+    fwd = obs_relay.Forwarder(obs_relay.Target(server="nowhere", token="t"))
+    fwd.live()
+    fwd.feed(_line(_event(1)))
+    fwd.finish(_line(_event(1)))
+    assert fwd.counts()["unposted"] == 1 and _kinds(fwd) == ["post"]
+
+
+def test_a_stuck_server_leaves_at_most_one_post_thread(obs, monkeypatch):
+    import threading, time
+    from adw_modules import obs_relay
+    monkeypatch.setattr(obs_relay, "POST_SECONDS", 0.3)
+    monkeypatch.setattr(obs_relay, "RETRY_SECONDS", 0.1)
+    monkeypatch.setattr(obs_relay, "SWEEP_SECONDS", 0.5)
+    obs.trickle = True
+    before = {t for t in threading.enumerate() if t.name == "sssf-obs-post"}
+    fwd = _forwarder(obs)
+    fwd.live()
+    fwd.feed(_line(_event(1)))
+    time.sleep(2)
+    fwd.finish(None)
+    assert len({t for t in threading.enumerate() if t.name == "sssf-obs-post"} - before) <= 1
+
+
+@node
+def test_the_follower_copies_lines_and_skips_one_too_long(tmp_path, monkeypatch):
+    from adw_modules import obs_relay
+    events = tmp_path / "events.jsonl"
+    events.write_text("")
+    proc = subprocess.Popen(["node", str(obs_relay.RELAY_SCRIPT), "--follow", str(events)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        with events.open("ab") as f:
+            f.write(b"one\n" + b"x" * (4 * 1024 * 1024) + b"\n" + b"two\n")
+            f.write(b"y" * (5 * 1024 * 1024))          # no newline: held to the cap, then skipped
+            f.write(b"\nthree\n")
+        assert [proc.stdout.readline() for _ in range(3)] == [b"one\n", b"two\n", b"three\n"]
     finally:
         proc.kill()
         proc.wait()

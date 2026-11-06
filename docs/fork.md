@@ -83,3 +83,4 @@ A code change is committed under the first build's message, not the last repair'
 | 2026-11-05 | b72d057 | pi extensions in a VM, the SDK and stream deadlines, and pi in the operator container |
 | 2026-11-05 | 5184023 | The obs relay for VM runs |
 | 2026-11-05 | 7decd41 | `just merge` keeps a worktree's uncommitted work |
+| 2026-11-05 | 09406c8 | The user guide under `docs/guide/`, a short README, an empty trace db no longer breaks a chain, and no fix runs after the last check |

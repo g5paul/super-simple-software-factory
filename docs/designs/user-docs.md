@@ -1,6 +1,6 @@
 # Docs for people who use this fork
 
-Status: decided on 2026-11-05. The worktree bug is fixed and the images are merged. The docs branch has every page in decision 5; the skill's own docs and the review are next. Work goes in the order under "The plan".
+Status: done on 2026-11-05. The worktree bug, the images and the docs are merged. The review in decision 10 found 19 problems: 16 in the docs, all fixed, and three bugs in the code, fixed in 338e80b. One question stays open: adw_simple_sdlc still sends a build that stayed red to review.
 
 ## The gap
 

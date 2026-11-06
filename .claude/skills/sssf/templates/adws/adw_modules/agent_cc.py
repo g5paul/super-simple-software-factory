@@ -19,8 +19,9 @@ agent sees its system.md and nothing else. Safe mode keeps environment
 variables, so a repo's refuse rules reach the agent as a shell prefix,
 sssf_refuse.py, not as a hook. Protected secret files (secret_files.py) are
 denied to Read and Grep with `--disallowedTools "Read(//<abs>)"`, one per
-file, which --safe-mode and bypassPermissions keep; checked by hand on
-claude 2.1.319. Keys .env set don't reach the agent (utils.agent_env). Auth stays on the operator's
+file, with the path's pattern characters escaped (deny_rule), which
+--safe-mode and bypassPermissions keep; checked by hand on claude 2.1.319.
+Keys .env names don't reach the agent (utils.agent_env). Auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """
 
@@ -185,6 +186,18 @@ def _ledger(request: AgentRequest) -> Path:
     return Path(request.session_dir) / f"{request.session_id}.json"
 
 
+# Claude Code reads a Read(...) rule as a gitignore-style pattern. Checked by
+# hand on claude 2.1.319 (bypassPermissions, --safe-mode) in `weird [x] dir`:
+# the raw path let the agent read .env; each of these escaped denied it.
+_RULE_SPECIAL = frozenset("[]*?!\\ ")
+
+
+def deny_rule(path: str) -> str:
+    """The Read deny for one absolute path, in Claude Code's //<abs> form,
+    with gitignore pattern characters escaped so it matches only that file."""
+    return "Read(/" + "".join("\\" + c if c in _RULE_SPECIAL else c for c in path) + ")"
+
+
 def _command(request: AgentRequest, resume: bool) -> list[str]:
     cmd = [
         CLAUDE_PATH, "-p", request.prompt,
@@ -208,7 +221,7 @@ def _command(request: AgentRequest, resume: bool) -> list[str]:
         cmd += ["--tools", ",".join(tools)]
     for path in request.secret_files:
         # One deny per file, in Claude Code's //<absolute path> form.
-        cmd += ["--disallowedTools", f"Read(/{path})"]
+        cmd += ["--disallowedTools", deny_rule(path)]
     if request.max_cost is not None:
         cmd += ["--max-budget-usd", str(request.max_cost)]
     return cmd

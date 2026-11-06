@@ -414,15 +414,15 @@ Agents must not read the repo's secret files. The protected set is `.env` and ev
 
 SSSF finds the files when each agent starts, so a file created later isn't covered. Three routes keep them out:
 
-- **Claude Code:** one `--disallowedTools "Read(//<abs>)"` per file, so Read and Grep refuse it.
+- **Claude Code:** one `--disallowedTools "Read(//<abs>)"` per file, with `[ ] * ? ! \` and space in the path escaped by a backslash, since Claude Code reads the rule as a gitignore-style pattern. Read and Grep refuse it.
 - **pi:** `sssf_rules.ts`, loaded into every pi agent, blocks `read`, `grep`, `find` and `ls` on the file's path.
 - **Shell:** a built-in refuse rule refuses any command that names one of the files by name or path.
 
 Refusals by the built-in rule never count toward the three-refusal stop, so a command that only mentions `.env` is refused and the run goes on. The cost caps bound a loop, and the stream check still backstops the rule: a matching call that wasn't refused stops the run.
 
-`.env` keys don't reach agents. An agent gets only `SSSF_*`, `OBS_*` and `CLAUDE_CODE_OAUTH_TOKEN` from `.env`, plus pi's provider keys for pi agents. List any other key under `agent_env` to keep it. This includes an operator's `CLAUDE_CODE_SHELL_PREFIX` or any other Claude Code setting kept in `.env`. Quality checks, `worktree_setup` and git keep the full environment, and so do keys exported in your shell, direnv included.
+`.env` keys don't reach agents. An agent gets only `SSSF_*`, `OBS_*` and `CLAUDE_CODE_OAUTH_TOKEN` from `.env`, plus pi's provider keys for pi agents. List any other key under `agent_env` to keep it. This includes an operator's `CLAUDE_CODE_SHELL_PREFIX` or any other Claude Code setting kept in `.env`. A key counts as from `.env` when `.env` names it, however it reached the environment, so a `just` recipe's `set dotenv-load` changes nothing. A shell export (direnv included) whose name `.env` doesn't set passes; one whose name `.env` also sets is held back too, since that name is a secret the repo keeps in `.env`. Quality checks, `worktree_setup` and git keep the full environment.
 
-This stops accidental exposure, not an agent set on a secret. Agents run as the engineer's user, so one can build a path at runtime or read `/proc/<pid>/environ`. The container and VMs are the boundary, since `.env` never enters them. Also left open: obfuscated shell access, keys exported before the ADW starts, a grep over a whole folder, Edit and Write reading a file to edit it, and files under the pruned folders.
+This stops accidental exposure, not an agent set on a secret. Agents run as the engineer's user, so one can build a path at runtime or read `/proc/<pid>/environ`. VMs are the boundary, since `.env` never enters them. The operator container mounts the repo and its `.env`, so it isn't one for `.env`. Also left open: obfuscated shell access, secrets exported in your shell that `.env` doesn't name, a grep over a whole folder, Edit and Write reading a file to edit it, and files under the pruned folders.
 
 ## Harness engineering
 
@@ -504,7 +504,7 @@ How the roster maps onto `claude`:
 
 **Permissions.** Runs use `--permission-mode bypassPermissions`, since nobody is there to answer a prompt. The boundary is `writes` and `protected_files`, enforced by `permissions.py` after the call, the same as on Pi.
 
-**Auth.** The default is the operator's subscription login. `agent_cc` removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the child's environment, because `.env` is loaded into every ADW and Claude prefers an API key when one is present. If the run's `init` event still reports an API key source (an `apiKeyHelper` in project settings, say), the run stops before the model is called. Set `SSSF_CLAUDE_AUTH=api_key` to bill the API instead. `.env` keys no longer reach Claude Code agents, so export `ANTHROPIC_API_KEY` in your shell or list it under `agent_env`. `--bare` is never used, because it ignores OAuth.
+**Auth.** The default is the operator's subscription login. `agent_cc` removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the child's environment, because `.env` is loaded into every ADW and Claude prefers an API key when one is present. If the run's `init` event still reports an API key source (an `apiKeyHelper` in project settings, say), the run stops before the model is called. Set `SSSF_CLAUDE_AUTH=api_key` to bill the API instead. `.env` keys no longer reach Claude Code agents, so with `SSSF_CLAUDE_AUTH=api_key`, export `ANTHROPIC_API_KEY` in your shell and keep it out of `.env`, or list it under `agent_env`. `--bare` is never used, because it ignores OAuth.
 
 **Sessions.** Claude needs a UUID session id, creates a session with `--session-id`, and continues one with `--resume`. `agent_cc` keeps a ledger file per session in `{agent}/claude_code_sessions/{uuid}.json`. If the file exists, the send resumes. That covers JSON retries, gate corrections, and a later phase rejoining the agent through `agent_map.json`. Claude stores the conversation itself under `~/.claude/projects/`, so factory sessions show up in `claude --resume` for that repo.
 

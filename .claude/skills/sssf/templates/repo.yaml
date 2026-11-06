@@ -77,7 +77,8 @@ agent_rules: []
 secret_files: []
 # Keys from .env that agents still get. By default an agent gets only SSSF_*,
 # OBS_* and CLAUDE_CODE_OAUTH_TOKEN from .env, and a pi agent its provider
-# keys too. Your shell's own exports and quality checks are not affected.
+# keys too. Quality checks are not affected. A shell export passes unless .env
+# names the same key.
 #   agent_env:
 #     - DATABASE_URL
 agent_env: []

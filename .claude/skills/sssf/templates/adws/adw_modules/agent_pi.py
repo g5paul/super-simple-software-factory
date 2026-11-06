@@ -311,11 +311,13 @@ def _utf8(value: str, name: str) -> str:
     return value
 
 
-def _node_homedir() -> str:
+def _node_homedir(env=None) -> str:
     """Node's os.homedir() (libuv uv_os_homedir): $HOME whenever HOME is set,
-    even empty, else the passwd entry for the effective uid."""
-    if "HOME" in os.environ:
-        return _utf8(os.environ["HOME"], "HOME")
+    even empty, else the passwd entry for the effective uid. env is the
+    environment pi runs with; os.environ when None."""
+    env = os.environ if env is None else env
+    if "HOME" in env:
+        return _utf8(env["HOME"], "HOME")
     try:
         return _utf8(pwd.getpwuid(os.geteuid()).pw_dir, "the passwd home dir")
     except KeyError:
@@ -324,7 +326,7 @@ def _node_homedir() -> str:
             "tell where pi reads its logins; set HOME.") from None
 
 
-def _pi_auth_json() -> Path:
+def _pi_auth_json(env=None) -> Path:
     """Where pi reads its stored logins, worked out as pi 1.4.0 does:
     join(getAgentDir(), "auth.json"). getAgentDir (dist/config.js) is
     normalizePath(PI_CODING_AGENT_DIR) when that's set and non-empty
@@ -333,15 +335,17 @@ def _pi_auth_json() -> Path:
     is not expanded), else join(homedir(), ".pi", "agent"). Any value SSSF
     can't match exactly raises SandboxFailed. A relative result is returned as
     is, for check_stored_login to stop on. No other override: the check must
-    read what pi reads."""
-    agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
+    read what pi reads. env is the environment pi runs with (the agent's, which
+    may lack a key .env named); os.environ when None."""
+    env = os.environ if env is None else env
+    agent_dir = env.get("PI_CODING_AGENT_DIR")
     if not agent_dir:
-        return Path(_node_join(_node_homedir(), ".pi", "agent", "auth.json"))
+        return Path(_node_join(_node_homedir(env), ".pi", "agent", "auth.json"))
     agent_dir = _utf8(agent_dir, "PI_CODING_AGENT_DIR")
     if agent_dir == "~":
-        return Path(_node_join(_node_homedir(), "auth.json"))
+        return Path(_node_join(_node_homedir(env), "auth.json"))
     if agent_dir.startswith("~/"):
-        return Path(_node_join(_node_homedir(), agent_dir[2:], "auth.json"))
+        return Path(_node_join(_node_homedir(env), agent_dir[2:], "auth.json"))
     if agent_dir.startswith("file://"):
         url = _PLAIN_FILE_URL.fullmatch(agent_dir)
         if not url:
@@ -465,7 +469,7 @@ def _models_json_credential(data: dict) -> Optional[str]:
     return None
 
 
-def check_stored_login(path: Path = None) -> None:
+def check_stored_login(path: Path = None, env=None) -> None:
     """Stop if the container's pi agent dir gives openai a credential of its own:
     pi would use it instead of the host's sign-in. Checks auth.json for an
     openai login, then models.json in the same dir for what pi 1.4.0 accepts as
@@ -473,11 +477,12 @@ def check_stored_login(path: Path = None) -> None:
     headers at the provider, model and modelOverrides level. Reads key names
     only; never a value.
 
-    The dir is pi's own, worked out by _pi_auth_json.
+    The dir is pi's own, worked out by _pi_auth_json from env, the environment
+    pi will run with (os.environ when None).
 
     Never blocks, for either file (see _load_agent_json). A missing file passes;
     an unreadable one stops the run."""
-    path = path or PI_AUTH_JSON or _pi_auth_json()
+    path = path or PI_AUTH_JSON or _pi_auth_json(env)
     if not path.is_absolute():
         raise sandbox.SandboxFailed(
             f"PI_CODING_AGENT_DIR puts pi's auth.json at {path}, a relative path, so SSSF "
@@ -544,7 +549,7 @@ def _in_container(env: dict[str, str], tree) -> dict[str, str]:
     socket_path = os.environ.get(CONTAINER_SOCKET_VAR)
     if tree is not sandbox.LOCAL or not socket_path:
         return env
-    check_stored_login()
+    check_stored_login(env=env)
     env["OPENAI_API_KEY"] = container_token(socket_path)
     return env
 

@@ -11,18 +11,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, find_dotenv, load_dotenv
 
-_SHELL_KEYS = frozenset(os.environ)
 load_dotenv()
-# Keys .env added. load_dotenv never overrides, so a key the shell exported is the shell's.
-DOTENV_KEYS = frozenset(os.environ) - _SHELL_KEYS
+# Every key .env names, read from the file as dotenv_values does, not from what
+# load_dotenv changed: a `just` recipe (`set dotenv-load`) or a shell export of
+# the same name has already put the key in os.environ, and it is still .env's.
+DOTENV_KEYS = frozenset(dotenv_values(find_dotenv()))
 AGENT_PREFIXES = ("SSSF_", "OBS_")
 AGENT_KEYS = frozenset({"CLAUDE_CODE_OAUTH_TOKEN"})
 
 
 def agent_env(env: dict[str, str], allowed: Iterable[str] = ()) -> dict[str, str]:
-    """env without the keys .env set, except SSSF's own (SSSF_*, OBS_*),
+    """env without the keys .env names (however they reached the environment),
+    except SSSF's own (SSSF_*, OBS_*),
     CLAUDE_CODE_OAUTH_TOKEN and `allowed`. For agents only: quality checks,
     worktree_setup and git keep operator_env() whole."""
     keep = set(allowed) | AGENT_KEYS

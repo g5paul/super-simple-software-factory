@@ -9,19 +9,22 @@ Run from the skill root:
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 SKILL = Path(__file__).resolve().parent.parent
 TEMPLATES = SKILL / "templates"
 sys.path.insert(0, str(TEMPLATES / "adws"))
 
-from adw_modules import agent_cc, agent_pi, agents, rules, secret_files, utils
+from adw_modules import agent_cc, agent_pi, agents, rules, sandbox, secret_files, utils
 from adw_modules.data_types import AgentRequest, SSSFConfig
 from adw_modules.repo_settings import RepoSettings
 
@@ -87,6 +90,22 @@ def test_agents_get_no_env_key_the_dotenv_set_but_checks_keep_them(monkeypatch):
     assert "APP_SECRET" in utils.operator_env()
 
 
+def test_the_container_login_check_reads_the_dir_the_pi_agent_gets(tmp_path, monkeypatch):
+    home, clean = tmp_path / "home", tmp_path / "clean"
+    (home / ".pi/agent").mkdir(parents=True)
+    (home / ".pi/agent/auth.json").write_text('{"openai": {"type": "oauth"}}')
+    clean.mkdir()
+    monkeypatch.setattr(utils, "DOTENV_KEYS", frozenset({"PI_CODING_AGENT_DIR"}))
+    monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", None)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(clean))
+    monkeypatch.setenv(agent_pi.CONTAINER_SOCKET_VAR, str(tmp_path / "broker.sock"))
+    env = agent_pi.child_env()
+    assert "PI_CODING_AGENT_DIR" not in env
+    with pytest.raises(sandbox.SandboxFailed, match="ChatGPT login"):
+        agent_pi._in_container(env, sandbox.LOCAL)
+
+
 def request_with(files: list[str]) -> AgentRequest:
     return AgentRequest(prompt="go", system_prompt="", model="anthropic/claude-sonnet-5-5",
                         session_id="f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
@@ -98,8 +117,95 @@ def test_claude_code_denies_read_of_each_file_once_with_the_double_slash_form(tm
     files = find(tmp_path)
     cmd = agent_cc._command(request_with(files), resume=False)
     values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--disallowedTools"]
-    assert values == [f"Read(/{f})" for f in files] and len(values) == 3
+    assert values == [agent_cc.deny_rule(f) for f in files] and len(values) == 3
     assert all(v.startswith("Read(//") and "*" not in v and ".env.sample" not in v for v in values)
+
+
+def test_deny_rule_escapes_gitignore_pattern_characters():
+    assert agent_cc.deny_rule("/abs/weird [x] dir/.env") == r"Read(//abs/weird\ \[x\]\ dir/.env)"
+    assert agent_cc.deny_rule("/a/*?!\\b/.env") == r"Read(//a/\*\?\!\\b/.env)"
+    assert agent_cc.deny_rule("/home/u/repo/sub/.env.local") == "Read(//home/u/repo/sub/.env.local)"
+
+
+def test_command_denies_a_weird_and_an_ordinary_path_one_rule_each():
+    p1, p2 = "/abs/weird [x] dir/.env", "/home/u/repo/.env"
+    cmd = agent_cc._command(request_with([p1, p2]), resume=False)
+    values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--disallowedTools"]
+    assert values == [agent_cc.deny_rule(p1), agent_cc.deny_rule(p2)]
+
+
+def stamped_repo(tmp: Path) -> Path:
+    """A git repo stamped by the shipped installer: default roster, shipped config."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+    done = subprocess.run([sys.executable, str(SKILL / "scripts" / "install.py")], cwd=tmp,
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return tmp
+
+
+PROBE = '''\
+import json, sys
+sys.path.insert(0, "adws")
+from adw_modules import utils, agent_cc, agent_pi
+print(json.dumps({
+    "dotenv": sorted(utils.DOTENV_KEYS),
+    "cc": sorted(agent_cc.child_env()),
+    "pi": sorted(agent_pi.child_env()),
+    "operator": sorted(utils.operator_env()),
+}))
+'''
+
+
+def test_a_key_the_environment_already_had_is_still_held_back_from_agents(tmp_path):
+    stamped_repo(tmp_path)
+    (tmp_path / ".env").write_text("APP_SECRET=from-dotenv\nSSSF_X=1\nDATABASE_URL=db\n")
+    (tmp_path / "probe.py").write_text(PROBE)
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("APP_SECRET", "SSSF_X", "DATABASE_URL")}
+    env.update(APP_SECRET="from-shell", SHELL_ONLY="1")
+    done = subprocess.run([sys.executable, "probe.py"], cwd=tmp_path, env=env,
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout.strip().splitlines()[-1])
+    assert "APP_SECRET" in got["dotenv"]
+    for agent in ("cc", "pi"):
+        assert "APP_SECRET" not in got[agent] and "DATABASE_URL" not in got[agent]
+        assert "SSSF_X" in got[agent] and "SHELL_ONLY" in got[agent]
+    assert "APP_SECRET" in got["operator"]
+
+
+FAKE_PI = '''\
+#!/usr/bin/env python3
+import json, os, sys
+if "--list-models" in sys.argv:
+    print("provider model context")
+    print("google gemini-3.6-flash 1.0M")
+    sys.exit(0)
+if "-p" in sys.argv:
+    with open(os.environ["FAKE_PI_ENV"], "w") as f:
+        f.write(json.dumps(sorted(os.environ)))
+    sys.exit(1)
+'''
+
+
+@pytest.mark.skipif(not (shutil.which("just") and shutil.which("uv")),
+                    reason="needs just and uv on PATH")
+def test_a_launch_through_the_stamped_just_recipe_keeps_dotenv_keys_from_the_agent(tmp_path):
+    (tmp_path / "repo").mkdir()
+    repo = stamped_repo(tmp_path / "repo")
+    (repo / ".env").write_text("APP_SECRET=from-dotenv\n")
+    fake = tmp_path / "bin" / "pi"
+    fake.parent.mkdir()
+    fake.write_text(FAKE_PI)
+    fake.chmod(0o755)
+    dump = tmp_path / "dump.json"
+    env = {k: v for k, v in os.environ.items() if k != "APP_SECRET"}
+    env.update(PI_PATH=str(fake), FAKE_PI_ENV=str(dump))
+    subprocess.run(["just", "prompt", "say hi"], cwd=repo, env=env, capture_output=True,
+                   text=True, timeout=300, check=False)
+    assert dump.exists()
+    keys = json.loads(dump.read_text())
+    assert "SSSF_ADW_ID" in keys and "APP_SECRET" not in keys
 
 
 def refuse(line: str, files: list[str], cwd: Path):

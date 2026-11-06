@@ -12,6 +12,7 @@ Run from the skill root:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -896,3 +897,160 @@ def test_a_lost_stream_ends_the_watchdog(box, quick):
     lines, dog, _, _ = _read(process, dog=1.5)
     time.sleep(2)
     assert dog.lost and stops == [1]
+
+
+# --- the obs relay (decisions 37 to 50) ----------------------------------------
+
+from test_obs_relay import FakeObs, _event  # noqa: E402
+
+POSTER = ("const u = process.env.OBS_SERVER_URL; "
+          "const ev = JSON.parse(process.argv[process.argv.length - 1]); "
+          "(async () => { for (const e of ev) await fetch(u + '/events', {method: 'POST', "
+          "headers: {'content-type': 'application/json'}, body: JSON.stringify([e])}); "
+          "console.log('posted ' + ev.length); })();")
+
+
+@pytest.fixture
+def relaying(box, tmp_path, monkeypatch):
+    from adw_modules import obs_relay, sandbox_remote
+    if shutil.which("node") is None:
+        pytest.skip("needs node")
+    monkeypatch.setattr(sandbox_remote, "OBS_ROOT", str(tmp_path / "vmtmp"))
+    fake = FakeObs()
+    target = obs_relay.Target(server=fake.url, token="obs-secret", name="builder",
+                              pool="sssf-abc", tags=["sssf", "adw-abc"])
+    yield box, fake, target
+    fake.close()
+
+
+def _poster(events) -> list[str]:
+    return ["node", "-e", POSTER, json.dumps(events)]
+
+
+def _relays(box) -> list[dict]:
+    return [p for name, p in box.events if name == "obs_relay"]
+
+
+def test_a_relayed_call_reaches_obs_with_the_calls_names(relaying):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    process = box.start(_poster([_event(n) for n in range(3)]), env={"OBS_DISABLE": "true"})
+    lines, _, _, code = _read(process)
+    assert code == 0 and lines[-1].strip() == "posted 3"
+    assert sorted(e["event_id"] for e in obs.events) == ["e0", "e1", "e2"]
+    assert all(e["pool"] == "sssf-abc" and e["agent_name"] == "builder" for e in obs.events)
+    assert all(h["Authorization"] == "Bearer obs-secret" for h in obs.headers)
+    [summary] = _relays(box)
+    assert summary["posted"] == 3 and summary["dropped"] == 0 and summary["live"] is True
+
+
+def test_the_agent_gets_the_relay_on_loopback_and_never_the_obs_token(relaying):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    process = box.start(["sh", "-c", "env | grep ^OBS_ || true"],
+                        env={"OBS_DISABLE": "true", "OBS_AUTH_TOKEN": "obs-secret", "OBS_SERVER_URL": "http://host:1"})
+    lines, _, _, _ = _read(process)
+    out = "".join(lines)
+    assert re.search(r"^OBS_SERVER_URL=http://127\.0\.0\.1:\d+$", out, re.M)
+    assert "OBS_DISABLE" not in out and "obs-secret" not in out
+    start = [c for c in box.raw.calls if c.get("start") and "OBS_SERVER_URL" in json.dumps(c.get("env"))]
+    assert start and all("obs-secret" not in json.dumps(c) for c in box.raw.calls)
+
+
+def test_a_call_with_no_relay_asked_is_unchanged(relaying):
+    box, obs, _ = relaying
+    before = len(box.raw.calls)
+    process = box.start(["sh", "-c", "echo ${OBS_DISABLE:-on}"], env={"OBS_DISABLE": "true"})
+    lines, _, _, _ = _read(process)
+    assert lines == ["true\n"] and not _relays(box) and not obs.batches
+    assert not any("sssf-obs" in _words(c) for c in box.raw.calls[before:])
+
+
+def test_a_relay_request_is_used_by_the_next_start_only(relaying):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    _read(box.start(["true"], env={"OBS_DISABLE": "true"}))
+    process = box.start(["sh", "-c", "echo ${OBS_DISABLE:-on}"], env={"OBS_DISABLE": "true"})
+    lines, _, _, _ = _read(process)
+    assert lines == ["true\n"] and len(_relays(box)) == 1
+
+
+def test_the_relay_is_not_part_of_the_agents_session(relaying):
+    box, _, target = relaying
+    box.relay_obs(target)
+    process = box.start(["true"], env={"OBS_DISABLE": "true"})
+    list(process.stdout)
+    time.sleep(0.3)
+    assert process._alive() is False          # the relay is still up, in its own session
+    process.wait()
+
+
+def test_a_relay_that_wont_start_leaves_obs_off_and_warns(relaying, monkeypatch, tmp_path):
+    from adw_modules import obs_relay, sandbox_remote
+    box, obs, target = relaying
+    dud = tmp_path / "dud.cjs"
+    dud.write_text("setTimeout(() => {}, 5000);\n")
+    monkeypatch.setattr(obs_relay, "RELAY_SCRIPT", dud)
+    monkeypatch.setattr(sandbox_remote, "RELAY_START_SECONDS", 0.5, raising=False)
+    box.relay_obs(target)
+    process = box.start(["sh", "-c", "echo ${OBS_DISABLE:-on}"], env={"OBS_DISABLE": "true"})
+    lines, _, _, code = _read(process)
+    assert lines == ["true\n"] and code == 0
+    assert [p["kind"] for n, p in box.events if n == "obs_relay_warning"] == ["start"]
+    assert not _relays(box)
+
+
+def test_the_sweep_posts_what_the_live_stream_missed(relaying, monkeypatch, tmp_path):
+    from adw_modules import obs_relay
+    box, obs, target = relaying
+    quiet = tmp_path / "quiet.cjs"
+    script = obs_relay.RELAY_SCRIPT.read_text()
+    assert "process.stdout.write(text)" in script
+    quiet.write_text(script.replace("process.stdout.write(text)", "void 0"))
+    monkeypatch.setattr(obs_relay, "RELAY_SCRIPT", quiet)
+    box.relay_obs(target)
+    _read(box.start(_poster([_event(n) for n in range(4)]), env={"OBS_DISABLE": "true"}))
+    assert sorted(e["event_id"] for e in obs.events) == ["e0", "e1", "e2", "e3"]
+    assert _relays(box)[0]["posted"] == 4
+
+
+def test_obs_down_never_fails_the_call(relaying):
+    box, obs, target = relaying
+    obs.status = 503
+    box.relay_obs(target)
+    lines, _, _, code = _read(box.start(_poster([_event(1)]), env={"OBS_DISABLE": "true"}))
+    assert code == 0 and lines[-1].strip() == "posted 1"
+    assert _relays(box)[0]["unposted"] == 1
+    assert [p["kind"] for n, p in box.events if n == "obs_relay_warning"] == ["post"]
+
+
+def test_the_events_file_stays_out_of_the_clone(relaying):
+    box, _, target = relaying
+    box.relay_obs(target)
+    _read(box.start(_poster([_event(1)]), env={"OBS_DISABLE": "true"}))
+    status = subprocess.run(["git", "status", "--porcelain", "--ignored"], cwd=box.vm_tree,
+                            capture_output=True, text=True).stdout
+    assert status == ""
+
+
+def test_a_relay_left_open_is_closed_with_the_vm(relaying):
+    box, obs, target = relaying
+    box.relay_obs(target)
+    process = box.start(_poster([_event(1)]), env={"OBS_DISABLE": "true"})
+    list(process.stdout)                       # the runner left before wait()
+    box.close()
+    assert [e["event_id"] for e in obs.events] == ["e1"] and len(_relays(box)) == 1
+
+
+def test_a_stopped_agent_still_gets_its_events_posted(relaying, quick, tmp_path):
+    box, obs, target = relaying
+    script = tmp_path / "poster.js"
+    script.write_text(POSTER)
+    box.relay_obs(target)
+    process = box.start(["sh", "-c", 'node "$0" "$1"; sleep 5', str(script), json.dumps([_event(1)])],
+                        env={"OBS_DISABLE": "true"})
+    for line in process.stdout:
+        if "posted" in line:
+            process.stop_tree()
+    process.wait()
+    assert [e["event_id"] for e in obs.events] == ["e1"], box.events

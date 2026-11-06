@@ -22,6 +22,13 @@ Usage, from the hub root:
     uv run adws/check_projects.py                 # expect the hub's current skill
     uv run adws/check_projects.py --skill 33a1ed2
     uv run adws/check_projects.py --repo fusion-harness
+    uv run adws/check_projects.py --listed        # output safe to paste anywhere
+
+--listed leaves out every repo the hub's .git/sssf-private-names lists, and
+says only how many it left out. That file is the one the pre-push hook reads,
+one name per line, case ignored; a repo is unlisted when its registry name or
+path contains one. Without the file, --listed refuses rather than print
+everything.
 
 Exit 0 when every check passes, 1 otherwise.
 """
@@ -69,6 +76,22 @@ def git(root: Path, *args: str) -> str:
     if done.returncode:
         raise RuntimeError(f"git {' '.join(args)} in {root}: {done.stderr.strip()}")
     return done.stdout
+
+
+def private_names(hub: Path) -> list[str] | None:
+    """The names in the hub's .git/sssf-private-names, as the pre-push hook
+    reads them; None when the file doesn't exist."""
+    path = Path(git(hub, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    path = path / "sssf-private-names"
+    if not path.is_file():
+        return None
+    return [line.strip().lower() for line in path.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+
+
+def unlisted(name: str, entry: dict, names: list[str]) -> bool:
+    text = f"{name}\n{entry.get('root', '')}".lower()
+    return any(n in text for n in names)
 
 
 def registry_path() -> Path:
@@ -155,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--skill", help="the skill commit to expect (default: the hub's current one)")
     parser.add_argument("--repo", action="append", help="check only this repo; repeatable")
+    parser.add_argument("--listed", action="store_true",
+                        help="leave out the repos in the hub's .git/sssf-private-names")
     parser.add_argument("--hub", type=Path, default=HUB, help=argparse.SUPPRESS)
     parser.add_argument("--registry", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -162,6 +187,15 @@ def main(argv: list[str] | None = None) -> int:
     skill = args.skill or git(args.hub, "log", "-1", "--format=%h", "--", SKILL_DIR).strip()
     skill = git(args.hub, "rev-parse", "--short", f"{skill}^{{commit}}").strip()
     repos = projects(args.registry or registry_path(), args.hub)
+    hidden = 0
+    if args.listed:
+        names = private_names(args.hub)
+        if names is None:
+            print("--listed needs the hub's .git/sssf-private-names, and it doesn't exist; "
+                  "refusing rather than print every repo", file=sys.stderr)
+            return 1
+        kept = {n: e for n, e in repos.items() if not unlisted(n, e, names)}
+        hidden, repos = len(repos) - len(kept), kept
     if args.repo:
         unknown = set(args.repo) - set(repos)
         if unknown:
@@ -178,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     bad = [r.repo for r in reports if not r.ok]
     print(f"\n{len(reports) - len(bad)} of {len(reports)} repos pass"
           + (f"; failing: {', '.join(bad)}" if bad else ""))
+    if hidden:
+        print(f"{hidden} unlisted repo(s) left out")
     return 1 if bad else 0
 
 

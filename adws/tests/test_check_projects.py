@@ -135,3 +135,32 @@ def test_an_uncommitted_change_fails_clean(world):
     (proj / "app.py").write_text("edited\n")
     ok, note = notes(hub, proj, skill)["clean"]
     assert not ok and "app.py" in note
+
+
+def test_listed_leaves_out_private_repos_and_never_names_them(world, tmp_path, capsys):
+    hub, proj, skill, registry = world
+    secret = repo(tmp_path / "secret-app")
+    data = json.loads(registry.read_text())
+    data["projects"]["secret-app"] = {"root": str(secret)}
+    registry.write_text(json.dumps(data))
+    (hub / ".git" / "sssf-private-names").write_text("# private\nSECRET-APP\n")
+    quality_run(proj, "success", "2026-01-01T00:05:00+00:00")
+    assert cp.main(["--hub", str(hub), "--registry", str(registry), "--listed"]) == 0
+    out = capsys.readouterr().out
+    assert "secret" not in out.lower() and "1 of 1 repos pass" in out
+    assert "1 unlisted repo(s) left out" in out
+
+
+def test_listed_refuses_without_the_names_file(world, capsys):
+    hub, _, _, registry = world
+    assert cp.main(["--hub", str(hub), "--registry", str(registry), "--listed"]) == 1
+    captured = capsys.readouterr()
+    assert "refusing" in captured.err and captured.out == ""
+
+
+def test_repo_cannot_reach_a_repo_listed_hides(world, tmp_path, capsys):
+    hub, _, _, registry = world
+    (hub / ".git" / "sssf-private-names").write_text("proj\n")
+    assert cp.main(["--hub", str(hub), "--registry", str(registry), "--listed",
+                    "--repo", "proj"]) == 1
+    assert "proj (" not in capsys.readouterr().out

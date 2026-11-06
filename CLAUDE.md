@@ -11,3 +11,11 @@ Make a guard change through the guard-change chain, `adws/adw_guard_change.py`, 
 The `bypass-reviewer` subagent stays for a quick check outside a run, or on a run that looks wrong. A merge no longer needs it: f11ed7c0, d6fb947e and d071d025 passed the chain three times in a row with the subagent finding nothing the chain missed, and the engineer dropped the step on 2026-11-03. If the subagent ever finds a bypass that a passing run missed, run it before every merge again until three more runs come back clean.
 
 The review exists because a guard change once passed every test and still let `cat <<EOF | bash` past every agent rule. Two project sessions caught it after the update was sent.
+
+## Public and private repos
+
+This repo is public. Some of the repos SSSF is installed in are private or unlisted, and nothing about them belongs here. Keep the two apart:
+
+- Name a private repo nowhere this repo tracks or sends: files, commit messages, test fixtures, and output pasted into either. Call it "a project", and describe a fix it turned up without its name, its packages or its commands. Its records go in the private repo `CLAUDE.local.md` names.
+- Treat command output as public before it's pasted. `adws/check_projects.py`, the trace and logs name every repo they touch; use `check_projects.py --listed` when the output goes anywhere public.
+- `.git/sssf-private-names` lists the private names, and the pre-push hook refuses a push that adds one. That's the backstop, not the plan: a name caught there was already written down.

@@ -116,5 +116,7 @@ isn't "Update SSSF to skill <h>", its tree isn't clean, its committed
 `adw_quality` run has passed since the update. A stray or leftover skill
 file shows as `extra`. It only reads git and each trace, so it is safe on a
 repo whose session owns it. `--skill <h>` expects an older commit, and
-`--repo <name>` checks one repo. The script and its tests are hub-only, like
-the guard chain.
+`--repo <name>` checks one repo. `--listed` leaves out the repos
+`.git/sssf-private-names` lists and says only how many, so its output is
+safe to paste into this public repo. The script and its tests are hub-only,
+like the guard chain.

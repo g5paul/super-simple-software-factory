@@ -518,3 +518,17 @@ def test_messages_name_recipes_with_the_sssf_prefix_when_the_repo_loads_the_modu
     with pytest.raises(worktree.WorktreeError, match="just sssf kill wt000023"):
         worktree.discard(SSSFConfig(), "wt000023")
     utils._recipe_prefix.cache_clear()
+
+
+@pytest.mark.parametrize("requested", [True, False])
+def test_an_empty_trace_db_reads_as_no_runs(repo, requested):
+    # `just sessions` before the first run made sqlite3 create a 0-byte
+    # sssf.db, and every chain then died on "no such table" before its
+    # tracer could make the schema.
+    db = Path(SSSFConfig().observability.db)
+    db.parent.mkdir(parents=True, exist_ok=True)
+    db.touch()
+    _, place, tracer = start("e1", requested)
+    assert (place is not None) == requested
+    assert worktree.recorded(str(db), "nope") is None
+    finish(tracer, "e1")

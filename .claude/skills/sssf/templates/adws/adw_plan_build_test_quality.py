@@ -90,7 +90,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
             ph.log(sha=git_helper.commit_all(message), message=message)
 
     return run.finish(accepted=verified,
-                      reason=f"verify/test never came back clean after {MAX_FIX_LOOPS} fix attempt(s)")
+                      reason=f"verify/test never came back clean after {MAX_FIX_LOOPS - 1} fix attempt(s)")
 
 
 if __name__ == "__main__":

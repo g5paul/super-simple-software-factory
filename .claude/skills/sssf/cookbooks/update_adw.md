@@ -60,6 +60,8 @@ MAX_FIX_LOOPS = 3
 
         if test.passed:
             break
+        if i == MAX_FIX_LOOPS:
+            break                                  # a fix after the last test is never checked
 
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
                                    description="Repair what the suite reported, from its verbatim output")) as ph:
@@ -68,7 +70,7 @@ MAX_FIX_LOOPS = 3
                                          gates=[gates.diff_matches_claims]))
 
     return run.finish(accepted=test is not None and test.passed,
-                      reason=f"the suite still failed after {MAX_FIX_LOOPS} fix attempt(s)")
+                      reason=f"the suite still failed after {MAX_FIX_LOOPS - 1} fix attempt(s)")
 ```
 
 `run.finish()` ends every ADW, and it takes the acceptance criterion the phase

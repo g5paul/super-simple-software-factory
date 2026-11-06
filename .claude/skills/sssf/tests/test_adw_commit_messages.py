@@ -169,3 +169,29 @@ def test_build_test_commits_nothing_when_the_suite_stays_red(repo, monkeypatch):
     monkeypatch.setattr(quality, "run_tests", suite(False, False, False, False))
     assert importlib.import_module("adw_build_test").main("add slugify", worktree=True) == 1
     assert subjects() == ["init"]
+
+
+@pytest.mark.parametrize("module, block", [
+    ("adw_build_test", "run_tests"),
+    ("adw_plan_build_test", "run_tests"),
+    ("adw_plan_build_test_quality", "run_quality"),
+    ("adw_simple_sdlc", "run_quality"),
+])
+def test_a_red_suite_gets_no_fix_it_never_checks(repo, monkeypatch, module, block):
+    # Three checks leave room for two fixes. A fix after the last check is an
+    # agent call whose work nothing tests and nothing commits.
+    checks = []
+    seen = []
+
+    def red(_run):
+        checks.append(1)
+        return QualityResult(passed=False, failures=["1 test failed"])
+
+    def execute(run, phase, call):
+        seen.append(phase.params.name)
+        return fake_execute(run, phase, call)
+    monkeypatch.setattr(quality, block, red)
+    monkeypatch.setattr(agents, "execute", _always_approve(execute))
+    assert run_adw(module) == 1
+    assert len(checks) == 3
+    assert [n for n in seen if n.startswith("fix_")] == ["fix_1", "fix_2"]

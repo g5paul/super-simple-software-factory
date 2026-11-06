@@ -25,9 +25,9 @@ To run every agent on Pi signed into a ChatGPT subscription, add `--chatgpt`. Th
 | `adws/adw_sssf_config/sssf.config.yaml` | `templates/sssf.config.yaml` | yes — the agent roster |
 | `adws/adw_sssf_config/repo.yaml` | `templates/repo.yaml` | yes — the repo's own rules, such as fast-forward-only merges. Yours to edit |
 | `.env.sample` | `templates/env.sample` | yes |
-| `adws/adw_*.py` | `templates/adws/` | yes — the twelve starter ADWs |
+| `adws/adw_*.py` | `templates/adws/` | yes — the 14 starter workflows, and `adw_kill`, `adw_worktree` and `adw_sandbox_usage` for managing runs |
 | `adws/adw_modules/` | `templates/adws/adw_modules/` | yes — all low-level logic |
-| `adws/adw_data/prompt_engineering/{planner,builder,scout,reviewer,documenter}/` | `templates/prompt_engineering/` | yes — **the user-owned home for prompts** |
+| `adws/adw_data/prompt_engineering/<agent>/`, one dir for each of the 8 starter agents and the trial `referee` | `templates/prompt_engineering/` | yes — **the user-owned home for prompts** |
 | `adws/adw_data/harness_engineering/` | `templates/harness_engineering/` | yes — **the user-owned home for pi extensions** |
 | `justfile` | `templates/justfile` | yes — starter recipes: `just demo`, the workflows, the trace reads, `just obs` |
 | `.githooks/pre-push` | `templates/githooks/` | yes — the secret scan before every push. Off until the engineer turns it on: see [Secret scan before every push](#secret-scan-before-every-push) |
@@ -194,7 +194,7 @@ A session that already has `/sssf` keeps it through the switch. New sessions get
 ## Post-install checklist
 
 0. **Restart the session.** Claude Code registers `/sssf` when a session starts, so a session that was running before the install cannot load it. Restart it in the repo (`claude --continue` keeps the conversation). If SSSF lives on a branch instead of `main`, start every operator session with that branch checked out: switching branches mid-session does not register the skill.
-1. **Env** — `cp .env.sample .env`, then set `OPENROUTER_API_KEY` in `.env`. (Claude Code agents need no key: they run on the operator's `claude` login, and `agent_cc` strips `ANTHROPIC_API_KEY` from them unless `SSSF_CLAUDE_AUTH=api_key`.)
+1. **Env** — `cp .env.sample .env`. A pi roster on API keys needs a key for each provider it names: the starter pi roster needs `OPENROUTER_API_KEY`, `FIREWORKS_API_KEY` and `OPENAI_API_KEY`, and `.env.sample` says which agent uses which. A `--chatgpt` roster needs none; set `SSSF_PI_AUTH=subscription`. (Claude Code agents need no key: they run on the operator's `claude` login, and `agent_cc` strips `ANTHROPIC_API_KEY` from them unless `SSSF_CLAUDE_AUTH=api_key`.)
 2. **Pi is installed and on PATH** — `pi --version`. Set `PI_PATH` in `.env` if it is not.
 3. **The model resolves** — the config's default `gemini-3.6-flash` must be a registered id in `~/.pi/agent/models.json`. Check with `pi --list-models` or read the file directly; see `references/config.md` for model resolution.
 4. **Gitignore** — `install.py` appends `adws/adw_data/sessions/`, `adws/adw_data/sssf.db*`, and `.env` for you; confirm they landed. All three are runtime or secrets and must never be committed.

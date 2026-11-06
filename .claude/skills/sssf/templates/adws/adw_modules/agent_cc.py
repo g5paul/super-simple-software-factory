@@ -18,12 +18,15 @@ drops their CLAUDE.md, skills, plugins, hooks, and MCP servers, so a factory
 agent sees its system.md and nothing else. Safe mode keeps environment
 variables, so a repo's refuse rules reach the agent as a shell prefix,
 sssf_refuse.py, not as a hook. Protected secret files (secret_files.py) are
-denied to Read and Grep with `--disallowedTools "Read(//<abs>)"`, one per
+denied to Read and Grep (and to Bash reads, by Claude Code itself) with
+`--disallowedTools "Read(//<abs>)"`, one per
 file, with the path's pattern characters escaped (deny_rule), which
 --safe-mode and bypassPermissions keep; checked by hand on claude 2.1.319.
-Each denial also arrives as a `permission_denied` system event whose `message`
-is a string. SSSF ignores it, and the trace records the denied call from its
-`tool_result`.
+Claude Code applies those denies to any tool that reads the file, Bash
+included, so it may deny `cat .env` before sssf_refuse.py runs. Each denial
+arrives as a `permission_denied` system event, whose `message` is a string. The
+forwarder (agents._event_forwarder, via rules.denied) counts that call as
+refused, by its `tool_use_id`, and the trace records it from its `tool_result`.
 Keys .env names don't reach the agent (utils.agent_env). Auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """

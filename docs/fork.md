@@ -1,8 +1,8 @@
 # What this fork adds
 
-This fork branched from [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory) at de31374, from 2026-08-02. Upstream has added nothing since. By 2026-11-02 the fork was 149 commits ahead, across 151 files: about 16,200 lines added and 400 removed. A fifth of that is tests, now 335 in Python and 60 in the dashboard.
+This fork branched from [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory) at de31374, from 2026-08-02. Upstream's `main` hasn't moved since. Its `example` branch adds one commit, b2dcb8e from 2026-08-04, an example app that the fork doesn't take. By 2026-11-05 the fork was 401 commits ahead, across 347 files: about 54,900 lines added and 700 removed. About 13,400 of those lines are tests, now 1,064 for the skill, 35 for the hub and 70 in the dashboard.
 
-The README describes SSSF as it is now. This page says what changed from upstream and where each change was designed. To bring it up to date, read the commits since the last one listed in the log at the bottom:
+This page is the changelog: what changed from upstream, and where each change was designed. The [guide](README.md) describes SSSF as it is now. To bring it up to date, read the commits since the last one listed in the log at the bottom:
 
 ```bash
 git log --reverse --format='%cs %h %s' de31374..main
@@ -32,7 +32,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 - **The ChatGPT plan's limit.** That route sends no usage windows, so a pi run stops by name on the plan's 429. Design: [pi-usage-stop.md](designs/pi-usage-stop.md). Research: [pi-usage-limits.md](research/pi-usage-limits.md).
 - **Plans checked before the build.** `gates.plan_well_formed` sends a plan back to its planner when its two copies differ, it overwrites a committed spec, it has no verification heading, or it names no real file. A fix costs one turn instead of a build.
 - **Agents that go quiet.** An agent that writes nothing for `max_silence_minutes` in repo.yaml, 15 by default, is stopped with the run. A hang spends nothing, so the caps above never catch it. Design: [silent-agents.md](designs/silent-agents.md).
-- **Private repos.** The installer asks whether a repo is private and keeps its runs off remote VMs unless the engineer asks. The pre-push hook refuses a push naming a project listed in `.git/sssf-private-names`, so a public fork can install into repos it doesn't name, private or not. This hub leaves a repo unlisted unless the engineer says otherwise: [projects.md](projects.md#unlisted-projects).
+- **Private repos.** The operator session asks at install whether a repo is private, and keeps a private repo on `sandbox: none`, so its runs stay off remote VMs unless the engineer asks. The pre-push hook refuses a push naming a project listed in `.git/sssf-private-names`, so a public fork can install into repos it doesn't name, private or not. This hub leaves a repo unlisted unless the engineer says otherwise: [projects.md](projects.md#unlisted-projects).
 - **Pricing.** A killed Claude call is priced from the output counts it streamed. `prices.json` holds Claude's list prices, a run and the dashboard warn about a model it doesn't list, and `scripts/check_prices.py` compares it with claude.com/pricing.
 
 ### A branch per run, and runs in parallel
@@ -43,7 +43,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 
 ### Runs in a remote VM
 
-- `--sandbox vercel` or `--sandbox e2b` runs a worktree run's agents, checks and git in a VM made for the run and deleted at its end, on a free Hobby tier. Commits come back to the host branch after each commit, and uncommitted work is saved as a patch. `just tickets` and `just trial` take it too, and repo.yaml's `sandbox:` sets a repo's default. Design: [remote-sandboxes.md](designs/remote-sandboxes.md).
+- `--sandbox vercel` or `--sandbox e2b` runs a worktree run's agents, checks and git in a VM made for the run and deleted at its end, within Vercel's free Hobby tier or E2B's one-time credit. Commits come back to the host branch after each commit, and uncommitted work is saved as a patch. `just tickets` and `just trial` take it too, and repo.yaml's `sandbox:` sets a repo's default. Design: [remote-sandboxes.md](designs/remote-sandboxes.md).
 - Claude Code agents sign in with a `claude setup-token` token. Pi agents on `openai/` models get a short-lived access token from the host's ChatGPT sign-in before each call, so the login never leaves the machine. Research: [pi-chatgpt-in-vm.md](research/pi-chatgpt-in-vm.md).
 - Before any agent starts, the VM's git, uv, `claude`, Node and `pi` versions are read. A missing or too-old tool fails the run with each one named, and nothing runs in that VM.
 - The dashboard shows each run's VM and what runs have used of each provider's allowance, as does `just sandbox-usage`.
@@ -71,7 +71,7 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 
 ### Smaller fixes
 
-A code change is committed under the first build's message, not the last repair's. Each review round keeps its own file. Docs updates are part of every change. SSSF's own files stay out of the feature reviews and the documenter's diff. A pi call whose last turn ended in an error fails with pi's message. A stopped run ends with its message, not a traceback.
+A code change is committed under the first build's message, not the last repair's. Each review round keeps its own file. Docs updates are part of every change. SSSF's own files stay out of the feature reviews and the documenter's diff. A pi call whose last turn ended in an error fails with pi's message. A stopped run ends with its message, not a traceback. `just merge` refuses while the run's worktree holds uncommitted work, which it used to delete with the worktree, and `just discard` names what it dropped.
 
 ## Log
 
@@ -81,3 +81,5 @@ A code change is committed under the first build's message, not the last repair'
 | 2026-11-03 | 247ebda | Remote VMs, the ChatGPT roster in them, the VM tool check, and the pre-push secret scan |
 | 2026-11-03 | 448e88c | The installer stamps the pre-push hook; agents that go quiet are stopped |
 | 2026-11-05 | b72d057 | pi extensions in a VM, the SDK and stream deadlines, and pi in the operator container |
+| 2026-11-05 | 5184023 | The obs relay for VM runs |
+| 2026-11-05 | 7decd41 | `just merge` keeps a worktree's uncommitted work |

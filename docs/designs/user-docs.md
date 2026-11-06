@@ -79,6 +79,8 @@ Checked against main at 92220f5. Line numbers are as of that commit.
 
 Reproduced on 2026-11-05 in sssf-sandbox: run b03647f9 (`adw_build_test --worktree`, $0.010) succeeded with `WORKTREE_PROBE.md` uncommitted in its worktree. `just merge b03647f9` printed "merged sssf/b03647f9 into master (fast-forward), now at c52bbae; removed its worktree and branch", and the file was gone from both.
 
+The fix, 7decd41, proven the same day in sssf-sandbox: run c95d4481 ($0.009) ended with a `commit` phase, d487a47 on its branch. With a stray `STRAY.txt` in its worktree, `just merge` refused and named the file. Without it, the merge fast-forwarded master to d487a47 with `WORKTREE_PROBE.md` in it. `just discard` on the obs proof's two leftover worktrees removed them and reported no uncommitted files.
+
 
 `adw_build_test` has no commit phase, so a `--worktree` run leaves its work uncommitted in the worktree. `_merge` checks for uncommitted changes in the launch checkout, never in the run's worktree (`worktree.py:378`). The merge of an unchanged branch succeeds, then `_remove` runs `git worktree remove --force` (`worktree.py:532`). README:427 and `run_adw.md:75,112` show this chain for `--worktree` and `--sandbox`.
 

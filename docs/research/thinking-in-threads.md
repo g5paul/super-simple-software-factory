@@ -61,3 +61,35 @@ Each repo's `sssf.db` holds most of what the levers need: concurrent runs for wi
 | 2026-W45 | 282 | 5 | 128 | 1.1 | 22.2 | 1 | 135 | 21.1 |
 
 Read them with care. Most agent runs here are the test bed's short proof runs, which pull the medians down, and this week's hub runs are guard-chain runs at about 68 tool calls each. A touch counts a session's launch the same as the engineer's, so calls per touch overstates how little attention the work took. The per-repo tables, `--by-repo`, are the better baseline to compare against.
+
+## 2026-11-06: what the levers miss
+
+The per-repo tables, with each repo's spend and failed runs from the same traces, for the listed repos. Two unlisted projects are left out. Spend and failures group runs by SQLite's `%W` week, which can put a run near a week's edge in the next or previous week from the levers' ISO week.
+
+| Repo | Week | Runs | Agent runs | Min/run | Calls/run | Agents | Touches | Spend | Failed |
+|---|---|---|---|---|---|---|---|---|---|
+| pi-agent-observability | W44 | 53 | 10 | 7.1 | 36.0 | 3 | 10 | $2.75 | 2 |
+| | W45 | 48 | 2 | 5.7 | 10.5 | 2.5 | 2 | $0.08 | 0 |
+| hub | W45 | 64 | 31 | 19.4 | 67.9 | 4 | 35 | $116.00 | 5 |
+| sssf-sandbox | W44 | 93 | 75 | 0.6 | 8.9 | 2 | 84 | $12.41 | 16 |
+| | W45 | 123 | 95 | 0.6 | 7.6 | 1 | 97 | $11.60 | 32 |
+| fusion-harness | W44 | 5 | 2 | 0.2 | 5.0 | 1 | 2 | $0.01 | 2 |
+| | W45 | 47 | 0 | 0 | 0 | 0 | 1 | $0.00 | 0 |
+
+The hub's $116 is its 31 guard-chain runs that week.
+
+### Why cost isn't one of the article's levers
+
+The levers are things to push up: more threads, longer, thicker, fewer checkpoints. Cost rises with every one of them, so it's what the levers cost rather than a lever. The article also takes plentiful compute as given. This fork can't: its dollars are list-price estimates on a subscription, the real limit is the usage window, and budgets, `max_run_cost` and the usage and rate-limit stops exist for it. So cost belongs in the report as a ratio, cost per thing that landed. The hub's $116 bought five merged guard changes, about $23 each, which is the number to weigh when deciding how many guard runs to make.
+
+### What else is missing
+
+- **Whether the work was any good.** "Tool calls roughly equal impact" is the article's weakest claim. A project's run made plenty of tool calls and landed nothing, on a plan check that couldn't pass. No lever counts accepted runs, commits that landed, fix rounds or review findings; sssf-sandbox failing 32 of 123 runs looks like any other week.
+- **Test noise in the totals.** The test bed's short proof runs are most of the agent runs and pull the median to 0.6 minutes, and quality-only checks inflate runs: fusion-harness had 47 in W45 with no agent in any.
+- **The long end of time.** A median of 1 to 6 minutes says nothing about L-threads. The longest run, and how many ran past an hour, would show whether threads grow.
+- **Depth above the run.** Agents per run is the B-thread inside one ADW. The deeper one here, the hub session running every project's session, is in no trace.
+- **The engineer's attention.** Touches count launches. The engineer's messages, approvals and pushes are in no trace. Claude Code's transcripts could estimate them, at the price of a second data source and its own privacy questions.
+
+### What to add first
+
+Accepted agent runs, meaning runs whose status is `success`, which `Run.finish` sets only when every phase passed and the ADW's acceptance test held; cost per accepted run; the longest run in minutes; and `--real`, leaving out quality-only runs and the hub's test beds. Fix rounds and review findings need more parsing and wait.

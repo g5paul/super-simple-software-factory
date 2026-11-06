@@ -136,3 +136,15 @@ does. Accepted, $/accepted and longest show yield: runs whose status is
 leaves out quality-only runs and the repos `.git/sssf-test-beds` names, one
 per line; the file lives in `.git`, so no name is committed. It only reads,
 and it is hub-only.
+
+## What each feature cost
+
+`uv run adws/features.py` joins each repo's agent runs to the commits that
+reached its main line, the current branch unless `--branch REPO=BRANCH`
+says otherwise. Runs that landed at one point are one feature, with its
+cost, run count and lead time; a rebased commit is matched by patch-id, then
+subject. Runs that never landed are pending when a branch still holds them,
+gone otherwise, and runs with no commits are counted apart. `--weeks`,
+`--repo`, `--listed` and `--real` work as in `levers.py`, and
+`levers.py --by-type` gives one row per chain. Both only read, and both are
+hub-only.

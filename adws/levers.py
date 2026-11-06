@@ -36,6 +36,7 @@ Usage, from the hub root:
     uv run adws/levers.py --weeks 4 --by-repo
     uv run adws/levers.py --listed         # output safe to paste anywhere
     uv run adws/levers.py --real           # agent runs only, test beds left out
+    uv run adws/levers.py --by-type        # per repo, one row per chain, whole window
 
 --real leaves out quality-only runs, and every repo the hub's
 .git/sssf-test-beds names, one per line, # for comments, matched the way
@@ -69,6 +70,7 @@ class Run:
     engineer: int = 0
     status: str = ""
     cost: float = 0.0
+    kind: str = ""
 
 
 @dataclass
@@ -91,7 +93,7 @@ def week_of(moment: datetime) -> str:
 
 def runs(db: Path, since: datetime) -> list[Run]:
     with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
-        rows = conn.execute("select adw_id, started_at, ended_at, status, total_cost "
+        rows = conn.execute("select adw_id, started_at, ended_at, status, total_cost, adw_name "
                             "from sessions").fetchall()
         agents = dict(conn.execute("select adw_id, count(distinct owner) from phases "
                                    "where kind = 'agent' group by adw_id"))
@@ -100,12 +102,12 @@ def runs(db: Path, since: datetime) -> list[Run]:
         calls = dict(conn.execute("select adw_id, count(*) from events where type = 'tool_call' "
                                   "and name not like 'quality%' group by adw_id"))
     out = []
-    for adw_id, started, ended, status, cost in rows:
+    for adw_id, started, ended, status, cost, kind in rows:
         start = _when(started)
         if start and start >= since:
             out.append(Run(adw_id, start, _when(ended), agents.get(adw_id, 0),
                            calls.get(adw_id, 0), engineer.get(adw_id, 0),
-                           status or "", cost or 0.0))
+                           status or "", cost or 0.0, kind or "?"))
     return out
 
 
@@ -174,12 +176,36 @@ def table(weeks: dict[str, Week], labels: list[str]) -> list[str]:
     return [HEADER] + [line(label, row(weeks.get(label, Week()))) for label in labels]
 
 
+TYPE_HEADER = (f"{'chain':24} {'runs':>5} {'accepted':>8} {'failed':>6} {'spend':>8} "
+               f"{'$/accepted':>10} {'min/run':>8} {'longest':>7} {'calls/run':>9}")
+
+
+def by_type(all_runs: list[Run]) -> list[str]:
+    """One row per chain over the whole window, busiest first."""
+    groups: dict[str, list[Run]] = defaultdict(list)
+    for run in all_runs:
+        groups[run.kind].append(run)
+    out = [TYPE_HEADER]
+    for kind, group in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        accepted = sum(r.status == "success" for r in group)
+        spend = sum(r.cost for r in group)
+        minutes = [(r.end - r.start).total_seconds() / 60 for r in group if r.end]
+        out.append(f"{kind[:24]:24} {len(group):5} {accepted:8} {len(group) - accepted:6} "
+                   f"{spend:8.2f} {(spend / accepted if accepted else 0):10.2f} "
+                   f"{(statistics.median(minutes) if minutes else 0):8.1f} "
+                   f"{(max(minutes) if minutes else 0):7.1f} "
+                   f"{sum(r.tool_calls for r in group) / len(group):9.1f}")
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--weeks", type=int, default=8, help="how many ISO weeks back (default 8)")
     parser.add_argument("--by-repo", action="store_true", help="a table per repo after the total")
     parser.add_argument("--listed", action="store_true",
                         help="leave out the repos in the hub's .git/sssf-private-names")
+    parser.add_argument("--by-type", action="store_true",
+                        help="per repo, one row per chain over the whole window")
     parser.add_argument("--real", action="store_true",
                         help="agent runs only, and leave out the hub's .git/sssf-test-beds")
     parser.add_argument("--hub", type=Path, default=cp.HUB, help=argparse.SUPPRESS)
@@ -230,8 +256,15 @@ def main(argv: list[str] | None = None) -> int:
         per_repo[name] = repo_weeks
 
     print(f"{len(entries)} repos, weeks {labels[0]} to {labels[-1]}\n")
-    print("\n".join(table(total, labels)))
-    if args.by_repo:
+    if args.by_type:
+        for name, repo_weeks in per_repo.items():
+            repo_runs = [r for label in labels for r in repo_weeks.get(label, Week()).runs]
+            if repo_runs:
+                print(f"{name}")
+                print("\n".join(by_type(repo_runs)) + "\n")
+    else:
+        print("\n".join(table(total, labels)))
+    if args.by_repo and not args.by_type:
         for name, repo_weeks in per_repo.items():
             print(f"\n{name}")
             print("\n".join(table(repo_weeks, labels)))

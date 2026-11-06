@@ -42,11 +42,11 @@ def trace(root, runs):
     db = root / "adws/adw_data/sssf.db"
     db.parent.mkdir(parents=True)
     with sqlite3.connect(db) as conn:
-        conn.execute("create table sessions (adw_id, started_at, ended_at, status, total_cost)")
+        conn.execute("create table sessions (adw_id, started_at, ended_at, status, total_cost, adw_name)")
         conn.execute("create table phases (adw_id, kind, owner)")
         conn.execute("create table events (adw_id, type, name)")
         for adw_id, start, end, agents, calls, engineer, status, cost in runs:
-            conn.execute("insert into sessions values (?, ?, ?, ?, ?)",
+            conn.execute("insert into sessions values (?, ?, ?, ?, ?, null)",
                          (adw_id, start, end, status, cost))
             for i in range(agents):
                 conn.execute("insert into phases values (?, 'agent', ?)", (adw_id, f"a{i}"))
@@ -142,3 +142,19 @@ def test_real_without_a_test_beds_file_still_drops_quality_only_runs(world, caps
     out = capsys.readouterr().out
     assert [l.split() for l in out.splitlines() if l.startswith("2026-W45")][0][1] == "2"
     assert "0 test bed(s) left out" in out
+
+
+def test_by_type_gives_a_row_per_chain_per_repo(world, tmp_path, capsys):
+    hub, registry = world
+    db = Path(json.loads(registry.read_text())["projects"]["proj"]["root"]) / "adws/adw_data/sssf.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("update sessions set adw_name = 'adw_simple_sdlc' where adw_id like 'r%'")
+        conn.execute("update sessions set adw_name = 'adw_quality' where adw_id = 'q1'")
+    assert levers.main(["--hub", str(hub), "--registry", str(registry), "--now", NOW,
+                        "--weeks", "1", "--by-type"]) == 0
+    rows = {l.split()[0]: l.split()[1:] for l in capsys.readouterr().out.splitlines()
+            if l.startswith("adw_")}
+    # r1 accepted at $1, r2 failed at $2: $3 spent, $3 per accepted run,
+    # median 15 min, longest 20, 20 calls per run.
+    assert rows["adw_simple_sdlc"] == ["2", "1", "1", "3.00", "3.00", "15.0", "20.0", "20.0"]
+    assert rows["adw_quality"][:3] == ["1", "1", "0"]

@@ -50,3 +50,14 @@ Each repo's `sssf.db` holds most of what the levers need: concurrent runs for wi
 - **F:** the trial judge picking winners alone.
 - **Z:** a class of change the engineer lets merge without reading it, with the trace as the reason.
 - **Attention:** project reports checked by code instead of by the hub session, and the lever numbers trending over weeks.
+
+## 2026-11-06: the first lever numbers
+
+`adws/levers.py` now prints the levers from the traces. The first run, with `--listed` so private repos are left out, covers four repos:
+
+| Week | Runs | At once | Agent runs | Minutes per run | Calls per run | Agents | Touches | Calls per touch |
+|---|---|---|---|---|---|---|---|---|
+| 2026-W44 | 151 | 2 | 87 | 0.6 | 12.0 | 2 | 96 | 10.8 |
+| 2026-W45 | 282 | 5 | 128 | 1.1 | 22.2 | 1 | 135 | 21.1 |
+
+Read them with care. Most agent runs here are the test bed's short proof runs, which pull the medians down, and this week's hub runs are guard-chain runs at about 68 tool calls each. A touch counts a session's launch the same as the engineer's, so calls per touch overstates how little attention the work took. The per-repo tables, `--by-repo`, are the better baseline to compare against.

@@ -120,3 +120,15 @@ repo whose session owns it. `--skill <h>` expects an older commit, and
 `.git/sssf-private-names` lists and says only how many, so its output is
 safe to paste into this public repo. The script and its tests are hub-only,
 like the guard chain.
+
+## The four levers
+
+`uv run adws/levers.py` prints one row per ISO week, across every repo in
+the install registry, for the levers `docs/research/thinking-in-threads.md`
+describes: runs and the most at once, minutes and agent tool calls per agent
+run, agents per run, and touches with agent tool calls per touch. A touch is
+an agent run's engineer phase or a merge commit, so it measures sessions'
+launches as much as the engineer's attention; the script's docstring says
+what each column counts. `--weeks N` sets the window, `--by-repo` adds a
+table per repo, and `--listed` leaves out private repos as `check_projects.py`
+does. It only reads, and it is hub-only.

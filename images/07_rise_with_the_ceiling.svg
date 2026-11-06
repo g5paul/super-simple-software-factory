@@ -3,29 +3,27 @@
   <title>Rise with the ceiling: vibe coding sits inside a narrow band with a short arrow of headroom, while agentic engineering rises far above it with a tall one</title>
   <defs>
     <style><![CDATA[
-      .ttl   { opacity: 0; animation: f .6s ease .10s forwards; }
+      .ttl { --s-opacity: 0; animation: f .6s ease .10s both; }
 
-      .vibe  { opacity: 0; animation: f .6s ease .55s forwards; }
+      .vibe { --s-opacity: 0; animation: f .6s ease .55s both; }
       /* The ceiling starts down beside vibe coding and RISES — the whole point
          is that it was never a different kind of work, only a higher one. */
-      .ceil  { opacity: 0; transform: translateY(250px);
-               animation: f .5s ease .85s forwards, rise 1.15s cubic-bezier(.25,.9,.3,1) 1.25s forwards; }
+      .ceil { --s-opacity: 0; --s-transform: translateY(250px); animation: f .5s ease .85s both, rise 1.15s cubic-bezier(.25,.9,.3,1) 1.25s both; }
 
-      .band  { opacity: 0; animation: fb .5s ease 2.45s forwards; }
+      .band { --s-opacity: 0; opacity: .55; animation: fb .5s ease 2.45s both; }
 
       /* Arrows grow from their base, so each reads as headroom being measured. */
-      .stem  { transform: scaleY(0); transform-box: fill-box; transform-origin: bottom;
-               animation: grow .55s cubic-bezier(.3,.8,.3,1) forwards; }
-      .head  { opacity: 0; animation: f .3s ease forwards; }
-      .aS    { animation-delay: 2.75s } .hS { animation-delay: 3.20s }
-      .aL    { animation-delay: 3.10s } .hL { animation-delay: 3.75s }
+      .stem { --s-transform: scaleY(0); transform-box: fill-box; transform-origin: bottom; animation: grow .55s cubic-bezier(.3,.8,.3,1) both; }
+      .head { --s-opacity: 0; animation: f .3s ease both; }
+      .aS { animation-delay: 2.75s } .hS { animation-delay: 3.20s }
+      .aL { animation-delay: 3.10s } .hL { animation-delay: 3.75s }
 
-      .glow  { animation: gl 3s ease-in-out 4s infinite; }
+      .glow { animation: gl 3s ease-in-out 4s infinite; }
 
-      @keyframes f     { to { opacity: 1 } }
-      @keyframes fb    { to { opacity: .55 } }
-      @keyframes rise  { to { transform: translateY(0) } }
-      @keyframes grow  { to { transform: scaleY(1) } }
+      @keyframes f { from { opacity: var(--s-opacity, 1); } to { opacity: 1 } }
+      @keyframes fb { from { opacity: var(--s-opacity, 1); } to { opacity: .55 } }
+      @keyframes rise { from { transform: var(--s-transform, none); } to { transform: translateY(0) } }
+      @keyframes grow { from { transform: var(--s-transform, none); } to { transform: scaleY(1) } }
       @keyframes gl    { 0%,100% { filter: drop-shadow(0 0 2px rgba(240,86,31,.25)) }
                          50%     { filter: drop-shadow(0 0 12px rgba(240,86,31,.65)) } }
 

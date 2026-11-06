@@ -8,16 +8,15 @@
     </filter>
 
     <style><![CDATA[
-      .ttl   { opacity: 0; animation: f .5s ease .10s forwards; }
-      .axis  { opacity: 0; animation: f .5s ease .35s forwards; }
-      .grid  { opacity: 0; animation: fg .6s ease .45s forwards; }
-      .lane  { opacity: 0; transform: translateX(-8px); animation: slide .4s cubic-bezier(.2,.8,.3,1) forwards; }
+      .ttl { --s-opacity: 0; animation: f .5s ease .10s both; }
+      .axis { --s-opacity: 0; animation: f .5s ease .35s both; }
+      .grid { --s-opacity: 0; opacity: .9; animation: fg .6s ease .45s both; }
+      .lane { --s-opacity: 0; --s-transform: translateX(-8px); animation: slide .4s cubic-bezier(.2,.8,.3,1) both; }
 
       /* A bar grows left-to-right, because its WIDTH is the point — this is a
          duration, not a decoration. The label fades in after its bar lands. */
-      .bar   { transform: scaleX(0); transform-box: fill-box; transform-origin: left center;
-               animation: grow .45s cubic-bezier(.2,.8,.3,1) forwards; }
-      .lab   { opacity: 0; animation: f .3s ease forwards; }
+      .bar { --s-transform: scaleX(0); transform-box: fill-box; transform-origin: left center; animation: grow .45s cubic-bezier(.2,.8,.3,1) both; }
+      .lab { --s-opacity: 0; animation: f .3s ease both; }
 
       .l1 { animation-delay: .55s } .l2 { animation-delay: .65s } .l3 { animation-delay: .75s }
       .l4 { animation-delay: .85s } .l5 { animation-delay: .95s }
@@ -27,13 +26,13 @@
       .t1 { animation-delay: 1.45s } .t2 { animation-delay: 1.80s } .t3 { animation-delay: 2.15s }
       .t4 { animation-delay: 2.50s } .t5 { animation-delay: 2.85s } .t6 { animation-delay: 3.20s }
 
-      .run   { animation: gl 2.4s ease-in-out 3.2s infinite; }
-      .legend{ opacity: 0; animation: f .5s ease 3.30s forwards; }
+      .run { animation: gl 2.4s ease-in-out 3.2s infinite; }
+      .legend { --s-opacity: 0; animation: f .5s ease 3.30s both; }
 
-      @keyframes f     { to { opacity: 1 } }
-      @keyframes fg    { to { opacity: .9 } }
-      @keyframes slide { to { opacity: 1; transform: translateX(0) } }
-      @keyframes grow  { to { transform: scaleX(1) } }
+      @keyframes f { from { opacity: var(--s-opacity, 1); } to { opacity: 1 } }
+      @keyframes fg { from { opacity: var(--s-opacity, 1); } to { opacity: .9 } }
+      @keyframes slide { from { opacity: var(--s-opacity, 1); transform: var(--s-transform, none); } to { opacity: 1; transform: translateX(0) } }
+      @keyframes grow { from { transform: var(--s-transform, none); } to { transform: scaleX(1) } }
       @keyframes gl    { 0%,100% { filter: drop-shadow(0 0 2px rgba(34,211,238,.30)) }
                          50%     { filter: drop-shadow(0 0 10px rgba(34,211,238,.75)) } }
 

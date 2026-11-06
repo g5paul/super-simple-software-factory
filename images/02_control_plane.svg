@@ -17,25 +17,25 @@
     <style><![CDATA[
       .title { font-weight: 700; font-size: 30px; fill: #FFFFFF; letter-spacing: -0.5px; }
       .panel { font-weight: 700; font-size: 19px; fill: #FFFFFF; }
-      .mono  { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-      .node  { font-size: 15px; fill: #FFFFFF; }
+      .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+      .node { font-size: 15px; fill: #FFFFFF; }
       .small { font-size: 13px; fill: #CBD5E1; }
-      .bad   { font-size: 13px; fill: #FCA5A5; }
-      .good  { font-size: 13px; fill: #6EE7B7; }
+      .bad { font-size: 13px; fill: #FCA5A5; }
+      .good { font-size: 13px; fill: #6EE7B7; }
       .verdict { font-size: 14px; font-weight: 700; fill: #FFFFFF; }
 
-      .pL { opacity: 0; animation: f 0.5s ease 0.15s forwards; }
-      .pR { opacity: 0; animation: f 0.5s ease 0.75s forwards; }
-      .loop { opacity: 0; stroke-dasharray: 520; stroke-dashoffset: 520; animation: dr 0.8s ease 0.5s forwards; }
+      .pL { --s-opacity: 0; animation: f 0.5s ease 0.15s both; }
+      .pR { --s-opacity: 0; animation: f 0.5s ease 0.75s both; }
+      .loop { --s-opacity: 0; --s-stroke-dashoffset: 520; opacity: .9; stroke-dasharray: 520; animation: dr 0.8s ease 0.5s both; }
       .spin { animation: wob 3s ease-in-out 1.2s infinite; transform-box: fill-box; transform-origin: center; }
-      .rail2 { opacity: 0; stroke-dasharray: 460; stroke-dashoffset: 460; animation: dr 0.9s ease 1.0s forwards; }
-      .rn { opacity: 0; transform: translateY(8px); animation: rise 0.4s ease forwards; }
-      .r1{animation-delay:1.25s} .r2{animation-delay:1.45s} .r3{animation-delay:1.65s} .r4{animation-delay:1.85s}
-      .vd { opacity: 0; animation: f 0.6s ease 2.2s forwards; }
+      .rail2 { --s-opacity: 0; --s-stroke-dashoffset: 460; opacity: .9; stroke-dasharray: 460; animation: dr 0.9s ease 1.0s both; }
+      .rn { --s-opacity: 0; --s-transform: translateY(8px); animation: rise 0.4s ease both; }
+      .r1 {animation-delay:1.25s} .r2 {animation-delay:1.45s} .r3 {animation-delay:1.65s} .r4 {animation-delay:1.85s}
+      .vd { --s-opacity: 0; animation: f 0.6s ease 2.2s both; }
 
-      @keyframes f { to { opacity: 1; } }
-      @keyframes rise { to { opacity: 1; transform: translateY(0); } }
-      @keyframes dr { 0%{opacity:0} 100% { opacity: .9; stroke-dashoffset: 0; } }
+      @keyframes f { from { opacity: var(--s-opacity, 1); } to { opacity: 1; } }
+      @keyframes rise { from { opacity: var(--s-opacity, 1); transform: var(--s-transform, none); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes dr { from { opacity: var(--s-opacity, 1); stroke-dashoffset: var(--s-stroke-dashoffset, 0); } 10 }
       @keyframes wob { 0%,100%{ transform: rotate(0deg);} 50%{ transform: rotate(4deg);} }
     
       @media (prefers-reduced-motion: reduce) {
@@ -43,6 +43,7 @@
       }
     ]]></style>
   </defs>
+  <rect x="0" y="0" width="1100" height="600" rx="14" fill="#0B0F14" stroke="#1B2431" stroke-width="1"/>
 
   <text filter="url(#ts2)" class="title" x="550" y="50" text-anchor="middle">Where does the control plane live?</text>
 
@@ -93,9 +94,9 @@
     <text filter="url(#ts2)" class="good mono" x="866" y="266" text-anchor="middle">&#10003; gates</text>
   </g>
   <g class="rn r4">
-    <rect x="924" y="212" width="92" height="72" rx="10" fill="#0F172A" stroke="#38BDF8" stroke-width="2"/>
-    <text filter="url(#ts2)" class="small mono" x="970" y="244" text-anchor="middle">tester</text>
-    <text filter="url(#ts2)" class="good mono" x="970" y="266" text-anchor="middle">&#10003; gates</text>
+    <rect x="924" y="212" width="92" height="72" rx="10" fill="#0F172A" stroke="#34D399" stroke-width="2"/>
+    <text filter="url(#ts2)" class="small mono" x="970" y="244" text-anchor="middle">quality</text>
+    <text filter="url(#ts2)" class="good mono" x="970" y="266" text-anchor="middle">code</text>
   </g>
 
   <g class="pR">

@@ -19,32 +19,33 @@
     </marker>
     <style><![CDATA[
       .title { font-weight: 700; font-size: 30px; fill: #FFFFFF; letter-spacing: -0.5px; }
-      .mono  { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-      .nd    { font-size: 15px; fill: #FFFFFF; }
-      .js    { font-size: 12px; fill: #CBD5E1; }
-      .lbl   { font-size: 12px; fill: #94A3B8; }
-      .warn  { font-size: 13px; fill: #FCD34D; }
-      .ok    { font-size: 13px; fill: #6EE7B7; }
-      .hd3   { font-weight: 700; font-size: 14px; fill: #FFFFFF; }
-      .foot  { font-size: 14px; fill: #CBD5E1; }
+      .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+      .nd { font-size: 15px; fill: #FFFFFF; }
+      .js { font-size: 12px; fill: #CBD5E1; }
+      .lbl { font-size: 12px; fill: #94A3B8; }
+      .warn { font-size: 13px; fill: #FCD34D; }
+      .ok { font-size: 13px; fill: #6EE7B7; }
+      .hd3 { font-weight: 700; font-size: 14px; fill: #FFFFFF; }
+      .foot { font-size: 14px; fill: #CBD5E1; }
 
-      .n { opacity: 0; transform: translateY(8px); animation: rise 0.45s cubic-bezier(.2,.8,.3,1) forwards; }
-      .n1{animation-delay:.15s} .n2{animation-delay:.45s} .n3{animation-delay:.75s} .n4{animation-delay:1.05s}
-      .e { opacity: 0; stroke-dasharray: 260; stroke-dashoffset: 260; animation: dr 0.5s ease forwards; }
-      .e1{animation-delay:.35s} .e2{animation-delay:.65s} .e3{animation-delay:.95s}
-      .lp { opacity: 0; stroke-dasharray: 900; stroke-dashoffset: 900; animation: dr 1s ease 1.35s forwards; }
-      .tri { opacity: 0; animation: f 0.5s ease 1.8s forwards; }
-      .ft { opacity: 0; animation: f 0.5s ease 2.1s forwards; }
+      .n { --s-opacity: 0; --s-transform: translateY(8px); animation: rise 0.45s cubic-bezier(.2,.8,.3,1) both; }
+      .n1 {animation-delay:.15s} .n2 {animation-delay:.45s} .n3 {animation-delay:.75s} .n4 {animation-delay:1.05s}
+      .e { --s-opacity: 0; --s-stroke-dashoffset: 260; stroke-dasharray: 260; animation: dr 0.5s ease both; }
+      .e1 {animation-delay:.35s} .e2 {animation-delay:.65s} .e3 {animation-delay:.95s}
+      .lp { --s-opacity: 0; --s-stroke-dashoffset: 900; stroke-dasharray: 900; animation: dr 1s ease 1.35s both; }
+      .tri { --s-opacity: 0; animation: f 0.5s ease 1.8s both; }
+      .ft { --s-opacity: 0; animation: f 0.5s ease 2.1s both; }
 
-      @keyframes f { to { opacity: 1; } }
-      @keyframes rise { to { opacity: 1; transform: translateY(0); } }
-      @keyframes dr { 0%{opacity:0} 100% { opacity: 1; stroke-dashoffset: 0; } }
+      @keyframes f { from { opacity: var(--s-opacity, 1); } to { opacity: 1; } }
+      @keyframes rise { from { opacity: var(--s-opacity, 1); transform: var(--s-transform, none); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes dr { from { opacity: var(--s-opacity, 1); stroke-dashoffset: var(--s-stroke-dashoffset, 0); } 10 }
     
       @media (prefers-reduced-motion: reduce) {
         * { opacity: 1 !important; animation: none !important; transform: none !important; stroke-dashoffset: 0 !important; }
       }
     ]]></style>
   </defs>
+  <rect x="0" y="0" width="1120" height="620" rx="14" fill="#0B0F14" stroke="#1B2431" stroke-width="1"/>
 
   <text filter="url(#ts5)" class="title" x="560" y="46" text-anchor="middle">Bad output is a correction, never a restart</text>
 
@@ -102,7 +103,7 @@
     <text filter="url(#ts5)" class="js mono" x="60" y="482">&#160;&#160;&#160;&#160;commit_message: str</text>
 
     <rect x="400" y="392" width="320" height="96" rx="11" fill="#0F172A" stroke="#38BDF8" stroke-width="1.8"/>
-    <text filter="url(#ts5)" class="nd mono" x="420" y="420">builder/system.md</text>
+    <text filter="url(#ts5)" class="nd mono" x="420" y="420">builder/user.md</text>
     <text filter="url(#ts5)" class="js mono" x="420" y="444">## Report</text>
     <text filter="url(#ts5)" class="js mono" x="420" y="466">the same JSON, as an example</text>
 

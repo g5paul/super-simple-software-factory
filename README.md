@@ -275,7 +275,7 @@ Config defines who an agent **is**. The ADW call site defines how it is **used**
 ## Phases: three lanes, one primitive
 
 <p align="center">
-  <img src="images/04_phase_lanes.svg" alt="Swim lanes for engineer, git, planner, builder, and reviewer with phase blocks placed on a time axis and one dashed queued block" width="780">
+  <img src="images/04_phase_lanes.svg" alt="Swim lanes for engineer, git, planner, builder, and quality with phase blocks placed on a time axis and one dashed queued block" width="780">
 </p>
 
 Every run is a sequence of phases, and every phase is the same context manager no matter who owns it.
@@ -562,7 +562,7 @@ MIT, see [`LICENSE`](LICENSE).
 ## Master Agentic Coding
 
 <p align="center">
-  <img src="images/08_rise_with_the_ceiling.svg" alt="Vibe coding sits inside a narrow band with a short arrow of headroom above it, agentic engineering rises far above that band with a tall one" width="850">
+  <img src="images/07_rise_with_the_ceiling.svg" alt="Vibe coding sits inside a narrow band with a short arrow of headroom above it, agentic engineering rises far above that band with a tall one" width="850">
 </p>
 
 Vibe coding is not knowing how your system works, and not looking. Agentic engineering is knowing how your system works so well that you do not have to look.

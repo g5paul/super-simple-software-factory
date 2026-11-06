@@ -10,26 +10,26 @@
     </filter>
     <style><![CDATA[
       .title { font-weight: 700; font-size: 30px; fill: #FFFFFF; letter-spacing: -0.5px; }
-      .mono  { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-      .lane  { font-size: 14px; fill: #FFFFFF; }
+      .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+      .lane { font-size: 14px; fill: #FFFFFF; }
       .lanem { font-size: 11px; fill: #94A3B8; }
-      .blkl  { font-size: 13px; fill: #FFFFFF; }
-      .tick  { font-size: 11px; fill: #64748B; }
-      .foot  { font-size: 14px; fill: #CBD5E1; }
-      .kind  { font-size: 12px; }
+      .blkl { font-size: 13px; fill: #FFFFFF; }
+      .tick { font-size: 11px; fill: #64748B; }
+      .foot { font-size: 14px; fill: #CBD5E1; }
+      .kind { font-size: 12px; }
 
-      .lb { opacity: 0; animation: f 0.4s ease forwards; }
-      .l1{animation-delay:.15s} .l2{animation-delay:.3s} .l3{animation-delay:.45s} .l4{animation-delay:.6s} .l5{animation-delay:.75s}
-      .pb { opacity: 0; transform: scaleX(.2); transform-box: fill-box; transform-origin: left center; animation: grow 0.5s cubic-bezier(.2,.8,.3,1) forwards; }
-      .p1{animation-delay:.85s} .p2{animation-delay:1.05s} .p3{animation-delay:1.3s} .p4{animation-delay:1.5s} .p5{animation-delay:1.75s}
-      .txf { opacity: 0; animation: f 0.35s ease forwards; }
-      .x1{animation-delay:1.15s} .x2{animation-delay:1.35s} .x3{animation-delay:1.6s} .x4{animation-delay:1.8s} .x5{animation-delay:2.05s}
-      .qd { opacity: 0; animation: f 0.5s ease 2.15s forwards; }
-      .ft { opacity: 0; animation: f 0.5s ease 2.4s forwards; }
+      .lb { --s-opacity: 0; animation: f 0.4s ease both; }
+      .l1 {animation-delay:.15s} .l2 {animation-delay:.3s} .l3 {animation-delay:.45s} .l4 {animation-delay:.6s} .l5 {animation-delay:.75s}
+      .pb { --s-opacity: 0; --s-transform: scaleX(.2); transform-box: fill-box; transform-origin: left center; animation: grow 0.5s cubic-bezier(.2,.8,.3,1) both; }
+      .p1 {animation-delay:.85s} .p2 {animation-delay:1.05s} .p3 {animation-delay:1.3s} .p4 {animation-delay:1.5s} .p5 {animation-delay:1.75s}
+      .txf { --s-opacity: 0; animation: f 0.35s ease both; }
+      .x1 {animation-delay:1.15s} .x2 {animation-delay:1.35s} .x3 {animation-delay:1.6s} .x4 {animation-delay:1.8s} .x5 {animation-delay:2.05s}
+      .qd { --s-opacity: 0; animation: f 0.5s ease 2.15s both; }
+      .ft { --s-opacity: 0; animation: f 0.5s ease 2.4s both; }
       .run { animation: rp 1.8s ease-in-out 2s infinite; }
 
-      @keyframes f { to { opacity: 1; } }
-      @keyframes grow { to { opacity: 1; transform: scaleX(1); } }
+      @keyframes f { from { opacity: var(--s-opacity, 1); } to { opacity: 1; } }
+      @keyframes grow { from { opacity: var(--s-opacity, 1); transform: var(--s-transform, none); } to { opacity: 1; transform: scaleX(1); } }
       @keyframes rp { 0%,100%{ filter: drop-shadow(0 0 2px rgba(56,189,248,.2)); } 50%{ filter: drop-shadow(0 0 8px rgba(56,189,248,.65)); } }
     
       @media (prefers-reduced-motion: reduce) {
@@ -37,8 +37,9 @@
       }
     ]]></style>
   </defs>
+  <rect x="0" y="0" width="1120" height="560" rx="14" fill="#0B0F14" stroke="#1B2431" stroke-width="1"/>
 
-  <text filter="url(#ts4)" class="title" x="560" y="46" text-anchor="middle">Three lanes. One primitive.</text>
+  <text filter="url(#ts4)" class="title" x="560" y="46" text-anchor="middle">Three kinds of phase. One primitive.</text>
 
   <!-- time axis -->
   <line x1="270" y1="96" x2="1080" y2="96" stroke="#334155" stroke-width="1"/>
@@ -51,7 +52,7 @@
 
   <!-- lane labels -->
   <g class="lb l1">
-    <text filter="url(#ts4)" class="lane mono" x="40" y="140">engineer &#183; dan</text>
+    <text filter="url(#ts4)" class="lane mono" x="40" y="140">engineer &#183; you</text>
     <text filter="url(#ts4)" class="kind mono" x="40" y="158" fill="#A78BFA">engineer</text>
   </g>
   <g class="lb l2">
@@ -67,8 +68,8 @@
     <text filter="url(#ts4)" class="kind mono" x="40" y="374" fill="#38BDF8">agent &#183; gemini-3.6-flash</text>
   </g>
   <g class="lb l5">
-    <text filter="url(#ts4)" class="lane mono" x="40" y="428">tester</text>
-    <text filter="url(#ts4)" class="kind mono" x="40" y="446" fill="#38BDF8">agent &#183; thinking low</text>
+    <text filter="url(#ts4)" class="lane mono" x="40" y="428">quality</text>
+    <text filter="url(#ts4)" class="kind mono" x="40" y="446" fill="#34D399">code</text>
   </g>
 
   <!-- lane rules -->
@@ -90,7 +91,7 @@
   <g class="pb p4"><rect x="556" y="334" width="330" height="44" rx="8" fill="#0F172A" stroke="#38BDF8" stroke-width="2"/></g>
   <g class="txf x4"><text filter="url(#ts4)" class="blkl mono" x="721" y="362" text-anchor="middle">build &#10003; attempt 2/2</text></g>
 
-  <g class="pb p5"><rect x="900" y="406" width="150" height="44" rx="8" fill="#0F172A" stroke="#38BDF8" stroke-width="2"/></g>
+  <g class="pb p5"><rect x="900" y="406" width="150" height="44" rx="8" fill="#0F172A" stroke="#34D399" stroke-width="2"/></g>
   <g class="txf x5 run"><text filter="url(#ts4)" class="blkl mono" x="975" y="434" text-anchor="middle">test_1 running</text></g>
 
   <!-- queued block -->

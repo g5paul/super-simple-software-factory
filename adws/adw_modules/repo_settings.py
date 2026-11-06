@@ -42,6 +42,13 @@ class RepoSettings(BaseModel):
     # Rules every agent gets at the end of its system prompt, whatever its role.
     # A string only asks; an AgentRule with `forbid` also stops the run (rules.py).
     agent_rules: list[str | AgentRule] = Field(default_factory=list)
+    # Paths or globs, from the repo root, of files agents must not read, on top of
+    # .env and .env.* (but .env.sample, .env.example). A pattern without / matches a
+    # file name anywhere (secret_files.py).
+    secret_files: list[str] = Field(default_factory=list)
+    # Keys from .env that agents still get, besides SSSF_*, OBS_*, CLAUDE_CODE_OAUTH_TOKEN
+    # and, for pi, its provider keys (utils.agent_env).
+    agent_env: list[str] = Field(default_factory=list)
 
 
 def load(root: Path) -> RepoSettings:

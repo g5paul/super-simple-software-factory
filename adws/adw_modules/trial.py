@@ -126,7 +126,7 @@ def pi_problems(made_by: str) -> list[str]:
         # rather than billing a key, so the oauth and SSSF_PI_AUTH checks below
         # have nothing to add here.
         try:
-            agent_pi.check_stored_login()
+            agent_pi.check_stored_login(env=agent_pi.child_env())
             agent_pi.container_token(socket_path)
         except sandbox.SandboxFailed as error:
             return [str(error)]

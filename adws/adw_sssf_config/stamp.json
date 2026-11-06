@@ -1,7 +1,7 @@
 {
   "files": {
     ".env.sample": {
-      "sha256": "567c29441ae1b6be48fcb1b79b523533d309994b75769930594421a2f04412f4",
+      "sha256": "379fc6b4d61f60a78c5383196213209fd592b9a96eead8a124ce2200cbba0f23",
       "source": "env.sample"
     },
     ".githooks/pre-push": {
@@ -117,15 +117,15 @@
       "source": "adws/adw_modules/account.py"
     },
     "adws/adw_modules/agent_cc.py": {
-      "sha256": "13a87951407af5f4a2ebf6b17358d682a9a5d7f1c0b5ca07028d7f9de8db634f",
+      "sha256": "d99a9f1c3bfb4282987863d298f6cca8492f83adf95a273bc89fb255c6258c84",
       "source": "adws/adw_modules/agent_cc.py"
     },
     "adws/adw_modules/agent_pi.py": {
-      "sha256": "ffe90a9af9da3417c02935b8a600ed41c270ea3d6734dac469b2ea16c169e80e",
+      "sha256": "f14325b798e7d642215f246cfccaa53dfe094114c10a79d50f0740b859f46147",
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
-      "sha256": "4c074741b7ec886b8538f5aa022c9bf0c72dd17ab54fa075ce7862dc9aab3ad5",
+      "sha256": "b701ecd74e3899eba3f9fc3c48f1da9884234a4fea525428c97adfd144afc1ce",
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/budget.py": {
@@ -141,7 +141,7 @@
       "source": "adws/adw_modules/console.py"
     },
     "adws/adw_modules/data_types.py": {
-      "sha256": "57bfc6693fff3f940adc1a324ca61368f31e3083f3402bff7d041ba02153e993",
+      "sha256": "c3bbd61bd60f07afa05e3f28524cdfb1e40df28c527de3955c4f0f9fe6f17f01",
       "source": "adws/adw_modules/data_types.py"
     },
     "adws/adw_modules/gates.py": {
@@ -185,7 +185,7 @@
       "source": "adws/adw_modules/quality.py"
     },
     "adws/adw_modules/repo_settings.py": {
-      "sha256": "bb35ab65980de0ddfb70ebc9889b1f174ef956c023ae19cdb476b1cee3860cac",
+      "sha256": "bfc5dd0e544954f4740923bf71677d01ab72d480dd8f6e8530891db25e726e04",
       "source": "adws/adw_modules/repo_settings.py"
     },
     "adws/adw_modules/rules.py": {
@@ -216,6 +216,10 @@
       "sha256": "957755d7ac8308bc54286f0310b5bbc6ce86fdbca672dd80c947ea43bc9c91c0",
       "source": "adws/adw_modules/sandbox_vercel.py"
     },
+    "adws/adw_modules/secret_files.py": {
+      "sha256": "b55fe200bc158dba2c8898689b957a210cebfa5ad7c666f8fb16c335d0b36b61",
+      "source": "adws/adw_modules/secret_files.py"
+    },
     "adws/adw_modules/session.py": {
       "sha256": "917de6140b9ccc6f771c46604ae838083bbe769a6189e4e61303b447d4c31adc",
       "source": "adws/adw_modules/session.py"
@@ -229,11 +233,11 @@
       "source": "adws/adw_modules/sssf_obs_relay.cjs"
     },
     "adws/adw_modules/sssf_refuse.py": {
-      "sha256": "94983822da7f53c554e7ff81eb475a9d81e4b284656bc0bef44202a22ba1cb15",
+      "sha256": "dc172947d99354809884969d8f8653f1d16191fd0a6b7e694a5821af32b27e9a",
       "source": "adws/adw_modules/sssf_refuse.py"
     },
     "adws/adw_modules/sssf_rules.ts": {
-      "sha256": "f535adaf29d9df67792a831f041baf67a0af02969704f13c67c926bb85d2c68e",
+      "sha256": "94560b2843563c0abc0eaa5ada7d4e8ad82dcec5d3650b9cc852fbc0a7051e41",
       "source": "adws/adw_modules/sssf_rules.ts"
     },
     "adws/adw_modules/tickets.py": {
@@ -245,11 +249,11 @@
       "source": "adws/adw_modules/tracer.py"
     },
     "adws/adw_modules/trial.py": {
-      "sha256": "59ea2af8b12c2b4a461928413fbeb844151cda0f1887cec9f7f395cc86f0977e",
+      "sha256": "1cea222a652e14deb4ef90482112fd098e06f5dd4bb31b9f6f81b92c92d16f03",
       "source": "adws/adw_modules/trial.py"
     },
     "adws/adw_modules/utils.py": {
-      "sha256": "7713109d4a249bf0e0021249ab2c419378847a432c73a7cbdb08eff3753fc2dd",
+      "sha256": "f6c805b1429b7818018e878f740cee9c28bfbed401eab60a716223b5ab4cb61c",
       "source": "adws/adw_modules/utils.py"
     },
     "adws/adw_modules/worktree.py": {
@@ -293,7 +297,7 @@
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {
-      "sha256": "98c4ef83ac4fc906d108f8cfa897b81a4e7cc62162d7d4fcd23a96a7829966d9",
+      "sha256": "7ce7a8b6b374a7d9d8d3f6e98cf7bd6be0ca96855b42bae72e5fdc95942bac32",
       "source": "repo.yaml"
     },
     "adws/adw_sssf_config/sssf.config.yaml": {

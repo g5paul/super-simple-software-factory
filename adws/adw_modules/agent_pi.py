@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from . import obs_relay, rules, sandbox, silence
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
-from .utils import mark_agent, now_iso, operator_env
+from .utils import agent_env, mark_agent, now_iso, operator_env
 
 PI_PATH = os.environ.get("PI_PATH", "pi")
 
@@ -311,11 +311,13 @@ def _utf8(value: str, name: str) -> str:
     return value
 
 
-def _node_homedir() -> str:
+def _node_homedir(env=None) -> str:
     """Node's os.homedir() (libuv uv_os_homedir): $HOME whenever HOME is set,
-    even empty, else the passwd entry for the effective uid."""
-    if "HOME" in os.environ:
-        return _utf8(os.environ["HOME"], "HOME")
+    even empty, else the passwd entry for the effective uid. env is the
+    environment pi runs with; os.environ when None."""
+    env = os.environ if env is None else env
+    if "HOME" in env:
+        return _utf8(env["HOME"], "HOME")
     try:
         return _utf8(pwd.getpwuid(os.geteuid()).pw_dir, "the passwd home dir")
     except KeyError:
@@ -324,7 +326,7 @@ def _node_homedir() -> str:
             "tell where pi reads its logins; set HOME.") from None
 
 
-def _pi_auth_json() -> Path:
+def _pi_auth_json(env=None) -> Path:
     """Where pi reads its stored logins, worked out as pi 1.4.0 does:
     join(getAgentDir(), "auth.json"). getAgentDir (dist/config.js) is
     normalizePath(PI_CODING_AGENT_DIR) when that's set and non-empty
@@ -333,15 +335,17 @@ def _pi_auth_json() -> Path:
     is not expanded), else join(homedir(), ".pi", "agent"). Any value SSSF
     can't match exactly raises SandboxFailed. A relative result is returned as
     is, for check_stored_login to stop on. No other override: the check must
-    read what pi reads."""
-    agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
+    read what pi reads. env is the environment pi runs with (the agent's, which
+    may lack a key .env named); os.environ when None."""
+    env = os.environ if env is None else env
+    agent_dir = env.get("PI_CODING_AGENT_DIR")
     if not agent_dir:
-        return Path(_node_join(_node_homedir(), ".pi", "agent", "auth.json"))
+        return Path(_node_join(_node_homedir(env), ".pi", "agent", "auth.json"))
     agent_dir = _utf8(agent_dir, "PI_CODING_AGENT_DIR")
     if agent_dir == "~":
-        return Path(_node_join(_node_homedir(), "auth.json"))
+        return Path(_node_join(_node_homedir(env), "auth.json"))
     if agent_dir.startswith("~/"):
-        return Path(_node_join(_node_homedir(), agent_dir[2:], "auth.json"))
+        return Path(_node_join(_node_homedir(env), agent_dir[2:], "auth.json"))
     if agent_dir.startswith("file://"):
         url = _PLAIN_FILE_URL.fullmatch(agent_dir)
         if not url:
@@ -465,7 +469,7 @@ def _models_json_credential(data: dict) -> Optional[str]:
     return None
 
 
-def check_stored_login(path: Path = None) -> None:
+def check_stored_login(path: Path = None, env=None) -> None:
     """Stop if the container's pi agent dir gives openai a credential of its own:
     pi would use it instead of the host's sign-in. Checks auth.json for an
     openai login, then models.json in the same dir for what pi 1.4.0 accepts as
@@ -473,11 +477,12 @@ def check_stored_login(path: Path = None) -> None:
     headers at the provider, model and modelOverrides level. Reads key names
     only; never a value.
 
-    The dir is pi's own, worked out by _pi_auth_json.
+    The dir is pi's own, worked out by _pi_auth_json from env, the environment
+    pi will run with (os.environ when None).
 
     Never blocks, for either file (see _load_agent_json). A missing file passes;
     an unreadable one stops the run."""
-    path = path or PI_AUTH_JSON or _pi_auth_json()
+    path = path or PI_AUTH_JSON or _pi_auth_json(env)
     if not path.is_absolute():
         raise sandbox.SandboxFailed(
             f"PI_CODING_AGENT_DIR puts pi's auth.json at {path}, a relative path, so SSSF "
@@ -544,7 +549,7 @@ def _in_container(env: dict[str, str], tree) -> dict[str, str]:
     socket_path = os.environ.get(CONTAINER_SOCKET_VAR)
     if tree is not sandbox.LOCAL or not socket_path:
         return env
-    check_stored_login()
+    check_stored_login(env=env)
     env["OPENAI_API_KEY"] = container_token(socket_path)
     return env
 
@@ -581,22 +586,47 @@ def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict],
     target = _obs_target(env, token, extensions)
     env["OBS_DISABLE"] = "true"             # the only value the obs extension reads as off
     env["SSSF_PI_TOKEN"] = vm_token()
-    if refuse_rules:
-        tree.install(REFUSE_EXTENSION)
+    tree.install(REFUSE_EXTENSION)          # every pi agent loads it
     if target is not None:
         tree.relay_obs(target)              # for the next start only
     return env
 
 
-def _with_refusals(env: dict[str, str], refuse_rules: list[dict]) -> dict[str, str]:
+def _with_refusals(env: dict[str, str], refuse_rules: list[dict],
+                   secret_files=()) -> dict[str, str]:
     if refuse_rules:
         env["SSSF_REFUSE_RULES"] = json.dumps(refuse_rules)
+    if secret_files:
+        env["SSSF_SECRET_FILES"] = json.dumps(list(secret_files))
     return env
 
 
-def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
-    """The operator's environment, less the subscription providers' keys when
-    SSSF_PI_AUTH=subscription. Read per call, since .env loads after import.
+# The provider key names pi reads, from pi-ai's env-api-keys.js. AWS credentials
+# are left out on purpose: they are general cloud credentials, so a repo that
+# uses Bedrock lists them under `agent_env`. A key pi learns later goes in
+# `agent_env` until this list catches up.
+PI_PROVIDER_KEYS = (
+    "AI_GATEWAY_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_OAUTH_TOKEN", "ANT_LING_API_KEY", "AZURE_OPENAI_API_KEY",
+    "BASETEN_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY",
+    "COPILOT_GITHUB_TOKEN", "DEEPSEEK_API_KEY", "FIREWORKS_API_KEY",
+    "GEMINI_API_KEY", "GOOGLE_CLOUD_API_KEY", "GROQ_API_KEY", "HF_TOKEN",
+    "KIMI_API_KEY", "META_API_KEY", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY",
+    "MISTRAL_API_KEY", "MOONSHOT_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY",
+    "OPENCODE_API_KEY", "OPENROUTER_API_KEY", "QWEN_TOKEN_PLAN_API_KEY",
+    "QWEN_TOKEN_PLAN_CN_API_KEY", "RADIUS_API_KEY", "TOGETHER_API_KEY",
+    "TYPESAFE_API_KEY", "XAI_API_KEY", "XIAOMI_API_KEY",
+    "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+    "XIAOMI_TOKEN_PLAN_SGP_API_KEY", "ZAI_API_KEY", "ZAI_CODING_CN_API_KEY",
+)
+
+
+def child_env(agent_name: str = "", adw_id: str = "", allowed=()) -> dict[str, str]:
+    """The operator's environment, less the keys .env set (utils.agent_env)
+    except SSSF_*, OBS_*, CLAUDE_CODE_OAUTH_TOKEN, pi's provider keys
+    (PI_PROVIDER_KEYS) and `allowed` (repo.yaml agent_env), and less the
+    subscription providers' keys when SSSF_PI_AUTH=subscription. Read per call,
+    since .env loads after import.
 
     The rest is for the pi-observability extension. OBS_NAME is the roster
     name, so the dashboard shows "builder" rather than an unnamed session.
@@ -605,7 +635,8 @@ def child_env(agent_name: str = "", adw_id: str = "") -> dict[str, str]:
     "sssf" and "adw-<adw_id>", added to the operator's tags, not replacing them.
     SSSF_ADW_ID and SSSF_AGENT mark the agent for the repo's scripts (mark_agent).
     """
-    env = mark_agent(operator_env(), agent_name, adw_id)
+    env = mark_agent(agent_env(operator_env(), (*PI_PROVIDER_KEYS, *allowed)),
+                     agent_name, adw_id)
     if agent_name:
         env["OBS_NAME"] = agent_name
     if adw_id:
@@ -642,10 +673,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         cmd += ["--tools", ",".join(request.tools)]
     for extension in request.extensions:
         cmd += ["-e", extension]
-    if request.refuse_rules:
-        # Last, so it checks a command after every other extension has had its
-        # turn (design decision 24). A test pins this.
-        cmd += ["-e", str(REFUSE_EXTENSION)]
+    # Last, so it checks a command after every other extension has had its
+    # turn (design decision 24). A test pins this.
+    cmd += ["-e", str(REFUSE_EXTENSION)]
     cmd.append(request.prompt)
 
     raw_path = Path(request.raw_output_path)
@@ -664,7 +694,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     # the last turn says whether the call failed.
     last_stop, last_error = None, ""
     tree = sandbox.current()
-    env = _with_refusals(child_env(request.agent_name, request.adw_id), request.refuse_rules)
+    env = _with_refusals(
+        child_env(request.agent_name, request.adw_id, request.agent_env),
+        request.refuse_rules, request.secret_files)
     env = _in_vm(env, tree, request.refuse_rules, request.extensions)
     env = _in_container(env, tree)
     process = tree.start(cmd, cwd=request.cwd, env=env)

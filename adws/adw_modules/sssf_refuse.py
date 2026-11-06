@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SSSF's refuse mode for a repo's agent_rules, on Claude Code agents.
+"""SSSF's refuse mode for a repo's agent_rules, and SSSF's built-in secret-file rule, on Claude Code agents.
 
 Claude Code agents run with --safe-mode, which ignores every hook, so the pi
 extension's way (sssf_rules.ts) isn't open to them. Safe mode does keep the

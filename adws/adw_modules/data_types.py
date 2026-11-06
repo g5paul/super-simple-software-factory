@@ -478,6 +478,8 @@ class AgentRequest(BaseModel):
     stop_on_usage_credits: bool = True  # claude: kill the call once the plan moves onto credits
     refuse_rules: list[dict] = Field(default_factory=list)  # sssf_rules.ts (pi), sssf_refuse.py (claude)
     max_silence_seconds: Optional[float] = None  # stop the agent after this long with no output (silence.py)
+    secret_files: list[str] = Field(default_factory=list)  # absolute paths, found at agent start
+    agent_env: list[str] = Field(default_factory=list)     # repo.yaml agent_env: .env keys agents keep
 
 
 class UsageBreakdown(BaseModel):

@@ -101,6 +101,19 @@ Then `--take` or `--keep` each flagged file, as in the install cookbook, and
 fast-forward `main`. The stamp records no `skill` commit here, for the same
 reason. `git log -1 -- adws/` names the update that stamped `adws/`.
 
+## The dashboard
+
+Run the all-projects dashboard from here:
+
+```bash
+just obs-all
+```
+
+It reads the machine-wide registry, so it shows every project from any
+repo. From here it's built from the skill's source, always the newest, and
+nothing runs in a project's repo: it only reads their traces. `just obs` in
+a project still shows that one repo.
+
 ## Check the projects' updates
 
 After the hub asks each project session to update, check their reports with

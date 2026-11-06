@@ -54,7 +54,7 @@ A run opens as swim lanes, one per owner, on a time axis. Click a phase to see i
 - each VM run's VM, and what runs have used of each provider's allowance;
 - spend for the last 24 hours against `max_daily_cost`, and live spend against `max_live_cost`.
 
-`just obs-all` reads `~/.config/sssf/projects.json`, where `install.py` records each repo. It opens on a list of projects, running ones first. To drop a repo, delete its entry from the file. For a repo on another machine, run `just obs` there and reach it through a tunnel: `ssh -L 4600:localhost:4600 host`.
+`just obs-all` reads `~/.config/sssf/projects.json`, where `install.py` records each repo. It opens on a list of projects, running ones first. It shows the same from any repo, since the registry is machine-wide, but each repo builds the dashboard from its own copy of the skill: run it from the repo with the newest one, such as the repo you update the others from. To drop a repo, delete its entry from the file. For a repo on another machine, run `just obs` there and reach it through a tunnel: `ssh -L 4600:localhost:4600 host`.
 
 ### The account panel
 

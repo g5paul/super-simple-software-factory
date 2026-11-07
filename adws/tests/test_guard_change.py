@@ -387,3 +387,13 @@ def test_the_new_prompts_render_with_every_placeholder_filled(role):
         text = prompts.render(folder / name, variables)
         assert "{{" not in text
     assert "the brief" in prompts.render(folder / "user.md", variables)
+
+
+def test_the_guard_list_is_the_one_claude_md_names():
+    hub = Path(__file__).resolve().parents[2]
+    for name in gc.GUARD_MODULES:
+        assert (hub / gc.GUARD_DIR / name).is_file(), name
+    guard_line = next(line for line in (hub / "CLAUDE.md").read_text().splitlines()
+                      if line.startswith("Guard code is what limits an agent"))
+    named = [n for n in guard_line.split("`") if n.endswith((".py", ".ts"))]
+    assert sorted(named) == sorted(gc.GUARD_MODULES)

@@ -4,7 +4,7 @@ This repo is the source of the `sssf` skill (`.claude/skills/sssf/`). `sssf-upda
 
 ## Guard changes
 
-Guard code is what limits an agent: `rules.py`, `sssf_refuse.py`, `sssf_rules.ts`, `permissions.py`, `agent_cc.py`, `agent_pi.py` and `gates.py` under `.claude/skills/sssf/templates/adws/adw_modules/`, and the agent prompts' lines on what an agent may do.
+Guard code is what limits an agent: `rules.py`, `sssf_refuse.py`, `sssf_rules.ts`, `secret_files.py`, `permissions.py`, `agent_cc.py`, `agent_pi.py` and `gates.py` under `.claude/skills/sssf/templates/adws/adw_modules/`, and the agent prompts' lines on what an agent may do.
 
 Make a guard change through the guard-change chain, `adws/adw_guard_change.py`, on a branch cut from `main`. `docs/sssf.md` says how to run it. The chain judges each finding against the spec's baseline and bar, and stops at three rounds or at a fix that adds a mechanism. A run that passes leaves its commits on the branch, and merging is the engineer's call. A run that stops goes to the engineer with `guard_report.md`. Say what the report found in the merge commit or the report to the engineer.
 

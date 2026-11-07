@@ -169,7 +169,7 @@
       "source": "adws/adw_modules/plan_checks.py"
     },
     "adws/adw_modules/prices.json": {
-      "sha256": "cc1b1c8c89af634daf0d896e5b53d8cd4d27de1cb879eba9be0c1c702403a369",
+      "sha256": "89f0a95e349a278a0e0b149a57f1394edd42edfcfe6eeb4636950c3df9ba1412",
       "source": "adws/adw_modules/prices.json"
     },
     "adws/adw_modules/prices.py": {

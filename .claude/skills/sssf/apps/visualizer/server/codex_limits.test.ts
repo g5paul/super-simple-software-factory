@@ -127,3 +127,26 @@ describe("ChatGPT's closed weeks", () => {
       last_at: "2026-11-11T23:00:00.000Z" }]);
   });
 });
+
+describe("the timer", () => {
+  test("reads at once and on each tick, with no page asking", async () => {
+    let reads = 0;
+    const limits = new CodexLimits(true, async () => { reads++; return parse(ACCOUNT, LIMITS, Date.now()); }, join(dir, "h.jsonl"));
+    let ticks = 0;
+    const current = limits.current.bind(limits);
+    limits.current = (now?: number) => { ticks++; return current(now); };
+    const timer = limits.start(5)!;
+    await Bun.sleep(30);
+    clearInterval(timer);
+    expect(reads).toBe(1);            // the later ticks fall inside the 5-minute spacing
+    expect(ticks).toBeGreaterThan(2);
+    expect(limits.latest?.seven_day).not.toBeNull();
+  });
+
+  test("doesn't start when SSSF_CODEX_LIMITS is off", () => {
+    let reads = 0;
+    const limits = new CodexLimits(false, async () => { reads++; return parse(ACCOUNT, LIMITS, NOW); }, join(dir, "h.jsonl"));
+    expect(limits.start(5)).toBeNull();
+    expect(reads).toBe(0);
+  });
+});

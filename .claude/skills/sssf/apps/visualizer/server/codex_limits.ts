@@ -175,6 +175,16 @@ export class CodexLimits {
     }
   }
 
+  /**
+   * Read on a timer, so the history and the weekly archive fill whether or not a
+   * browser has the projects page open. Off unless SSSF_CODEX_LIMITS=1.
+   */
+  start(every = EVERY_MS): ReturnType<typeof setInterval> | null {
+    if (!this.enabled) return null;
+    this.current();
+    return setInterval(() => this.current(), every);
+  }
+
   /** The newest reading, starting a fresh one in the background when it's due. */
   current(now = Date.now()): ChatGptLimits | null {
     if (this.enabled && !this.busy && now - this.last >= EVERY_MS) {

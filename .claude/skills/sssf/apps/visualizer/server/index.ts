@@ -71,6 +71,7 @@ if (ALL) {
 const account = new Account();
 const piSessions = new PiSessions();
 const codexLimits = new CodexLimits();
+codexLimits.start();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {

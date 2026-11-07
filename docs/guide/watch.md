@@ -70,7 +70,7 @@ Above the projects, `just obs-all` shows the accounts every repo shares:
 
 #### ChatGPT's windows through Codex CLI
 
-pi can't read the ChatGPT plan's windows, but Codex CLI can. Its `/status` asks Codex's app server for `account/rateLimits/read`. Set `SSSF_CODEX_LIMITS=1` in the hub's `.env`, and `just obs-all` makes the same request every 5 minutes while it runs. It starts `codex -s read-only -a never app-server` and sends `initialize`, `account/read` and `account/rateLimits/read`, nothing else. Codex holds the sign-in, and SSSF never reads the token. It needs Codex CLI installed and signed in to the ChatGPT account pi uses.
+pi can't read the ChatGPT plan's windows, but Codex CLI can. Its `/status` asks Codex's app server for `account/rateLimits/read`. Set `SSSF_CODEX_LIMITS=1` in the hub's `.env`, and `just obs-all` makes the same request every 5 minutes while it runs, with or without a browser on the page. It starts `codex -s read-only -a never app-server` and sends `initialize`, the `initialized` notice, `account/read` and `account/rateLimits/read`, nothing else. Codex holds the sign-in, and SSSF never reads the token. It needs Codex CLI installed and signed in to the ChatGPT account pi uses.
 
 pi's ChatGPT use draws on the same windows. A test run on 2026-11-07 started the 5-hour window and moved it from 0% to 1%, with nothing else using ChatGPT.
 

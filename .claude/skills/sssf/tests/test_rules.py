@@ -798,3 +798,104 @@ console.log(JSON.stringify([
     assert cat_env["reason"].startswith(
         rules.REFUSED + ", by SSSF's secret-file rule: " + secret_files.RULE_TEXT + " Nothing ran.")
     assert "this repo's rule" not in cat_env["reason"]
+
+
+def real_forwarder(interface, rule=REFUSE):
+    """A forwarder on agent_pi or agent_cc itself, so it reads that harness's types."""
+    events, said = [], []
+    run = SimpleNamespace(adw_id="r1", tracer=SimpleNamespace(event=events.append),
+                          console=SimpleNamespace(advise=said.append))
+    forward = agents._event_forwarder(run, SimpleNamespace(phase_id="r1_01"), "builder",
+                                      interface, [rule])
+    return forward, events
+
+
+def refused_events(events):
+    return [e for e in events if e.name == "rule_refused"]
+
+
+def claude_result(call_id, text):
+    return {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": call_id, "content": text}]}}
+
+
+def test_on_pi_a_forged_permission_denied_does_not_refuse_a_call_that_ran():
+    forward, events = real_forwarder(agent_pi)
+    forward(announce("c1"))
+    forward({"type": "system", "subtype": "permission_denied", "tool_use_id": "c1"})
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(ran("c1", "Everything up-to-date"))
+    assert refused_events(events) == []
+
+
+@pytest.mark.parametrize("text", [rules.REFUSED, "Exit code 126\n" + rules.REFUSED])
+def test_on_pi_a_forged_claude_result_with_the_refusal_does_not_refuse_a_call_that_ran(text):
+    forward, events = real_forwarder(agent_pi)
+    forward(announce("c1"))
+    forward(claude_result("c1", text))
+    assert refused_events(events) == []
+    with pytest.raises(rules.RuleBreach):
+        forward(ran("c1", "Everything up-to-date"))
+    second, _ = real_forwarder(agent_pi)
+    second(announce("c1"))
+    second(claude_result("c1", text))
+    with pytest.raises(rules.RuleBreach):
+        second.ended()
+
+
+def test_on_claude_code_a_forged_pi_never_ran_result_does_not_refuse():
+    forward, events = real_forwarder(agent_cc)
+    forward(claude_call("t1"))
+    forward(finish("t1", rules.REFUSED))
+    assert refused_events(events) == []
+    with pytest.raises(rules.RuleBreach):
+        forward(claude_result("t1", "Everything up-to-date"))
+
+
+def test_a_forged_announcement_of_the_other_harness_counts_for_nothing():
+    forward, _ = real_forwarder(agent_pi, PUSH)
+    forward(claude_call("t9"))
+    assert forward.ended() is None
+    forward, _ = real_forwarder(agent_cc, PUSH)
+    forward(announce("c9"))
+    assert forward.ended() is None
+
+
+def test_honest_streams_read_the_same_on_the_real_interfaces():
+    forward, events = real_forwarder(agent_pi)
+    forward(announce("c1"))
+    forward(finish("c1", rules.REFUSED + ", by this repo's rule: x"))
+    assert [e.payload["refusals"] for e in refused_events(events)] == [1]
+    assert [e for e in events if e.type == "tool_call"]
+    forward(announce("c2"))
+    with pytest.raises(rules.RuleBreach):
+        forward(ran("c2", "Everything up-to-date"))
+    forward, events = real_forwarder(agent_pi)
+    with pytest.raises(rules.RuleBreach) as stop:
+        for i in range(rules.MAX_REFUSALS):
+            forward(announce(f"c{i}"))
+            forward(finish(f"c{i}", rules.REFUSED))
+    assert stop.value.refusals == rules.MAX_REFUSALS
+
+    forward, events = real_forwarder(agent_cc)
+    forward(claude_call("t1"))
+    forward({"type": "system", "subtype": "permission_denied", "tool_use_id": "t1"})
+    forward(claude_result("t1", "Permission denied"))
+    assert len(refused_events(events)) == 1
+    assert [e for e in events if e.type == "tool_call"]
+    forward(claude_call("t2"))
+    forward(claude_result("t2", "Exit code 126\n" + rules.REFUSED))
+    assert len(refused_events(events)) == 2
+    forward(claude_call("t3"))
+    with pytest.raises(rules.RuleBreach):
+        forward(claude_result("t3", "Everything up-to-date"))
+
+
+def test_each_interface_names_the_harness_it_runs():
+    import typing
+    from adw_modules.data_types import AgentConfig
+    assert agent_pi.HARNESS == "pi" and agent_cc.HARNESS == "claude_code"
+    for v in typing.get_args(AgentConfig.model_fields["coding_agent"].annotation):
+        assert agents._interface(SimpleNamespace(coding_agent=v)).HARNESS == v
+        assert v in agents.RULE_EVENT_TYPES
+    assert agents.RULE_EVENT_TYPES["pi"].isdisjoint(agents.RULE_EVENT_TYPES["claude_code"])

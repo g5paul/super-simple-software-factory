@@ -26,7 +26,7 @@ Claude Code applies those denies to any tool that reads the file, Bash
 included, so it may deny `cat .env` before sssf_refuse.py runs. Each denial
 arrives as a `permission_denied` system event, whose `message` is a string. The
 forwarder (agents._event_forwarder, via rules.denied) counts that call as
-refused, by its `tool_use_id`, and the trace records it from its `tool_result`.
+refused, on a Claude Code stream only, by its `tool_use_id`, and the trace records it from its `tool_result`.
 Keys .env names don't reach the agent (utils.agent_env). Auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """
@@ -45,6 +45,7 @@ from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import agent_env, mark_agent, operator_env
 
 CLAUDE_PATH = os.environ.get("CLAUDE_CODE_PATH", "claude")
+HARNESS = "claude_code"   # agents._event_forwarder reads only Claude Code's event types for rules
 # subscription: strip API keys from the child so the operator's login pays,
 # and refuse a run that would bill the API anyway. api_key: pass them through.
 AUTH = os.environ.get("SSSF_CLAUDE_AUTH", "subscription")

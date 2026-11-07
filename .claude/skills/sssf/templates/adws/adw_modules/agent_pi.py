@@ -26,6 +26,7 @@ from .data_types import AgentRequest, AgentResult
 from .utils import agent_env, mark_agent, now_iso, operator_env
 
 PI_PATH = os.environ.get("PI_PATH", "pi")
+HARNESS = "pi"   # agents._event_forwarder reads only pi's event types for rules
 
 # OpenAI's code for a ChatGPT plan that is out of usage, on the token-sharing
 # route pi's `openai` sign-in uses (HTTP 429). Pi never retries it. The route

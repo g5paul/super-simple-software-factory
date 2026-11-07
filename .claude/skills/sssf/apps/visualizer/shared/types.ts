@@ -596,6 +596,18 @@ export interface SpendWindow {
   use: WindowUse | null;
 }
 
+/** A 7-day window, closed or the one running, with its peak and what it spent at list price. */
+export interface WeekWindow {
+  start: string;
+  end: string;
+  /** The highest utilization read in the window, 0 to 1; the current one for the running window. */
+  peak: number;
+  /** List-price spend in the window; null when the calls SSSF reads start after it did. */
+  usd: number | null;
+  /** The window still running. */
+  current: boolean;
+}
+
 /** A window's use in percent per hour, from the readings kept over time. */
 export interface WindowUse {
   /** Its utilization over the hours since it started; null in its first 15 minutes. */
@@ -672,6 +684,8 @@ export interface AccountUsage {
   transcripts: string;
   /** SSSF's own Pi agents, from every registered project's trace db; span is ?pi_span=. */
   pi: { window: PiSpendWindow; week: PiSpendWindow; span: SpanSpend; limit_hit?: PiLimitHit | null; plan?: ChatGptPlan };
+  /** Claude's 7-day windows, newest first: the running one, then each one archived. */
+  weeks: WeekWindow[];
 }
 
 /** The ChatGPT plan's windows as Codex CLI read them; opt-in with SSSF_CODEX_LIMITS=1. */
@@ -700,6 +714,8 @@ export interface PlanWindowSpend {
 export interface ChatGptPlan {
   /** False unless the dashboard started with SSSF_CODEX_LIMITS=1. */
   enabled: boolean;
+  /** The plan's weekly windows, newest first, as for Claude. */
+  weeks: WeekWindow[];
   limits: ChatGptLimits | null;
   five_hour: PlanWindowSpend | null;
   seven_day: PlanWindowSpend | null;

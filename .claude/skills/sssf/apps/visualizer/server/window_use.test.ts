@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readHistory, windowUse, type Reading } from "./window_use.ts";
+import { closedWeek, readArchive, readHistory, windowUse, type Reading } from "./window_use.ts";
 
 const H = 3_600_000;
 const RESET = Date.parse("2026-11-13T05:00:00Z");
@@ -55,6 +55,36 @@ describe("a window's use in percent per hour", () => {
       writeFileSync(path, `{"at":"2026-11-07T02:00:00Z","w":{"seven_day":[0.03,${RESET / 1000}]}}\n{"at":`);
       expect(readHistory(path)).toEqual([{ at: Date.parse("2026-11-07T02:00:00Z"), w: { seven_day: [0.03, RESET / 1000] } }]);
       expect(readHistory(join(dir, "none"))).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a closed week", () => {
+  const read = (at: number, u: number, reset: number): Reading => ({ at, w: { seven_day: [u, reset / 1000] } });
+
+  test("is the last window's peak, once a reading names a new reset after it ended", () => {
+    const history = [read(START + H, 0.1, RESET), read(RESET - H, 0.4, RESET)];
+    const got = closedWeek(history, read(RESET + H, 0.01, RESET + 7 * 24 * H), "chatgpt");
+    expect(got).toEqual({ provider: "chatgpt", kind: "seven_day", start: START / 1000, end: RESET / 1000, peak: 0.4,
+      last_at: new Date(RESET - H).toISOString() });
+  });
+
+  test("isn't a window whose reset moved before it ended, or the same window", () => {
+    const history = [read(START + H, 0.0, RESET)];
+    expect(closedWeek(history, read(START + 2 * H, 0.0, RESET + H), "chatgpt")).toBeNull();
+    expect(closedWeek(history, read(START + 2 * H, 0.1, RESET), "chatgpt")).toBeNull();
+    expect(closedWeek([], read(START, 0.1, RESET), "chatgpt")).toBeNull();
+  });
+
+  test("reads the archive newest first, skipping a broken line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "archive-"));
+    try {
+      const path = join(dir, "a.jsonl");
+      writeFileSync(path, `${JSON.stringify({ provider: "claude", kind: "seven_day", start: 1, end: 2, peak: 0.3, last_at: "x" })}\n`
+        + `${JSON.stringify({ provider: "chatgpt", kind: "seven_day", start: 3, end: 4, peak: 0.1, last_at: "y" })}\n{"prov`);
+      expect(readArchive(path).map((a) => a.end)).toEqual([4, 2]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -16,7 +16,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ChatGptLimits, LimitWindow } from "../shared/types.ts";
 import { registryPath } from "./projects.ts";
-import { readHistory, type Reading } from "./window_use.ts";
+import { closedWeek, readArchive, readHistory, type Reading } from "./window_use.ts";
 
 export const ENABLED = process.env.SSSF_CODEX_LIMITS === "1";
 const EVERY_MS = 5 * 60_000;
@@ -128,7 +128,10 @@ export class CodexLimits {
   private busy = false;
   private last = 0;
 
+  readonly archiveFile: string;
+
   constructor(readonly enabled: boolean = ENABLED, private readonly read = readOnce, readonly historyFile: string = historyPath()) {
+    this.archiveFile = join(dirname(historyFile), "window_archive.jsonl");
     this.history = enabled ? readHistory(historyFile) : [];
     if (this.history.length > 3000) {
       // Past this, keep 8 days: rewrite the file once at start.
@@ -155,6 +158,14 @@ export class CodexLimits {
     const same = prev && JSON.stringify({ ...prev.w, five_hour: prev.w.five_hour?.[0] })
       === JSON.stringify({ ...w, five_hour: w.five_hour?.[0] });
     if (same && at - prev.at < HISTORY_EVERY_MS) return;
+    const closed = closedWeek(this.history, { at, w }, "chatgpt");
+    if (closed && !readArchive(this.archiveFile).some((a) => a.provider === "chatgpt" && a.end === closed.end)) {
+      try {
+        appendFileSync(this.archiveFile, `${JSON.stringify(closed)}\n`);
+      } catch {
+        // the week is lost from the archive, nothing else
+      }
+    }
     this.history = [...this.history.filter((h) => h.at >= at - HISTORY_KEEP_MS), { at, w }];
     try {
       mkdirSync(dirname(this.historyFile), { recursive: true });

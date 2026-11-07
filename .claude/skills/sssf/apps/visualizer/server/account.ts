@@ -19,10 +19,10 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AccountUsage, ChatGptLimits, ChatGptPlan, LimitSample, LimitWindow, PiSpendWindow, PlanWindowSpend, SpanSpend, SpendPeak, SpendRow, SpendWindow } from "../shared/types.ts";
+import type { AccountUsage, ChatGptLimits, ChatGptPlan, LimitSample, LimitWindow, PiSpendWindow, PlanWindowSpend, SpanSpend, WeekWindow, SpendPeak, SpendRow, SpendWindow } from "../shared/types.ts";
 import { SPAN_MS, type Span } from "../shared/spans.ts";
 import { registryPath } from "./projects.ts";
-import { PACE_MS, readHistory, windowUse, type Reading } from "./window_use.ts";
+import { PACE_MS, readArchive, readHistory, windowUse, type Archived, type Reading } from "./window_use.ts";
 import prices from "../../../templates/adws/adw_modules/prices.json";
 
 /**
@@ -295,8 +295,21 @@ export function piSpanSpend(calls: PiCallAt[], now: number, span: Span): SpanSpe
 }
 
 /** ChatGPT spend inside each window Codex read: pi's openai calls, SSSF's and interactive. */
+/** Archived weeks newest first, behind the running one; spend is null where the calls don't reach back. */
+function weeks(archive: Archived[], provider: Archived["provider"], current: WeekWindow | null,
+  spent: (from: number, to: number) => number, coveredFrom: number): WeekWindow[] {
+  const closed = archive.filter((a) => a.provider === provider).map((a): WeekWindow => ({
+    start: new Date(a.start * 1000).toISOString(),
+    end: new Date(a.end * 1000).toISOString(),
+    peak: a.peak,
+    usd: a.start * 1000 >= coveredFrom ? spent(a.start * 1000, a.end * 1000) : null,
+    current: false,
+  }));
+  return [...(current ? [current] : []), ...closed];
+}
+
 export function planSpend(calls: PiCallAt[], limits: ChatGptLimits | null, now: number, enabled: boolean,
-  history: Reading[] = []): ChatGptPlan {
+  history: Reading[] = [], archive: Archived[] = [], coveredFrom = now): ChatGptPlan {
   const chatgpt = calls.filter((c) => c.model.startsWith("openai/"));
   const one = (live: LimitWindow | null, kind: "five_hour" | "seven_day"): PlanWindowSpend | null => {
     if (!live) return null;
@@ -320,7 +333,15 @@ export function planSpend(calls: PiCallAt[], limits: ChatGptLimits | null, now: 
       use,
     };
   };
-  return { enabled, limits, five_hour: one(limits?.five_hour ?? null, "five_hour"), seven_day: one(limits?.seven_day ?? null, "seven_day") };
+  const seven = one(limits?.seven_day ?? null, "seven_day");
+  const live = limits?.seven_day;
+  const current = live && seven
+    ? { start: new Date(Date.parse(live.resets_at) - WINDOW_MS.seven_day).toISOString(), end: live.resets_at,
+      peak: live.utilization, usd: seven.est_usd, current: true }
+    : null;
+  const spent = (from: number, to: number) => chatgpt.filter((c) => c.at >= from && c.at <= to).reduce((sum, c) => sum + c.cost, 0);
+  return { enabled, limits, five_hour: one(limits?.five_hour ?? null, "five_hour"), seven_day: seven,
+    weeks: weeks(archive, "chatgpt", current, spent, coveredFrom) };
 }
 
 export class Account {
@@ -367,7 +388,7 @@ export class Account {
 
   summary(now: number, sssfSessions: Set<string>, projectOf: (cwd: string) => string, piCalls: PiCallAt[] = [],
     spanArg: Span = "5h", piSpan: Span = "5h",
-    plan: { enabled: boolean; limits: ChatGptLimits | null; history?: Reading[] } = { enabled: false, limits: null }): AccountUsage {
+    plan: { enabled: boolean; limits: ChatGptLimits | null; history?: Reading[]; piFrom?: number } = { enabled: false, limits: null }): AccountUsage {
     const calls = this.refresh(now);
     const sample = readSample(this.ratesFile, now);
     // Many calls share a cwd, and placing one in its project resolves paths.
@@ -411,6 +432,13 @@ export class Account {
         input_tokens: c.input + c.cacheRead + c.cacheWrite5m + c.cacheWrite1h, output_tokens: c.output };
     });
     const earliest = calls.length ? calls.reduce((min, c) => Math.min(min, c.at), Infinity) : null;
+    const archive = readArchive(join(dirname(this.ratesFile), "window_archive.jsonl"));
+    const week = span(sample?.seven_day ?? null, "seven_day");
+    const claudeSpent = (from: number, to: number) => calls.filter((c) => c.at >= from && c.at <= to)
+      .reduce((sum, c) => sum + (estimateCost(c.model, c) ?? 0), 0);
+    const claudeWeeks = weeks(archive, "claude",
+      sample?.seven_day ? { start: week.start, end: week.end, peak: sample.seven_day.utilization, usd: week.est_usd, current: true } : null,
+      claudeSpent, earliest ?? Infinity);
     // The 5h span is the account's live 5-hour window when there is one, as the meters are.
     const live5h = spanArg === "5h" ? sample?.five_hour ?? null : null;
     const spanEnd = live5h ? Math.min(Date.parse(live5h.resets_at), now) : now;
@@ -418,11 +446,12 @@ export class Account {
     return {
       sample,
       window: span(sample?.five_hour ?? null, "five_hour"),
-      week: span(sample?.seven_day ?? null, "seven_day"),
+      week,
       span: spanSpend(items, spanArg, spanStart, spanEnd, live5h ? "five_hour" : "rolling", earliest),
       transcripts: this.transcripts,
       pi: { ...piSpend(piCalls, now), span: piSpanSpend(piCalls, now, piSpan),
-        plan: planSpend(piCalls, plan.limits, now, plan.enabled, plan.history) },
+        plan: planSpend(piCalls, plan.limits, now, plan.enabled, plan.history, archive, plan.piFrom ?? now - SPAN_MS["7d"]) },
+      weeks: claudeWeeks,
     };
   }
 }

@@ -9,6 +9,7 @@ export type {
   ChatGptPlan,
   ChatGptLimits,
   WindowUse,
+  WeekWindow,
   RunCaps,
   DaySpend,
   LiveSpend,

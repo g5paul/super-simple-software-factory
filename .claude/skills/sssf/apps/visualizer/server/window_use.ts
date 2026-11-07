@@ -43,6 +43,43 @@ export function readHistory(path: string): Reading[] {
   return out.toSorted((a, b) => a.at - b.at);
 }
 
+/** A closed 7-day window, as account.py and codex_limits.ts archive it; times in epoch seconds. */
+export interface Archived { provider: "claude" | "chatgpt"; kind: "seven_day"; start: number; end: number; peak: number; last_at: string }
+
+export function readArchive(path: string): Archived[] {
+  if (!existsSync(path)) return [];
+  const out: Archived[] = [];
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      const d = JSON.parse(line);
+      if ((d.provider === "claude" || d.provider === "chatgpt") && typeof d.end === "number" && typeof d.peak === "number") out.push(d);
+    } catch {
+      // a half-written line
+    }
+  }
+  return out.toSorted((a, b) => b.end - a.end);
+}
+
+/** The window that closed when a reading names a new 7-day reset, from the readings of it; null when none closed. */
+export function closedWeek(history: Reading[], next: Reading, provider: Archived["provider"]): Archived | null {
+  const now = next.w.seven_day;
+  const prev = history.findLast((r) => r.w.seven_day);
+  if (!now || !prev) return null;
+  const end = prev.w.seven_day![1];
+  // An unused window can report a reset that moves; only one that has ended is closed.
+  if (Math.abs(end - now[1]) < 300 || end * 1000 > next.at || end > now[1]) return null;
+  const same = history.filter((r) => r.w.seven_day && Math.abs(r.w.seven_day[1] - end) < 300);
+  return { provider, kind: "seven_day", start: end - 7 * 86_400, end, peak: Math.max(...same.map((r) => r.w.seven_day![0])),
+    last_at: new Date(same.at(-1)!.at).toISOString() };
+}
+
 /** The window's use since it started, and over the recent span, as of the reading at `readAt`. */
 export function windowUse(history: Reading[], kind: Kind, live: LimitWindow, readAt: number): WindowUse {
   const end = Date.parse(live.resets_at);

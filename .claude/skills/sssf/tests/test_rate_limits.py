@@ -234,3 +234,40 @@ def test_a_broken_history_never_stops_a_reading(private_registry):
     account.history_path().mkdir()
     account.record(info(0.10), at="2026-10-29T16:00:00Z")
     assert account.latest()["recorded_at"] == "2026-10-29T16:00:00Z"
+
+
+def week(utilization: float, reset: int) -> dict:
+    return {"unifiedWindows": {"seven_day": {"utilization": utilization, "resetsAt": reset}}}
+
+
+def archive() -> list[dict]:
+    target = account.archive_path()
+    return [json.loads(line) for line in target.read_text().splitlines()] if target.exists() else []
+
+
+def test_a_new_week_archives_the_one_that_closed(private_registry):
+    end = 1_794_574_800                     # 2026-11-13T13:00:00Z
+    account.record(week(0.10, end), at="2026-11-10T12:00:00Z")
+    account.record(week(0.37, end), at="2026-11-13T11:00:00Z")
+    account.record(week(0.01, end + 7 * 86400), at="2026-11-13T14:00:00Z")
+    account.record(week(0.02, end + 7 * 86400), at="2026-11-13T15:00:00Z")
+    assert archive() == [{"provider": "claude", "kind": "seven_day", "start": end - 7 * 86400, "end": end,
+                          "peak": 0.37, "last_at": "2026-11-13T11:00:00Z"}]
+    assert account.archive_path() == private_registry.parent / "window_archive.jsonl"
+
+
+def test_a_window_still_running_is_not_archived(private_registry):
+    end = 1_794_574_800
+    account.record(week(0.10, end), at="2026-11-10T12:00:00Z")
+    # A reset that moved forward before the old one ended isn't a new week.
+    account.record(week(0.10, end + 3600), at="2026-11-10T13:00:00Z")
+    assert archive() == []
+
+
+def test_a_week_is_archived_once(private_registry):
+    end = 1_794_574_800
+    account.record(week(0.20, end), at="2026-11-13T11:00:00Z")
+    account.record(week(0.01, end + 7 * 86400), at="2026-11-13T14:00:00Z")
+    account.history_path().write_text(json.dumps({"at": "2026-11-13T11:00:00Z", "w": {"seven_day": [0.2, end]}}) + "\n")
+    account.record(week(0.01, end + 7 * 86400), at="2026-11-13T16:00:00Z")
+    assert len(archive()) == 1

@@ -106,3 +106,24 @@ describe("the Codex readings kept over time", () => {
     expect(new CodexLimits(true, async () => good, file).history).toHaveLength(1);
   });
 });
+
+describe("ChatGPT's closed weeks", () => {
+  test("a reading with a new weekly reset archives the week that ended, once", async () => {
+    const file = join(dir, "codex_history.jsonl");
+    const end = S("2026-11-12T00:00:00Z");
+    const before = { ...parse(ACCOUNT, LIMITS, NOW), recorded_at: "2026-11-11T23:00:00.000Z",
+      seven_day: { utilization: 0.31, resets_at: "2026-11-12T00:00:00.000Z" }, five_hour: null };
+    const after = (at: string) => ({ ...before, recorded_at: at,
+      seven_day: { utilization: 0.01, resets_at: "2026-11-19T00:00:00.000Z" } });
+    const reads = [before, after("2026-11-12T01:00:00.000Z"), after("2026-11-12T02:30:00.000Z")];
+    let n = 0;
+    const limits = new CodexLimits(true, async () => reads[n++]!, file);
+    for (const t of [NOW, NOW + 6 * 60_000, NOW + 12 * 60_000]) {
+      limits.current(t);
+      await Bun.sleep(0);
+    }
+    const archived = readFileSync(join(dir, "window_archive.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(archived).toEqual([{ provider: "chatgpt", kind: "seven_day", start: end - 7 * 86_400, end, peak: 0.31,
+      last_at: "2026-11-11T23:00:00.000Z" }]);
+  });
+});

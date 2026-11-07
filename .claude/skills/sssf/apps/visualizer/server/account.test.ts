@@ -288,7 +288,7 @@ describe("the ChatGPT plan's windows", () => {
 
   test("has no window spend without a reading", () => {
     const plan = planSpend([pi("2026-10-29T15:30:00Z", 2)], null, NOW, false);
-    expect(plan).toEqual({ enabled: false, limits: null, five_hour: null, seven_day: null });
+    expect(plan).toEqual({ enabled: false, limits: null, five_hour: null, seven_day: null, weeks: [] });
   });
 
   test("splits SSSF's pi calls from interactive ones", () => {
@@ -320,5 +320,35 @@ describe("a window's use in percent", () => {
   test("has none without a reading", () => {
     const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
     expect(usage.window.use).toBeNull();
+  });
+});
+
+describe("the 7-day windows week by week", () => {
+  test("Claude's running window comes first, then each archived one with its spend", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "0", at: "2026-10-15T10:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "1", at: "2026-10-20T10:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-28T10:00:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.2);
+    // Archived weeks: Oct 18 to 25, and Oct 11 to 18, which starts before the first transcript on the 15th.
+    const oldEnd = RESET_7D - 7 * 86_400;
+    writeFileSync(join(dir, "window_archive.jsonl"),
+      `${JSON.stringify({ provider: "claude", kind: "seven_day", start: oldEnd - 7 * 86_400, end: oldEnd, peak: 0.3, last_at: "x" })}\n`
+      + `${JSON.stringify({ provider: "claude", kind: "seven_day", start: oldEnd - 14 * 86_400, end: oldEnd - 7 * 86_400, peak: 0.5, last_at: "y" })}\n`);
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    const one = estimateCost("claude-opus-5-5", { input: 10, output: 100, cacheRead: 1000, cacheWrite5m: 0, cacheWrite1h: 0 })!;
+    expect(usage.weeks.map((w) => [w.current, w.peak])).toEqual([[true, 0.05], [false, 0.3], [false, 0.5]]);
+    expect(usage.weeks[0]!.usd).toBeCloseTo(one);           // the call on the 28th
+    expect(usage.weeks[1]!.usd).toBeCloseTo(one);           // the call on the 20th
+    expect(usage.weeks[2]!.usd).toBeNull();                 // starts before the first transcript
+  });
+
+  test("ChatGPT's come from pi's openai calls, null before the calls reach", () => {
+    const pi = (at: string, cost: number) => ({ at: Date.parse(at), project: "p", model: "openai/gpt-6.1-sol", cost, input_tokens: 1, output_tokens: 1 });
+    const end = Date.parse("2026-10-27T00:00:00Z") / 1000;
+    const archive = [{ provider: "chatgpt" as const, kind: "seven_day" as const, start: end - 7 * 86_400, end, peak: 0.2, last_at: "x" },
+      { provider: "chatgpt" as const, kind: "seven_day" as const, start: end - 14 * 86_400, end: end - 7 * 86_400, peak: 0.1, last_at: "y" }];
+    const plan = planSpend([pi("2026-10-25T00:00:00Z", 4)], null, NOW, true, [], archive, Date.parse("2026-10-15T00:00:00Z"));
+    expect(plan.weeks.map((w) => [w.peak, w.usd])).toEqual([[0.2, 4], [0.1, null]]);
   });
 });

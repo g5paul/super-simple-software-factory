@@ -17,6 +17,7 @@ import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
 import { Account, type PiCallAt } from "./account.ts";
 import { CodexLimits } from "./codex_limits.ts";
+import { readArchive } from "./window_use.ts";
 import { PiSessions } from "./pi_sessions.ts";
 import { SPAN_MS, isSpan, type Span } from "../shared/spans.ts";
 import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
@@ -227,7 +228,10 @@ const server = listen((port) => Bun.serve({
       const query = new URL(req.url).searchParams;
       const span = isSpan(query.get("span")) ? query.get("span") as Span : "5h";
       const piSpan = isSpan(query.get("pi_span")) ? query.get("pi_span") as Span : "5h";
-      const since = new Date(now - Math.max(SPAN_MS["7d"], SPAN_MS[piSpan])).toISOString();
+      // Far enough back for the ChatGPT weeks archived, up to 120 days.
+      const oldestWeek = Math.min(...readArchive(codexLimits.archiveFile).filter((a) => a.provider === "chatgpt").map((a) => a.start * 1000));
+      const piFrom = Math.max(now - 120 * 86_400_000, Math.min(now - Math.max(SPAN_MS["7d"], SPAN_MS[piSpan]), oldestWeek));
+      const since = new Date(piFrom).toISOString();
       const sessions = new Set<string>();
       const piCalls: PiCallAt[] = [];
       let limitHit: PiLimitHit | null = null;
@@ -242,7 +246,7 @@ const server = listen((port) => Bun.serve({
       // pi used outside SSSF; SSSF's own pi agents keep their sessions inside each run.
       for (const c of piSessions.calls(Date.parse(since), (cwd) => projects.projectOf(cwd))) piCalls.push(c);
       const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls, span, piSpan,
-        { enabled: codexLimits.enabled, limits: codexLimits.current(now), history: codexLimits.history });
+        { enabled: codexLimits.enabled, limits: codexLimits.current(now), history: codexLimits.history, piFrom });
       usage.pi.limit_hit = limitHit;
       return json(usage satisfies AccountUsage);
     }),

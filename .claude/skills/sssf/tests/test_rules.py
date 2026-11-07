@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 SKILL = Path(__file__).resolve().parent.parent
@@ -194,9 +195,23 @@ def announce(call_id, command="git push"):
             "args": {"command": command}}
 
 
+def starter_push_rule():
+    """The push rule from the starter's commented agent_rules in templates/repo.yaml, as shipped."""
+    lines = (SKILL / "templates" / "repo.yaml").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("#     - rule: Never run `git push`"))
+    body = "\n".join(line[2:] for line in lines[start:start + 3])
+    return rules.AgentRule(**{**yaml.safe_load(body)[0], "on_match": "refuse"})
+
+
 def finish(call_id, text):
+    """pi's result for a call it never ran: isError, no durationMs (a `tool_call` block)."""
     return {"type": "tool_execution_end", "toolCallId": call_id, "toolName": "bash",
             "result": {"content": [{"type": "text", "text": text}]}, "isError": True}
+
+
+def ran(call_id, text, is_error=False):
+    """pi's result for a call it ran: the same event with durationMs."""
+    return {**finish(call_id, text), "isError": is_error, "durationMs": 12}
 
 
 def test_a_refused_command_is_logged_and_the_run_goes_on():
@@ -425,6 +440,149 @@ def test_a_claude_code_refusal_is_read_past_its_exit_line():
     forward(claude_call)
     with pytest.raises(rules.RuleBreach, match="may have run"):
         forward(result(f"Exit code 1\n{rules.REFUSED}"))
+
+
+def claude_call(call_id="t1", command="git push"):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": call_id, "name": "Bash", "input": {"command": command}}]}}
+
+
+def test_blocked_reads_only_pis_never_ran_results():
+    assert rules.blocked(finish("c1", "x")) == ["c1"]
+    assert rules.blocked(ran("c1", "x", is_error=True)) == []
+    assert rules.blocked({**finish("c1", "x"), "isError": False}) == []
+
+    def message(**extra):
+        return {"type": "message_end", "message": {"role": "toolResult", "toolCallId": "c2",
+                                                   "content": [], **extra}}
+    assert rules.blocked(message(isError=True)) == ["c2"]
+    assert rules.blocked(message(isError=True, durationMs=3)) == []
+    assert rules.blocked(message(isError=False)) == []
+    claude_result = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+         "content": f"Exit code 126\n{rules.REFUSED}"}]}}
+    assert rules.blocked(claude_result) == []
+    assert not rules.pi_result(claude_result)
+    assert rules.blocked({"type": "system", "subtype": "permission_denied", "tool_use_id": "c1"}) == []
+
+
+@pytest.mark.parametrize("text", [rules.REFUSED, "Exit code 126\n" + rules.REFUSED])
+@pytest.mark.parametrize("is_error", [True, False])
+def test_a_pi_command_that_ran_and_printed_the_refusal_stops_the_run(text, is_error):
+    forward, events, _ = forwarder(rule=starter_push_rule())
+    forward(announce("c1"))
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(ran("c1", text, is_error))
+    assert events == []
+    forward, events, _ = forwarder(rule=starter_push_rule())
+    forward(announce("c2"))
+    message = {"type": "message_end", "message": {"role": "toolResult", "toolCallId": "c2",
+                                                  "isError": is_error, "durationMs": 12,
+                                                  "content": [{"type": "text", "text": text}]}}
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward(message)
+    assert events == []
+
+
+def test_a_pi_built_in_match_that_ran_and_printed_the_refusal_stops_the_run():
+    builtin = secret_files.shell_rule(["/r/.env"])
+    forward, events, _ = forwarder(enforced=[builtin], uncounted=(builtin,))
+    forward(announce("c1", "cat .env"))
+    with pytest.raises(rules.RuleBreach) as stop:
+        forward(ran("c1", rules.REFUSED))
+    assert stop.value.builtin is True
+    assert events == []
+
+
+def test_a_pending_refuse_call_at_exit_is_a_breach():
+    forward, events, _ = forwarder(rule=starter_push_rule())
+    forward(announce("c1"))
+    with pytest.raises(rules.RuleBreach, match="may have run") as stop:
+        forward.ended()
+    assert stop.value.refusals == 0
+    marker = object()
+    with pytest.raises(rules.RuleBreach) as stop:
+        forward.ended(partial=marker)
+    assert stop.value.partial is marker
+    # A refused call that finished leaves nothing pending.
+    forward, _, _ = forwarder(rule=starter_push_rule())
+    forward(announce("c1"))
+    forward(finish("c1", f"{rules.REFUSED}, by this repo's rule: x"))
+    assert forward.ended() is None
+    # Same on Claude Code.
+    forward, _, _ = forwarder(rule=starter_push_rule())
+    forward(claude_call())
+    with pytest.raises(rules.RuleBreach, match="may have run"):
+        forward.ended()
+
+
+@pytest.mark.parametrize("stop", ["error", "aborted"])
+def test_a_call_in_a_turn_pi_ended_in_error_is_not_held_for_exit(stop):
+    builtin = secret_files.shell_rule(["/r/.env"])
+    forward, events, _ = forwarder(enforced=[builtin], uncounted=(builtin,))
+    command = "cat > notes.md <<'EOF'\nKeys live in .env; never print them.\nEOF"
+    forward({"type": "message_end", "message": {
+        "role": "assistant", "stopReason": stop, "content": [
+            {"type": "toolCall", "id": "e1", "name": "bash", "arguments": {"command": command}}]}})
+    assert forward.ended() is None
+    # The same message in a normal turn is still held.
+    forward, _, _ = forwarder(enforced=[builtin], uncounted=(builtin,))
+    forward({"type": "message_end", "message": {
+        "role": "assistant", "stopReason": "toolUse", "content": [
+            {"type": "toolCall", "id": "e1", "name": "bash", "arguments": {"command": command}}]}})
+    with pytest.raises(rules.RuleBreach):
+        forward.ended()
+
+
+@pytest.mark.parametrize("dies", ["raises", "returns"])
+def test_execute_stops_when_the_agent_dies_with_a_refuse_call_pending(tmp_path, monkeypatch, dies):
+    from adw_modules.data_types import AgentResult
+    from test_secret_files import make_repo, shipped_config
+    cfg = shipped_config()
+    root = make_repo(tmp_path / "repo")
+    monkeypatch.chdir(root)
+    data = yaml.safe_load((SKILL / "templates" / "repo.yaml").read_text()) or {}
+    data["agent_rules"] = [{"rule": "Never run `git push`.", "forbid": [r"\bgit\s+push\b"],
+                            "on_match": "refuse"}]
+    path = root / repo_settings.PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data))
+    for a in cfg.agents:
+        for ref in (a.prompt_engineering.system, a.prompt_engineering.user):
+            f = root / ref
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.touch()
+
+    def run_fake(request, **kw):
+        kw["on_event"](announce("c1", "git push"))
+        if dies == "raises":
+            raise RuntimeError("pi exited 137: ")
+        return AgentResult(text="done", cost=0.1)
+
+    fake = SimpleNamespace(run=run_fake, ToolCallTracker=agent_pi.ToolCallTracker)
+    monkeypatch.setattr(agents, "_interface", lambda agent: fake)
+    for name in ("check_run", "check_live", "check_daily", "check_machine"):
+        monkeypatch.setattr(agents.budget, name, lambda *a, **k: None)
+    monkeypatch.setattr(agents.permissions, "guard_git_dir", lambda run: None)
+    monkeypatch.setattr(agents.permissions, "restore_git_dir", lambda *a, **k: [])
+    monkeypatch.setattr(agents.agent_cc, "check_login", lambda *a, **k: None)
+    monkeypatch.setattr(agents.account, "check", lambda *a, **k: None)
+    seen = []
+    run = SimpleNamespace(
+        cfg=cfg, adw_id="r1", session_dir=tmp_path / "s", repo_root=root,
+        context_handoff_dir=tmp_path / "h", agent_map={},
+        tracer=SimpleNamespace(event=seen.append, process_start=lambda *a: None,
+                               process_end=lambda *a: None, gate_row=lambda *a: None,
+                               agent_session_row=lambda *a, **k: None),
+        console=SimpleNamespace(agent_started=lambda *a: None, advise=lambda *a: None,
+                                note=lambda *a: None, envelope_summary=lambda *a: None),
+        add_usage=lambda *a: None, save_agent_map=lambda *a: None)
+    phase = SimpleNamespace(phase_id="r1_01", params=SimpleNamespace(owner="builder", name="build"))
+    call = SimpleNamespace(prompt="x", previous=None, session=None)
+    with pytest.raises(rules.RuleBreach):
+        agents.execute(run, phase, call)
+    [breach] = [e for e in seen if e.name == "rule_breach"]
+    assert breach.type == "error" and breach.payload["command"] == "git push"
 
 
 # ── sssf_refuse.py, the Claude Code shell prefix ─────────────────────────────

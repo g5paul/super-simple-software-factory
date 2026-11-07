@@ -9,9 +9,10 @@
  * patterns are Python regexes read here as JavaScript ones. rules.py rejects,
  * when the settings load, the constructs references/config.md lists; a
  * pattern that still doesn't compile here is skipped. SSSF's stream check,
- * which reads the patterns as Python, then stops the run on that command,
- * unless its output is taken for a refusal: rules.refused counts any result
- * that starts with REFUSED as one. references/config.md also lists the
+ * which reads the patterns as Python, then stops the run on that command: it
+ * counts a pi refusal only when pi's result shows it never ran the call (no
+ * `durationMs`), so a command that slips past here and prints the refusal
+ * still stops the run. references/config.md also lists the
  * differences no check catches. SSSF's built-in secret-file rule comes
  * marked `builtin`, and its refusal names it as SSSF's.
  */
@@ -20,7 +21,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-// rules.REFUSED in Python: the stream check looks for it in a bash call's result.
+// rules.REFUSED in Python: the stream check reads it in a bash call's result, and counts it only when pi's result has no durationMs.
 // File-tool refusals don't use it; the stream check never reads those.
 const REFUSED = "SSSF refused this command";
 const TAIL = "Nothing ran. Don't try it another way: do the task without it, or say in your "

@@ -1,7 +1,7 @@
 {
   "files": {
     ".env.sample": {
-      "sha256": "379fc6b4d61f60a78c5383196213209fd592b9a96eead8a124ce2200cbba0f23",
+      "sha256": "cb558310803619c4a236b8e1f45839e558569141fb44c2fa131b856879358cc9",
       "source": "env.sample"
     },
     ".githooks/pre-push": {

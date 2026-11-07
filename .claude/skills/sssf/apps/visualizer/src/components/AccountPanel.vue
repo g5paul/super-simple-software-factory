@@ -263,7 +263,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
         </div>
         <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
       </div>
-      <WeekTable v-if="usage && usage.weeks.some((w) => !w.current)" :weeks="usage.weeks" label="The 7-day window" />
+      <WeekTable v-if="usage?.weeks.length" :weeks="usage.weeks" label="The 7-day window" />
 
       <div v-if="usage" class="spend">
         <div class="spend-bar">
@@ -334,7 +334,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
         <div v-if="usage.pi.plan?.limits?.reached" class="err">The ChatGPT plan is out: {{ usage.pi.plan.limits.reached.replaceAll('_', ' ') }}</div>
       </div>
       <div v-if="usage.pi.plan?.limits?.error" class="faint small">{{ usage.pi.plan.limits.error }}</div>
-      <WeekTable v-if="usage.pi.plan?.weeks.some((w) => !w.current)" :weeks="usage.pi.plan.weeks" label="ChatGPT's weekly window" />
+      <WeekTable v-if="usage.pi.plan?.weeks.length" :weeks="usage.pi.plan.weeks" label="ChatGPT's weekly window" />
 
       <div v-if="usage.pi.limit_hit" class="pi-limit">
         The ChatGPT plan was out of usage at {{ fmtDate(usage.pi.limit_hit.at) }} (run

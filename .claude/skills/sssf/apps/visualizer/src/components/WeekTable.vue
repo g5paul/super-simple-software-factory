@@ -7,6 +7,8 @@ const FULL_FROM = 0.1
 
 defineProps<{ weeks: WeekWindow[], label: string }>()
 
+const when = (iso: string) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+
 const day = (iso: string) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
 
 function perPoint(w: WeekWindow): string {
@@ -35,6 +37,9 @@ function full(w: WeekWindow): string {
         </tr>
       </tbody>
     </table>
+    <div v-if="weeks.every((w) => w.current)" class="faint small">
+      The first closed week lands here when this one resets, {{ when(weeks[0]!.end) }}.
+    </div>
     <div v-if="weeks.some((w) => w.usd === null)" class="faint small">
       "gone": the transcripts or traces SSSF reads start after that window did, so its spend isn't known.
     </div>

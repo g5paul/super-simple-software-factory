@@ -220,3 +220,20 @@ describe("spend over a chosen span", () => {
     expect(spend.peaks[0].est_usd).toBe(2);
   });
 });
+
+describe("a live window's spend at the limit reading", () => {
+  test("counts the window's calls up to the reading, for the 100% figure", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-29T15:55:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.2);
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    const one = estimateCost("claude-opus-5-5", { input: 10, output: 100, cacheRead: 1000, cacheWrite5m: 0, cacheWrite1h: 0 })!;
+    expect(usage.week.at_sample_usd).toBeCloseTo(one);
+    expect(usage.week.est_usd).toBeCloseTo(2 * one);
+  });
+
+  test("a rolling window has none", () => {
+    expect(new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf).week.at_sample_usd).toBeNull();
+  });
+});

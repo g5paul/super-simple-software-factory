@@ -346,6 +346,10 @@ export class Account {
         by_project: rows(inside, (c) => place(c.cwd)),
         by_model: rows(inside, (c) => c.model),
         unpriced_models: unpriced.toSorted(),
+        at_sample_usd: live && sample
+          ? inside.filter((c) => c.at <= Date.parse(sample.recorded_at))
+            .reduce((sum, c) => sum + (estimateCost(c.model, c) ?? 0), 0)
+          : null,
       };
     };
     const items: Spent[] = calls.map((c) => {

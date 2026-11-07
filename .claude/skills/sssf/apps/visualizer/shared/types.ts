@@ -572,6 +572,8 @@ export interface SpendWindow {
   by_project: SpendRow[];
   by_model: SpendRow[];
   unpriced_models: string[];
+  /** A live window only: its spend up to the limit reading, what the reading's utilization measured. */
+  at_sample_usd: number | null;
 }
 
 /** One of the busiest 5-hour stretches in a span: what a 5-hour limit would have seen. */

@@ -105,15 +105,16 @@ function coverage(s: SpanSpend): string {
   if (!s.data_from) return ''
   const from = Date.parse(s.data_from)
   const days = Math.max(1, Math.round((Date.parse(s.end) - from) / 86_400_000))
-  const start = `Claude Code's transcripts start ${new Date(s.data_from).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+  const start = `Claude Code's transcripts start ${day(s.data_from)}`
   return SPAN_MS[s.span] >= 86_400_000
     ? `Covers ${days} of ${Math.round(SPAN_MS[s.span] / 86_400_000)} days. ${start}.`
     : `${start}.`
 }
 
+const day = (iso: string) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
+const hm = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+
 function stretch(p: { start: string, end: string }): string {
-  const day = (iso: string) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
-  const hm = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
   const across = day(p.start) === day(p.end) ? '' : `${day(p.end)} `
   return `${day(p.start)} ${hm(p.start)} to ${across}${hm(p.end)}`
 }
@@ -122,10 +123,24 @@ const windows = computed(() => {
   const s = usage.value?.sample
   // Plans below Ultra have a 5-hour window; with no sample yet, show both.
   return [
-    ...(s && !s.has_five_hour ? [] : [{ label: '5-hour', w: s?.five_hour ?? null }]),
-    { label: '7-day', w: s?.seven_day ?? null },
+    ...(s && !s.has_five_hour ? [] : [{ label: '5-hour', w: s?.five_hour ?? null, spend: usage.value?.window ?? null }]),
+    { label: '7-day', w: s?.seven_day ?? null, spend: usage.value?.week ?? null },
   ]
 })
+
+function shortWhen(iso: string): string {
+  return `${day(iso)} ${hm(iso)}`
+}
+
+// Below 10% the reading's rounding swamps the figure: 3% could be 2.5% or 3.5%.
+const FULL_FROM = 0.1
+
+/** What 100% of a window is worth at list price: the spend the reading measured, over its utilization. */
+function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null } | null): string {
+  if (!w || !spend?.at_sample_usd) return ''
+  if (w.utilization < FULL_FROM) return `100% figure shows from ${FULL_FROM * 100}% used`
+  return `100% ≈ ${fmtCost(spend.at_sample_usd / w.utilization)} at list price, from ${fmtCost(spend.at_sample_usd)} at ${Math.round(w.utilization * 100)}%`
+}
 </script>
 
 <template>
@@ -151,6 +166,7 @@ const windows = computed(() => {
           <div class="faint small">
             {{ m.w ? `resets ${fmtDate(m.w.resets_at)}` : 'no live reading: the last one has reset' }}
           </div>
+          <div v-if="fullWindow(m.w, m.spend)" class="dim small">{{ fullWindow(m.w, m.spend) }}</div>
         </div>
         <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
       </div>
@@ -163,7 +179,7 @@ const windows = computed(() => {
               <b>{{ fmtCost(usage.span.est_usd) }}</b> est. over {{ usage.span.calls }} calls
             </span>
             <span>
-              {{ usage.week.basis === 'seven_day' ? 'This 7-day window' : 'Last 7 days' }}:
+              {{ usage.week.basis === 'seven_day' ? `This 7-day window, since ${shortWhen(usage.week.start)}` : 'Last 7 days' }}:
               <b>{{ fmtCost(usage.week.est_usd) }}</b> est.
             </span>
           </div>

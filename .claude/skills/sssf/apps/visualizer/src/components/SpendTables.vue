@@ -13,6 +13,24 @@ defineProps<{
 function share(row: SpendRow, total: number): string {
   return total > 0 ? `${Math.round((row.est_usd / total) * 100)}%` : ''
 }
+
+const SHOWN = 8
+
+// The top rows, and the rest folded into one, so every table adds up to the total.
+function shown(rows: SpendRow[]): SpendRow[] {
+  if (rows.length <= SHOWN) return rows
+  const rest = rows.slice(SHOWN - 1)
+  return [...rows.slice(0, SHOWN - 1), rest.reduce(
+    (sum, r) => ({ ...sum, calls: sum.calls + r.calls, est_usd: sum.est_usd + r.est_usd,
+      output_tokens: sum.output_tokens + r.output_tokens, input_tokens: sum.input_tokens + r.input_tokens }),
+    { key: `${rest.length} others`, calls: 0, est_usd: 0, output_tokens: 0, input_tokens: 0 },
+  )]
+}
+
+function sum(rows: SpendRow[]): SpendRow {
+  return rows.reduce((t, r) => ({ ...t, calls: t.calls + r.calls, est_usd: t.est_usd + r.est_usd,
+    output_tokens: t.output_tokens + r.output_tokens }), { key: 'total', calls: 0, est_usd: 0, output_tokens: 0, input_tokens: 0 })
+}
 </script>
 
 <template>
@@ -22,8 +40,8 @@ function share(row: SpendRow, total: number): string {
       <table v-for="t in tables" :key="t.name">
         <thead><tr><th>{{ t.name }}</th><th>calls</th><th>est.</th><th></th><th>out</th></tr></thead>
         <tbody>
-          <tr v-for="r in t.rows.slice(0, 8)" :key="r.key">
-            <td class="key" :title="r.key">{{ t.label ? t.label(r.key) : r.key }}</td>
+          <tr v-for="(r, i) in shown(t.rows)" :key="r.key" :class="{ others: t.rows.length > SHOWN && i === SHOWN - 1 }">
+            <td class="key" :title="r.key">{{ t.label && !(t.rows.length > SHOWN && i === SHOWN - 1) ? t.label(r.key) : r.key }}</td>
             <td>{{ r.calls }}</td>
             <td>{{ fmtCost(r.est_usd) }}</td>
             <td class="dim">{{ share(r, total) }}</td>
@@ -31,6 +49,15 @@ function share(row: SpendRow, total: number): string {
           </tr>
           <tr v-if="!t.rows.length"><td colspan="5" class="dim">{{ empty }}</td></tr>
         </tbody>
+        <tfoot v-if="t.rows.length > 1">
+          <tr>
+            <td class="key">total</td>
+            <td>{{ sum(t.rows).calls }}</td>
+            <td>{{ fmtCost(sum(t.rows).est_usd) }}</td>
+            <td></td>
+            <td class="dim">{{ fmtTokens(sum(t.rows).output_tokens) }}</td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   </div>
@@ -72,6 +99,13 @@ td {
   padding: 4px 8px;
   font-family: var(--mono);
   border-top: 1px solid var(--border-soft);
+}
+
+tr.others td { color: var(--dim); font-style: italic; }
+
+tfoot td {
+  border-top: 1px solid var(--border);
+  font-weight: 700;
 }
 
 td.key {

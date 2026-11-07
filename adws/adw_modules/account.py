@@ -17,7 +17,10 @@ and `record_windows` merges them in.
 
 Each kept reading also goes into `rate_limits_history.jsonl` beside it, when
 a window moved or the last line is an hour old, so the dashboard can tell how
-fast each window fills in percent per hour. It keeps about 8 days.
+fast each window fills in percent per hour. It keeps about 8 days. When a
+reading shows the 7-day window has reset, the window that closed goes into
+`window_archive.jsonl` for good: its start, end and peak, so the dashboard can
+set each week's spend against how full it got.
 """
 
 from __future__ import annotations
@@ -66,6 +69,46 @@ def history_path() -> Path:
     return path().with_name("rate_limits_history.jsonl")
 
 
+def archive_path() -> Path:
+    return path().with_name("window_archive.jsonl")
+
+
+def _archive_closed(lines: list[str], windows: dict, at: str) -> None:
+    """If this reading's 7-day window is a new one, archive the one before it,
+    from the history lines that read it. The old window must have ended: an
+    unused window can report a reset that moves, and that isn't a new week."""
+    new = windows.get("seven_day")
+    if not new or not isinstance(new[1], (int, float)):
+        return
+    seen = []
+    for raw in lines:
+        try:
+            line = json.loads(raw)
+            w = line["w"]["seven_day"]
+            seen.append((str(line["at"]), float(w[0]), int(w[1])))
+        except (ValueError, KeyError, TypeError, IndexError):
+            continue
+    if not seen:
+        return
+    end = seen[-1][2]
+    if abs(end - new[1]) < 300 or end > _epoch(at) or end > new[1]:
+        return
+    target = archive_path()
+    if target.exists():
+        for raw in target.read_text().splitlines():
+            try:
+                old = json.loads(raw)
+            except ValueError:
+                continue
+            if old.get("provider") == "claude" and old.get("end") == end:
+                return
+    same = [x for x in seen if abs(x[2] - end) < 300]
+    record = {"provider": "claude", "kind": "seven_day", "start": end - 7 * 86400, "end": end,
+              "peak": max(x[1] for x in same), "last_at": same[-1][0]}
+    with target.open("a") as f:
+        f.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+
 def _epoch(at: str) -> float:
     return datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
 
@@ -90,6 +133,7 @@ def _append_history(info: dict, at: str) -> None:
         last = None
     if last and last.get("w") == windows and _epoch(at) - _epoch(str(last.get("at"))) < HISTORY_EVERY_S:
         return
+    _archive_closed(lines, windows, at)
     line = json.dumps({"at": at, "w": windows}, separators=(",", ":"))
     if len(lines) >= HISTORY_PRUNE_AT:
         cutoff = _epoch(at) - HISTORY_KEEP_S

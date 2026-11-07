@@ -47,12 +47,12 @@ function full(w: WeekWindow): string {
 </template>
 
 <style scoped>
-.weeks { margin-top: 12px; }
-.caption { font-size: 13px; color: var(--faint); margin-bottom: 4px; }
+.weeks { margin-top: 0; }
+.caption { font-size: 14px; color: var(--dim); margin-bottom: 6px; }
 table { border-collapse: collapse; font-size: 14px; }
-th { text-align: left; font-weight: 500; color: var(--faint); padding: 2px 16px 2px 0; }
-td { padding: 2px 16px 2px 0; font-variant-numeric: tabular-nums; }
-tr.current td { color: var(--faint); }
-.small { font-size: 12px; }
+th { text-align: left; font-weight: 500; color: var(--dim); padding: 2px 16px 2px 0; }
+td { padding: 3px 16px 3px 0; color: var(--text); font-weight: 600; font-family: var(--mono); font-size: 13px; }
+td:first-child { font-family: var(--sans); font-size: 14px; }
+.small { font-size: 13px; margin-top: 4px; }
 .faint { color: var(--faint); }
 </style>

@@ -68,8 +68,8 @@ function shown(rows: SpendRow[]): SpendRow[] {
 
 <style scoped>
 .caption {
-  font-size: 13px;
-  color: var(--faint);
+  font-size: 14px;
+  color: var(--dim);
   margin-bottom: 6px;
 }
 

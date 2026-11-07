@@ -254,12 +254,12 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
             <span class="pct">{{ m.w ? `${Math.round(m.w.utilization * 100)}%` : '—' }}</span>
           </div>
           <div class="bar"><div class="fill" :style="{ width: `${(m.w?.utilization ?? 0) * 100}%` }" /><div class="stop" /></div>
-          <div class="faint small">
+          <div class="note">
             {{ m.w ? `resets ${fmtDate(m.w.resets_at)}` : 'no live reading: the last one has reset' }}
           </div>
-          <div v-if="fullWindow(m.w, m.spend)" class="dim small">{{ fullWindow(m.w, m.spend) }}</div>
-          <div v-if="rateLine(m.spend)" class="dim small">{{ rateLine(m.spend) }}</div>
-          <div v-if="projection(m.w, m.spend)" class="dim small">{{ projection(m.w, m.spend) }}</div>
+          <div v-if="fullWindow(m.w, m.spend)" :class="m.w && m.w.utilization >= FULL_FROM ? 'explain' : 'note'">{{ fullWindow(m.w, m.spend) }}</div>
+          <div v-if="rateLine(m.spend)" class="explain">{{ rateLine(m.spend) }}</div>
+          <div v-if="projection(m.w, m.spend)" class="explain">{{ projection(m.w, m.spend) }}</div>
         </div>
         <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
       </div>
@@ -298,7 +298,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
             { name: 'by model', rows: usage.span.by_model, label: modelName },
           ]"
         />
-        <div class="faint small">
+        <div class="note">
           Cost is estimated from transcript token counts at list price. The subscription pays it; it shows
           what fills the windows.
         </div>
@@ -326,14 +326,14 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
             <span class="pct">{{ `${Math.round(m.w.utilization * 100)}%` }}</span>
           </div>
           <div class="bar"><div class="fill" :style="{ width: `${m.w.utilization * 100}%` }" /></div>
-          <div class="faint small">{{ idle(m.w) ? 'not started: it starts with the next ChatGPT call' : `resets ${fmtDate(m.w.resets_at)}` }}</div>
-          <div v-if="fullWindow(m.w, m.spend)" class="dim small">{{ fullWindow(m.w, m.spend) }}</div>
-          <div v-if="rateLine(m.spend)" class="dim small">{{ rateLine(m.spend) }}</div>
-          <div v-if="projection(m.w, m.spend)" class="dim small">{{ projection(m.w, m.spend) }}</div>
+          <div class="note">{{ idle(m.w) ? 'not started: it starts with the next ChatGPT call' : `resets ${fmtDate(m.w.resets_at)}` }}</div>
+          <div v-if="fullWindow(m.w, m.spend)" :class="m.w && m.w.utilization >= FULL_FROM ? 'explain' : 'note'">{{ fullWindow(m.w, m.spend) }}</div>
+          <div v-if="rateLine(m.spend)" class="explain">{{ rateLine(m.spend) }}</div>
+          <div v-if="projection(m.w, m.spend)" class="explain">{{ projection(m.w, m.spend) }}</div>
         </div>
         <div v-if="usage.pi.plan?.limits?.reached" class="err">The ChatGPT plan is out: {{ usage.pi.plan.limits.reached.replaceAll('_', ' ') }}</div>
       </div>
-      <div v-if="usage.pi.plan?.limits?.error" class="faint small">{{ usage.pi.plan.limits.error }}</div>
+      <div v-if="usage.pi.plan?.limits?.error" class="note">{{ usage.pi.plan.limits.error }}</div>
       <WeekTable v-if="usage.pi.plan?.weeks.length" :weeks="usage.pi.plan.weeks" label="ChatGPT's weekly window" />
 
       <div v-if="usage.pi.limit_hit" class="pi-limit">
@@ -376,7 +376,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
             { name: 'by model', rows: usage.pi.span.by_model },
           ]"
         />
-        <div class="faint small">
+        <div class="note">
           Cost is pi's list-price figure, for SSSF's agents and the sessions pi saves when you use it
           yourself. A subscription sign-in, such as ChatGPT, pays it.
           <template v-if="planMeters.length">
@@ -463,15 +463,10 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
 .high .pct { color: var(--red); }
 
 /* The rule between the limits and the spend. */
-.meters + .spend {
-  padding-top: 12px;
-  border-top: 1px solid var(--border-soft);
-}
-
 .spend {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
 .spend-bar {
@@ -490,9 +485,34 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
 }
 
 .caption {
+  font-size: 14px;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+
+/* Three levels of text: figures in --text, lines that explain a figure, and notes read once. */
+.explain {
+  font-size: 14px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+
+.note {
   font-size: 13px;
   color: var(--faint);
-  margin-bottom: 4px;
+  line-height: 1.5;
+}
+
+/* A rule between each section of a card: the meters, the weeks, the spend. */
+.meters + .weeks,
+.meters + .spend,
+.meters + .spend-bar,
+.weeks + .spend,
+.weeks + .spend-bar,
+.weeks + .pi-limit {
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
 }
 
 .peaks ol {
@@ -524,7 +544,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
   color: var(--red);
 }
 
-.small { font-size: 12px; }
+.small { font-size: 13px; }
 
 @media (max-width: 520px) {
   .account { margin: 12px 16px 0; }

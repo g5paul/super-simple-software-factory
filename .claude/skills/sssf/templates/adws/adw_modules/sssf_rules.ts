@@ -6,9 +6,10 @@
  * agent_pi passes the rules marked `on_match: refuse` in SSSF_REFUSE_RULES.
  * A bash call whose command matches one of their `forbid` patterns is blocked
  * before it runs, and the agent reads the rule as the call's result. The
- * patterns are Python regexes read here as JavaScript ones; one that doesn't
- * compile is skipped, and SSSF's stream check, which reads them as Python,
- * stops the run if that command runs. SSSF's built-in secret-file rule comes
+ * patterns are Python regexes read here as JavaScript ones. rules.py rejects,
+ * when the settings load, the Python syntax known to read differently here, so
+ * every pattern should compile; one that still doesn't is skipped, and SSSF's
+ * stream check, which reads them as Python, stops the run if that command runs. SSSF's built-in secret-file rule comes
  * marked `builtin`, and its refusal names it as SSSF's.
  */
 import * as fs from "node:fs";

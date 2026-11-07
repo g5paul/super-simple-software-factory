@@ -62,9 +62,20 @@ Above the projects, `just obs-all` shows the accounts every repo shares:
 
 - **Claude's usage windows:** how full the 5-hour and 7-day windows are, and when each resets. Once a window is 10% used, its meter also says what 100% is worth at list price: the window's spend up to the reading, over the reading's utilization. Below 10%, the reading's rounding swamps the figure. Anthropic doesn't publish the limits in dollars, so treat it as an estimate. Claude Code reports them on every SSSF agent call. Your interactive sessions report them too once you set SSSF's statusline, below. Without it, the panel says how old the reading is, in amber once it's over an hour; `/usage` in any Claude Code session gives the current figure. Each meter also shows the recent pace, over the last hour for the 5-hour window and the last 24 hours for the 7-day one, or since the window started if that's sooner. Once the 100% figure shows, it says when the window fills at that pace, or how full it gets by its reset.
 - **Where Claude spend went**: SSSF agents against interactive sessions, by project and by model, at list price. A picker sets the span, from 5 hours to 90 days; the browser remembers it. Each table shows its top seven rows, folds the rest into one, and ends with a total that matches the span's. For a span of a day or more, the card also lists the three busiest 5-hour stretches, which is what a plan with a 5-hour limit would have seen. Claude Code deletes transcripts after `cleanupPeriodDays`, 30 by default, so a span longer than that needs the setting raised; the card says when the data starts inside the span.
-- **pi agents' spend**, by project and model, with its own span picker. The traces keep every pi call, so any span is complete. ChatGPT sends no usage windows, so there are none to show. When a run hits the ChatGPT plan's limit, the panel shows it for 5 hours. A span with no pi calls is one line.
+- **pi spend**: SSSF's pi agents against your own pi sessions, by project and model, with its own span picker. The traces keep every SSSF pi call, so any span is complete for them. Your own sessions come from the files pi saves in `~/.pi/agent/sessions`, or `$PI_CODING_AGENT_DIR/sessions`; SSSF's agents keep theirs inside each run, so nothing is counted twice. When a run hits the ChatGPT plan's limit, the panel shows it for 5 hours. A span with no pi calls is one line.
+- **The ChatGPT plan's windows**, when you opt in, below: the 5-hour and weekly meters, with the same 100% figure and pace as Claude's. Without the opt-in there are none, since pi's ChatGPT sign-in gets no usage windows back.
 - **Sandboxes**, once a repo has run in a VM: one line per provider, its bar the allowance nearest its limit, and the rest on hover. The bar always measures the allowance's own window, 30 days for Vercel and all time for E2B's credit. The card's picker sets the runs line under it.
 - **The machine's cap**, when `~/.config/sssf/limits.yaml` sets one.
+
+#### ChatGPT's windows through Codex CLI
+
+pi can't read the ChatGPT plan's windows, but Codex CLI can. Its `/status` asks Codex's app server for `account/rateLimits/read`. Set `SSSF_CODEX_LIMITS=1` in the hub's `.env`, and `just obs-all` makes the same request every 5 minutes while it runs. It starts `codex -s read-only -a never app-server` and sends `initialize`, `account/read` and `account/rateLimits/read`, nothing else. Codex holds the sign-in, and SSSF never reads the token. It needs Codex CLI installed and signed in to the ChatGPT account pi uses.
+
+Three caveats:
+
+- OpenAI doesn't document the method, so a Codex release could change it. A failed read keeps the last good meters and says why under them.
+- The windows count Codex's own use too, and the 100% figure counts only pi's `openai/` calls, so using Codex directly makes the figure read low.
+- Whether pi's sign-in draws on the same windows Codex reports is unverified. If a pi run spends and the meters don't move, they're Codex's alone.
 
 #### A fresh reading from your own sessions
 

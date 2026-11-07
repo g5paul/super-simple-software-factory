@@ -19,7 +19,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AccountUsage, LimitSample, LimitWindow, PiSpendWindow, SpanSpend, SpendPeak, SpendRow, SpendWindow } from "../shared/types.ts";
+import type { AccountUsage, ChatGptLimits, ChatGptPlan, LimitSample, LimitWindow, PiSpendWindow, PlanWindowSpend, SpanSpend, SpendPeak, SpendRow, SpendWindow } from "../shared/types.ts";
 import { SPAN_MS, type Span } from "../shared/spans.ts";
 import { registryPath } from "./projects.ts";
 import prices from "../../../templates/adws/adw_modules/prices.json";
@@ -243,6 +243,8 @@ function spanSpend(items: Spent[], span: Span, start: number, end: number, basis
 /** A Pi call placed in its project, with its time parsed. */
 export interface PiCallAt {
   at: number;
+  /** "interactive" for a session pi saved itself; absent, an SSSF agent's call. */
+  kind?: string;
   project: string;
   model: string;
   cost: number;
@@ -287,9 +289,30 @@ export function piSpend(calls: PiCallAt[], now: number): { window: PiSpendWindow
 
 /** Pi agents' spend over a span. The traces keep every call, so there is no data_from. */
 export function piSpanSpend(calls: PiCallAt[], now: number, span: Span): SpanSpend {
-  const items = calls.map((c) => ({ at: c.at, cost: c.cost, kind: "", project: c.project, model: c.model,
+  const items = calls.map((c) => ({ at: c.at, cost: c.cost, kind: c.kind ?? "sssf", project: c.project, model: c.model,
     priced: true, input_tokens: c.input_tokens, output_tokens: c.output_tokens }));
   return spanSpend(items, span, now - SPAN_MS[span], now, "rolling", null);
+}
+
+/** ChatGPT spend inside each window Codex read: pi's openai calls, SSSF's and interactive. */
+export function planSpend(calls: PiCallAt[], limits: ChatGptLimits | null, now: number, enabled: boolean): ChatGptPlan {
+  const chatgpt = calls.filter((c) => c.model.startsWith("openai/"));
+  const one = (live: LimitWindow | null, kind: "five_hour" | "seven_day"): PlanWindowSpend | null => {
+    if (!live) return null;
+    const end = Date.parse(live.resets_at);
+    const start = end - WINDOW_MS[kind];
+    const to = Math.min(end, now);
+    const inside = chatgpt.filter((c) => c.at >= start && c.at <= to);
+    const from = Math.max(start, now - PACE_MS[kind]);
+    const hours = Math.max(0, (to - from) / 3_600_000);
+    const recent = inside.filter((c) => c.at >= from).reduce((sum, c) => sum + c.cost, 0);
+    return {
+      est_usd: inside.reduce((sum, c) => sum + c.cost, 0),
+      calls: inside.length,
+      pace: { usd_per_hour: hours > 0 ? recent / hours : 0, hours },
+    };
+  };
+  return { enabled, limits, five_hour: one(limits?.five_hour ?? null, "five_hour"), seven_day: one(limits?.seven_day ?? null, "seven_day") };
 }
 
 export class Account {
@@ -335,7 +358,7 @@ export class Account {
   }
 
   summary(now: number, sssfSessions: Set<string>, projectOf: (cwd: string) => string, piCalls: PiCallAt[] = [],
-    spanArg: Span = "5h", piSpan: Span = "5h"): AccountUsage {
+    spanArg: Span = "5h", piSpan: Span = "5h", plan: { enabled: boolean; limits: ChatGptLimits | null } = { enabled: false, limits: null }): AccountUsage {
     const calls = this.refresh(now);
     const sample = readSample(this.ratesFile, now);
     // Many calls share a cwd, and placing one in its project resolves paths.
@@ -380,7 +403,8 @@ export class Account {
       week: span(sample?.seven_day ?? null, "seven_day"),
       span: spanSpend(items, spanArg, spanStart, spanEnd, live5h ? "five_hour" : "rolling", earliest),
       transcripts: this.transcripts,
-      pi: { ...piSpend(piCalls, now), span: piSpanSpend(piCalls, now, piSpan) },
+      pi: { ...piSpend(piCalls, now), span: piSpanSpend(piCalls, now, piSpan),
+        plan: planSpend(piCalls, plan.limits, now, plan.enabled) },
     };
   }
 }

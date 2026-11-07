@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import type { AccountUsage, LimitWindow, SpanSpend, SpendWindow } from '../lib/types'
+import type { AccountUsage, LimitWindow, PlanWindowSpend, SpanSpend, SpendWindow } from '../lib/types'
 import { isSpan, SPAN_MS, type Span } from '@shared/spans'
 import { fetchAccount } from '../lib/api'
 import { fmtCost, fmtDate } from '../lib/format'
@@ -128,6 +128,32 @@ const windows = computed(() => {
   ]
 })
 
+const paced = (s: PlanWindowSpend | null | undefined): Paced | null =>
+  (s ? { est_usd: s.est_usd, at_sample_usd: s.est_usd, pace: s.pace } : null)
+
+// The ChatGPT plan's windows, when Codex read them. The reading is at most a few
+// minutes old, so the window's whole spend is what it measured.
+const planMeters = computed(() => {
+  const plan = usage.value?.pi.plan
+  const l = plan?.limits
+  if (!plan || !l || (!l.five_hour && !l.seven_day)) return []
+  return [
+    ...(l.five_hour ? [{ label: '5-hour', w: l.five_hour, spend: paced(plan.five_hour) }] : []),
+    ...(l.seven_day ? [{ label: 'Weekly', w: l.seven_day, spend: paced(plan.seven_day) }] : []),
+  ]
+})
+
+// An unused window reports a reset a full window after the reading: it starts on the next call.
+function idle(w: LimitWindow): boolean {
+  const at = usage.value?.pi.plan?.limits?.recorded_at
+  return w.utilization === 0 && !!at && Date.parse(w.resets_at) - Date.parse(at) > 4.9 * 3_600_000
+}
+
+const planAge = computed(() => {
+  const at = usage.value?.pi.plan?.limits?.recorded_at
+  return at ? age(Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000))) : ''
+})
+
 function shortWhen(iso: string): string {
   return `${day(iso)} ${hm(iso)}`
 }
@@ -145,7 +171,9 @@ function paceSpan(hours: number): string {
 }
 
 /** When the window fills at the recent pace, once the 100% figure exists; otherwise the pace alone. */
-function projection(w: LimitWindow | null, spend: SpendWindow | null): string {
+type Paced = Pick<SpendWindow, 'est_usd' | 'at_sample_usd' | 'pace'>
+
+function projection(w: LimitWindow | null, spend: Paced | null): string {
   if (!w || !spend || spend.pace.hours < 0.25) return ''
   const rate = spend.pace.usd_per_hour
   const said = `${fmtCost(rate)}/h over the ${paceSpan(spend.pace.hours)}`
@@ -242,11 +270,29 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
       </div>
     </div>
 
-    <div v-if="usage?.pi.limit_hit || usage?.pi.week.calls || usage?.pi.span.calls" class="meter-card">
+    <div v-if="usage && (usage.pi.limit_hit || usage.pi.week.calls || usage.pi.span.calls || planMeters.length)" class="meter-card">
       <div class="card-head">
-        <span class="card-title">pi agents</span>
-        <span class="dim">ChatGPT and the other pi providers</span>
+        <span class="card-title">pi</span>
+        <span v-if="planMeters.length" class="dim">
+          ChatGPT {{ usage.pi.plan?.limits?.plan ?? '' }} limits as of {{ planAge }}, read through Codex CLI
+        </span>
+        <span v-else class="dim">ChatGPT and the other pi providers</span>
       </div>
+
+      <div v-if="planMeters.length" class="meters">
+        <div v-for="m in planMeters" :key="m.label" class="meter" :class="level(m.w)">
+          <div class="meter-top">
+            <span>{{ m.label }} window</span>
+            <span class="pct">{{ `${Math.round(m.w.utilization * 100)}%` }}</span>
+          </div>
+          <div class="bar"><div class="fill" :style="{ width: `${m.w.utilization * 100}%` }" /></div>
+          <div class="faint small">{{ idle(m.w) ? 'not started: it starts with the next ChatGPT call' : `resets ${fmtDate(m.w.resets_at)}` }}</div>
+          <div v-if="fullWindow(m.w, m.spend)" class="dim small">{{ fullWindow(m.w, m.spend) }}</div>
+          <div v-if="projection(m.w, m.spend)" class="dim small">{{ projection(m.w, m.spend) }}</div>
+        </div>
+        <div v-if="usage.pi.plan?.limits?.reached" class="err">The ChatGPT plan is out: {{ usage.pi.plan.limits.reached.replaceAll('_', ' ') }}</div>
+      </div>
+      <div v-if="usage.pi.plan?.limits?.error" class="faint small">{{ usage.pi.plan.limits.error }}</div>
 
       <div v-if="usage.pi.limit_hit" class="pi-limit">
         The ChatGPT plan was out of usage at {{ fmtDate(usage.pi.limit_hit.at) }} (run
@@ -283,14 +329,23 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
           :total="usage.pi.span.est_usd"
           :empty="`no pi calls in the last ${NAMES[usage.pi.span.span]}`"
           :tables="[
+            { name: 'by kind', rows: usage.pi.span.by_kind },
             { name: 'by project', rows: usage.pi.span.by_project },
             { name: 'by model', rows: usage.pi.span.by_model },
           ]"
         />
         <div class="faint small">
-          Cost is pi's list-price figure. A subscription sign-in, such as ChatGPT, pays it. pi's providers
-          report no usage limits to SSSF, so check a ChatGPT plan's limits in ChatGPT or Codex. A run
-          that reaches the plan's limit stops there, and shows here for 5 hours.
+          Cost is pi's list-price figure, for SSSF's agents and the sessions pi saves when you use it
+          yourself. A subscription sign-in, such as ChatGPT, pays it.
+          <template v-if="planMeters.length">
+            The windows come from Codex CLI's sign-in, so they count Codex's own use too, and the 100%
+            figure counts only pi's openai calls.
+          </template>
+          <template v-else-if="!usage.pi.plan?.enabled">
+            pi's providers report no usage limits; start the dashboard with SSSF_CODEX_LIMITS=1 to read the
+            ChatGPT plan's windows through Codex CLI.
+          </template>
+          A run that reaches the plan's limit stops there, and shows here for 5 hours.
         </div>
       </template>
     </div>

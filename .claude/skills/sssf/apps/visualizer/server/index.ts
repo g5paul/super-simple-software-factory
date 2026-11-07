@@ -16,6 +16,8 @@ import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { SssfDb, resolveDbPath } from "./db.ts";
 import { Account, type PiCallAt } from "./account.ts";
+import { CodexLimits } from "./codex_limits.ts";
+import { PiSessions } from "./pi_sessions.ts";
 import { SPAN_MS, isSpan, type Span } from "../shared/spans.ts";
 import { DAY_MS, daySpend, readDailyCap } from "./day.ts";
 import { liveSpend, readLiveCap } from "./live.ts";
@@ -66,6 +68,8 @@ if (ALL) {
 }
 
 const account = new Account();
+const piSessions = new PiSessions();
+const codexLimits = new CodexLimits();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -235,7 +239,10 @@ const server = listen((port) => Bun.serve({
         const hit = db?.piLimitHit(new Date(now - 5 * 3_600_000).toISOString());
         if (hit && (!limitHit || hit.at > limitHit.at)) limitHit = { ...hit, project: p.name };
       }
-      const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls, span, piSpan);
+      // pi used outside SSSF; SSSF's own pi agents keep their sessions inside each run.
+      for (const c of piSessions.calls(Date.parse(since), (cwd) => projects.projectOf(cwd))) piCalls.push(c);
+      const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls, span, piSpan,
+        { enabled: codexLimits.enabled, limits: codexLimits.current(now) });
       usage.pi.limit_hit = limitHit;
       return json(usage satisfies AccountUsage);
     }),

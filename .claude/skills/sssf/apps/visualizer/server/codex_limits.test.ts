@@ -1,0 +1,90 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CodexLimits, parse, readOnce } from "./codex_limits.ts";
+
+const NOW = Date.parse("2026-11-07T02:00:00Z");
+const S = (iso: string) => Date.parse(iso) / 1000;
+const LIMITS = {
+  rateLimits: {
+    limitId: "codex", planType: "plus", rateLimitReachedType: null,
+    primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: S("2026-11-07T05:00:00Z") },
+    secondary: { usedPercent: 2, windowDurationMins: 10080, resetsAt: S("2026-11-12T00:00:00Z") },
+  },
+};
+const ACCOUNT = { account: { type: "chatgpt", email: "someone@example.com", planType: "plus" }, requiresOpenaiAuth: true };
+
+let dir: string;
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "codex-limits-")); });
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+/** A stand-in for `codex app-server` that logs each request and answers from `replies`. */
+function fake(replies: Record<string, unknown>): string[] {
+  const script = join(dir, "codex.ts");
+  writeFileSync(script, `
+    import { appendFileSync } from "node:fs";
+    const replies = ${JSON.stringify(replies)};
+    for await (const line of console) {
+      appendFileSync(${JSON.stringify(join(dir, "sent.log"))}, line + "\\n");
+      const m = JSON.parse(line);
+      if (m.id === undefined) continue;
+      const r = replies[m.method];
+      console.log(JSON.stringify(r && r.error ? { id: m.id, error: r.error } : { id: m.id, result: r ?? {} }));
+    }`);
+  return [process.execPath, script];
+}
+
+describe("the ChatGPT plan's windows through Codex", () => {
+  test("reads both windows and the plan, and keeps no email", () => {
+    const got = parse(ACCOUNT, LIMITS, NOW);
+    expect(got).toEqual({
+      recorded_at: new Date(NOW).toISOString(), plan: "plus", signed_in: true, reached: null, error: null,
+      five_hour: { utilization: 0.12, resets_at: "2026-11-07T05:00:00.000Z" },
+      seven_day: { utilization: 0.02, resets_at: "2026-11-12T00:00:00.000Z" },
+    });
+    expect(JSON.stringify(got)).not.toContain("example.com");
+  });
+
+  test("places a window by its length, and drops one that has reset", () => {
+    const got = parse(ACCOUNT, { rateLimits: {
+      primary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: S("2026-11-10T00:00:00Z") },
+      secondary: { usedPercent: 90, windowDurationMins: 300, resetsAt: S("2026-11-07T01:00:00Z") },
+    } }, NOW);
+    expect(got.seven_day?.utilization).toBe(0.4);
+    expect(got.five_hour).toBeNull();
+  });
+
+  test("sends only initialize, account/read and account/rateLimits/read", async () => {
+    const got = await readOnce(NOW, fake({ "account/read": ACCOUNT, "account/rateLimits/read": LIMITS }));
+    expect(got.five_hour?.utilization).toBe(0.12);
+    const sent = readFileSync(join(dir, "sent.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l).method);
+    expect(sent).toEqual(["initialize", "initialized", "account/read", "account/rateLimits/read"]);
+  });
+
+  test("an error reply or a missing codex reads as an error", async () => {
+    const err = await readOnce(NOW, fake({ "account/read": ACCOUNT, "account/rateLimits/read": { error: { code: -1, message: "not signed in" } } }));
+    expect(err.error).toContain("not signed in");
+    const missing = await readOnce(NOW, [join(dir, "no-such-codex")]);
+    expect(missing.error).toContain("isn't installed");
+  });
+
+  test("polls only when enabled, and an error keeps the last good windows", async () => {
+    let n = 0;
+    const good = parse(ACCOUNT, LIMITS, NOW);
+    const reads = [good, { ...good, five_hour: null, seven_day: null, error: "Codex didn't answer in time" }];
+    const off = new CodexLimits(false, async () => reads[n++]!);
+    expect(off.current(NOW)).toBeNull();
+    expect(n).toBe(0);
+    const on = new CodexLimits(true, async () => reads[n++]!);
+    on.current(NOW);
+    await Bun.sleep(0);
+    expect(on.latest?.five_hour?.utilization).toBe(0.12);
+    on.current(NOW + 60_000);
+    expect(n).toBe(1);
+    on.current(NOW + 6 * 60_000);
+    await Bun.sleep(0);
+    expect(on.latest?.five_hour?.utilization).toBe(0.12);
+    expect(on.latest?.error).toContain("didn't answer");
+  });
+});

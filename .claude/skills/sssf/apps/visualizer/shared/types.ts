@@ -611,7 +611,7 @@ export interface SpanSpend {
   end: string;
   calls: number;
   est_usd: number;
-  /** Claude only: SSSF agents against interactive sessions. */
+  /** SSSF agents against interactive sessions. */
   by_kind: SpendRow[];
   by_project: SpendRow[];
   by_model: SpendRow[];
@@ -657,7 +657,37 @@ export interface AccountUsage {
   span: SpanSpend;
   transcripts: string;
   /** SSSF's own Pi agents, from every registered project's trace db; span is ?pi_span=. */
-  pi: { window: PiSpendWindow; week: PiSpendWindow; span: SpanSpend; limit_hit?: PiLimitHit | null };
+  pi: { window: PiSpendWindow; week: PiSpendWindow; span: SpanSpend; limit_hit?: PiLimitHit | null; plan?: ChatGptPlan };
+}
+
+/** The ChatGPT plan's windows as Codex CLI read them; opt-in with SSSF_CODEX_LIMITS=1. */
+export interface ChatGptLimits {
+  recorded_at: string;
+  /** Codex's plan name, such as plus or pro. */
+  plan: string | null;
+  signed_in: boolean;
+  five_hour: LimitWindow | null;
+  seven_day: LimitWindow | null;
+  /** Set when the plan is out, such as rate_limit_reached. */
+  reached: string | null;
+  /** Why the last read failed; the windows then come from the read before it. */
+  error: string | null;
+}
+
+/** ChatGPT spend, through pi, inside one of the plan's windows. */
+export interface PlanWindowSpend {
+  est_usd: number;
+  calls: number;
+  /** Spend over the last hour for the 5-hour window, the last 24 for the weekly one. */
+  pace: { usd_per_hour: number; hours: number };
+}
+
+export interface ChatGptPlan {
+  /** False unless the dashboard started with SSSF_CODEX_LIMITS=1. */
+  enabled: boolean;
+  limits: ChatGptLimits | null;
+  five_hour: PlanWindowSpend | null;
+  seven_day: PlanWindowSpend | null;
 }
 
 /** The trial a run belongs to, as an attempt or as its panel (trials.md decision 24). */

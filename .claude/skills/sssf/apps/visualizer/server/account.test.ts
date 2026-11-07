@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Account, estimateCost, peaks, piSpanSpend, piSpend } from "./account.ts";
+import { Account, estimateCost, peaks, piSpanSpend, piSpend, planSpend } from "./account.ts";
 
 const NOW = Date.parse("2026-10-29T16:00:00Z");
 const RESET_5H = Date.parse("2026-10-29T17:30:00Z") / 1000;
@@ -216,7 +216,7 @@ describe("spend over a chosen span", () => {
     const pi = (at: string, cost: number) =>
       ({ at: Date.parse(at), project: "yt", model: "openai/gpt-6.1-sol", cost, input_tokens: 1, output_tokens: 1 });
     const spend = piSpanSpend([pi("2026-10-01T09:00:00Z", 2), pi("2026-10-29T15:00:00Z", 1)], NOW, "30d");
-    expect([spend.calls, spend.est_usd, spend.data_from, spend.by_kind]).toEqual([2, 3, null, []]);
+    expect([spend.calls, spend.est_usd, spend.data_from, spend.by_kind.map((r) => r.key)]).toEqual([2, 3, null, ["sssf"]]);
     expect(spend.peaks[0].est_usd).toBe(2);
   });
 });
@@ -258,5 +258,41 @@ describe("a window's recent pace", () => {
     sample(0.2, Date.parse("2026-10-29T20:30:00Z") / 1000);   // this 5-hour window started at 15:30
     const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
     expect(usage.window.pace.hours).toBeCloseTo(0.5);
+  });
+});
+
+describe("the ChatGPT plan's windows", () => {
+  const limits = (five: number, week: number) => ({
+    recorded_at: new Date(NOW).toISOString(), plan: "plus", signed_in: true, reached: null, error: null,
+    five_hour: { utilization: five, resets_at: new Date(RESET_5H * 1000).toISOString() },
+    seven_day: { utilization: week, resets_at: new Date(RESET_7D * 1000).toISOString() },
+  });
+  const pi = (at: string, cost: number, model = "openai/gpt-6.1-sol", kind?: string) =>
+    ({ at: Date.parse(at), project: "yt", model, cost, input_tokens: 1, output_tokens: 1, kind });
+
+  test("counts only pi's openai calls inside each window", () => {
+    const calls = [
+      pi("2026-10-29T15:30:00Z", 2),
+      pi("2026-10-29T15:40:00Z", 3, "openai/gpt-6.1-terra", "interactive"),
+      pi("2026-10-29T15:45:00Z", 50, "anthropic/claude-opus-5-5"),
+      pi("2026-10-29T11:00:00Z", 7),
+    ];
+    const plan = planSpend(calls, limits(0.1, 0.02), NOW, true);
+    expect(plan.enabled).toBe(true);
+    // The 5-hour window began at 12:30, so 11:00 is only in the week.
+    expect(plan.five_hour?.est_usd).toBe(5);
+    expect(plan.five_hour?.pace.usd_per_hour).toBeCloseTo(5);
+    expect(plan.seven_day?.est_usd).toBe(12);
+    expect(plan.seven_day?.calls).toBe(3);
+  });
+
+  test("has no window spend without a reading", () => {
+    const plan = planSpend([pi("2026-10-29T15:30:00Z", 2)], null, NOW, false);
+    expect(plan).toEqual({ enabled: false, limits: null, five_hour: null, seven_day: null });
+  });
+
+  test("splits SSSF's pi calls from interactive ones", () => {
+    const span = piSpanSpend([pi("2026-10-29T15:30:00Z", 2), pi("2026-10-29T15:40:00Z", 3, undefined, "interactive")], NOW, "5h");
+    expect(span.by_kind.map((r) => [r.key, r.est_usd])).toEqual([["interactive", 3], ["sssf", 2]]);
   });
 });

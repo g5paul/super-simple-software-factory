@@ -237,3 +237,26 @@ describe("a live window's spend at the limit reading", () => {
     expect(new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf).week.at_sample_usd).toBeNull();
   });
 });
+
+describe("a window's recent pace", () => {
+  test("the last hour for the 5-hour window and the last 24 for the 7-day one", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "1", at: "2026-10-28T10:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "3", at: "2026-10-29T15:55:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.2);
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    const one = estimateCost("claude-opus-5-5", { input: 10, output: 100, cacheRead: 1000, cacheWrite5m: 0, cacheWrite1h: 0 })!;
+    expect(usage.window.pace.hours).toBeCloseTo(1);
+    expect(usage.window.pace.usd_per_hour).toBeCloseTo(2 * one);
+    expect(usage.week.pace.hours).toBeCloseTo(24);
+    expect(usage.week.pace.usd_per_hour).toBeCloseTo((2 * one) / 24);   // the call 30 hours back is outside
+  });
+
+  test("a window younger than the pace's span counts from its start", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"), call({ id: "1", at: "2026-10-29T15:50:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.2, Date.parse("2026-10-29T20:30:00Z") / 1000);   // this 5-hour window started at 15:30
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.window.pace.hours).toBeCloseTo(0.5);
+  });
+});

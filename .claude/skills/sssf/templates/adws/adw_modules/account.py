@@ -10,8 +10,10 @@ the machine reads the same account. `just obs-all` shows it.
 
 `check` runs before each Claude Code agent starts. It stops the run when a
 window is at or above `defaults.rate_limit_stop`, which beats a run that dies
-halfway through a phase with a rate-limit error. The sample is only as fresh
-as the last SSSF send; interactive sessions do not write one.
+halfway through a phase with a rate-limit error. Interactive sessions add
+readings too once the engineer sets SSSF's statusline (scripts/statusline.py):
+Claude Code hands a statusline command the same windows after every reply,
+and `record_windows` merges them in.
 """
 
 from __future__ import annotations
@@ -70,6 +72,18 @@ def record(info: dict, at: Optional[str] = None, source: str = "") -> None:
     tmp = target.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps({"recorded_at": at, "source": source, "info": info}, indent=2))
     tmp.replace(target)
+
+
+def record_windows(windows: dict, at: Optional[str] = None, source: str = "statusline") -> None:
+    """Merge windows read elsewhere, keyed like unifiedWindows, into the newest
+    sample. The sample's other fields stay: a statusline reports no status or
+    overage, and `check` still needs the last ones an agent call reported."""
+    if not windows:
+        return
+    current = latest() or {}
+    info = dict(current.get("info") or {})
+    info["unifiedWindows"] = {**(info.get("unifiedWindows") or {}), **windows}
+    record(info, at=at, source=source)
 
 
 def _clock(epoch: int) -> str:

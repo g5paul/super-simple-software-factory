@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import type { AccountUsage, LimitWindow, SpanSpend } from '../lib/types'
+import type { AccountUsage, LimitWindow, SpanSpend, SpendWindow } from '../lib/types'
 import { isSpan, SPAN_MS, type Span } from '@shared/spans'
 import { fetchAccount } from '../lib/api'
 import { fmtCost, fmtDate } from '../lib/format'
@@ -138,6 +138,28 @@ const STALE_S = 3600
 // Below 10% the reading's rounding swamps the figure: 3% could be 2.5% or 3.5%.
 const FULL_FROM = 0.1
 
+/** The span the pace covered; shorter than its usual hour or day while the window is young. */
+function paceSpan(hours: number): string {
+  if (hours >= 0.95 && hours < 1.5) return 'last hour'
+  return hours < 1 ? `last ${Math.round(hours * 60)} minutes` : `last ${Math.round(hours)} hours`
+}
+
+/** When the window fills at the recent pace, once the 100% figure exists; otherwise the pace alone. */
+function projection(w: LimitWindow | null, spend: SpendWindow | null): string {
+  if (!w || !spend || spend.pace.hours < 0.25) return ''
+  const rate = spend.pace.usd_per_hour
+  const said = `${fmtCost(rate)}/h over the ${paceSpan(spend.pace.hours)}`
+  if (!spend.at_sample_usd || w.utilization < FULL_FROM) return `Pace: ${said}`
+  if (rate <= 0) return `Pace: nothing spent in the ${paceSpan(spend.pace.hours)}`
+  const full = spend.at_sample_usd / w.utilization
+  const reset = Date.parse(w.resets_at)
+  const fills = Date.now() + ((full - spend.est_usd) / rate) * 3_600_000
+  if (fills <= Date.now()) return `Pace: ${said}. At this pace it's full now`
+  if (fills < reset) return `Pace: ${said}. At this pace it fills around ${shortWhen(new Date(fills).toISOString())}, before it resets`
+  const atReset = (spend.est_usd + rate * ((reset - Date.now()) / 3_600_000)) / full
+  return `Pace: ${said}. At this pace it reaches about ${Math.round(atReset * 100)}% by its reset`
+}
+
 /** What 100% of a window is worth at list price: the spend the reading measured, over its utilization. */
 function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null } | null): string {
   if (!w || !spend?.at_sample_usd) return ''
@@ -154,7 +176,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
       <div class="card-head">
         <span class="card-title">Claude</span>
         <span v-if="usage?.sample" :class="usage.sample.age_s > STALE_S ? 'stale' : 'dim'">
-          limits as of {{ age(usage.sample.age_s) }}, from the last SSSF agent call{{ usage.sample.age_s > STALE_S ? ': interactive use since then isn\'t in the meters' : '' }}
+          limits as of {{ age(usage.sample.age_s) }}, {{ usage.sample.source === 'statusline' ? 'from a Claude Code session\'s statusline' : 'from the last SSSF agent call' }}{{ usage.sample.age_s > STALE_S ? ': use since then isn\'t in the meters' : '' }}
         </span>
         <span v-else-if="usage" class="dim">no limit reading yet: one SSSF run on Claude Code records it</span>
       </div>
@@ -170,6 +192,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
             {{ m.w ? `resets ${fmtDate(m.w.resets_at)}` : 'no live reading: the last one has reset' }}
           </div>
           <div v-if="fullWindow(m.w, m.spend)" class="dim small">{{ fullWindow(m.w, m.spend) }}</div>
+          <div v-if="projection(m.w, m.spend)" class="dim small">{{ projection(m.w, m.spend) }}</div>
         </div>
         <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
       </div>

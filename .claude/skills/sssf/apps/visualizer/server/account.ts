@@ -116,6 +116,16 @@ function parseCall(line: string): (Call & { key: string }) | null {
   };
 }
 
+// How far back the pace looks: long enough to smooth a burst, short enough to be the current rate.
+const PACE_MS = { five_hour: 3_600_000, seven_day: 24 * 3_600_000 } as const;
+
+function pace(calls: Call[], from: number, to: number): { usd_per_hour: number; hours: number } {
+  const hours = Math.max(0, (to - from) / 3_600_000);
+  const spent = calls.filter((c) => c.at >= from && c.at <= to)
+    .reduce((sum, c) => sum + (estimateCost(c.model, c) ?? 0), 0);
+  return { usd_per_hour: hours > 0 ? spent / hours : 0, hours };
+}
+
 function readSample(path: string, now: number): LimitSample | null {
   if (!existsSync(path)) return null;
   let data;
@@ -346,6 +356,7 @@ export class Account {
         by_project: rows(inside, (c) => place(c.cwd)),
         by_model: rows(inside, (c) => c.model),
         unpriced_models: unpriced.toSorted(),
+        pace: pace(inside, Math.max(start, now - PACE_MS[kind]), Math.min(end, now)),
         at_sample_usd: live && sample
           ? inside.filter((c) => c.at <= Date.parse(sample.recorded_at))
             .reduce((sum, c) => sum + (estimateCost(c.model, c) ?? 0), 0)

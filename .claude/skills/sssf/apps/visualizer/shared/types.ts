@@ -590,6 +590,8 @@ export interface SpendWindow {
   unpriced_models: string[];
   /** A live window only: its spend up to the limit reading, what the reading's utilization measured. */
   at_sample_usd: number | null;
+  /** The recent pace: spend over the last hour for a 5-hour window, the last 24 for a 7-day one, inside the window. */
+  pace: { usd_per_hour: number; hours: number };
 }
 
 /** One of the busiest 5-hour stretches in a span: what a 5-hour limit would have seen. */

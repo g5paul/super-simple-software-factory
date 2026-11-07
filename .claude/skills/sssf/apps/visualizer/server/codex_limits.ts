@@ -8,11 +8,15 @@
  * makes. SSSF starts `codex app-server` read-only, sends initialize,
  * account/read and account/rateLimits/read, and nothing else: the same
  * protocol can spend a reset credit, and SSSF never asks it to. Codex holds
- * the login; SSSF never reads its token. OpenAI doesn't document this method,
- * and whether pi's sign-in draws on Codex's windows is unverified
+ * the login; SSSF never reads its token. OpenAI doesn't document this method.
+ * pi's ChatGPT use draws on the same windows: a test run moved them
  * (docs/research/usage-monitors.md).
  */
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { ChatGptLimits, LimitWindow } from "../shared/types.ts";
+import { registryPath } from "./projects.ts";
+import { readHistory, type Reading } from "./window_use.ts";
 
 export const ENABLED = process.env.SSSF_CODEX_LIMITS === "1";
 const EVERY_MS = 5 * 60_000;
@@ -106,13 +110,59 @@ export async function readOnce(now = Date.now(), command = ["codex", "-s", "read
   }
 }
 
-/** Polls every 5 minutes while the dashboard runs; `latest` is the newest reading. */
+export function historyPath(): string {
+  return join(dirname(registryPath()), "codex_limits_history.jsonl");
+}
+
+const HISTORY_EVERY_MS = 3_600_000;
+const HISTORY_KEEP_MS = 8 * 86_400_000;
+
+/**
+ * Polls every 5 minutes while the dashboard runs; `latest` is the newest reading.
+ * Each good reading also goes into the history, in account.py's format, when a
+ * window moved or the last line is an hour old.
+ */
 export class CodexLimits {
   latest: ChatGptLimits | null = null;
+  history: Reading[];
   private busy = false;
   private last = 0;
 
-  constructor(readonly enabled: boolean = ENABLED, private readonly read = readOnce) {}
+  constructor(readonly enabled: boolean = ENABLED, private readonly read = readOnce, readonly historyFile: string = historyPath()) {
+    this.history = enabled ? readHistory(historyFile) : [];
+    if (this.history.length > 3000) {
+      // Past this, keep 8 days: rewrite the file once at start.
+      const cutoff = Date.now() - HISTORY_KEEP_MS;
+      this.history = this.history.filter((h) => h.at >= cutoff);
+      try {
+        writeFileSync(historyFile, this.history.map((h) => `${JSON.stringify({ at: new Date(h.at).toISOString(), w: h.w })}\n`).join(""));
+      } catch {
+        // kept in memory either way
+      }
+    }
+  }
+
+  private remember(r: ChatGptLimits): void {
+    const w: Reading["w"] = {};
+    for (const k of ["five_hour", "seven_day"] as const) {
+      const live = r[k];
+      if (live) w[k] = [live.utilization, Math.round(Date.parse(live.resets_at) / 1000)];
+    }
+    if (!w.five_hour && !w.seven_day) return;
+    const at = Date.parse(r.recorded_at);
+    const prev = this.history.at(-1);
+    // An idle 5-hour window's reset moves with every reading, so it alone isn't a change.
+    const same = prev && JSON.stringify({ ...prev.w, five_hour: prev.w.five_hour?.[0] })
+      === JSON.stringify({ ...w, five_hour: w.five_hour?.[0] });
+    if (same && at - prev.at < HISTORY_EVERY_MS) return;
+    this.history = [...this.history.filter((h) => h.at >= at - HISTORY_KEEP_MS), { at, w }];
+    try {
+      mkdirSync(dirname(this.historyFile), { recursive: true });
+      appendFileSync(this.historyFile, `${JSON.stringify({ at: r.recorded_at, w })}\n`);
+    } catch {
+      // the meters still work from memory
+    }
+  }
 
   /** The newest reading, starting a fresh one in the background when it's due. */
   current(now = Date.now()): ChatGptLimits | null {
@@ -122,6 +172,7 @@ export class CodexLimits {
       void this.read(now).then((r) => {
         // An error keeps the last good windows, so a hiccup doesn't blank the meters.
         this.latest = r.error && this.latest && !this.latest.error ? { ...this.latest, error: r.error } : r;
+        if (!r.error) this.remember(r);
       }).finally(() => { this.busy = false; });
     }
     return this.latest;

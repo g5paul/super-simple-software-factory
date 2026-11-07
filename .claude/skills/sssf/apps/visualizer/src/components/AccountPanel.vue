@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import type { AccountUsage, LimitWindow, PlanWindowSpend, SpanSpend, SpendWindow } from '../lib/types'
+import type { AccountUsage, LimitWindow, PlanWindowSpend, SpanSpend, SpendWindow, WindowUse } from '../lib/types'
 import { isSpan, SPAN_MS, type Span } from '@shared/spans'
 import { fetchAccount } from '../lib/api'
 import { fmtCost, fmtDate } from '../lib/format'
@@ -129,7 +129,7 @@ const windows = computed(() => {
 })
 
 const paced = (s: PlanWindowSpend | null | undefined): Paced | null =>
-  (s ? { est_usd: s.est_usd, at_sample_usd: s.est_usd, pace: s.pace } : null)
+  (s ? { est_usd: s.est_usd, at_sample_usd: s.est_usd, pace: s.pace, use: s.use } : null)
 
 // The ChatGPT plan's windows, when Codex read them. The reading is at most a few
 // minutes old, so the window's whole spend is what it measured.
@@ -171,21 +171,58 @@ function paceSpan(hours: number): string {
 }
 
 /** When the window fills at the recent pace, once the 100% figure exists; otherwise the pace alone. */
-type Paced = Pick<SpendWindow, 'est_usd' | 'at_sample_usd' | 'pace'>
+type Paced = Pick<SpendWindow, 'est_usd' | 'at_sample_usd' | 'pace' | 'use'>
 
+// Whole-percent readings: a smaller move is mostly rounding.
+const MIN_POINTS = 2
+
+function pct(v: number): string {
+  return v >= 10 ? `${Math.round(v)}%` : v >= 1 ? `${v.toFixed(1)}%` : `${v.toFixed(2)}%`
+}
+
+// With no reading inside the span yet, the recent rate runs from the window's empty start.
+const fromStart = (u: WindowUse | null | undefined) =>
+  !!u?.recent && !!u.since_start && Math.abs(u.recent.hours - u.since_start.hours) < 0.01
+
+const hoursAgo = (h: number) => (h < 1 ? `${Math.round(h * 60)} minutes ago` : `${Math.round(h)} hours ago`)
+
+/** The recent rate in $ and in percent, side by side, and what one percent cost. */
+function rateLine(spend: Paced | null): string {
+  if (!spend) return ''
+  const dollars = spend.pace.hours >= 0.25 ? `${fmtCost(spend.pace.usd_per_hour)}/h` : ''
+  const r = spend.use?.recent
+  const since = spend.use?.since_start
+  if (r && r.points >= MIN_POINTS) {
+    const each = r.usd > 0 ? ` (${fmtCost(r.usd / r.points)} per 1%)` : ''
+    if (fromStart(spend.use)) {
+      const use = `${pct(r.pct_per_hour)}/h since it started ${hoursAgo(r.hours)}${each}`
+      return dollars ? `Pace: ${dollars} over the ${paceSpan(spend.pace.hours)}; ${use}` : `Pace: ${use}`
+    }
+    if (dollars && Math.abs(r.hours - spend.pace.hours) < 0.1)
+      return `Pace: ${dollars} · ${pct(r.pct_per_hour)}/h over the ${paceSpan(r.hours)}${each}`
+    return [dollars && `Pace: ${dollars} over the ${paceSpan(spend.pace.hours)}`,
+      `${pct(r.pct_per_hour)}/h over the ${paceSpan(r.hours)}${each}`].filter(Boolean).join('; ')
+  }
+  const parts = [dollars && `Pace: ${dollars} over the ${paceSpan(spend.pace.hours)}`]
+  if (since) parts.push(`${pct(since.pct_per_hour)}/h since it started ${hoursAgo(since.hours)}`)
+  if (r) parts.push(`${Math.round(r.points)} ${Math.round(r.points) === 1 ? 'point' : 'points'} in the ${paceSpan(r.hours)}, too few for a recent rate`)
+  return parts.filter(Boolean).join('; ')
+}
+
+/** Where the window ends up at its percent rate: the recent one, or since it started. */
 function projection(w: LimitWindow | null, spend: Paced | null): string {
-  if (!w || !spend || spend.pace.hours < 0.25) return ''
-  const rate = spend.pace.usd_per_hour
-  const said = `${fmtCost(rate)}/h over the ${paceSpan(spend.pace.hours)}`
-  if (!spend.at_sample_usd || w.utilization < FULL_FROM) return `Pace: ${said}`
-  if (rate <= 0) return `Pace: nothing spent in the ${paceSpan(spend.pace.hours)}`
-  const full = spend.at_sample_usd / w.utilization
+  if (!w || !spend?.use) return ''
+  const r = spend.use.recent
+  const recent = r && r.points >= MIN_POINTS
+  const rate = recent ? r.pct_per_hour : spend.use.since_start?.pct_per_hour
+  if (rate === undefined || rate <= 0) return ''
+  const which = recent && !fromStart(spend.use) ? 'At the recent rate' : 'At the rate since it started'
+  const used = w.utilization * 100
   const reset = Date.parse(w.resets_at)
-  const fills = Date.now() + ((full - spend.est_usd) / rate) * 3_600_000
-  if (fills <= Date.now()) return `Pace: ${said}. At this pace it's full now`
-  if (fills < reset) return `Pace: ${said}. At this pace it fills around ${shortWhen(new Date(fills).toISOString())}, before it resets`
-  const atReset = (spend.est_usd + rate * ((reset - Date.now()) / 3_600_000)) / full
-  return `Pace: ${said}. At this pace it reaches about ${Math.round(atReset * 100)}% by its reset`
+  const atReset = used + rate * ((reset - Date.now()) / 3_600_000)
+  if (atReset < 100) return `${which} it reaches about ${Math.round(atReset)}% by its reset`
+  const fills = Date.now() + ((100 - used) / rate) * 3_600_000
+  return fills <= Date.now() ? `${which} it's full now` : `${which} it fills around ${shortWhen(new Date(fills).toISOString())}, before it resets`
 }
 
 /** What 100% of a window is worth at list price: the spend the reading measured, over its utilization. */
@@ -220,6 +257,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
             {{ m.w ? `resets ${fmtDate(m.w.resets_at)}` : 'no live reading: the last one has reset' }}
           </div>
           <div v-if="fullWindow(m.w, m.spend)" class="dim small">{{ fullWindow(m.w, m.spend) }}</div>
+          <div v-if="rateLine(m.spend)" class="dim small">{{ rateLine(m.spend) }}</div>
           <div v-if="projection(m.w, m.spend)" class="dim small">{{ projection(m.w, m.spend) }}</div>
         </div>
         <div v-if="usage.sample?.status === 'rejected'" class="err">Claude rejected the last request: limit reached</div>
@@ -288,6 +326,7 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
           <div class="bar"><div class="fill" :style="{ width: `${m.w.utilization * 100}%` }" /></div>
           <div class="faint small">{{ idle(m.w) ? 'not started: it starts with the next ChatGPT call' : `resets ${fmtDate(m.w.resets_at)}` }}</div>
           <div v-if="fullWindow(m.w, m.spend)" class="dim small">{{ fullWindow(m.w, m.spend) }}</div>
+          <div v-if="rateLine(m.spend)" class="dim small">{{ rateLine(m.spend) }}</div>
           <div v-if="projection(m.w, m.spend)" class="dim small">{{ projection(m.w, m.spend) }}</div>
         </div>
         <div v-if="usage.pi.plan?.limits?.reached" class="err">The ChatGPT plan is out: {{ usage.pi.plan.limits.reached.replaceAll('_', ' ') }}</div>

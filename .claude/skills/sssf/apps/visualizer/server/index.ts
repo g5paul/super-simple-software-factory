@@ -242,7 +242,7 @@ const server = listen((port) => Bun.serve({
       // pi used outside SSSF; SSSF's own pi agents keep their sessions inside each run.
       for (const c of piSessions.calls(Date.parse(since), (cwd) => projects.projectOf(cwd))) piCalls.push(c);
       const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls, span, piSpan,
-        { enabled: codexLimits.enabled, limits: codexLimits.current(now) });
+        { enabled: codexLimits.enabled, limits: codexLimits.current(now), history: codexLimits.history });
       usage.pi.limit_hit = limitHit;
       return json(usage satisfies AccountUsage);
     }),

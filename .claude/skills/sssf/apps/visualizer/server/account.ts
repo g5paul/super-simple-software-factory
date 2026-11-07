@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import type { AccountUsage, ChatGptLimits, ChatGptPlan, LimitSample, LimitWindow, PiSpendWindow, PlanWindowSpend, SpanSpend, SpendPeak, SpendRow, SpendWindow } from "../shared/types.ts";
 import { SPAN_MS, type Span } from "../shared/spans.ts";
 import { registryPath } from "./projects.ts";
+import { PACE_MS, readHistory, windowUse, type Reading } from "./window_use.ts";
 import prices from "../../../templates/adws/adw_modules/prices.json";
 
 /**
@@ -117,7 +118,6 @@ function parseCall(line: string): (Call & { key: string }) | null {
 }
 
 // How far back the pace looks: long enough to smooth a burst, short enough to be the current rate.
-const PACE_MS = { five_hour: 3_600_000, seven_day: 24 * 3_600_000 } as const;
 
 function pace(calls: Call[], from: number, to: number): { usd_per_hour: number; hours: number } {
   const hours = Math.max(0, (to - from) / 3_600_000);
@@ -295,7 +295,8 @@ export function piSpanSpend(calls: PiCallAt[], now: number, span: Span): SpanSpe
 }
 
 /** ChatGPT spend inside each window Codex read: pi's openai calls, SSSF's and interactive. */
-export function planSpend(calls: PiCallAt[], limits: ChatGptLimits | null, now: number, enabled: boolean): ChatGptPlan {
+export function planSpend(calls: PiCallAt[], limits: ChatGptLimits | null, now: number, enabled: boolean,
+  history: Reading[] = []): ChatGptPlan {
   const chatgpt = calls.filter((c) => c.model.startsWith("openai/"));
   const one = (live: LimitWindow | null, kind: "five_hour" | "seven_day"): PlanWindowSpend | null => {
     if (!live) return null;
@@ -306,10 +307,17 @@ export function planSpend(calls: PiCallAt[], limits: ChatGptLimits | null, now: 
     const from = Math.max(start, now - PACE_MS[kind]);
     const hours = Math.max(0, (to - from) / 3_600_000);
     const recent = inside.filter((c) => c.at >= from).reduce((sum, c) => sum + c.cost, 0);
+    const readAt = Date.parse(limits!.recorded_at);
+    const use = windowUse(history, kind, live, readAt);
+    if (use.recent) {
+      const since = Date.parse(use.recent.from);
+      use.recent.usd = inside.filter((c) => c.at >= since && c.at <= readAt).reduce((sum, c) => sum + c.cost, 0);
+    }
     return {
       est_usd: inside.reduce((sum, c) => sum + c.cost, 0),
       calls: inside.length,
       pace: { usd_per_hour: hours > 0 ? recent / hours : 0, hours },
+      use,
     };
   };
   return { enabled, limits, five_hour: one(limits?.five_hour ?? null, "five_hour"), seven_day: one(limits?.seven_day ?? null, "seven_day") };
@@ -358,16 +366,25 @@ export class Account {
   }
 
   summary(now: number, sssfSessions: Set<string>, projectOf: (cwd: string) => string, piCalls: PiCallAt[] = [],
-    spanArg: Span = "5h", piSpan: Span = "5h", plan: { enabled: boolean; limits: ChatGptLimits | null } = { enabled: false, limits: null }): AccountUsage {
+    spanArg: Span = "5h", piSpan: Span = "5h",
+    plan: { enabled: boolean; limits: ChatGptLimits | null; history?: Reading[] } = { enabled: false, limits: null }): AccountUsage {
     const calls = this.refresh(now);
     const sample = readSample(this.ratesFile, now);
     // Many calls share a cwd, and placing one in its project resolves paths.
     const placed = new Map<string, string>();
     const place = (cwd: string) => placed.get(cwd) ?? placed.set(cwd, projectOf(cwd)).get(cwd)!;
+    const history = sample ? readHistory(join(dirname(this.ratesFile), "rate_limits_history.jsonl")) : [];
     const span = (live: LimitWindow | null, kind: "five_hour" | "seven_day"): SpendWindow => {
       const end = live ? Date.parse(live.resets_at) : now;
       const start = end - WINDOW_MS[kind];
       const inside = calls.filter((c) => c.at >= start && c.at <= Math.min(end, now));
+      const use = live && sample ? windowUse(history, kind, live, Date.parse(sample.recorded_at)) : null;
+      if (use?.recent) {
+        const from = Date.parse(use.recent.from);
+        const to = Date.parse(sample!.recorded_at);
+        use.recent.usd = inside.filter((c) => c.at >= from && c.at <= to)
+          .reduce((sum, c) => sum + (estimateCost(c.model, c) ?? 0), 0);
+      }
       const unpriced = [...new Set(inside.map((c) => c.model).filter((m) => PRICES[m] === undefined))];
       return {
         basis: live ? kind : "rolling",
@@ -380,6 +397,7 @@ export class Account {
         by_model: rows(inside, (c) => c.model),
         unpriced_models: unpriced.toSorted(),
         pace: pace(inside, Math.max(start, now - PACE_MS[kind]), Math.min(end, now)),
+        use,
         at_sample_usd: live && sample
           ? inside.filter((c) => c.at <= Date.parse(sample.recorded_at))
             .reduce((sum, c) => sum + (estimateCost(c.model, c) ?? 0), 0)
@@ -404,7 +422,7 @@ export class Account {
       span: spanSpend(items, spanArg, spanStart, spanEnd, live5h ? "five_hour" : "rolling", earliest),
       transcripts: this.transcripts,
       pi: { ...piSpend(piCalls, now), span: piSpanSpend(piCalls, now, piSpan),
-        plan: planSpend(piCalls, plan.limits, now, plan.enabled) },
+        plan: planSpend(piCalls, plan.limits, now, plan.enabled, plan.history) },
     };
   }
 }

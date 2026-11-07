@@ -73,10 +73,10 @@ describe("the ChatGPT plan's windows through Codex", () => {
     let n = 0;
     const good = parse(ACCOUNT, LIMITS, NOW);
     const reads = [good, { ...good, five_hour: null, seven_day: null, error: "Codex didn't answer in time" }];
-    const off = new CodexLimits(false, async () => reads[n++]!);
+    const off = new CodexLimits(false, async () => reads[n++]!, join(dir, "h.jsonl"));
     expect(off.current(NOW)).toBeNull();
     expect(n).toBe(0);
-    const on = new CodexLimits(true, async () => reads[n++]!);
+    const on = new CodexLimits(true, async () => reads[n++]!, join(dir, "h.jsonl"));
     on.current(NOW);
     await Bun.sleep(0);
     expect(on.latest?.five_hour?.utilization).toBe(0.12);
@@ -86,5 +86,23 @@ describe("the ChatGPT plan's windows through Codex", () => {
     await Bun.sleep(0);
     expect(on.latest?.five_hour?.utilization).toBe(0.12);
     expect(on.latest?.error).toContain("didn't answer");
+  });
+});
+
+describe("the Codex readings kept over time", () => {
+  test("a good reading goes into the history, an unchanged one only hourly, and a failed one never", async () => {
+    const file = join(dir, "codex_history.jsonl");
+    const good = parse(ACCOUNT, LIMITS, NOW);
+    const reads = [good, { ...good, recorded_at: new Date(NOW + 6 * 60_000).toISOString() },
+      { ...good, five_hour: null, seven_day: null, error: "no" }];
+    let n = 0;
+    const limits = new CodexLimits(true, async () => reads[n++]!, file);
+    for (const t of [NOW, NOW + 6 * 60_000, NOW + 12 * 60_000]) {
+      limits.current(t);
+      await Bun.sleep(0);
+    }
+    const lines = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(lines).toEqual([{ at: good.recorded_at, w: { five_hour: [0.12, S("2026-11-07T05:00:00Z")], seven_day: [0.02, S("2026-11-12T00:00:00Z")] } }]);
+    expect(new CodexLimits(true, async () => good, file).history).toHaveLength(1);
   });
 });

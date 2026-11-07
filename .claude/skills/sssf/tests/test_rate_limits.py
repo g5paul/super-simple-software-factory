@@ -191,3 +191,46 @@ def test_execute_stops_a_claude_agent_before_it_spawns(tmp_path, private_registr
         agents.execute(run, phase, SimpleNamespace(prompt="x", previous=None))
     assert not spawned
     assert [(e.type, e.name) for e in events] == [("error", "rate_limit_stop")]
+
+
+def history() -> list[dict]:
+    target = account.history_path()
+    return [json.loads(line) for line in target.read_text().splitlines()] if target.exists() else []
+
+
+def test_each_kept_reading_goes_into_the_history(private_registry):
+    account.record(info(0.10), at="2026-10-29T16:00:00Z")
+    account.record(info(0.12), at="2026-10-29T16:05:00Z")
+    got = history()
+    assert [h["at"] for h in got] == ["2026-10-29T16:00:00Z", "2026-10-29T16:05:00Z"]
+    assert got[1]["w"]["five_hour"] == [0.12, NOW + 3600]
+    assert account.history_path() == private_registry.parent / "rate_limits_history.jsonl"
+
+
+def test_an_unchanged_reading_adds_a_line_only_hourly(private_registry):
+    account.record(info(0.10), at="2026-10-29T16:00:00Z")
+    account.record(info(0.10), at="2026-10-29T16:30:00Z")
+    account.record(info(0.10), at="2026-10-29T17:00:00Z")
+    assert [h["at"] for h in history()] == ["2026-10-29T16:00:00Z", "2026-10-29T17:00:00Z"]
+
+
+def test_an_older_reading_adds_no_history(private_registry):
+    account.record(info(0.50), at="2026-10-29T16:00:00Z")
+    account.record(info(0.10), at="2026-10-29T15:00:00Z")
+    assert len(history()) == 1
+
+
+def test_a_long_history_drops_lines_older_than_8_days(private_registry, monkeypatch):
+    monkeypatch.setattr(account, "HISTORY_PRUNE_AT", 3)
+    account.record(info(0.10), at="2026-10-01T16:00:00Z")
+    account.record(info(0.11), at="2026-10-28T16:00:00Z")
+    account.record(info(0.12), at="2026-10-29T15:00:00Z")
+    account.record(info(0.13), at="2026-10-29T16:00:00Z")
+    assert [h["at"] for h in history()] == ["2026-10-28T16:00:00Z", "2026-10-29T15:00:00Z", "2026-10-29T16:00:00Z"]
+
+
+def test_a_broken_history_never_stops_a_reading(private_registry):
+    account.history_path().parent.mkdir(parents=True, exist_ok=True)
+    account.history_path().mkdir()
+    account.record(info(0.10), at="2026-10-29T16:00:00Z")
+    assert account.latest()["recorded_at"] == "2026-10-29T16:00:00Z"

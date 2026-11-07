@@ -592,6 +592,20 @@ export interface SpendWindow {
   at_sample_usd: number | null;
   /** The recent pace: spend over the last hour for a 5-hour window, the last 24 for a 7-day one, inside the window. */
   pace: { usd_per_hour: number; hours: number };
+  /** How fast the window fills in percent; null without a live reading. */
+  use: WindowUse | null;
+}
+
+/** A window's use in percent per hour, from the readings kept over time. */
+export interface WindowUse {
+  /** Its utilization over the hours since it started; null in its first 15 minutes. */
+  since_start: { pct_per_hour: number; hours: number } | null;
+  /**
+   * Over the same span as the $ pace, or from the last reading before it when
+   * nothing was recording at its start. `usd` is the list-price spend over the
+   * same interval, so usd / points is what one percent cost.
+   */
+  recent: { from: string; hours: number; points: number; pct_per_hour: number; usd: number } | null;
 }
 
 /** One of the busiest 5-hour stretches in a span: what a 5-hour limit would have seen. */
@@ -680,6 +694,7 @@ export interface PlanWindowSpend {
   calls: number;
   /** Spend over the last hour for the 5-hour window, the last 24 for the weekly one. */
   pace: { usd_per_hour: number; hours: number };
+  use: WindowUse | null;
 }
 
 export interface ChatGptPlan {

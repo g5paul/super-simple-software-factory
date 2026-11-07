@@ -296,3 +296,29 @@ describe("the ChatGPT plan's windows", () => {
     expect(span.by_kind.map((r) => [r.key, r.est_usd])).toEqual([["interactive", 3], ["sssf", 2]]);
   });
 });
+
+describe("a window's use in percent", () => {
+  test("measures the 5-hour window from the history beside the reading, with what each percent cost", () => {
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"),
+      call({ id: "1", at: "2026-10-29T14:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "2", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" })
+      + call({ id: "3", at: "2026-10-29T15:30:00Z", session: "s", cwd: "/repos/yt" }));
+    sample(0.2);                                   // read at 15:50
+    writeFileSync(join(dir, "rate_limits_history.jsonl"),
+      `${JSON.stringify({ at: "2026-10-29T14:40:00Z", w: { five_hour: [0.12, RESET_5H] } })}\n`);
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    const one = estimateCost("claude-opus-5-5", { input: 10, output: 100, cacheRead: 1000, cacheWrite5m: 0, cacheWrite1h: 0 })!;
+    const recent = usage.window.use!.recent!;
+    expect(recent.from).toBe("2026-10-29T14:50:00.000Z");
+    expect(recent.points).toBeCloseTo(8);
+    expect(recent.pct_per_hour).toBeCloseTo(8);
+    expect(recent.usd).toBeCloseTo(2 * one);
+    // The window started at 12:30, 3h20m before the reading.
+    expect(usage.window.use!.since_start!.pct_per_hour).toBeCloseTo(20 / (10 / 3));
+  });
+
+  test("has none without a reading", () => {
+    const usage = new Account(transcripts, ratesFile).summary(NOW, new Set(), projectOf);
+    expect(usage.window.use).toBeNull();
+  });
+});

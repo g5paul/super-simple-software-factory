@@ -8,6 +8,7 @@ export type {
   PlanWindowSpend,
   ChatGptPlan,
   ChatGptLimits,
+  WindowUse,
   RunCaps,
   DaySpend,
   LiveSpend,

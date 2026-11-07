@@ -121,7 +121,7 @@
       "source": "adws/adw_modules/agent_cc.py"
     },
     "adws/adw_modules/agent_pi.py": {
-      "sha256": "f14325b798e7d642215f246cfccaa53dfe094114c10a79d50f0740b859f46147",
+      "sha256": "d957233888f1ab10726efea6d13f7f0c00392367018f1fd899392e1f8b033b39",
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
@@ -189,7 +189,7 @@
       "source": "adws/adw_modules/repo_settings.py"
     },
     "adws/adw_modules/rules.py": {
-      "sha256": "d8490d995414b5a20520144a9a7409dabbd72cc6fae443a56fa29300b587601b",
+      "sha256": "ffdcf349b1d4aa1f69de6e823ce310899ad37bf8e8edf77e04391598eca7141c",
       "source": "adws/adw_modules/rules.py"
     },
     "adws/adw_modules/runner.py": {
@@ -237,7 +237,7 @@
       "source": "adws/adw_modules/sssf_refuse.py"
     },
     "adws/adw_modules/sssf_rules.ts": {
-      "sha256": "2fbca11d8e91c8851849b6df078fad29a3d1f32a1a030bd66107854f0b56cb55",
+      "sha256": "c04f5cd7aca2c877fba093d312b6b91e199dff65c6e9d23a4220a4b738633812",
       "source": "adws/adw_modules/sssf_rules.ts"
     },
     "adws/adw_modules/tickets.py": {

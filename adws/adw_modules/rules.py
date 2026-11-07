@@ -24,6 +24,8 @@ SSSF's shell prefix (sssf_refuse.py) instead. The stream check stays as the
 backstop: a matching call whose result isn't that refusal, and that Claude Code
 didn't deny itself (a `permission_denied` event for its id), ran, and is a
 breach.
+
+So every `forbid` pattern must read the same in both languages: the settings fail to load on Python syntax JavaScript reads differently or can't compile (`_python_only`).
 """
 
 from __future__ import annotations
@@ -48,6 +50,80 @@ BUILTIN_RULE = "SSSF's secret-file rule"   # how a refusal or breach names secre
 _CLAUDE_REFUSED = re.compile(r"Exit code 126\n" + re.escape(REFUSED))
 # An agent refused this many times in one call is looping: stop the run.
 MAX_REFUSALS = 3
+
+# Python regex syntax that pi's extension, which reads a pattern as
+# new RegExp(pattern, "m") (sssf_rules.ts), can't compile or reads
+# differently: (what it is, how to write it portably). Each one is shown
+# disagreeing under bun in tests/test_rules_portable.py.
+_ESCAPES = {
+    "A": ("`\\A`", "use `^`; with the m flag both read it as the start of a line"),
+    "Z": ("`\\Z`", "use `$`"),
+    "z": ("`\\z`", "use `$`"),
+    "a": ("`\\a`", "use `\\x07`"),
+    "U": ("a `\\U` escape", "use `\\xhh`, `\\uhhhh` or the character itself"),
+    "N": ("a `\\N{...}` escape", "use `\\xhh`, `\\uhhhh` or the character itself"),
+}
+_GROUPS = [   # what follows "(?", checked in order
+    ("P<", "a named group `(?P<name>...)`", "use a plain group `(...)`"),
+    ("P=", "a named backreference `(?P=name)`", "use a plain group and a numbered backreference such as `\\1`"),
+    ("#", "a comment group `(?#...)`", "drop the comment"),
+    ("(", "a conditional group `(?(...)...)`", "use alternation with `|`"),
+    (">", "an atomic group `(?>...)`", "use `(?:...)`"),
+]
+_PORTABLE_GROUPS = (":", "=", "!", "<=", "<!")
+_FLAGS = ("an inline flag group such as `(?i)` or `(?i:...)`",
+          "spell the flag out, e.g. `[Gg]it` for i, no spaces for x, `[\\s\\S]` for s's `.`")
+_POSSESSIVE = ("a possessive quantifier such as `++` or `*+`", "drop the trailing `+`")
+_EMPTY_MIN = ("a quantifier with no minimum, `{,n}`", "write `{0,n}`")
+_CLASS_BRACKET = ("a character class opening with `]`, such as `[]x]`", "escape it: `[\\]x]`")
+_BRACES = re.compile(r"\{(\d*)(,\d*)?\}")
+
+
+def _python_only(pattern: str) -> Optional[tuple[str, str]]:
+    """(construct, portable spelling) of the first Python-only syntax in a valid pattern, or None."""
+    i, n, in_class = 0, len(pattern), False
+    while i < n:
+        c = pattern[i]
+        if c == "\\":
+            if i + 1 < n and pattern[i + 1] in _ESCAPES:
+                return _ESCAPES[pattern[i + 1]]
+            i += 2
+        elif in_class:
+            in_class = c != "]"
+            i += 1
+        elif c == "[":
+            i += 1
+            if pattern[i:i + 1] == "^":
+                i += 1
+            if pattern[i:i + 1] == "]":
+                return _CLASS_BRACKET
+            in_class = True
+        elif c == "(" and pattern[i + 1:i + 2] == "?":
+            rest = pattern[i + 2:]
+            if rest.startswith(_PORTABLE_GROUPS):
+                i += 2
+                continue
+            for prefix, construct, fix in _GROUPS:
+                if rest.startswith(prefix):
+                    return construct, fix
+            return _FLAGS
+        elif c in "*+?":
+            if pattern[i + 1:i + 2] == "+":
+                return _POSSESSIVE
+            i += 1
+        elif c == "{":
+            m = _BRACES.match(pattern, i)
+            if not m:
+                i += 1
+                continue
+            if not m.group(1) and m.group(2) is not None:
+                return _EMPTY_MIN
+            if m.group(1) and pattern[m.end():m.end() + 1] == "+":
+                return _POSSESSIVE
+            i = m.end()
+        else:
+            i += 1
+    return None
 
 
 class RuleBreach(RuntimeError):
@@ -87,6 +163,12 @@ class AgentRule(BaseModel):
                 re.compile(pattern)
             except re.error as error:
                 raise ValueError(f"forbid pattern {pattern!r} is not a valid regex: {error}")
+            found = _python_only(pattern)
+            if found:
+                construct, fix = found
+                raise ValueError(f"forbid pattern {pattern!r} uses {construct}, which pi's extension (sssf_rules.ts) "
+                                 f"reads as a JavaScript regex and can't compile or reads differently, so pi wouldn't "
+                                 f"refuse the command. Write it portably: {fix}.")
         return patterns
 
 

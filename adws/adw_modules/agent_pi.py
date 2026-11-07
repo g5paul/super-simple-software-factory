@@ -1,4 +1,4 @@
-"""Pi coding agent interface — v1's only coding agent.
+"""Pi coding agent interface.
 
 Runs `pi -p --mode json` and tails its JSONL stdout line by line, forwarding
 each event to a callback WHILE the agent works (the streaming crack, solved

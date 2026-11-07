@@ -521,7 +521,8 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
     (`interface.HARNESS`, `RULE_EVENT_TYPES`). On pi, Claude Code's
     `permission_denied`, `user` results and `assistant` announcements count for
     nothing; on Claude Code, pi's results and announcements count for nothing.
-    Every event still reaches the tracker. An interface with no `HARNESS` (a
+    Every event still reaches the tracker. A `type` that isn't a string is none
+    of the harness's types. An interface with no `HARNESS` (a
     test's stand-in) reads every type."""
     is_builtin = lambda rule: any(rule is u for u in uncounted)
     tracker = interface.ToolCallTracker()
@@ -568,7 +569,8 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
                                        builtin=is_builtin(rule))
 
     def forward(event: dict) -> None:
-        if harness is None or event.get("type") in RULE_EVENT_TYPES[harness]:
+        etype = event.get("type")
+        if harness is None or (isinstance(etype, str) and etype in RULE_EVENT_TYPES[harness]):
             check(event)
         # The call's span rides the columns; duration_ms stays in the payload as
         # the interface's own number.

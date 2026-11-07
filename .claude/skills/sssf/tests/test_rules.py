@@ -861,6 +861,25 @@ def test_a_forged_announcement_of_the_other_harness_counts_for_nothing():
     assert forward.ended() is None
 
 
+@pytest.mark.parametrize("interface", [agent_pi, agent_cc], ids=["pi", "claude_code"])
+@pytest.mark.parametrize("etype", [["user"], {"type": "user"}, 5], ids=["list", "dict", "number"])
+def test_an_event_whose_type_is_not_a_string_skips_the_rule_reads(interface, etype, monkeypatch):
+    event = {**claude_call("t1"), **announce("c1"), "type": etype}
+    forward, _ = real_forwarder(interface, PUSH)
+    forward(event)                       # the real tracker, and nothing raises
+    assert forward.ended() is None
+    read, seen = [], []
+    monkeypatch.setattr(rules, "denied", lambda e: read.append(e) or [])
+    spy = SimpleNamespace(HARNESS=interface.HARNESS,
+                          ToolCallTracker=lambda: SimpleNamespace(observe=lambda e: seen.append(e) or []))
+    forward, _ = real_forwarder(spy, PUSH)
+    forward(event)
+    assert read == [] and seen == [event]
+    own = {"type": sorted(agents.RULE_EVENT_TYPES[interface.HARNESS])[0]}
+    forward(own)
+    assert read == [own]                 # the spy does see a read of the harness's own type
+
+
 def test_honest_streams_read_the_same_on_the_real_interfaces():
     forward, events = real_forwarder(agent_pi)
     forward(announce("c1"))

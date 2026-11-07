@@ -25,7 +25,10 @@ backstop: on pi a matching call counts as refused only when pi's result shows
 it never ran the call (`blocked`) and reads as the refusal; on Claude Code when
 its result is the prefix's refusal or Claude Code denied it itself (a
 `permission_denied` event for its id). Anything else is a breach, and so is a
-matching call still waiting for its result when the agent ends.
+matching call still waiting for its result when the agent ends. The check
+reads only the running harness's own event types (`agents.RULE_EVENT_TYPES`),
+so a line of the other harness's type that a command writes to the stream
+counts for nothing.
 
 So every `forbid` pattern must read the same in both languages: the settings fail to load on Python syntax JavaScript reads differently or can't compile (`_python_only`).
 """

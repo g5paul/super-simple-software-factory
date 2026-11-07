@@ -25,6 +25,14 @@ from .utils import new_id
 
 JSON_FIX_ATTEMPTS = 2      # continue-with-correction attempts for malformed JSON
 
+# The event types each harness writes that the stream check reads for rules.
+# An event of another type, which only a command writing to the harness's
+# stdout can add, counts for nothing.
+RULE_EVENT_TYPES = {
+    "pi": frozenset({"message_end", "tool_execution_start", "tool_execution_end"}),
+    "claude_code": frozenset({"assistant", "user", "system"}),
+}
+
 
 class GateFailure(RuntimeError):
     pass
@@ -507,14 +515,23 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
     .env never ends a run; the cost caps bound a loop. A call by such a rule
     that the stream check doesn't count as refused still
     raises RuleBreach. A RuleBreach for a rule in `uncounted` names it as
-    SSSF's secret-file rule."""
+    SSSF's secret-file rule.
+
+    The rule reads cover only the event types of the harness `interface` runs
+    (`interface.HARNESS`, `RULE_EVENT_TYPES`). On pi, Claude Code's
+    `permission_denied`, `user` results and `assistant` announcements count for
+    nothing; on Claude Code, pi's results and announcements count for nothing.
+    Every event still reaches the tracker. A `type` that isn't a string is none
+    of the harness's types. An interface with no `HARNESS` (a
+    test's stand-in) reads every type."""
     is_builtin = lambda rule: any(rule is u for u in uncounted)
     tracker = interface.ToolCallTracker()
+    harness = getattr(interface, "HARNESS", None)   # agent_pi or agent_cc; None only for a test's stand-in
     pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
     denied: set[str] = set()            # call ids Claude Code denied itself (permission_denied)
     refusals = 0
 
-    def forward(event: dict) -> None:
+    def check(event: dict) -> None:
         nonlocal refusals
         denied.update(rules.denied(event))
         pi_blocked = set(rules.blocked(event))
@@ -550,6 +567,11 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
             if refusals >= rules.MAX_REFUSALS:
                 raise rules.RuleBreach(agent_name, rule, pattern, command, refusals=refusals,
                                        builtin=is_builtin(rule))
+
+    def forward(event: dict) -> None:
+        etype = event.get("type")
+        if harness is None or (isinstance(etype, str) and etype in RULE_EVENT_TYPES[harness]):
+            check(event)
         # The call's span rides the columns; duration_ms stays in the payload as
         # the interface's own number.
         for record in tracker.observe(event):

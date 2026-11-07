@@ -16,7 +16,7 @@ Location comes from `observability.db` in `sssf.config.yaml`, default `adws/adw_
 |---|---|
 | `phase_start` | a `run.phase(...)` block is entered |
 | `agent_start` | a coding agent is spawned or resumed for `ph.call(...)` |
-| `tool_call` | a tool (`read`, `bash`, `edit`, `write`) returns — **one event per real call**, named `bash: ls -la src`, payload `{tool, tool_call_id, args, result_snippet, ok, duration_ms, agent}` |
+| `tool_call` | a tool returns, under the harness's own name: pi's `read`, `bash`, `edit`, `write`, or Claude Code's `Read`, `Bash`, `Edit`, `Grep` and the rest. **One event per real call**, named `bash: ls -la src`, payload `{tool, tool_call_id, args, result_snippet, ok, duration_ms, agent}` |
 | `handoff` | an envelope crosses from one agent to the next |
 | `gate_pass` | a gate found no failed checks — payload carries `attempt`, `checks` (the evidence), and an empty `violations` |
 | `gate_fail` | a gate found at least one failed check — payload carries `attempt`, `checks`, and `violations` |
@@ -43,18 +43,20 @@ The gate event payload carries `attempt` too, so the `gate_results` table and th
 
 **A `tool_call` is the one event that spans time**, so it fills both `started_at` and `ended_at` on the row — the tool's real start and return. Every other type is a point in time: `started_at` is when it was recorded and `ended_at` stays NULL. Lay tool calls out on a time axis from those columns, never by parsing `payload_json` (`duration_ms` is in the payload too, as pi's own number, but it is a convenience, not the source for layout).
 
-**Streaming is solved by construction.** `agent_pi.py` tails pi's JSONL stdout line by line and the tracer inserts each event into `sssf.db` **while the agent is still working** — never batched at phase end (verified in the first smoke run: tool calls visible mid-run). Everything downstream is a poll → render.
+**Streaming is solved by construction.** `agent_pi.py` and `agent_cc.py` each tail their agent's JSONL stdout line by line, and fold it into one `tool_call` record of the same shape per call. The tracer inserts each event into `sssf.db` **while the agent is still working**, never batched at phase end. The first smoke run showed tool calls mid-run. Everything downstream is a poll → render.
 
 ## Tables
 
 ```sql
 sessions (
   adw_id        TEXT PRIMARY KEY,
+  adw_name      TEXT,              -- ADW script(s) run, e.g. "adw_plan + adw_build_test"
   request       TEXT,              -- the engineer's ask
   status        TEXT,              -- running | success | fail
   engineer      TEXT,
   started_at    TEXT, ended_at TEXT,
-  total_tokens  INTEGER, total_cost REAL
+  total_tokens  INTEGER, total_cost REAL,
+  archived      INTEGER DEFAULT 0  -- review triage, set by the UI, never by a run
 );
 
 phases (
@@ -112,7 +114,8 @@ processes (                        -- adw_id → pid, so a stuck run can be stop
   name          TEXT,               -- '' for the adw, the agent name for a child
   pid           INTEGER,
   command       TEXT,               -- what the pid WAS; pids get recycled, so verify before killing
-  started_at    TEXT, ended_at TEXT -- ended_at NULL = believed alive
+  started_at    TEXT, ended_at TEXT, -- ended_at NULL = believed alive
+  host          TEXT                -- the pid only means something on this host
 );
 
 agent_sessions (                   -- the queryable mirror of agent_map.json
@@ -127,7 +130,7 @@ agent_sessions (                   -- the queryable mirror of agent_map.json
 );
 ```
 
-**A hung agent emits nothing**, which is exactly when you need its pid: no events, no tokens, no output to read. `processes` is the only table that can answer "what is this run running, and how do I stop it" — `just procs <adw_id>` lists what is live, `just kill <adw_id>` stops children before the parent, and both verify the recorded `command` still matches the pid before signalling it. A killed run finalizes its own trace: SIGTERM and SIGINT are turned into `SystemExit` in `session.ensure`, so the session lands on `fail` with its process rows closed instead of reading `running` forever.
+**A hung agent emits nothing**, which is exactly when you need its pid: no events, no tokens, no output to read. `processes` is the only table that can answer "what is this run running, and how do I stop it". `just procs <adw_id>` lists what is live, and `just kill <adw_id>` stops the chain first, so a retry can't start, then its agents, and both verify the recorded `command` still matches the pid before signalling it. A killed run finalizes its own trace: SIGTERM and SIGINT are turned into `SystemExit` in `session.ensure`, so the session lands on `fail` with its process rows closed instead of reading `running` forever.
 
 **Derived, never stored:** phase durations (`ended_at − started_at`), session phase-progress (query `phases` by `adw_id`), lane layout (`kind` + `owner`).
 
@@ -135,24 +138,61 @@ Phase status invariants: `queued` only for manifest-declared phases not yet ente
 
 ## WAL pragmas
 
-Open **every** connection — writer and reader — with:
+Open **every** connection, writer and reader, with:
 
 ```sql
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
-PRAGMA busy_timeout=5000;
+PRAGMA busy_timeout=30000;   -- tracer.py; the visualizer's connections use 5000
 ```
 
-WAL allows readers during writes. Writers are the tracers of running ADW processes; concurrent writers are fine given one small transaction per event plus `busy_timeout`. The visualizer reads on a readonly connection with exactly one exception: archiving a session (`POST /api/sessions/:adw_id/archive`) opens a second connection to set `sessions.archived`. That flag is review triage — it says a human has looked at the run — so it is the reader's state living on the row, and no tracer ever writes or reads it.
+The tracer waits longer because parallel worktree runs share the db, and a phase should wait out another run's write rather than fail.
+
+WAL allows readers during writes. Writers are the tracers of running ADW processes; concurrent writers are fine given one small transaction per event plus `busy_timeout`. The visualizer reads on a readonly connection with exactly one exception: archiving a session (`POST /api/projects/:project/sessions/:adw_id/archive`) opens a second connection to set `sessions.archived`. That flag is review triage, saying a human has looked at the run, so it is the reader's state living on the row, and no tracer ever writes or reads it.
 
 ## Polling contract
 
 **The UI never receives pushes.** No ingest endpoint, no WebSocket, no backfill or dedup logic.
 
-Live view polls on a rowid cursor every `observability.poll_ms` (default 500):
+Live view polls on a rowid cursor every 500 ms. The interval is fixed in the UI. `observability.poll_ms` has no effect.
 
 ```sql
 SELECT ... FROM events WHERE adw_id = ? AND rowid > ? ORDER BY rowid LIMIT 500;
 ```
 
 Keep the highest `rowid` returned as the next cursor. History is **the same queries** with filters, lazy-paged as the engineer scrolls or drills in — one mechanism serves both live and past runs, which is why there is no separate replay path.
+
+## Dashboard endpoints
+
+`apps/visualizer/server/index.ts` serves these. Anything else outside `/api/` gets the built UI.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/health` | `ok`, and whether the server shows every registered repo |
+| `GET /api/projects` | each registered repo, its db, and its session counts |
+| `GET /api/account` | the Claude account's usage windows and where its spend went, plus pi and ChatGPT use |
+| `GET /api/machine/day` | every repo's last 24 hours against `max_daily_cost` in `~/.config/sssf/limits.yaml` |
+| `GET /api/machine/sandbox` | what VM runs used of each provider's free allowance |
+| `GET /api/projects/:project/health` | the db path, journal mode and session count |
+| `GET /api/projects/:project/day` | the last 24 hours against `repo.yaml`'s `max_daily_cost` |
+| `GET /api/projects/:project/live` | what live runs spend together against `max_live_cost` |
+| `GET /api/projects/:project/trials/:trial` | a trial's attempts and the panel's scorecard |
+| `GET /api/projects/:project/rosters` | every scored trial, per roster file |
+| `GET /api/projects/:project/sessions` | session summaries, `?limit=` default 200 |
+| `GET /api/projects/:project/sessions/:adw_id` | one session's detail |
+| `POST /api/projects/:project/sessions/:adw_id/archive` | sets `archived`, body `{"archived": false}` to undo |
+| `GET /api/projects/:project/sessions/:adw_id/events` | events after `?after=` rowid, `?limit=` default 500 |
+| `GET /api/projects/:project/sessions/:adw_id/envelopes` | the session's envelopes |
+| `GET /api/projects/:project/sessions/:adw_id/gates` | the session's gate results |
+| `GET /api/projects/:project/sessions/:adw_id/agents/:agent/prompts` | the prompts the agent was sent, read from the session dir |
+
+## Dashboard environment
+
+| Variable | Effect |
+|---|---|
+| `SSSF_DB` | the trace db when `--db` isn't passed |
+| `SSSF_OBS_PORT`, `PORT` | pin the port, and a taken pinned port is an error. Unset, the server takes the first free port from 4600. |
+| `SSSF_REGISTRY` | the project registry file. Default `$XDG_CONFIG_HOME/sssf/projects.json`, or `~/.config/sssf/projects.json`. |
+| `SSSF_CODEX_LIMITS` | `1` reads the ChatGPT plan's usage windows through `codex app-server`. Off by default. |
+| `CLAUDE_CONFIG_DIR` | where Claude Code's transcripts are read, `<dir>/projects`. Default `~/.claude`. |
+| `PI_CODING_AGENT_DIR` | where pi's sessions are read, `<dir>/sessions`. Default `~/.pi/agent`. |

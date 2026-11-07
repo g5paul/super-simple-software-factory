@@ -8,9 +8,9 @@ Generate `sssf.config.yaml` — the agent roster for a target repo.
 uv run .claude/skills/sssf/scripts/make_config.py
 ```
 
-Writes `adws/adw_sssf_config/sssf.config.yaml` — creating the directory if needed — with the starter agents (planner, builder, scout, reviewer, documenter) wired to the prompt files `/sssf install` stamped into `adws/adw_data/prompt_engineering/`. That path is the default every ADW and the justfile look for; `--config` overrides it. `make_config.py` refuses to overwrite an existing config unless you pass `--force`, so retuning an existing roster is a hand edit — see `update_config.md`.
+Writes `adws/adw_sssf_config/sssf.config.yaml`, creating the directory if needed, with the eight starter agents, planner, builder, scout, reviewer, ticket_builder, standards_reviewer, spec_reviewer and documenter, wired to the prompt files `/sssf install` stamped into `adws/adw_data/prompt_engineering/`. That path is the default every ADW and the justfile look for; `--config` overrides it. `make_config.py` refuses to overwrite an existing config unless you pass `--force`, so retuning an existing roster is a hand edit. See `update_config.md`.
 
-`--coding-agent claude_code` writes the Claude Code roster instead: planner and reviewer on Opus with high thinking, builder on Sonnet, scout and documenter on Haiku. See `references/config.md`, section "Claude Code".
+`--coding-agent claude_code` writes the Claude Code roster instead: planner, reviewer, standards_reviewer and spec_reviewer on Opus with high thinking, builder and ticket_builder on Sonnet, scout and documenter on Haiku. See `references/config.md`, section "Claude Code".
 
 `--chatgpt` writes the ChatGPT roster: still Pi, with gpt-6.1-sol for the planner, builders, and reviewers, and gpt-6.1-terra for the scout and documenter. See `references/config.md`, section "ChatGPT".
 
@@ -54,7 +54,7 @@ agents:
       - bash
 ```
 
-Every agent entry merges over `defaults`, so an entry only states what differs. Pi's builtin tools are `read`, `bash`, `edit`, `write` — a read-only recon agent gets `[read, bash]`; a builder omits `tools` altogether.
+Every agent entry merges over `defaults`, so an entry only states what differs. Pi has seven builtin tools: `read`, `bash`, `edit`, `write`, `grep`, `find` and `ls`. The starter `defaults` turn on all seven. A read-only recon agent drops `edit`, and an agent that inherits `defaults` can omit `tools` altogether.
 
 ## After generating
 

@@ -21,9 +21,31 @@ Extend `adws/adw_modules/` with new low-level logic.
 | `session.py` | mint or join `adw_id`, maintain `agent_map.json`, create session dirs incl. `context_handoff/` |
 | `tracer.py` | append JSONL **and** insert every event into `sssf.db` as it happens |
 | `console.py` | the terminal narrative — every line printed also lands in the db as a `log` event, so the UI reads the same story; plain sequential lines, no spinners |
-| `console.py` | the rich stdout reporter — every line printed is ALSO traced as a `log` event (`{message, level}`) so the terminal and the swim-lane UI tell the same story |
 | `git_helper.py` | branch, status, diff, commit — the raw plumbing `changes.py` composes |
 | `utils.py` | safe subprocess env, logging, `resolve_prompt` |
+| `plan_checks.py` | the plan's own checks, such as a validation script the plan requires, run as code beside `quality.py`'s blocks |
+| `quality.py` | the repo's fixed commands: test, lint, format, typecheck, build. The one module a repo edits, and `--update` keeps it |
+| `permissions.py` | what an agent may change: checks `writes:` and `protected_files` after every agent call and rolls back what it wasn't allowed to change |
+| `rules.py` | the repo's `agent_rules` from `repo.yaml`, checked against every shell command an agent runs |
+| `sssf_refuse.py` | refuse mode for `agent_rules` and the secret-file rule on Claude Code agents: refuses a matching command before it runs |
+| `sssf_rules.ts` | the same refuse mode as a pi extension, loaded into every pi agent; also blocks `read`, `grep`, `find` and `ls` on a secret file |
+| `secret_files.py` | the files agents must not read: `.env` and its kin, plus `repo.yaml`'s `secret_files` |
+| `repo_settings.py` | loads `adws/adw_sssf_config/repo.yaml`, the repo's rules that no roster swap can change |
+| `budget.py` | cost caps that stop spending before an unattended run gets expensive |
+| `account.py` | the Claude account's 5-hour and 7-day usage windows, as Claude Code last reported them |
+| `prices.py` | Claude's list prices from `prices.json`, for a Claude Code call killed before it reported its own cost |
+| `silence.py` | stops an agent that writes nothing for `repo.yaml`'s `max_silence_minutes` |
+| `kill.py` | stops a run by `adw_id`: the chain first, then its coding agents, found from the trace's `processes` |
+| `worktree.py` | a run on its own `sssf/<adw_id>` branch in its own worktree, with `--worktree` |
+| `sandbox.py` | where a run's tree lives; every process and file read SSSF does in it goes through `current()` |
+| `sandbox_remote.py` | a run's tree in a remote VM, with a clone of the run's branch at the host worktree's path |
+| `sandbox_vercel.py`, `sandbox_e2b.py` | make, refresh and delete a Vercel Sandbox or E2B VM for `sandbox_remote.py` |
+| `sandbox_usage.py` | what remote VM runs have used of each provider's free allowance, from `sandbox_end` events |
+| `obs_relay.py`, `sssf_obs_relay.cjs` | the host and VM sides of the relay that carries a pi agent's obs events out of a VM |
+| `tickets.py` | reads a feature folder written by `to-spec` and `to-tickets` for `adw_tickets.py` |
+| `trial.py` | trials: one request, several rosters, a panel's verdict, the best one merged |
+
+Guard code is SSSF's limit on agents: `rules.py`, `sssf_refuse.py`, `sssf_rules.ts`, `secret_files.py`, `permissions.py`, `agent_cc.py`, `agent_pi.py` and `gates.py`. A change to any of them goes through the SSSF hub's guard-change chain, not a local edit.
 
 ## Never `print()`
 

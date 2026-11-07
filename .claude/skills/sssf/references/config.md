@@ -43,14 +43,15 @@ agents:
 | Field | Type | Meaning |
 |---|---|---|
 | `coding_agent` | `pi` \| `claude_code` | Which interface runs the agent: `agent_pi.py` or `agent_cc.py`. See [Claude Code](#claude-code-coding_agent-claude_code) for how the other fields map onto `claude`. |
-| `model` | string | Model id. For Pi, any id registered in `~/.pi/agent/models.json`. Default `gemini-3.6-flash`. |
-| `thinking` | enum | Reasoning effort — see below. Default `medium`. |
+| `model` | string | Model id. For Pi, any id registered in `~/.pi/agent/models.json`. Default `google/gemini-3.6-flash`. |
+| `thinking` | string | Reasoning effort, see [Thinking levels](#thinking-levels). SSSF does not check the value. Pi gets it as written, and Claude Code maps a value it doesn't know to `medium`. Default `medium`. |
 | `color` | hex string | Lane color for every agent that does not set its own. Default empty — the visualizer falls back to its own palette. |
 | `harness_engineering` | list[string] | Pi extension paths. Rejected on a `claude_code` agent. SSSF sets `OBS_NAME` to the agent's name for each Pi call, so an observability extension that reads it labels the session `builder` or `reviewer`. It also puts each run in its own pool, `OBS_POOL=sssf-<adw_id>`, unless you set `OBS_POOL` yourself, and adds the tags `sssf` and `adw-<adw_id>` to any `OBS_TAG` you set. Under `--sandbox vercel|e2b`, see [pi extensions in a VM](#pi-extensions-in-a-vm). |
 | `tools` | list[string] | Roster-wide tool allowlist. Every agent that omits its own `tools` inherits this. Unset = all tools usable. |
-| `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`: the same entry, or a path inside a protected directory. A broad glob such as `**/*.md` does not count. Default: `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py` — an agent must not be able to edit the machinery that decides whether its work passed — `specs/`, which is on record once `commit_plan` lands, and what Matt Pocock's skills write with the engineer: `.scratch/` (specs and tickets), `GLOSSARY.md`, `GLOSSARY-MAP.md`, and `docs/adr/`. |
+| `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`: the same entry, or a path inside a protected directory. A broad glob such as `**/*.md` does not count. Default in code: `adws/adw_modules/`, `adws/adw_sssf_config/` and `adws/adw_*.py`, so an agent can't edit the machinery that decides whether its work passed, and `specs/`, which is on record once `commit_plan` lands. The starter `sssf.config.yaml` lists those four and adds what Matt Pocock's skills write with the engineer: `.scratch/` for specs and tickets, `GLOSSARY.md`, `GLOSSARY-MAP.md` and `docs/adr/`. A roster that sets the key replaces the code default, so list all of them. |
+| `writes` | list[string] | The roster-wide default for each agent's `writes`. `load_config` copies it into every agent that doesn't set its own. Unset means each agent without `writes` is unrestricted, except for `protected_files`. |
 | `data_dir` | path | Runtime home. Sessions land at `{data_dir}/sessions/{adw_id}/{agent_name}/`. Default `adws/adw_data`. |
-| `rate_limit_stop` | fraction or `null` | Claude Code agents only. Before an agent starts, SSSF reads the account's last reported usage and stops the run if the 5-hour or 7-day window is at or over this fraction, with the time the window resets. A plan without a 5-hour window, such as a verified Ultra account, is checked on its 7-day window alone. It also stops a run when the account has moved onto usage credits, which bill at API rates once a Pro, Max or Ultra plan's limit is used up: before an agent starts, if the last report says so, and during a call, by killing the agent the moment Claude Code reports the switch. Default `0.8`. `null` turns off both checks, and lets runs spend credits. Each `claude` send records the report in `rate_limits.json` beside the project registry, so every repo sees the same account, and `just obs-all` shows it. Interactive sessions don't write a report, so the sample is as fresh as the last SSSF send. |
+| `rate_limit_stop` | fraction or `null` | Claude Code agents only. Before an agent starts, SSSF reads the account's last reported usage and stops the run if the 5-hour or 7-day window is at or over this fraction, with the time the window resets. A plan without a 5-hour window, such as a verified Ultra account, is checked on its 7-day window alone. It also stops a run when the account has moved onto usage credits, which bill at API rates once a Pro, Max or Ultra plan's limit is used up: before an agent starts, if the last report says so, and during a call, by killing the agent the moment Claude Code reports the switch. Default `0.8`. `null` turns off both checks, and lets runs spend credits. Each `claude` send records the report in `rate_limits.json` beside the project registry, so every repo sees the same account, and `just obs-all` shows it. Interactive sessions add readings too once the engineer sets SSSF's statusline, `scripts/statusline.py` in the skill. Claude Code hands it the same windows after every reply, and it merges them into `rate_limits.json`. Without it, the sample is as fresh as the last SSSF send. |
 | `max_run_cost` | dollars or `null` | Before every send, retries and corrections included, SSSF compares what the run has spent with this cap and stops the run at or over it. Spend comes from the coding agent's own cost reports, at list prices, so on a subscription login it's an estimate of usage, not a bill. A run can go over by one call. The stop is recorded as `budget_stop`, and the message says how to look at, keep, or drop any uncommitted work. Default `5.0`. `null` turns it off. |
 | `max_call_cost` | dollars or `null` | The roster-wide default for each agent's `max_call_cost`. Default `null`. |
 
@@ -59,7 +60,7 @@ agents:
 | Field | Type | Meaning |
 |---|---|---|
 | `db` | path | SQLite trace db. `tracer.py` writes it directly; the visualizer polls it. Default `adws/adw_data/sssf.db`. |
-| `poll_ms` | int | Visualizer live-poll cadence in ms. History uses the same queries, lazy-paged. Default `500`. |
+| `poll_ms` | int | Has no effect. Nothing reads it, and the visualizer polls every 500 ms. The field stays so older configs still load. Default `500`. |
 
 ### `agents[]`
 
@@ -362,6 +363,23 @@ This fails quietly. The extension still loads, the run still succeeds, and the t
 ```
 
 Rule: **every entry in `harness_engineering` that registers a tool must have that tool name added to the agent's `tools` list.** Adding an extension is therefore a two-line change, never one. The alternative is dropping the `tools` key *and* leaving `defaults.tools` unset so the agent resolves to `None` (all tools) — but with a roster-wide `defaults.tools` in place, that escape hatch is closed; naming the tool is the only path.
+
+## Repo settings in `repo.yaml`
+
+`adws/adw_sssf_config/repo.yaml` holds the rules a repo keeps whatever roster runs, and every clone follows it. `repo_settings.py` rejects an unknown key, so a misspelled one fails the run. The SSSF repo's `docs/guide/customize.md` covers the same keys for engineers.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `merge` | `any` | How `just merge` lands a `--worktree` run. `ff_only` refuses anything but a fast-forward. `SSSF_MERGE_FF_ONLY` in `.env` overrides it on one machine. |
+| `max_worktree_runs` | `2` | How many `--worktree` runs may be alive at once. Set `1` if the checks bind a fixed port or share a database. |
+| `max_live_cost` | off | Dollars every live run in the repo may spend together, checked at launch and before each agent call. |
+| `max_daily_cost` | off | Dollars the repo's runs may spend in a rolling 24 hours, finished runs included. |
+| `sandbox` | `none` | Where a chain that takes `--sandbox` runs new work when the flag is left out: `none`, `vercel` or `e2b`. A resume stays where its run started. |
+| `max_silence_minutes` | `15` | See [below](#agents-that-go-quiet--max_silence_minutes). |
+| `worktree_setup` | `[]` | Shell commands run in order from a worktree's root before its first agent, such as `bun install --frozen-lockfile`. |
+| `worktree_setup_timeout` | `600` | Seconds each setup command may take before the run stops. |
+| `agent_rules` | `[]` | See [Rules for every agent](#rules-for-every-agent--agent_rules). |
+| `secret_files`, `agent_env` | `[]` | See [Secret files](#secret-files--secret_files-and-agent_env). |
 
 ## Agents that go quiet — `max_silence_minutes`
 

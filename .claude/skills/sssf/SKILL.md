@@ -6,7 +6,7 @@ argument-hint: "[install | create adw | run adw | update config | ...]"
 
 # Super Simple Software Factory (SSSF)
 
-Reusable combination of **agents plus code**: deterministic Python ADW scripts own sequencing, retries, and acceptance; coding agents (Pi in v1) work inside bounded phases; typed JSON envelopes carry context between them; everything streams into SQLite for the polled visualizer. Agent proposes, code disposes.
+Reusable combination of **agents plus code**: deterministic Python ADW scripts own sequencing, retries, and acceptance; coding agents (Pi or Claude Code) work inside bounded phases; typed JSON envelopes carry context between them; everything streams into SQLite for the polled visualizer. Agent proposes, code disposes.
 
 ## Startup
 
@@ -71,7 +71,7 @@ Deep specs, when needed: [references/config.md](references/config.md) · [refere
 1. **Validate before running** — every ADW declares `REQUIRED_AGENTS` and calls `agents.validate()` first; a missing/misnamed agent fails before anything spawns.
 2. **Typed outputs only** — every agent call pairs with a concrete `EnvelopeBase` subclass in `adw_modules/data_types.py`; parse failures re-prompt the same session (context intact), never restart.
    **The output contract is a synced triad**: (a) the type in `data_types.py`, (b) the JSON example in the agent's `user.md` `## Report` section, (c) `output_type=` at every call site. These are ONE contract — change any one, update all three in the same edit (grep the type name to find every call site).
-3. **Gates validate claims, not guesses** — `gate(envelope, run) -> list[str]` violations; failures return to the same session as corrections.
+3. **Gates validate claims, not guesses**: `gate(envelope, run) -> GateReport`, one check per item it looked at; failed checks are the violations, and they return to the same session as corrections.
 4. **Four-param rule** — any function with more than 4 parameters takes one concrete data type instead (`AgentCall`, `PhaseParams` are the pattern).
 5. **One agent, one prompt, one purpose** — identity lives in `system.md`; task shape (user prompt + output type) lives at the call site.
 6. **ADW scripts stay thin** — all low-level logic lives in `adw_modules/`.
@@ -82,4 +82,4 @@ Deep specs, when needed: [references/config.md](references/config.md) · [refere
 
 ## v1 scope
 
-Two coding agents: Pi (`coding_agent: pi`, the default, model `gemini-3.6-flash` via openrouter, thinking `medium`) and Claude Code (`coding_agent: claude_code`, `anthropic/*` models on the operator's subscription; see `references/config.md`). The visualizer app ships in a later pass — observe via sqlite queries until then.
+Two coding agents: Pi (`coding_agent: pi`, the default, default model `google/gemini-3.6-flash` with some agents on their own, thinking `medium`) and Claude Code (`coding_agent: claude_code`, `anthropic/*` models on the operator's subscription; see `references/config.md`). Watch runs in the dashboard with `just obs`, or `just obs-all` for every repo SSSF is installed in; `references/observability.md` covers the events and tables behind it.

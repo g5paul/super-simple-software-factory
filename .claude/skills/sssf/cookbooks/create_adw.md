@@ -6,7 +6,7 @@ Compose a new ADW script — a thin, deterministic Python workflow over agents a
 
 Answer four questions, in order:
 
-1. **What agents, in what order?** Pick from the roster (`adws/adw_sssf_config/sssf.config.yaml`). The starter six cover most chains:
+1. **What agents, in what order?** Pick from the roster (`adws/adw_sssf_config/sssf.config.yaml`). The eight starter agents cover most chains:
 
 | Agent | Use when | Output type | Typical gates |
 |---|---|---|---|
@@ -16,6 +16,9 @@ Answer four questions, in order:
 | `reviewer` | the change must be confirmed to BE what was asked for | `ReviewOutput` | `artifacts_exist`, `verdict_consistent` |
 | *(no tester)* | verifying that it RUNS is a `kind="code"` phase over `quality.py`, not an agent | `QualityResult` → `as_envelope` | the exit code is the check |
 | `documenter` | finished work needs a write-up (runs after a build, off the diff) | `DocumentOutput` | `artifacts_exist`, `files_non_empty` |
+| `ticket_builder` | one ticket of an approved feature, built test-first at the spec's seams | `BuildOutput` | `diff_matches_claims` |
+| `standards_reviewer` | a feature's diff must be checked against the repo's documented standards | `AxisReviewOutput` | `artifacts_exist`, `files_non_empty` |
+| `spec_reviewer` | a feature's diff must be checked against its spec and tickets | `AxisReviewOutput` | `artifacts_exist`, `files_non_empty` |
 | any agent, generic ask | one-off prompt, no special shape | `GenericOutput` | as needed |
 
    A new kind of agent needs a config entry + prompt pair + output type first — see `update_config.md`.

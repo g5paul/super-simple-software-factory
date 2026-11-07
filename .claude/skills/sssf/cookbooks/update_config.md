@@ -65,7 +65,7 @@ Narrow by role, not by reflex:
       - .pi/extensions/json_guard.ts    # a pi extension FILE PATH
 ```
 
-Entries are pi extension **file paths**, passed through as `pi -e <path>`, applied to that agent only. Reach for an output-tightening extension when an agent keeps wrapping its envelope in prose and burning correction retries. The starter roster ships with none — this is an escape hatch, not a default.
+Entries are pi extension **file paths**, passed through as `pi -e <path>`, applied to that agent only. Reach for an output-tightening extension when an agent keeps wrapping its envelope in prose and burning correction retries. In the starter Pi roster, only the planner and scout load an extension, `subagents.ts`, which registers the `subagent_*` tools. Anything more is an escape hatch, not a default.
 
 **Adding a tool-registering extension is a two-part edit.** The extension path goes in `harness_engineering`, *and* the tool name it registers goes in that agent's `tools` list:
 

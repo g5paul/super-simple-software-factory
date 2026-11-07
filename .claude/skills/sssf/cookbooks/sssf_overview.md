@@ -13,28 +13,45 @@ Your job as orchestrator: **run the system, observe the system, help the enginee
 ```
 adws/
 ├── adw_sssf_config/
-│   └── sssf.config.yaml         the agent roster — one agent, one prompt, one purpose
+│   ├── sssf.config.yaml         the agent roster: one agent, one prompt, one purpose
+│   ├── repo.yaml                the repo's own rules: agent_rules, merges, cost caps, sandbox, worktree setup
+│   └── stamp.json               a hash of every stamped file and the skill commit, for --update
 ├── adw_prompt.py                smallest ADW: one agent, one prompt, traced end-to-end
 ├── adw_plan.py, adw_scout.py, adw_build.py, adw_plan_build.py, adw_build_test.py, adw_plan_build_test.py
-├── adw_build_review.py          build → review: is this what was asked for? (not testing)
+├── adw_plan_build_test_quality.py   plan, build, then quality.py checks and tests in a bounded fix loop
+├── adw_quality.py               lint, typecheck and build the project, no agents
+├── adw_build_review.py          build, then review: is this what was asked for? Not testing
 ├── adw_document.py              write up the work just done, from git diff vs main
-├── adw_simple_sdlc.py           plan → build → test → review → document; commits each product
-├── adw_modules/                 ALL low-level logic — ADW scripts stay thin
+├── adw_simple_sdlc.py           plan, build, test, review, document; commits each product
+├── adw_tickets.py               build an approved feature one ticket at a time, test-first
+├── adw_trial.py                 one request under several rosters, a panel judges, the best one merged
+├── adw_worktree.py              land or drop a run started with --worktree
+├── adw_kill.py                  stop a run by adw_id, the chain first, then its coding agents
+├── adw_sandbox_usage.py         what remote VM runs have used of Vercel's and E2B's free allowances
+├── adw_modules/                 ALL low-level logic; ADW scripts stay thin
 │   ├── data_types.py            AgentCall, PhaseParams, Phase, Envelope + one output type per agent call
-│   ├── agents.py                load_config, validate, resolve entry → interface + model + thinking
-│   ├── runner.py                the Run object: run.phase(PhaseParams) → ph.call(AgentCall)
-│   ├── agent_pi.py              Pi interface   ·   agent_cc.py  Claude Code interface
-│   ├── gates.py                 gate(envelope, run) -> GateReport — one check per item verified
-│   ├── changes.py               git diff vs a resolved base → ChangeSet → envelope for the documenter
-│   ├── prompts.py, session.py, tracer.py, console.py, git_helper.py, utils.py
+│   ├── agents.py, runner.py, session.py, prompts.py   roster, the Run object, adw_id sessions, prompt rendering
+│   ├── agent_pi.py, agent_cc.py the Pi and Claude Code interfaces
+│   ├── gates.py, plan_checks.py gate(envelope, run) -> GateReport; the plan's own checks
+│   ├── quality.py               the repo's fixed checks: test, lint, format, typecheck, build. Yours to edit
+│   ├── changes.py, git_helper.py, worktree.py   git diff into an envelope, git plumbing, worktree runs
+│   ├── permissions.py, rules.py, secret_files.py, sssf_refuse.py, sssf_rules.ts   what an agent may change, run and read
+│   ├── budget.py, account.py, prices.py, prices.json, silence.py, kill.py   cost caps, usage limits, quiet agents, stopping runs
+│   ├── sandbox*.py, obs_relay.py, sssf_obs_relay.cjs   where a run's tree lives: local, Vercel or E2B VM
+│   ├── tickets.py, trial.py, repo_settings.py   feature folders, trials, repo.yaml
+│   └── tracer.py, console.py, utils.py   the trace db, the terminal narrative, small helpers
 └── adw_data/
-    ├── prompt_engineering/{agent}/{system.md,user.md}   tracked — edit prompts HERE, never in the skill
-    │                                planner · builder · scout · reviewer · documenter
+    ├── prompt_engineering/{agent}/{system.md,user.md}   tracked: edit prompts HERE, never in the skill
+    │                                planner · builder · scout · reviewer · documenter · ticket_builder
+    │                                standards_reviewer · spec_reviewer · referee, for trials
+    ├── harness_engineering/     tracked pi extensions: subagents.ts, themeMap.ts
     ├── sessions/{adw_id}/                               gitignored runtime
     │   ├── agent_map.json       agent → coding-agent session_id + model
     │   ├── context_handoff/     the one place agents write files for the agents that follow
     │   └── {agent}/{prompts/, raw_output.jsonl, envelope.json}
     └── sssf.db                  gitignored SQLite trace db the visualizer polls
+justfile                         starter recipes, or sssf.just as a module when the repo has its own
+.env.sample, .githooks/pre-push  env template; the secret scan before every push
 ```
 
 **Two coding agents.** `coding_agent: pi` is the default, with model `gemini-3.6-flash` and thinking `medium`. `coding_agent: claude_code` runs `anthropic/*` models through the `claude` CLI on the operator's subscription. See `references/config.md` for how the roster maps onto it.
@@ -76,8 +93,10 @@ Load one cookbook per request — this overview is the only one you read up fron
 
 | Request | Cookbook |
 |---|---|
+| Bring SSSF into a new project, up to the first reviewed run | `onboard.md` |
 | Choose one run or a ticket feature | `choose_a_flow.md` |
 | Build a feature from a spec and tickets | `tickets.md` |
+| Run one request under several rosters and merge the best | `trial.md` |
 | Turn a request into the prompt an ADW gets | `how_to_prompt_for_the_eng.md` — **read before every launch** |
 | Set the system up in a repo | `install.md` |
 | Write a new ADW script | `create_adw.md` |

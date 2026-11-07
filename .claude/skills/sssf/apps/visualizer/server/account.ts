@@ -6,8 +6,10 @@
  *
  * - rate_limits.json, beside the project registry. adw_modules/account.py
  *   keeps the newest `rate_limit_event` an SSSF agent saw there: the 5-hour
- *   and 7-day utilization and their reset times. Interactive sessions never
- *   write one, so it is as fresh as the last SSSF send.
+ *   and 7-day utilization and their reset times. Interactive sessions add
+ *   readings too once the engineer sets SSSF's statusline,
+ *   scripts/statusline.py. Without it, the file is as fresh as the last
+ *   SSSF send.
  * - Claude Code's transcripts, ~/.claude/projects/**.jsonl (or
  *   $CLAUDE_CONFIG_DIR/projects). Every API call is there with its model and
  *   token counts, SSSF agents' calls included. A call is SSSF's when its

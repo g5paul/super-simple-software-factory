@@ -33,6 +33,7 @@ class GenericOutput(EnvelopeBase):
 
 class PlanOutput(EnvelopeBase):
     commit_message: str = ""            # imperative git subject for the PLAN FILE itself
+    checks: list[str] = []              # commands verify runs beside quality.py's blocks
 
 class BuildOutput(EnvelopeBase):
     changed_files: list[str] = []
@@ -50,7 +51,21 @@ class DocumentOutput(EnvelopeBase):
     document_path: str = ""             # the write-up's home in the repo
     documented_files: list[str] = []
     commit_message: str = ""
+
+class AxisReviewOutput(EnvelopeBase):
+    findings: list[AxisFinding] = []    # AxisFinding: {where, problem, source, blocking: bool}
+
+class TrialAttempts(EnvelopeBase):
+    attempts: list[TrialAttempt] = []   # TrialAttempt: {label, diff_path}
+
+class PanelOutput(EnvelopeBase):
+    verdicts: list[PanelVerdict] = []   # PanelVerdict: {label, approved, findings, blocking}
+    ranking: list[str] = []             # attempt labels, best first
 ```
+
+`PlanOutput.checks` has a validator. Verify runs the checks before the build is committed, so a check that compares the tree with git, such as `git diff --exit-code`, could never pass once the build changes that file. The validator rejects it, and the planner gets the error in its own session to rewrite the check.
+
+`AxisReviewOutput` is one axis of the two-axis code review, standards or spec, written blind to the other. Its `blocking` is a property: the findings with `blocking: true`. `TrialAttempts` is what code hands a trial's panel reviewer, each attempt by label and diff, with nothing that names its roster. `PanelOutput` is that reviewer's verdict on each attempt and its ranking.
 
 `commit_message` defaults to empty, so a git phase consuming it always needs a fallback — see `cookbooks/create_adw.md`.
 
@@ -86,6 +101,7 @@ There is no separate continue call to make. `agent_pi.run()` passes `--session-i
 | `{{prompt}}` | the engineer's ask (or the ADW's per-call prompt) |
 | `{{previous_envelope}}` | the upstream envelope JSON, from `AgentCall(previous=...)` |
 | `{{context_handoff_dir}}` | absolute path to this session's `context_handoff/` |
+| `{{protected_files}}` | the roster's `protected_files` as a bullet list, or `(none)` when it's empty |
 | `{{phase_name}}` | the phase's name, e.g. `review_2`. A phase that repeats uses it to name its files, so a later round does not overwrite an earlier one. |
 
 A `user.md` declares one h3 per incoming datum, then the task, then the output contract:
@@ -134,6 +150,7 @@ The `## Report` section shows the exact JSON shape of the declared output type �
 ```
 adws/adw_data/sessions/{adw_id}/
 ├── agent_map.json          agent name → coding-agent session_id + model
+├── events.jsonl            every trace event, appended as the tracer writes it to sssf.db
 ├── context_handoff/        the ONE place agents write files for the agents that follow
 └── {agent_name}/
     ├── prompts/            exact prompts sent (system.md + user.md), saved before execution
@@ -159,4 +176,4 @@ This map is the key that lets a later ADW rejoin each agent's **existing context
 
 The map records the model each session was created with. If config drift changes an agent's model, that agent starts a **fresh** session and the map is updated — never a bad resume. `agent_sessions` in `sssf.db` is the queryable mirror of this file.
 
-**Files are the raw record; the db is the queryable mirror.** Losing `sssf.db` loses nothing that can't be rebuilt from `raw_output.jsonl`, `envelope.json`, and `agent_map.json`.
+**Files are the raw record; the db is the queryable mirror.** Losing `sssf.db` loses nothing that can't be rebuilt from `raw_output.jsonl`, `envelope.json`, `agent_map.json` and `events.jsonl`.

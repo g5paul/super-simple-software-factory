@@ -81,6 +81,7 @@ SSSF prices each call from `adws/adw_modules/prices.json`. A run warns about a m
 | `merge` | `any` | `ff_only` makes `just merge` refuse anything but a fast-forward |
 | `max_worktree_runs` | 2 | how many worktree runs go at once. Set 1 if your checks bind a fixed port or share a test database |
 | `worktree_setup` | `[]` | commands that install what a fresh checkout lacks, such as `bun install --frozen-lockfile`, run before the first agent |
+| `worktree_setup_timeout` | 600 | seconds each `worktree_setup` command may take before the run stops |
 | `sandbox` | `none` | `vercel` or `e2b` sends new runs to a VM by default |
 | `max_live_cost` | off | dollars every live run may spend together |
 | `max_daily_cost` | off | dollars the repo's runs may spend in a rolling 24 hours |
@@ -144,7 +145,8 @@ pi agents can load TypeScript extensions from `adws/adw_data/harness_engineering
 This fork is built to be cut down. The parts that serve only this hub, and are safe to delete in your fork:
 
 - the guard chain, which reviews changes to SSSF's own guard code: `adws/adw_guard_change.py`, `.claude/agents/bypass-reviewer.md`, `adws/tests/test_guard_change.py`, `docs/designs/hub-guard-chain.md`, the guard section of `CLAUDE.md`, and the run specs it left in `specs/`;
-- `docs/projects.md` and `docs/sssf.md`: the repos this hub runs and how it runs SSSF on itself.
+- the hub's read-only reports on its projects: `adws/check_projects.py`, `adws/levers.py`, `adws/features.py`, and their tests `adws/tests/test_check_projects.py`, `adws/tests/test_levers.py` and `adws/tests/test_features.py`;
+- `docs/projects.md`, `docs/sssf.md` and `docs/open.md`: the repos this hub runs, how it runs SSSF on itself, and its list of open work.
 
 Keep the `agent_rules` in this hub's `repo.yaml` unless you want agents to push. They refuse `git push` and the `gh` commands their pattern lists, such as `gh pr create` and `gh api`.
 

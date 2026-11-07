@@ -29,11 +29,11 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 
 - **Claude's usage windows.** A run stops before a Claude agent starts when a window is past `rate_limit_stop`, or when the account has moved on to usage credits. A call already running is stopped the moment Claude reports credits in use.
 - **Caps in dollars.** `max_run_cost` and `max_call_cost` in the roster cap one run and one agent call. `max_live_cost` and `max_daily_cost` in repo.yaml cap what the repo's live runs spend together and what it spends in a day. `max_daily_cost` in `~/.config/sssf/limits.yaml` caps the whole machine's day. Design: [parallel-worktree-runs.md](designs/parallel-worktree-runs.md).
-- **The ChatGPT plan's limit.** That route sends no usage windows, so a pi run stops by name on the plan's 429. Design: [pi-usage-stop.md](designs/pi-usage-stop.md). Research: [pi-usage-limits.md](research/pi-usage-limits.md).
-- **Plans checked before the build.** `gates.plan_well_formed` sends a plan back to its planner when its two copies differ, it overwrites a committed spec, it has no verification heading, or it names no real file. A fix costs one turn instead of a build.
+- **The ChatGPT plan's limit.** That route sends no usage windows, so a pi run stops by name on the plan's 429. With `SSSF_CODEX_LIMITS=1`, the dashboard reads the plan's 5-hour and weekly windows through Codex CLI's app server. No stop reads them. Design: [pi-usage-stop.md](designs/pi-usage-stop.md). Research: [pi-usage-limits.md](research/pi-usage-limits.md).
+- **Plans checked before the build.** `gates.plan_well_formed` sends a plan back to its planner when its two copies differ, it overwrites a committed spec, it has no verification heading, or it names no real file. A fix costs one turn instead of a build. The plan's own checks may not compare the tree with git, through `git diff --exit-code` or `git status --porcelain` and the like, since verify runs them before the build is committed and no fix can pass them.
 - **Agents that go quiet.** An agent that writes nothing for `max_silence_minutes` in repo.yaml, 15 by default, is stopped with the run. A hang spends nothing, so the caps above never catch it. Design: [silent-agents.md](designs/silent-agents.md).
 - **Private repos.** The operator session asks at install whether a repo is private, and keeps a private repo on `sandbox: none`, so its runs stay off remote VMs unless the engineer asks. The pre-push hook refuses a push naming a project listed in `.git/sssf-private-names`, so a public fork can install into repos it doesn't name, private or not. This hub leaves a repo unlisted unless the engineer says otherwise: [projects.md](projects.md#unlisted-projects).
-- **Pricing.** A killed Claude call is priced from the output counts it streamed. `prices.json` holds Claude's list prices, a run and the dashboard warn about a model it doesn't list, and `scripts/check_prices.py` compares it with claude.com/pricing.
+- **Pricing.** A killed Claude call is priced from the output counts it streamed. `prices.json` holds Claude's list prices, a run and the dashboard warn about a model it doesn't list, and `scripts/check_prices.py` compares it with claude.com/pricing. Prices for models that page doesn't list, such as Sonnet 5, sit under its `elsewhere` map, which the check skips.
 
 ### A branch per run, and runs in parallel
 
@@ -59,6 +59,8 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 
 - `adws/adw_sssf_config/repo.yaml`, committed in each repo, holds its merge style, worktree setup, spend caps and `agent_rules`.
 - Every agent gets the rules in its prompt. A rule with a `forbid` pattern is enforced: a matching command stops the run, and with `on_match: refuse` it is refused before it runs and the run goes on, on Claude Code and pi agents alike.
+- No agent may read the repo's secret files: `.env` and its kin, plus repo.yaml's `secret_files`. Claude Code gets a deny rule per file, pi's file tools refuse the path, and a built-in refuse rule refuses any command naming one. An agent gets none of `.env`'s keys beyond SSSF's own and those `agent_env` lists. See [config.md](../.claude/skills/sssf/references/config.md#secret-files--secret_files-and-agent_env).
+- When Claude Code denies a call itself, before SSSF's refuse rule sees it, SSSF counts the call as refused, as if its own rule had refused it.
 - Every agent's environment carries `SSSF_ADW_ID`, so a repo's own scripts and hooks can tell an SSSF agent from the engineer.
 - `install.py` stamps a `pre-push` hook, `.githooks/pre-push`, that scans what a push would send with gitleaks, refuses on a find, and refuses any push from an SSSF agent. Each clone turns it on with `git config core.hooksPath .githooks`. See [secret-scan.md](secret-scan.md).
 
@@ -66,12 +68,15 @@ The fork runs several repos at once on two subscriptions. A run can't spend past
 
 - `install.py --update` and `just sssf-update` refresh a repo from the skill and keep the repo's own edits. A file both sides changed is flagged, and `--keep` or `--take` settles it. The install records the skill commit it came from.
 - An onboarding cookbook sets a new repo up, and `choose_a_flow.md` says when to use one run and when to use tickets.
-- `just obs-all` shows every registered repo in one dashboard. Its account panel shows Claude's usage windows and spend, pi agents' spend and the ChatGPT plan's limit. Gauges show live and daily spend against their caps, and the dashboard has views for tickets, trials, worktree branches, merges and rebases.
+- `just obs-all` shows every registered repo in one dashboard. Its account panel has a card per account, Claude and pi, each with spans from 5 hours to 90 days. Each usage window shows its pace in $ per hour and in percent per hour, and a table sets the closed 7-day weeks side by side from `window_archive.jsonl`. Both cards split spend into SSSF agents and interactive sessions, pi's from the sessions pi saves. Gauges show live and daily spend against their caps, and the dashboard has views for tickets, trials, worktree branches, merges and rebases.
+- `scripts/statusline.py`, set as Claude Code's statusline, records the account's 5-hour and 7-day windows after every interactive reply, so the meters and `rate_limit_stop` stay current between runs.
+- The hub has three read-only reports on its projects. `adws/check_projects.py` checks each repo's update against the skill, `adws/levers.py` counts runs, minutes, agents and touches per week, and `adws/features.py` prices each feature that landed. See [sssf.md](sssf.md).
+- [open.md](open.md) is the hub's one list of open SSSF work.
 - [projects.md](projects.md) lists the repos running SSSF, the skill commit each one is on, and their open items.
 
 ### Smaller fixes
 
-A code change is committed under the first build's message, not the last repair's. Each review round keeps its own file. Docs updates are part of every change. SSSF's own files stay out of the feature reviews and the documenter's diff. A pi call whose last turn ended in an error fails with pi's message. A stopped run ends with its message, not a traceback. `just merge` refuses while the run's worktree holds uncommitted work, which it used to delete with the worktree, and `just discard` names what it dropped.
+A code change is committed under the first build's message, not the last repair's. `adw_simple_sdlc` ends before review when its checks stay red, since that build is never committed. Each review round keeps its own file. Docs updates are part of every change. SSSF's own files stay out of the feature reviews and the documenter's diff. A pi call whose last turn ended in an error fails with pi's message. A stopped run ends with its message, not a traceback. `just merge` refuses while the run's worktree holds uncommitted work, which it used to delete with the worktree, and `just discard` names what it dropped.
 
 ## Log
 
@@ -84,3 +89,5 @@ A code change is committed under the first build's message, not the last repair'
 | 2026-11-05 | 5184023 | The obs relay for VM runs |
 | 2026-11-05 | 7decd41 | `just merge` keeps a worktree's uncommitted work |
 | 2026-11-05 | 09406c8 | The user guide under `docs/guide/`, a short README, an empty trace db no longer breaks a chain, and no fix runs after the last check |
+| 2026-11-06 | 33a1ed2 | Secret files and `.env` keys kept from agents, Claude Code's own denials counted as refusals, simple SDLC ending on red checks, plan checks that compare the tree with git rejected, and `docs/open.md` |
+| 2026-11-06 | c2df332 | `check_projects.py`, `levers.py` and `features.py`; the account cards with spans from 5 hours to 90 days, the statusline, each window's pace, interactive pi spend, ChatGPT's windows through Codex, the weekly archive and week table, and new model prices |

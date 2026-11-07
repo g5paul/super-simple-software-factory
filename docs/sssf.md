@@ -74,7 +74,9 @@ out of scope. `guard_spec_reviewer` passes it before any code. The builder
 changes the guard, and verify runs the hub suite and the chain's own tests.
 Then `bypass_reviewer` judges a snapshot commit of the tree against the
 baseline, for at most three rounds. Bypasses, harms and new false positives
-block; `--allow-false-positives` turns the last off for one run. A fix that
+block; `--allow-false-positives` turns the last off for one run. `--base`
+names the baseline ref, `main` by default, and `--worktree` runs on branch
+`sssf/<adw_id>` in its own worktree instead of the current branch. A fix that
 adds module-level state or a `global` to a guard module stops the run, and
 so does the reviewer's `adds_mechanism`.
 
@@ -157,7 +159,7 @@ reached its main line, the current branch unless `--branch REPO=BRANCH`
 says otherwise. Runs that landed at one point are one feature, with its
 cost, run count and lead time; a rebased commit is matched by patch-id, then
 subject. Runs that never landed are pending when a branch still holds them,
-gone otherwise, and runs with no commits are counted apart. `--weeks`,
-`--repo`, `--listed` and `--real` work as in `levers.py`, and
-`levers.py --by-type` gives one row per chain. Both only read, and both are
-hub-only.
+gone otherwise, and runs with no commits are counted apart. `--repo NAME`
+picks one repo and can repeat. `--weeks`, `--listed` and `--real` work as in
+`levers.py`, and `levers.py --by-type` gives one row per chain. Both only
+read, and both are hub-only.

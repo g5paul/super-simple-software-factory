@@ -39,7 +39,9 @@ The skill ships these chains, each in `adws/adw_<name>.py`:
 | `adw_tickets` | scout, then for each ticket: build test-first, verify, commit; then two reviews and docs | the feature has a spec and tickets |
 | `adw_trial` | one `adw_simple_sdlc` per roster, then a panel of referees | you want to compare rosters on one request |
 
-Four more scripts manage runs rather than build anything: `adw_kill`, `adw_worktree` (merge, discard and rebase), `adw_sandbox_usage`, and `adw_guard_change`, which is this repo's own and not stamped.
+Three more scripts manage runs rather than build anything: `adw_kill`, `adw_worktree` (merge, discard and rebase), and `adw_sandbox_usage`.
+
+`adw_guard_change` is the hub's own chain for changes to guard code. It plans, builds, verifies and commits like the others, with a bypass review against the old code. It lives only in this repo, and an install never copies it.
 
 `--adw-id` joins an existing run. The run keeps its folders, and each agent continues its own session instead of starting cold. That's how you chain two ADWs by hand:
 
@@ -133,6 +135,8 @@ An ADW names agents, never models. Swap a model in the roster and every chain pi
 **`tools` says what an agent can do. `writes` says where it may leave changes.** `bash` runs anything and `write` reaches any path, so SSSF can't stop an agent at the tool. Code compares the repo before and after every call instead. A change outside `writes` is rolled back and the phase fails. A read-only agent can still write its own report, which goes outside the repo.
 
 Some commands do harm outside the repo, such as `git push` or a recipe that bills an API key. `agent_rules` in `adws/adw_sssf_config/repo.yaml` holds rules every agent gets in its prompt. A rule with `forbid` patterns is also enforced. SSSF reads each shell command as the agent sends it. A match stops the agent and the run, though the command may have started already. With `on_match: refuse`, the command is refused before it runs, and the run goes on. [customize.md](guide/customize.md#rules-for-every-agent) has examples.
+
+SSSF keeps the repo's secret files from every agent: `.env` and its kin, plus any path `secret_files` in `repo.yaml` lists. Agents also get none of `.env`'s keys beyond SSSF's own, unless `agent_env` names them. [config.md](../.claude/skills/sssf/references/config.md#secret-files--secret_files-and-agent_env) says how each route refuses the read, and what it leaves open.
 
 Each Claude Code agent runs with `--safe-mode`, so it never loads your `CLAUDE.md`, skills, hooks or MCP servers. It sees its prompt and the repo.
 

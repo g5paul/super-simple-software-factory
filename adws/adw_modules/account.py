@@ -14,6 +14,10 @@ halfway through a phase with a rate-limit error. Interactive sessions add
 readings too once the engineer sets SSSF's statusline (scripts/statusline.py):
 Claude Code hands a statusline command the same windows after every reply,
 and `record_windows` merges them in.
+
+Each kept reading also goes into `rate_limits_history.jsonl` beside it, when
+a window moved or the last line is an hour old, so the dashboard can tell how
+fast each window fills in percent per hour. It keeps about 8 days.
 """
 
 from __future__ import annotations
@@ -53,6 +57,57 @@ def path() -> Path:
     return Path(config) / "sssf" / "rate_limits.json"
 
 
+HISTORY_EVERY_S = 3600             # an unchanged reading still gets a line this often
+HISTORY_KEEP_S = 8 * 86400
+HISTORY_PRUNE_AT = 3000            # lines; past this, older ones go
+
+
+def history_path() -> Path:
+    return path().with_name("rate_limits_history.jsonl")
+
+
+def _epoch(at: str) -> float:
+    return datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
+
+
+def _append_history(info: dict, at: str) -> None:
+    """One line per change of a window, and one an hour while nothing moves.
+    A gap longer than that means nothing was recording, and the dashboard
+    measures only between lines."""
+    windows = {k: [w.get("utilization"), w.get("resetsAt")]
+               for k, w in (info.get("unifiedWindows") or {}).items()
+               if k in WINDOWS and isinstance(w, dict) and isinstance(w.get("utilization"), (int, float))}
+    if not windows:
+        return
+    target = history_path()
+    try:
+        lines = target.read_text().splitlines() if target.exists() else []
+    except OSError:
+        lines = []
+    try:
+        last = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        last = None
+    if last and last.get("w") == windows and _epoch(at) - _epoch(str(last.get("at"))) < HISTORY_EVERY_S:
+        return
+    line = json.dumps({"at": at, "w": windows}, separators=(",", ":"))
+    if len(lines) >= HISTORY_PRUNE_AT:
+        cutoff = _epoch(at) - HISTORY_KEEP_S
+        kept = []
+        for old in lines:
+            try:
+                if _epoch(str(json.loads(old).get("at"))) >= cutoff:
+                    kept.append(old)
+            except (ValueError, TypeError):
+                continue
+        tmp = target.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text("".join(f"{x}\n" for x in [*kept, line]))
+        tmp.replace(target)
+        return
+    with target.open("a") as f:
+        f.write(f"{line}\n")
+
+
 def latest() -> Optional[dict]:
     try:
         return json.loads(path().read_text())
@@ -72,6 +127,10 @@ def record(info: dict, at: Optional[str] = None, source: str = "") -> None:
     tmp = target.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps({"recorded_at": at, "source": source, "info": info}, indent=2))
     tmp.replace(target)
+    try:
+        _append_history(info, at)
+    except (OSError, ValueError, TypeError):
+        pass                        # the history is for the dashboard; a run never waits on it
 
 
 def record_windows(windows: dict, at: Optional[str] = None, source: str = "statusline") -> None:

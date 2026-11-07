@@ -16,20 +16,23 @@ function share(row: SpendRow, total: number): string {
 
 const SHOWN = 8
 
+/** The rows added up into one, under the given key. */
+function addUp(rows: SpendRow[], key: string): SpendRow {
+  const out: SpendRow = { key, calls: 0, est_usd: 0, output_tokens: 0, input_tokens: 0 }
+  for (const r of rows) {
+    out.calls += r.calls
+    out.est_usd += r.est_usd
+    out.output_tokens += r.output_tokens
+    out.input_tokens += r.input_tokens
+  }
+  return out
+}
+
 // The top rows, and the rest folded into one, so every table adds up to the total.
 function shown(rows: SpendRow[]): SpendRow[] {
   if (rows.length <= SHOWN) return rows
   const rest = rows.slice(SHOWN - 1)
-  return [...rows.slice(0, SHOWN - 1), rest.reduce(
-    (sum, r) => ({ ...sum, calls: sum.calls + r.calls, est_usd: sum.est_usd + r.est_usd,
-      output_tokens: sum.output_tokens + r.output_tokens, input_tokens: sum.input_tokens + r.input_tokens }),
-    { key: `${rest.length} others`, calls: 0, est_usd: 0, output_tokens: 0, input_tokens: 0 },
-  )]
-}
-
-function sum(rows: SpendRow[]): SpendRow {
-  return rows.reduce((t, r) => ({ ...t, calls: t.calls + r.calls, est_usd: t.est_usd + r.est_usd,
-    output_tokens: t.output_tokens + r.output_tokens }), { key: 'total', calls: 0, est_usd: 0, output_tokens: 0, input_tokens: 0 })
+  return [...rows.slice(0, SHOWN - 1), addUp(rest, `${rest.length} others`)]
 }
 </script>
 
@@ -52,10 +55,10 @@ function sum(rows: SpendRow[]): SpendRow {
         <tfoot v-if="t.rows.length > 1">
           <tr>
             <td class="key">total</td>
-            <td>{{ sum(t.rows).calls }}</td>
-            <td>{{ fmtCost(sum(t.rows).est_usd) }}</td>
+            <td>{{ addUp(t.rows, 'total').calls }}</td>
+            <td>{{ fmtCost(addUp(t.rows, 'total').est_usd) }}</td>
             <td></td>
-            <td class="dim">{{ fmtTokens(sum(t.rows).output_tokens) }}</td>
+            <td class="dim">{{ fmtTokens(addUp(t.rows, 'total').output_tokens) }}</td>
           </tr>
         </tfoot>
       </table>

@@ -1,3 +1,4 @@
+import type { Span } from "./spans.ts";
 /**
  * Types shared by the read-only server and the Vue client.
  *
@@ -334,8 +335,23 @@ export interface SandboxAllowance {
   repos: { name: string; runs: number }[];
 }
 
+/** One provider's runs in the span the card's picker chose, apart from its allowance's own window. */
+export interface SandboxSpan {
+  provider: "vercel" | "e2b";
+  runs: number;
+  vm_seconds: number;
+  cpu_seconds: number;
+  /** Vercel's memory GB-hours, or E2B's dollars, so the span reads in the allowance's unit. */
+  gb_hours: number;
+  cost_usd: number;
+  repos: { name: string; runs: number }[];
+}
+
 export interface SandboxUsage {
   providers: SandboxAllowance[];
+  /** The picker's span, and each provider's runs in it; a provider with none there is left out. */
+  span: Span;
+  in_span: SandboxSpan[];
 }
 
 /** From the `worktree_rebased` event `just rebase` logs, kept or not. */

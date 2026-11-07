@@ -41,3 +41,26 @@ test("no VM runs means no providers, so the gauge stays hidden", () => {
   expect(sandboxUsage([repo("a", [])], NOW).providers).toEqual([]);
   expect(sandboxUsage([{ name: "a", ends: [{ at: daysAgo(1), payload_json: "not json" }] }], NOW).providers).toEqual([]);
 });
+
+test("the span counts each provider's runs apart from its allowance's window", () => {
+  const repos = [
+    repo("a", [
+      [40, { provider: "vercel", vm: "v-old", vm_seconds: 3600, cpu_seconds: 900, memory_gb_hours: 4 }],
+      [2, { provider: "vercel", vm: "v-new", vm_seconds: 1800, cpu_seconds: 360, memory_gb_hours: 2 }],
+      [40, { provider: "e2b", vm: "e-old", vm_seconds: 1000, vm_cost_usd: 0.046 }],
+    ]),
+  ];
+  const week = sandboxUsage(repos, NOW, "7d");
+  expect(week.span).toBe("7d");
+  expect(week.in_span).toEqual([{ provider: "vercel", runs: 1, vm_seconds: 1800, cpu_seconds: 360, gb_hours: 2, cost_usd: 0, repos: [{ name: "a", runs: 1 }] }]);
+  expect(week.providers.map((p) => p.runs)).toEqual([1, 1]);   // the allowances don't move with the span
+
+  const quarter = sandboxUsage(repos, NOW, "90d");
+  expect(quarter.in_span.map((t) => [t.provider, t.runs])).toEqual([["vercel", 2], ["e2b", 1]]);
+});
+
+test("a provider whose runs are all outside its allowance's window still shows for a span that has them", () => {
+  const usage = sandboxUsage([repo("a", [[40, { provider: "vercel", vm: "v", vm_seconds: 60 }]])], NOW, "60d");
+  expect(usage.providers.map((p) => [p.provider, p.runs])).toEqual([["vercel", 0]]);
+  expect(usage.in_span[0].runs).toBe(1);
+});

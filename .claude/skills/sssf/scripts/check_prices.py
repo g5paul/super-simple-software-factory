@@ -133,7 +133,12 @@ def main(argv: list[str] | None = None, read=fetch, out=sys.stdout) -> int:
               "Compare it by hand.", file=out)
         return 2
 
-    differences = compare(data["models"], page)
+    # A model priced from another page, named in "elsewhere", is checked by hand.
+    elsewhere = data.get("elsewhere", {})
+    checked = {name: prices for name, prices in data["models"].items() if name not in elsewhere}
+    if elsewhere:
+        print(f"not checked, priced from another page: {', '.join(sorted(elsewhere))}", file=out)
+    differences = compare(checked, page)
     unlisted = sorted(set(page) - set(data["models"]))
     if unlisted:
         print(f"on the page, not in prices.json (add one only if SSSF agents use it): "
@@ -147,11 +152,11 @@ def main(argv: list[str] | None = None, read=fetch, out=sys.stdout) -> int:
     if not args.write:
         print("Run again with --write to apply the page's prices.", file=out)
         return 1
-    data["models"] = apply(data["models"], page)
+    data["models"] = {**data["models"], **apply(checked, page)}
     data["source"] = re.sub(r"read \d{4}-\d{2}-\d{2}", f"read {datetime.date.today().isoformat()}",
                             data["source"])
     args.table.write_text(json.dumps(data, indent=1) + "\n")
-    left = compare(data["models"], page)
+    left = compare({n: v for n, v in data["models"].items() if n not in elsewhere}, page)
     print(f"wrote {args.table}. Commit it and update the repos." if not left
           else "wrote the table, but these still differ:\n  " + "\n  ".join(left), file=out)
     return 0 if not left else 1

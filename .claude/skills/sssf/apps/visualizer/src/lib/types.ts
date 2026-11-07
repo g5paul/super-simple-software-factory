@@ -13,6 +13,7 @@ export type {
   RunLeftover,
   SandboxAllowance,
   SandboxEnd,
+  SandboxSpan,
   SandboxUsage,
   RunWorktree,
   RunTrial,

@@ -64,7 +64,15 @@ def test_the_page_parses_into_each_models_prices_and_haikus_tiers():
 def test_the_shipped_table_matches_the_page(tmp_path):
     code, said, _ = run(tmp_path, page())
     assert code == 0 and "matches" in said
-    assert "claude-opus-4-8" in said           # on the page, not in the table
+    assert "not checked, priced from another page: claude-sonnet-5" in said
+
+
+def test_a_model_priced_elsewhere_is_left_alone_by_write(tmp_path):
+    code, said, path = run(tmp_path, page(opus_output="25"), "--write")
+    assert code == 0
+    written = json.loads(path.read_text())
+    assert written["models"]["claude-sonnet-5"]["output"] == 10
+    assert "claude-sonnet-5" in written["elsewhere"]
 
 
 def test_a_changed_price_is_named_and_left_alone_without_write(tmp_path):

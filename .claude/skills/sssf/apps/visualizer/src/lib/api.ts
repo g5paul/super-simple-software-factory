@@ -17,6 +17,7 @@ import type {
   TrialView,
 } from './types'
 import { useRoute } from './router'
+import type { Span } from '@shared/spans'
 
 const route = useRoute()
 
@@ -116,8 +117,8 @@ export function fetchMachineDay(): Promise<MachineDay> {
 }
 
 /** What remote VM runs in every registered repo used of each provider's free allowance. */
-export function fetchSandboxUsage(): Promise<SandboxUsage> {
-  return getJson('/api/machine/sandbox') as Promise<SandboxUsage>
+export function fetchSandboxUsage(span: Span = '30d'): Promise<SandboxUsage> {
+  return getJson(`/api/machine/sandbox?span=${span}`) as Promise<SandboxUsage>
 }
 
 /** A trial's attempts side by side, with the panel's scorecard once it ran. */
@@ -134,7 +135,7 @@ export function fetchProjects(): Promise<ProjectsResponse> {
   return getJson('/api/projects') as Promise<ProjectsResponse>
 }
 
-export function fetchAccount(span = '5h', piSpan = '5h'): Promise<AccountUsage> {
+export function fetchAccount(span: Span = '5h', piSpan: Span = '5h'): Promise<AccountUsage> {
   const query = new URLSearchParams({ span, pi_span: piSpan })
   return getJson(`/api/account?${query}`) as Promise<AccountUsage>
 }

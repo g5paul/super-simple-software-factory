@@ -272,9 +272,10 @@ const server = listen((port) => Bun.serve({
     }),
 
     // What remote VM runs in every registered repo used of each provider's free allowance.
-    "/api/machine/sandbox": safely(() => {
+    "/api/machine/sandbox": safely((req) => {
+      const asked = new URL(req.url).searchParams.get("span");
       const repos = projects.everyProject().map((p) => ({ name: p.name, ends: projects.db(p)?.sandboxEnds() ?? [] }));
-      return json(sandboxUsage(repos, Date.now()) satisfies SandboxUsage);
+      return json(sandboxUsage(repos, Date.now(), isSpan(asked) ? asked as Span : "30d") satisfies SandboxUsage);
     }),
 
     // What the live runs spend together against repo.yaml's max_live_cost.

@@ -132,6 +132,9 @@ function shortWhen(iso: string): string {
   return `${day(iso)} ${hm(iso)}`
 }
 
+// Only an SSSF agent call records a limit reading, so an hour-old one misses the engineer's own use since.
+const STALE_S = 3600
+
 // Below 10% the reading's rounding swamps the figure: 3% could be 2.5% or 3.5%.
 const FULL_FROM = 0.1
 
@@ -150,8 +153,8 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
     <div class="meter-card">
       <div class="card-head">
         <span class="card-title">Claude</span>
-        <span v-if="usage?.sample" class="dim">
-          limits as of {{ age(usage.sample.age_s) }}, from the last SSSF agent call
+        <span v-if="usage?.sample" :class="usage.sample.age_s > STALE_S ? 'stale' : 'dim'">
+          limits as of {{ age(usage.sample.age_s) }}, from the last SSSF agent call{{ usage.sample.age_s > STALE_S ? ': interactive use since then isn\'t in the meters' : '' }}
         </span>
         <span v-else-if="usage" class="dim">no limit reading yet: one SSSF run on Claude Code records it</span>
       </div>
@@ -229,7 +232,14 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
         <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener">check its usage</a>.
       </div>
 
-      <template v-if="usage.pi.week.calls || usage.pi.span.calls">
+      <div v-if="!usage.pi.span.calls" class="spend-bar">
+        <span class="dim">
+          No pi calls in the last {{ NAMES[usage.pi.span.span] }}.
+          Last 7 days: <b>{{ fmtCost(usage.pi.week.est_usd) }}</b> est. over {{ usage.pi.week.calls }} calls.
+        </span>
+        <SpanPicker v-model="piSpan" />
+      </div>
+      <template v-else>
         <div class="spend-bar">
           <div class="totals">
             <span>{{ spanLabel(usage.pi.span) }}: <b>{{ fmtCost(usage.pi.span.est_usd) }}</b> est. over {{ usage.pi.span.calls }} calls</span>
@@ -351,6 +361,8 @@ function fullWindow(w: LimitWindow | null, spend: { at_sample_usd: number | null
   justify-content: space-between;
   gap: 10px 20px;
 }
+
+.stale { color: var(--amber); }
 
 .coverage {
   font-size: 13px;

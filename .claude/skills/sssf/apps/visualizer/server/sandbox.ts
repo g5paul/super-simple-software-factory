@@ -7,7 +7,8 @@
  * SSSF's runs only. VMs made outside SSSF don't show, and the provider's own
  * dashboard is the bill.
  */
-import type { SandboxAllowance, SandboxEnd, SandboxUsage } from "../shared/types.ts";
+import type { SandboxAllowance, SandboxEnd, SandboxSpan, SandboxUsage } from "../shared/types.ts";
+import { SPAN_MS, type Span } from "../shared/spans.ts";
 
 // vercel.com/docs/sandbox/pricing (2026-09-10) and e2b.dev/pricing (2026-11-02).
 export const VERCEL = { cpu_hours: 5, gb_hours: 420, creations: 5000 };
@@ -41,31 +42,53 @@ function parse(json: string | null): End | null {
   }
 }
 
-/** Vercel over the last 30 days, E2B over all time. A VM counted once, however often its trace is read. */
-export function sandboxUsage(repos: RepoEnds[], now: number): SandboxUsage {
+type Tally = Pick<SandboxAllowance, "runs" | "vm_seconds" | "cpu_seconds" | "gb_hours" | "cost_usd" | "repos">
+  & { cpu_unknown?: number };
+
+function add(t: Tally, end: End, repo: string): void {
+  const seconds = end.vm_seconds ?? 0;
+  t.runs += 1;
+  t.vm_seconds += seconds;
+  if (end.cpu_seconds === undefined || end.cpu_seconds === null) {
+    if (t.cpu_unknown !== undefined) t.cpu_unknown += 1;
+  } else t.cpu_seconds += end.cpu_seconds;
+  if (end.provider === "vercel") t.gb_hours += end.memory_gb_hours ?? (4 * seconds) / 3600;
+  else t.cost_usd += end.vm_cost_usd ?? seconds * E2B_USD_PER_SECOND;
+  const share = t.repos.find((r) => r.name === repo);
+  if (share) share.runs += 1;
+  else t.repos.push({ name: repo, runs: 1 });
+}
+
+function spanBlank(provider: "vercel" | "e2b"): SandboxSpan {
+  return { provider, runs: 0, vm_seconds: 0, cpu_seconds: 0, gb_hours: 0, cost_usd: 0, repos: [] };
+}
+
+/**
+ * Vercel over the last 30 days, E2B over all time, against their allowances;
+ * and each provider's runs in the picker's span, apart. A VM counted once,
+ * however often its trace is read.
+ */
+export function sandboxUsage(repos: RepoEnds[], now: number, span: Span = "30d"): SandboxUsage {
   const since = now - WINDOW_DAYS * 24 * 3_600_000;
+  const spanSince = now - SPAN_MS[span];
   const totals = { vercel: blank("vercel"), e2b: blank("e2b") };
+  const inSpan = { vercel: spanBlank("vercel"), e2b: spanBlank("e2b") };
   const seen = new Set<string>();
   for (const repo of repos) {
     for (const row of repo.ends) {
       const end = parse(row.payload_json);
       if (end?.provider !== "vercel" && end?.provider !== "e2b") continue;
-      if (end.provider === "vercel" && Date.parse(row.at) < since) continue;
       const key = `${end.provider}:${end.vm}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const t = totals[end.provider];
-      const seconds = end.vm_seconds ?? 0;
-      t.runs += 1;
-      t.vm_seconds += seconds;
-      if (end.cpu_seconds === undefined || end.cpu_seconds === null) t.cpu_unknown += 1;
-      else t.cpu_seconds += end.cpu_seconds;
-      if (end.provider === "vercel") t.gb_hours += end.memory_gb_hours ?? (4 * seconds) / 3600;
-      else t.cost_usd += end.vm_cost_usd ?? seconds * E2B_USD_PER_SECOND;
-      const share = t.repos.find((r) => r.name === repo.name);
-      if (share) share.runs += 1;
-      else t.repos.push({ name: repo.name, runs: 1 });
+      const at = Date.parse(row.at);
+      if (end.provider === "e2b" || at >= since) add(totals[end.provider], end, repo.name);
+      if (at >= spanSince) add(inSpan[end.provider], end, repo.name);
     }
   }
-  return { providers: [totals.vercel, totals.e2b].filter((t) => t.runs > 0) };
+  return {
+    providers: [totals.vercel, totals.e2b].filter((t) => t.runs > 0 || inSpan[t.provider].runs > 0),
+    span,
+    in_span: [inSpan.vercel, inSpan.e2b].filter((t) => t.runs > 0),
+  };
 }

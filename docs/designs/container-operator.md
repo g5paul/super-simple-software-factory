@@ -90,6 +90,8 @@ Sandboxes come in two kinds, as sandcastle's providers show (`~/github/sandcastl
 
 Nothing asks for a second sandbox yet. The needs that would are running unattended while this machine is off or busy, or more parallel runs than one machine holds, both pointing at an isolated provider, or a stronger boundary than rootless Podman for untrusted code, which could stay local. The first question to settle then: does the trace stay on the host, or travel with the run?
 
+Since then the isolated kind is built, as `--sandbox vercel|e2b`, per [remote-sandboxes.md](remote-sandboxes.md). The trace stays on the host, and only the run's work goes to the VM. A second bind-mount kind, such as Docker beside Podman, still waits for a need.
+
 ### disler's E2B skill
 
 disler, who wrote SSSF, also wrote agent-sandbox-skill, read from the fork at `~/github/agent-sandbox-skill` (ac460ee). It's an isolated sandbox on [E2B](https://e2b.dev/), built for a different job:

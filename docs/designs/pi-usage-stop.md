@@ -15,6 +15,8 @@ A pi agent signed in with ChatGPT runs on the plan's usage. When the plan runs o
 - **Pi's provider retry is off by default.** `retry.provider.maxRetries` is 0. Set higher, it retries every 429 by status code, this one included. Pi's own docs say to leave it at 0.
 - **SSSF already fails the call.** Since 2026-11-01, `agent_pi.run` raises when a call's last turn ends in an error, with pi's message. The run failed correctly, but under no name.
 
+Added after: pi's route still sends no windows, but the dashboard now reads the same plan's windows through `codex app-server`. That is `codex_limits.ts`, and it is opt-in. [usage-monitors.md](../research/usage-monitors.md#chatgpt-visibility) shows pi's use moves them. No stop reads them, so the 429 stop of decision 2 stands.
+
 ## Decisions
 
 1. **Build it now,** against the code in OpenAI's docs and pi's source, without waiting for a real 429. The first real one gets a log row.

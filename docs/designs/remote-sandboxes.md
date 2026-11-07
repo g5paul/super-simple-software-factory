@@ -1,6 +1,6 @@
 # Design: remote sandboxes
 
-Status: building. Settled in one grilling session on 2026-11-02. All three steps of decision 17 are built: the seam, then Vercel and E2B, which each passed all six proof cases. Where the text and a decision disagree, the decision wins; "As built" below records where the build differs from a decision.
+Status: built. The open items are in [open.md](../open.md). Settled in one grilling session on 2026-11-02. All three steps of decision 17 are built: the seam, then Vercel and E2B, which each passed all six proof cases. Where the text and a decision disagree, the decision wins; "As built" below records where the build differs from a decision.
 
 A run with `--sandbox vercel` or `--sandbox e2b` does its work in a remote VM. The ADW stays on the host and keeps the trace, the caps, the launch lock and the dashboard. Every process the run starts in its tree, agents, checks and git, goes through one runner, which sends it to the VM. Commits come back to the run's branch on the host, and the engineer merges as usual.
 
@@ -151,7 +151,7 @@ Decision 17's last step, built after the dashboard:
 
 - **`just tickets <folder> --sandbox vercel|e2b|none`.** The whole feature is one worktree run in one VM: the scout, every ticket's build, checks and commit, both reviews and the write-up. Each ticket's commit comes back to `sssf/<adw_id>` as it lands, so a VM that dies keeps every finished ticket on the host. The choice is made before the feature claim, because a VM run is a worktree run and builds from the feature folder as committed.
 - **Done marks go through the sandbox.** `tickets.mark_done` used to write the ticket file on the host, which in a VM run would have left the mark out of the ticket's commit. The sandbox has a `write_text` now, and the mark lands in the VM's tree.
-- **`just trial --sandbox vercel|e2b|none "<request>" <rosters>`.** The trial picks one place, from the flag or repo.yaml, and passes it to every attempt, so a trial never mixes VM and host attempts. Each roster is checked before anything starts. A pi roster can't run in a VM yet, so it refuses the trial and names `--sandbox none`. The panel runs on the host, from the branches the attempts' commits came back to.
+- **`just trial --sandbox vercel|e2b|none "<request>" <rosters>`.** The trial picks one place, from the flag or repo.yaml, and passes it to every attempt, so a trial never mixes VM and host attempts. Each roster is checked before anything starts. A roster that `sandbox.check_roster` rejects, pi on a provider other than `openai/`, refuses the trial and names `--sandbox none`. A ChatGPT roster runs in the VM. The panel runs on the host, from the branches the attempts' commits came back to.
 - **The trial doesn't load the SDK.** Loading it restarts a process under `uv run --with`, and the flag that guards that restart would have reached every attempt and stopped each one from fetching the SDK. The trial checks only the provider name and the roster, drops the flag from the attempts' environment, and each attempt fetches the SDK itself.
 - **A stop's message says where the work is.** It used to say to `git stash` on the host. In a VM run it now says the work will be saved as `sandbox-uncommitted.patch` when the VM closes.
 - **Changed for repos with `sandbox:` set.** A new ticket run in such a repo now goes to the VM without the flag. Trials already did: their attempts are `adw_simple_sdlc` runs, which read repo.yaml, so this design's earlier line saying trials stay on the host was wrong.
@@ -201,7 +201,7 @@ What this build settled that decisions 20 to 27 left open:
 - The check runs in `session._open_sandbox`, after the worktree exists.
 - A trial no longer pre-checks extensions. Each attempt checks at launch.
 - `OBS_AUTH_TOKEN` is held back from every VM command, checks and agents of both harnesses (`sandbox_remote.HELD`).
-- Decision 27's VM proof is still to run.
+- Decision 27's VM proof passed on both providers on 2026-11-05; see the Log.
 
 ## As built: the obs relay
 

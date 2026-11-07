@@ -10,6 +10,8 @@ Each tool's facts come from its README and docs, read on 2026-11-06. None of the
 
 SSSF's spend accounting is already ahead of all four tools. It splits SSSF agents from interactive sessions, totals cost per run, phase, feature and project, and lists the busiest 5-hour stretches. The gap is the **limit readings**. Claude's reading comes only from SSSF agent calls, so it goes stale while the engineer works interactively, and pi's ChatGPT plan has no reading at all. Two of the tools show cleaner ways to fill both gaps.
 
+Since then SSSF has closed both gaps. `scripts/statusline.py` (23cf66c) writes the windows from interactive Claude sessions into `rate_limits.json`. `apps/visualizer/server/codex_limits.ts` (761a93e) reads the ChatGPT windows through `codex app-server` when the dashboard starts with `SSSF_CODEX_LIMITS=1`. It is opt-in.
+
 ## The four tools
 
 ### CodexBar
@@ -52,15 +54,17 @@ SSSF's spend accounting is already ahead of all four tools. It splits SSSF agent
 
 | | SSSF | CodexBar | Usage Monitor | ccusage | sniffly |
 |---|---|---|---|---|---|
-| Claude limit reading | from SSSF agent calls only | live, from the OAuth endpoint | from the statusline | none | none |
-| ChatGPT limit reading | none | live, from `wham/usage` or `codex app-server` | none | none | none |
+| Claude limit reading | from SSSF agent calls and the statusline | live, from the OAuth endpoint | from the statusline | none | none |
+| ChatGPT limit reading | opt-in, from `codex app-server` | live, from `wham/usage` or `codex app-server` | none | none | none |
 | Cost by project and model | yes, over 5 hours to 90 days | totals only | per model | yes | none |
 | SSSF agents against interactive use | yes | no | no | no | no |
 | Cost per run, phase and feature | yes | no | no | no | no |
 | Busiest 5-hour stretches | yes | no | no | blocks list | no |
-| Burn rate and projection | no | burndown | yes | yes | no |
+| Burn rate and projection | yes | burndown | yes | yes | no |
 | Quality signals | traces only | no | no | no | error breakdown |
 | Reads credentials or cookies | no | yes | only with `--api` | no | no |
+
+The SSSF cells for the two limit readings and the burn rate changed after the survey. At the survey SSSF read Claude's limits from its agent calls only, had no ChatGPT reading and no burn rate.
 
 SSSF prices from `prices.json`, checked against Anthropic's page by `check_prices.py`, rather than pulling a third-party table. That's slower to pick up a new model and harder to get wrong.
 
@@ -68,10 +72,10 @@ SSSF prices from `prices.json`, checked against Anthropic's page by `check_price
 
 1. **A fresh Claude reading from interactive sessions.** A statusline script that writes Claude Code's `rate_limits` to the `rate_limits.json` SSSF agents already fill. No credentials, no undocumented endpoint, no polling. [Claude Code's statusline docs](https://code.claude.com/docs/en/statusline) confirm the fields: `rate_limits.five_hour` and `rate_limits.seven_day`, each with `used_percentage` from 0 to 100 and `resets_at` in epoch seconds, for Pro, Max and Ultra logins after a session's first reply. Built as `scripts/statusline.py`.
 2. **A burn rate and a projection.** When each window fills at the recent pace. Built into the meters.
-3. **ChatGPT plan limits for the pi card.** See the next section.
+3. **ChatGPT plan limits for the pi card.** See the next section. Built as `codex_limits.ts`, opt-in.
 4. **Per-model weekly windows and extra-usage spend.** Only the OAuth endpoint has them, at the cost of reading a login token. Skip unless item 1 carries them.
 5. **Quality signals.** Tool error rates and interruptions, SSSF runs against interactive sessions. The traces hold the SSSF half already.
-6. **History past `cleanupPeriodDays`.** Copy daily totals into sqlite.
+6. **History past `cleanupPeriodDays`.** Copy daily totals into sqlite. Partly built. Each closed 7-day window, Claude's and ChatGPT's, now stays in `~/.config/sssf/window_archive.jsonl` with its start, end and peak. `templates/adws/adw_modules/account.py` and `codex_limits.ts` write it. The dashboard works out each week's spend from the calls when it shows the week, so spend is known only while the transcripts or pi traces still exist. Daily totals past the transcript cleanup are still unbuilt. The pace reads `rate_limits_history.jsonl` and `codex_limits_history.jsonl`.
 7. **A warning near a limit**, as a browser notification.
 
 Supporting many providers, as ccusage and CodexBar do, isn't worth copying. pi is the only route to ChatGPT that SSSF uses.
@@ -82,7 +86,7 @@ Supporting many providers, as ccusage and CodexBar do, isn't worth copying. pi i
 
 - **Interactive pi spend.** pi writes every session to `~/.pi/agent/sessions/**/*.jsonl`, with a list-price cost per message. ccusage and CodexBar both read those files. Counting them would split pi spend into SSSF agents and interactive use, as the Claude card already does. That needs no credentials. Built: SSSF's agents run pi with `--session-dir` inside the run, so they don't land there.
 - **Codex CLI spend.** `~/.codex/sessions/` holds Codex's own sessions, if the engineer uses Codex directly.
-- **Plan windows through `codex app-server`.** `account/rateLimits/read` returns the 5-hour and weekly windows with reset times. It needs Codex CLI installed and signed in to the same ChatGPT account. The method isn't documented by OpenAI, but Codex's own `/status` uses it, so it's the method least likely to break. Built as an opt-in poll, `SSSF_CODEX_LIMITS=1`. On Codex CLI 0.153.0, `codex app-server generate-json-schema` gives the reply: `rateLimits.primary` and `secondary`, each with `usedPercent`, `windowDurationMins` and `resetsAt` in epoch seconds, plus `planType`, `credits` and `rateLimitReachedType`. The first read on 2026-11-07 gave a Plus plan with a 300-minute window at 0% and a 10,080-minute window at 2%. An unused 5-hour window reports a reset a full window after the reading, since it starts on the next call. The same protocol has `account/rateLimitResetCredit/consume`, which spends a reset credit, so SSSF sends a fixed list of three read requests and a test holds it to that.
+- **Plan windows through `codex app-server`.** `account/rateLimits/read` returns the 5-hour and weekly windows with reset times. It needs Codex CLI installed and signed in to the same ChatGPT account. The method isn't documented by OpenAI, but Codex's own `/status` uses it, so it's the method least likely to break. Built as an opt-in poll, `SSSF_CODEX_LIMITS=1`. On Codex CLI 0.153.0, `codex app-server generate-json-schema` gives the reply: `rateLimits.primary` and `secondary`, each with `usedPercent`, `windowDurationMins` and `resetsAt` in epoch seconds, plus `planType`, `credits` and `rateLimitReachedType`. The first read on 2026-11-07 UTC gave a Plus plan with a 300-minute window at 0% and a 10,080-minute window at 2%. An unused 5-hour window reports a reset a full window after the reading, since it starts on the next call. The same protocol has `account/rateLimitResetCredit/consume`, which spends a reset credit, so SSSF sends a fixed list of three read requests and a test holds it to that.
 
   pi draws on these windows. Run f0fe3deb in the sandbox repo, a ChatGPT-roster plan and build at 02:39 UTC on 2026-11-07, spent $0.065 at list price in 87 seconds. Before it, the 5-hour window was at 0% and unstarted, and the weekly window at 2%. After it, the 5-hour window was at 1%, with a reset 5 hours after the run's first call, and the weekly window at 3%. Codex reports whole percents, so one run says only that a full 5-hour window is somewhere around $4 to $13 at list price on Plus; the card's 100% figure waits for 10%.
 - **Plan windows from `wham/usage` directly.** The same data, with SSSF holding the token from `~/.codex/auth.json`. Higher risk, since SSSF would handle a login token.

@@ -149,3 +149,5 @@ In order of cost:
 2. If it does, finish option 1: record the sample, extend `account.check` to ChatGPT windows keyed by `window_minutes`, and call it for Pi agents.
 3. If it doesn't, add the 429 hard stop and an optional rolling 5-hour Pi spend cap built from the dashboard's existing sums. Then correct the README and `references/config.md:239`. They say ChatGPT "doesn't send" usage windows. Accurate wording would be that the Codex backend sends them, but the token-sharing route SSSF uses documents none.
 4. Don't switch the roster to Pi's legacy `openai-codex` provider just to get windows. Pi marks it legacy, and OpenAI points token-sharing apps at the public API.
+
+Since then the 429 stop is built, per [pi-usage-stop.md](../designs/pi-usage-stop.md), and the dashboard reads the plan's windows through Codex, per [usage-monitors.md](usage-monitors.md#chatgpt-visibility).

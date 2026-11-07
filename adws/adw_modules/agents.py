@@ -232,13 +232,20 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         forward = _event_forwarder(run, phase, agent.name, interface, enforced,
                                    uncounted=(builtin,) if builtin else ())
         try:
-            result = interface.run(
-                request,
-                on_event=forward,
-                on_spawn=lambda pid: run.tracer.process_start(
-                    run.adw_id, "agent", agent.name, pid,
-                    f"{agent.coding_agent} {agent.name} {agent.model}"),
-                on_exit=lambda pid: run.tracer.process_end(run.adw_id, pid))
+            try:
+                result = interface.run(
+                    request,
+                    on_event=forward,
+                    on_spawn=lambda pid: run.tracer.process_start(
+                        run.adw_id, "agent", agent.name, pid,
+                        f"{agent.coding_agent} {agent.name} {agent.model}"),
+                    on_exit=lambda pid: run.tracer.process_end(run.adw_id, pid))
+            except (rules.RuleBreach, budget.BudgetStop, account.RateLimitStop, silence.SilentStop):
+                raise
+            except Exception:
+                forward.ended()        # the agent died with a refuse-rule call pending
+                raise
+            forward.ended(result)
         except budget.CallBudgetStop as stop:
             spent.merge(stop.result.usage)
             raise budget.record_call_stop(run, agent.name, phase.phase_id,
@@ -487,16 +494,18 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
     then kills the agent before the call can finish.
 
     A refuse rule waits for the call's result instead: sssf_rules.ts refuses
-    for pi, sssf_refuse.py for Claude Code. SSSF's refusal there
-    means nothing ran, and the run goes on; any other result means it ran. So
-    does a call Claude Code denied itself (a `permission_denied` event with its
-    `tool_use_id`, read by rules.denied): nothing ran, and it counts like
-    SSSF's refusal.
+    for pi, sssf_refuse.py for Claude Code. On pi, SSSF's refusal counts when
+    pi's result shows it never ran the call (rules.blocked) and the text is the
+    refusal; any other result means it ran. On Claude Code, the prefix's refusal
+    text (`_CLAUDE_REFUSED`) counts, as does Claude Code's own `permission_denied`
+    (read by rules.denied), because Claude Code's stream can't tell a real
+    prefix refusal from a forged one (see sssf_refuse.py). A call still pending
+    when the agent ends raises RuleBreach through `forward.ended`.
 
     Refusals by a rule in `uncounted` (the built-in secret-file rule, by
     identity) don't count toward MAX_REFUSALS, so a command that only mentions
     .env never ends a run; the cost caps bound a loop. A call by such a rule
-    whose result isn't the refusal, and that Claude Code didn't deny, still
+    that the stream check doesn't count as refused still
     raises RuleBreach. A RuleBreach for a rule in `uncounted` names it as
     SSSF's secret-file rule."""
     is_builtin = lambda rule: any(rule is u for u in uncounted)
@@ -508,9 +517,15 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
     def forward(event: dict) -> None:
         nonlocal refusals
         denied.update(rules.denied(event))
+        pi_blocked = set(rules.blocked(event))
+        message = event.get("message") or {}
+        never_runs = (event.get("type") == "message_end" and message.get("role") == "assistant"
+                      and message.get("stopReason") in ("error", "aborted"))
         for call_id, command in rules.calls(event):
             found = rules.breach(list(enforced), command)
             if found and can_refuse and found[0].on_match == "refuse":
+                if never_runs:
+                    continue    # a turn pi ended in error: it never runs the call, and retries with new ids
                 pending.setdefault(call_id, (*found, command))
             elif found:
                 raise rules.RuleBreach(agent_name, *found, command, builtin=is_builtin(found[0]))
@@ -521,7 +536,8 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
             rule, pattern, command = pending.pop(call_id)
             by_claude = call_id in denied
             denied.discard(call_id)
-            if not (by_claude or rules.refused(text)):
+            by_text = rules.refused(text) and (call_id in pi_blocked or not rules.pi_result(event))
+            if not (by_claude or by_text):
                 raise rules.RuleBreach(agent_name, rule, pattern, command, builtin=is_builtin(rule))
             if not is_builtin(rule):
                 refusals += 1
@@ -543,6 +559,16 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
                                          ended_at=record.pop("ended_at", None),
                                          payload={**record, "agent": agent_name}))
     forward.tracker = tracker      # a silent stop asks it what was running
+
+    def ended(partial=None) -> None:
+        """The agent's process is gone. A refuse-rule call still waiting for its
+        result may have run (`<command>; kill -9 $PPID`): raise RuleBreach for the first one."""
+        if pending:
+            rule, pattern, command = next(iter(pending.values()))
+            breach = rules.RuleBreach(agent_name, rule, pattern, command, builtin=is_builtin(rule))
+            breach.partial = partial
+            raise breach
+    forward.ended = ended
     return forward
 
 

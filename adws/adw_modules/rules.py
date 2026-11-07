@@ -21,9 +21,11 @@ runs, the agent reads the rule as the tool's result, and the run goes on. On
 pi, SSSF's own extension (sssf_rules.ts) blocks it. Claude Code agents run
 with --safe-mode, which ignores every hook, so their Bash calls go through
 SSSF's shell prefix (sssf_refuse.py) instead. The stream check stays as the
-backstop: a matching call whose result isn't that refusal, and that Claude Code
-didn't deny itself (a `permission_denied` event for its id), ran, and is a
-breach.
+backstop: on pi a matching call counts as refused only when pi's result shows
+it never ran the call (`blocked`) and reads as the refusal; on Claude Code when
+its result is the prefix's refusal or Claude Code denied it itself (a
+`permission_denied` event for its id). Anything else is a breach, and so is a
+matching call still waiting for its result when the agent ends.
 
 So every `forbid` pattern must read the same in both languages: the settings fail to load on Python syntax JavaScript reads differently or can't compile (`_python_only`).
 """
@@ -41,8 +43,9 @@ from pydantic import BaseModel, ConfigDict, field_validator
 # The shell tool's name in each harness: Claude Code's `Bash`, pi's `bash`.
 SHELL_TOOLS = {"Bash", "bash"}
 
-# How sssf_rules.ts and sssf_refuse.py start a shell refusal, so the stream check
-# can tell it from output. Claude Code puts the exit line first. A pi file-tool
+# How sssf_rules.ts and sssf_refuse.py start a shell refusal. On pi the stream
+# check reads this text only together with `blocked`; on Claude Code it reads it
+# after the exit line, which Claude Code puts first. A pi file-tool
 # refusal says "this <tool> call" instead, and never reaches the stream check:
 # only shell calls are.
 REFUSED = "SSSF refused this command"
@@ -236,6 +239,31 @@ def denied(event: dict) -> list[str]:
     return [call_id] if isinstance(call_id, str) and call_id else []
 
 
+def pi_result(event: dict) -> bool:
+    """Whether an event is a pi tool result: `tool_execution_end`, or a
+    `message_end` for a toolResult message. A Claude Code result (a `user`
+    event) is not one."""
+    return event.get("type") == "tool_execution_end" or (
+        event.get("type") == "message_end"
+        and (event.get("message") or {}).get("role") == "toolResult")
+
+
+def blocked(event: dict) -> list[str]:
+    """The call id in a pi result for a call pi never ran. pi 1.4.0's agent loop
+    (pi-agent-core/dist/agent-loop.js) sets `durationMs` on every call it ran
+    (executePreparedToolCall) and on none it didn't: those are prepareToolCall's
+    immediate results (a `tool_call` block, validation error, unknown tool, abort)
+    and the output-token-limit "was not executed" result. The agent can't set or
+    clear it. Claude Code's stream has no such field, so this returns nothing for
+    it and the stream check reads its results by text alone."""
+    if not pi_result(event):
+        return []
+    body = event if event["type"] == "tool_execution_end" else event["message"]
+    if body.get("isError") is True and "durationMs" not in body:
+        return [str(body.get("toolCallId"))]
+    return []
+
+
 def _text(content) -> str:
     if isinstance(content, str):
         return content
@@ -246,7 +274,9 @@ def _text(content) -> str:
 
 
 def refused(text: str) -> bool:
-    """Whether a call's result is SSSF's refusal, from either harness."""
+    """Whether a call's result text reads as SSSF's refusal, from either harness.
+    It reads only the text, which the agent controls: on pi the stream check also
+    needs `blocked`; on Claude Code the text alone counts (see sssf_refuse.py)."""
     return text.startswith(REFUSED) or bool(_CLAUDE_REFUSED.match(text))
 
 

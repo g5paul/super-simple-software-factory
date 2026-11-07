@@ -13,6 +13,13 @@ to stderr, the script exits 126 and nothing runs. The agent reads "Exit code
 else runs as Claude Code meant it to, through an operator's own prefix if
 they had one (SSSF_NEXT_SHELL_PREFIX).
 
+SSSF's stream check counts this script's refusal by its text, since Claude
+Code's stream gives it the same result as a command that printed it and exited
+126. A forged one needs this script to miss a command the stream check
+matches; both read the same command with Python `re`, so that needs a change in
+how Claude Code wraps a command (the shape `commands()` unwraps) or a Bash call
+that skips the prefix. `docs/open.md` in SSSF's source repo watches for it.
+
 Claude Code wraps the agent's command in its own shell line, which ends
 `&& eval '<command>' < /dev/null && pwd -P ...`. The patterns are searched in
 that command. A line in another shape is searched whole, and so is each
@@ -32,7 +39,7 @@ import re
 import shlex
 import sys
 
-REFUSED = "SSSF refused this command"     # rules.REFUSED; the stream check looks for it
+REFUSED = "SSSF refused this command"     # rules.REFUSED; the stream check reads it after the exit line
 TAIL = ("Nothing ran. Don't try it another way: do the task without it, or say in your "
         "report that the task needs it.")
 EXIT = 126

@@ -115,10 +115,11 @@ def test_portable_patterns_still_load(tmp_path, on_match):
     (shipped / repo_settings.PATH).parent.mkdir(parents=True)
     shutil.copy(SKILL / "templates" / "repo.yaml", shipped / repo_settings.PATH)
     repo_settings.load(shipped)
-    hub = SKILL.parents[2]
-    if (hub / repo_settings.PATH).exists():
-        loaded = repo_settings.load(hub).agent_rules
-        assert any(isinstance(r, rules.AgentRule) and r.forbid for r in loaded)
+    # The repo this skill copy sits in: the hub, or a repo SSSF is installed in.
+    # Its own rules must load; only the hub's are known to hold a forbid rule.
+    repo = SKILL.parents[2]
+    if (repo / repo_settings.PATH).exists():
+        repo_settings.load(repo)
 
 
 SECRET_FILES = ["/r/.env", "/r/.env.local", "/r/my file.txt", "/r/a+b[1].txt",

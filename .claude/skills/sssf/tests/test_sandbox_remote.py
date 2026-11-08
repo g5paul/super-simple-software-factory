@@ -338,6 +338,22 @@ def test_vm_commands_use_the_python_the_hosts_uv_picks(box, tmp_path):
     process.wait()
 
 
+def test_a_bad_answer_means_no_uv_python(box, tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    bin_ = tmp_path / "badbin"
+    bin_.mkdir()
+    interp = bin_ / "interp"
+    interp.write_text("#!/bin/sh\necho 'hello from sitecustomize'\n")
+    interp.chmod(0o755)
+    uv = bin_ / "uv"
+    uv.write_text(f"#!/bin/sh\necho {interp}\n")
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:{os.environ['PATH']}")
+    box.python = sandbox_remote._host_python(box.host_tree)
+    assert box.python == ""
+    assert "UV_PYTHON" not in box.run(["sh", "-c", "env"]).stdout
+
+
 def test_an_agent_writes_the_handoff_folder_and_the_host_gets_it_back(box):
     process = box.start(["sh", "-c", f"echo done > {box.handoff}/build.md; echo ok"])
     assert list(process.stdout) == ["ok\n"]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import subprocess
 import sys
 import types
@@ -225,7 +226,7 @@ def test_create_writes_the_policy_and_passes_no_upload(cli, tmp_path, monkeypatc
     folder = osh.folder_for(repo)
     assert create[create.index("--from") + 1] == osh.image_tag(folder)
     assert create[create.index("--policy") + 1] == str(run.session_dir / "openshell-policy.yaml")
-    assert "sssf=my-repo" in create and "adw_id=abc" in create
+    assert f"sssf={osh.project_label('my repo')}" in create and "adw_id=abc" in create
     assert "--detach" in create and "--no-tty" in create
     assert not {"--upload", "--env", "--env-from"} & set(create)
     assert vm.name == create[create.index("--name") + 1] and vm.name.startswith("sssf-abc-")
@@ -267,8 +268,48 @@ def test_sweep_deletes_only_dead_runs_of_this_project(cli, monkeypatch):
     monkeypatch.setenv("FAKE_OPENSHELL_NAMES", "sssf-live1-aaaaaa\nsssf-dead1-bbbbbb\nother-thing")
     assert osh.sweep("proj", {"live1"}) == ["sssf-dead1-bbbbbb (dead1)"]
     calls = [c["argv"] for c in cli()]
-    assert calls[0][:4] == ["sandbox", "list", "--selector", "sssf=proj"]
+    assert calls[0][:4] == ["sandbox", "list", "--selector", f"sssf={osh.project_label('proj')}"]
     assert [c for c in calls if c[:2] == ["sandbox", "delete"]] == [["sandbox", "delete", "sssf-dead1-bbbbbb"]]
+
+
+LABEL_VALUE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?")
+
+COLLIDING = [("my app", "my-app"), ("app+x", "app-x"), ("café", "caf-"),
+             ("a" * 63 + "b", "a" * 63 + "c")]
+
+
+@pytest.mark.parametrize("one,two", COLLIDING)
+def test_names_the_old_label_merged_get_distinct_labels(one, two):
+    assert osh.label(one) == osh.label(two)            # the baseline's collision
+    assert osh.project_label(one) != osh.project_label(two)
+
+
+@pytest.mark.parametrize("name", [n for pair in COLLIDING for n in pair] + [
+    "x" * 200, "日本語のプロジェクト", "café" * 60, "", "-lead", "trail-", ".dot", "_u",
+    "a,b=c", "my repo", "caf\udcc3\udca9", "\udcff" * 3])
+def test_every_project_label_passes_openshell_limits(name):
+    value = osh.project_label(name)
+    assert len(value) <= osh.LABEL_MAX and LABEL_VALUE.fullmatch(value)
+    assert value == osh.project_label(name)
+
+
+def test_the_label_keeps_a_readable_prefix():
+    assert osh.project_label("my-repo").startswith("my-repo-")
+    assert osh.project_label("café") != osh.project_label("caf\udcc3\udca9")
+
+
+def test_create_labels_what_this_projects_sweep_lists(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+    osh.OpenShell(run, "sssf/abc", "my repo")._create()
+    create = next(c["argv"] for c in cli() if c["argv"][:2] == ["sandbox", "create"])
+    made = [create[i + 1] for i, a in enumerate(create) if a == "--label"
+            and create[i + 1].startswith("sssf=")]
+    osh.sweep("my repo", set())
+    osh.sweep("my-repo", set())
+    selectors = [c["argv"][3] for c in cli() if c["argv"][:3] == ["sandbox", "list", "--selector"]]
+    assert made == [selectors[0]]
+    assert selectors[1] != selectors[0]
 
 
 def call_end_box():

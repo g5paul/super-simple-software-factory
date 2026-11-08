@@ -14,7 +14,9 @@ the host or in the sandbox (anyone can read another process's argv).
 
 `sweep` reads the adw_id from the sandbox's name, `sssf-<adw_id>-<hex6>`, so it
 needs no JSON from `sandbox list`, whose shape v0.1.7 doesn't document. The
-`adw_id` label is still set.
+`adw_id` label is still set. The `sssf`
+label is `project_label(project)`: a readable prefix and a hash of the exact
+name, so no two projects share one.
 """
 
 from __future__ import annotations
@@ -52,7 +54,9 @@ SENTINEL = "sssf-openshell-exec-started"
 SETUP = "just openshell-setup"
 _SETUP_HINT = f"`{SETUP}` (or `just sssf openshell-setup` where SSSF's recipes are a module)"
 _TIMEOUT = 30
-KILL_SLACK = 30      # seconds past kill_after the CLI gets to return on its own
+LABEL_MAX = 63       # a Kubernetes label value's limit; the CLI's help gives none
+LABEL_HASH = 12      # hex characters of the name's SHA-256 in the project label
+KILL_SLACK = 30    # seconds past kill_after the CLI gets to return on its own
 
 
 class OpenShellError(RuntimeError):
@@ -182,10 +186,21 @@ def label(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "-", value)[:63]
 
 
+def project_label(project: str) -> str:
+    """The `sssf=` label for a project: its name cleaned to [A-Za-z0-9_.-] and cut,
+    then `-` and 12 hex of the SHA-256 of the exact name, so distinct names get
+    distinct labels. At most 63 characters, starting and ending with a letter or
+    digit."""
+    digest = hashlib.sha256(project.encode("utf-8", "surrogatepass")).hexdigest()[:LABEL_HASH]
+    prefix = re.sub(r"[^A-Za-z0-9_.-]", "-", project)[:LABEL_MAX - LABEL_HASH - 1]
+    prefix = re.sub(r"^[^A-Za-z0-9]+", "", prefix)
+    return f"{prefix}-{digest}" if prefix else digest
+
+
 def sweep(project: str, live: set[str]) -> list[str]:
     """Delete this project's SSSF sandboxes whose run isn't live. Returns their names
     and ids. The id is read from the name; a name that doesn't parse is left alone."""
-    listed = subprocess.run([CLI, "sandbox", "list", "--selector", f"sssf={label(project)}",
+    listed = subprocess.run([CLI, "sandbox", "list", "--selector", f"sssf={project_label(project)}",
                              "--names", "--page-size", "1000"],
                             capture_output=True, text=True, timeout=_TIMEOUT)
     if listed.returncode != 0:
@@ -345,7 +360,7 @@ class OpenShell(Remote):
         try:
             done = subprocess.run(
                 [CLI, "sandbox", "create", "--name", name, "--from", image_tag(folder),
-                 "--policy", str(file), "--label", f"sssf={label(self.project)}",
+                 "--policy", str(file), "--label", f"sssf={project_label(self.project)}",
                  "--label", f"adw_id={label(self.run_.adw_id)}", "--detach", "--no-tty",
                  "--no-auto-providers"],
                 capture_output=True, text=True, timeout=READY_SECONDS)

@@ -75,6 +75,7 @@ So nothing in the design changes, and the build can start at step 2.
 - **`include_workdir: true`** stays, as in both test policies. The proof run checks whether it can go.
 - **`ANY_BINARY = "/**"`** is an untested reading of "any binary". The proof run confirms it.
 - **Sweep** reads the adw_id from the sandbox name `sssf-<adw_id>-<hex6>`, so `sandbox list --names` is enough.
+- **The project label.** `sssf=` is the project name cleaned to `[A-Za-z0-9_.-]` and cut to 50 characters, then `-` and the first 12 hex characters of the exact name's SHA-256, so two projects never share one, and it stays within a Kubernetes label value's 63 characters.
 - **The image tag** hashes the Containerfile, which holds the shared folder, so each repo layout has its own image.
 - **`data_dir(repo_root)`** reads `defaults.data_dir` from the shipped config; `folder_for` is the one source of the layout for `require_sdk`, `_create` and `scripts/openshell_image.py`.
 - **`Remote._call_end`** is a hook that logs denials when an agent call ends. A `wait` that raises before it logs none.

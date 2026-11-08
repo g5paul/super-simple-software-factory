@@ -21,9 +21,11 @@ RuntimeDirectoryMode=0755
 # The per-wrap handshake sockets go here, where wrap can reach them and
 # no other user can write.
 Environment=TMPDIR=/run/agentsh
-# The one right the tracer needs, and no other.
-AmbientCapabilities=CAP_SYS_PTRACE
-CapabilityBoundingSet=CAP_SYS_PTRACE
+# CAP_SYS_PTRACE lets the tracer attach to an agent of another user.
+# CAP_DAC_READ_SEARCH lets it open the agent's /proc/<pid>/mem, which is
+# mode 0600, and reach workspaces in a home folder that is mode 0750.
+AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only

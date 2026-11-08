@@ -145,9 +145,21 @@ The engineer chose the service on 2026-11-08. The files are in [agentsh/](agents
 - The server cannot `chown` a wrap's socket folder to the engineer, because it has only `CAP_SYS_PTRACE`. The code then uses mode 0711. Whether `wrap` still connects is not tested.
 - `ProtectHome=read-only` lets the server read home folders. Whether ptrace file checks need more is not tested.
 
+## Service checks, 2026-11-08
+
+The engineer ran `install.sh`. The service is `active`, and its `CapEff` is `0x80000`, which is `CAP_SYS_PTRACE` alone.
+
+- **The server could not reach the workspace.** As the `agentsh` user, it got `permission denied` on a stat of a workspace in the engineer's mode 0750 home folder and in a mode 0700 scratch folder. The session failed to start, and nothing ran. A dummy workspace in `/tmp` with mode 0755 was used for the next check.
+- **The wrap attached, and every check failed open.** `just test live`, `j""ust test live`, `cat .env` and `gh` all ran. The server can't open the agent's `/proc/<pid>/mem`, because it is the engineer's file with mode 0600 and the kernel checks file permissions before ptrace rights. agentsh handles the read failure in two ways:
+  - The exec handler allows the exec when it can't read the filename (agentsh `internal/ptrace/tracer.go:2013`). That is a fail-open bug.
+  - The file handler denies in the same case (`internal/ptrace/handle_file.go:228`). It denied 6 opens, but `cat .env` still ran, so not every open reached it. Not explained yet.
+  - The memory reader has a `process_vm_readv` fallback that needs no file permission, but `ensureMemFD` returns an error first (`internal/ptrace/memory.go:107`), so the fallback never runs.
+- **The fix for this machine.** The unit adds `CAP_DAC_READ_SEARCH`. With it, the server can open `/proc/<pid>/mem` to read, and it can reach workspaces in the home folder. It adds little power, because `CAP_SYS_PTRACE` already lets the server read any process's memory.
+- **The fix upstream.** The exec handler must deny when it can't read the filename, and the memory reader must try `process_vm_readv` before it gives up. Both are fork patches or upstream reports. SSSF can't rely on agentsh until the fail-open is fixed, because any read failure lets an exec through.
+
 ## Next
 
-1. The engineer runs `install.sh` with sudo. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
+1. The engineer installs the updated unit and restarts the service. The checks run again. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
 2. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
 2. The decisions above, settled from the proof.
 3. A guard chain run for the wrap.

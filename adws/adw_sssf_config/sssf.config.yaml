@@ -175,7 +175,7 @@ agents:
   # Hub only: the guard-change chain, adws/adw_guard_change.py.
   - name: guard_spec_reviewer
     model: anthropic/claude-opus-5-5
-    max_call_cost: 1.00
+    max_call_cost: 2.00
     thinking: high
     color: "#fb7185"
     purpose: Check a guard change's spec before any code; change nothing.

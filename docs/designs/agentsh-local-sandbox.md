@@ -1,6 +1,6 @@
 # Design: agentsh as the local sandbox
 
-Status: direction decided by the engineer on 2026-11-08; design pending the research note and a proof. The open item is in [open.md](../open.md).
+Status: direction decided by the engineer on 2026-11-08. The research note is done, [agentsh-local-sandbox.md](../research/agentsh-local-sandbox.md) in `docs/research/`, and the proof in sssf-sandbox is being set up. The open item is in [open.md](../open.md).
 
 Under `sandbox: none`, SSSF runs each agent under [agentsh](https://github.com/canyonroad/agentsh) with a policy built from the repo's settings, in place of the text checks that limit a local agent today. `--sandbox openshell` stays as it is.
 
@@ -42,9 +42,46 @@ The proof then runs in sssf-sandbox. It wraps one Claude Code agent and one pi a
 
 Not every agentsh feature fits SSSF. Its CLAUDE.md snippet asks the agent to wrap its own commands, which is advisory. Its shell shim edits `/bin/sh` on the host, and skips policy when stdin isn't a TTY unless forced. Only `wrap` fits a local run.
 
+## What the research found
+
+agentsh can be the local sandbox, and it closes the class SSSF kept patching. As the engineer's user, with no root, it runs in its `landlock` mode, and its seccomp checks on exec and file opens still work there. `args_patterns` are Go regexes searched in the process's argv after the shell has parsed it, so every spelling in the guard reports reaches a rule as one exec of `just` with `test live`.
+
+It isn't yet a boundary against an agent working around it. Two conditions come first.
+
+1. **SSSF configures it.** Out of the box `wrap` checks almost nothing: exec checking is off by default (agentsh `internal/config/sandbox.go:21`); the file check skips read-only opens, so reading `.env` isn't checked (`docs/seccomp.md:77`); and when interception setup fails, `wrap` warns once and starts the agent with no checks (`internal/cli/wrap.go:128`). SSSF needs its own root-owned config, and treats "running without interception" as a failed launch.
+2. **The server's local API is closed.** Its auth defaults to `none` (`config.yml:43`), and the API can run commands. Without eBPF, which needs a root server, nothing stops an agent from connecting to it on 127.0.0.1. agentsh's own adversarial review marks the missing per-session ownership checks as confirmed and High, finding #29, still open.
+
+Other gaps that matter to SSSF:
+
+- A symlink to `.env` gets past the file check, finding #1, next on the vendor's list.
+- Command rules match a basename, so a copy of a binary under another name gets through. A Landlock execute list that leaves out the workspace and `/tmp` closes it.
+- Processes the agent didn't start, through `systemd-run --user`, tmux, `at` or ssh, run unfiltered.
+- pi is a Node script whose exec resolves to its package's `cli.js`, so a rule on the name `pi` never fires. The rule names the package path and runs only `[nested]`, or it would deny the wrapped pi agent's own launch.
+- A plain deny reaches the agent as `Permission denied`, with the rule's message only in the audit event. A `redirect` to a script that prints SSSF's refusal can show text.
+- The last release is v0.20.5 from 2026-06-23. The November review's fixes, approvals failing closed among them, are only on `main`.
+
+Even so, it guards better than the regexes against an agent's mistakes, which is all the text guard promises today.
+
+## Decisions
+
+The research note's recommendations, for the engineer to confirm after the proof:
+
+| Decision | Recommendation |
+|---|---|
+| Ship now or wait | A second layer now, behind a `repo.yaml` key such as `local_guard: agentsh`, off by default. The text checkers stay until the proof shows they add nothing |
+| A root server with eBPF | Not yet. The server runs as the engineer's user |
+| The API escape | Closing it is the precondition for calling agentsh a boundary: upstream's fix for #29, or a fix carried in the engineer's fork, with `auth.type: api_key` and the key kept from agents |
+| Install | With sudo, root-owned binaries, config and policies. A file under `~` is one the agent can edit, and policies reload every 30 seconds |
+| Release or `main` | v0.20.6 final for daily use. The proof can test `main` |
+| How a denial counts | A blocked exec counts as a refusal toward the three-refusal stop, not a breach |
+| Rule format | An argv form, such as `deny_exec`, beside `forbid`, which keeps its text uses |
+| Proxy, DLP, FUSE, `BASH_ENV` | All off for SSSF runs. Each changes what the agent sees or where it works |
+| Silent fallback | A failed launch, and an upstream request for `wrap --require-interception` |
+
+The seam is one place: a new local sandbox whose `start` puts `agentsh wrap --policy <name> --root <cwd> --` before the agent's command. That covers `agent_cc.py` and `agent_pi.py` through `tree.start`, and leaves quality checks and git outside the wrap.
+
 ## Next
 
-1. The research note.
-2. The proof in sssf-sandbox. Building agentsh needs Go or a release package, installed by the engineer.
-3. This design's decisions, from the note.
-4. A guard chain run for the wrap in `agent_cc.py` and `agent_pi.py`.
+1. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
+2. The decisions above, settled from the proof.
+3. A guard chain run for the wrap.

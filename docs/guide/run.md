@@ -197,7 +197,7 @@ The run succeeded: all 5 phases passed and the tests came back green.
 
 The first start built the image. The session wrote its own prompt for the chain, with what's in and out of scope, and reported what the builder found: the helper already existed, so it only exported and tested it. Run without `-p` for an interactive session.
 
-## In a remote VM
+## In a VM
 
 `--sandbox vercel` or `--sandbox e2b` runs the agents, checks and git in a VM made for the run. It implies `--worktree`, so you merge as usual. These two ran at once, Vercel on the Claude roster and E2B on ChatGPT:
 
@@ -232,6 +232,16 @@ vercel, last 30 days: 22 runs, 0.81 VM hours
 ```
 
 `--sandbox openshell` does the same in a local microVM, free and with no API key, for Claude Code rosters only. Its network is closed except `api.anthropic.com` for Claude Code and read-only package registries; denials show as `sandbox_denied` events. Run `just openshell-setup` once first.
+
+### Which to pick
+
+None of these is the default. A run with no flag runs on this machine, and SSSF's guard rules (no push, no `gh` writes, no billing recipes, secret files and `.env` kept out) apply in every mode, VM or not. A VM adds a wall the rules can't: a command the rules miss still has no route out.
+
+- **No sandbox**, the default, for everyday runs. It's the fastest, with no VM to make.
+- **`openshell`** when you want that wall at no cost and the code shouldn't leave the machine, such as a private repo, an unattended run, or a request you don't fully trust. It needs `/dev/kvm` and a Claude Code roster. It's new: one proof run so far (700a50bb, 2026-11-08), on OpenShell 0.1.7, which marks WSL2 experimental.
+- **`vercel` or `e2b`** for a pi agent on ChatGPT, for a machine without KVM, or to run several at once off this machine. Both upload the branch to the provider and use its free allowance.
+
+Whether the rules against harm outside the repo can go in a VM mode is still open, after a few weeks of runs.
 
 `sandbox: vercel`, `sandbox: e2b` or `sandbox: openshell` in `repo.yaml` makes a VM the repo's default, and `--sandbox none` keeps one run local. [install.md](install.md#set-up-remote-vms) has the setup.
 

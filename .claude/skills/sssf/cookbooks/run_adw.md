@@ -107,12 +107,12 @@ A repo can have more than one worktree run going, up to its `max_worktree_runs`.
 - Each run's `max_run_cost` holds for that run alone, so two runs can spend up to twice it between them. The usage check before each agent's first call doesn't see the other run's calls either, so two runs can pass `rate_limit_stop` together and go a little over it.
 - In the container, each worktree run gets its own project environment, built on its first `uv run`, so its first check is slower. Merge and discard remove it.
 
-### In a remote VM: `--sandbox vercel` or `--sandbox e2b`
+### In a VM: `--sandbox vercel`, `e2b` or `openshell`
 
-Use it only when the engineer asks for it, with the provider they name, or when the repo's `adws/adw_sssf_config/repo.yaml` sets `sandbox: vercel` or `sandbox: e2b`. Then a new run of these chains goes to that provider's VM without the flag. Pass `--sandbox none` to keep one run on this machine only when the engineer says to. Don't change the setting yourself: it's the engineer's call, made in a commit. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, and for ticket runs ([tickets.md](tickets.md)) and trials ([trial.md](trial.md)). The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
+Use it only when the engineer asks for it, with the provider they name, or when the repo's `adws/adw_sssf_config/repo.yaml` sets `sandbox: vercel`, `sandbox: e2b` or `sandbox: openshell`. Then a new run of these chains goes to that provider's VM without the flag. Pass `--sandbox none` to keep one run on this machine only when the engineer says to. Don't change the setting yourself: it's the engineer's call, made in a commit. It's built for `adw_simple_sdlc`, `adw_build_test`, `adw_plan_build_test` and `adw_plan_build_test_quality`, and for ticket runs ([tickets.md](tickets.md)) and trials ([trial.md](trial.md)). The design is `docs/designs/remote-sandboxes.md` in the SSSF repo.
 
 ```bash
-uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or e2b, or none for this machine
+uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or e2b, openshell, or none for this machine
 ```
 
 - It implies `--worktree`, so merge, discard, rebase and `max_worktree_runs` work as for any worktree run. The chain stays on this machine, and its agents, checks, git and `worktree_setup` run in a VM made for the run and deleted at its end.
@@ -123,6 +123,7 @@ uv run adws/<chain>.py "<prompt>" --sandbox vercel    # or e2b, or none for this
 - Before any agent starts, SSSF reads the VM's tool versions. If one is missing or too old, the run stops in its `sandbox` phase naming the tool, the version found and the minimum, and nothing has run. Report that message. Don't rerun on the other provider or with `--sandbox none` unless the engineer says to. A note that a tool is a newer major than SSSF has run on doesn't stop the run; report it with the results.
 - If the provider won't make the VM, for example past Vercel's Hobby allowance or E2B's credit, the run stops in its `sandbox` phase with the provider's message. Report that message. Don't rerun without `--sandbox` or with `--sandbox none`, and don't switch providers unless the engineer says to.
 - Report the VM name, VM seconds and `cpu_seconds` from the `sandbox_end` event with the run's other results, and on E2B its `vm_cost_usd` estimate too.
+- `openshell` is a microVM on this machine, made by NVIDIA OpenShell: free, no API key, and the code never leaves the machine. It runs Claude Code agents only; a roster with a pi agent stops the run before anything is made. It needs the same `token.env`. Its network is closed except Claude Code to `api.anthropic.com` and read-only package registries, so a command that reaches anywhere else, GitHub included, fails with "Couldn't connect to server". Each one is a `sandbox_denied` event in the trace with the program and the destination; report them with the results. A denial never stops the run. If the run stops in its `sandbox` phase saying the CLI, the gateway or the image is missing, tell the engineer to run `just openshell-setup`; don't run it yourself, since it starts a system service and builds an image. A repo opens more hosts with `sandbox_allow` in `repo.yaml`, the engineer's call like `sandbox`. `just sandbox-usage` doesn't count it, since it has no allowance.
 - When the engineer asks what VM runs have used of the providers' free allowances, run `just sandbox-usage`, naming other repos' `adws/adw_data/sssf.db` if they share the account. It counts SSSF's runs only; the provider's dashboard is the bill.
 
 ## Observe

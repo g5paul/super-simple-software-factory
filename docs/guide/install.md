@@ -213,7 +213,7 @@ For a local, free microVM instead, `--sandbox openshell` needs only `just opensh
    uv run .claude/skills/sssf/scripts/e2b_template.py
    ```
 
-A VM run uploads the repo's code to that provider. Keep a private repo on `sandbox: none` in `adws/adw_sssf_config/repo.yaml`, the default, and use a VM only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [run.md](run.md#in-a-remote-vm) has an example run.
+A Vercel or E2B run uploads the repo's code to that provider; an OpenShell run keeps it on this machine. Keep a private repo on `sandbox: none`, the default, or `sandbox: openshell` in `adws/adw_sssf_config/repo.yaml`, and use a VM only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [run.md](run.md#in-a-vm) has an example run.
 
 ## Update to a newer skill
 

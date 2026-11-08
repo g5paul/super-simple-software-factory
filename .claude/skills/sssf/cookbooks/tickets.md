@@ -32,7 +32,7 @@ just tickets .scratch/<feature>/
 
 To build it on its own branch, add `--worktree`: `just tickets .scratch/<feature>/ --worktree`. Every ticket lands on `sssf/<adw_id>` in its own folder, and nothing reaches the engineer's branch until `just merge <adw_id>`. With it, the run may start from `main`. The feature folder must be committed first, since the worktree checks out what is committed, and the run refuses while it has uncommitted changes. Ask the engineer which they want; it's their branch.
 
-If the repo's `repo.yaml` sets `sandbox: vercel` or `sandbox: e2b`, a new ticket run builds the feature in that provider's VM, as a worktree run, without the flag. `--sandbox <provider>` asks for one when the engineer does, and `--sandbox none` keeps one run on this machine when they say to. Every ticket's commit comes back to `sssf/<adw_id>` as it lands. The rest is as in [run_adw.md](run_adw.md), section "In a remote VM".
+If the repo's `repo.yaml` sets `sandbox: vercel`, `e2b` or `openshell`, a new ticket run builds the feature in that provider's VM, as a worktree run, without the flag. `--sandbox <provider>` asks for one when the engineer does, and `--sandbox none` keeps one run on this machine when they say to. Every ticket's commit comes back to `sssf/<adw_id>` as it lands. The rest is as in [run_adw.md](run_adw.md), section "In a VM".
 
 The read step runs before any agent and prints the ticket order, what the feature has cost so far, and an estimate from past ticket runs. It stops the run on `main` without `--worktree`, on a dirty tree, on an untracked folder, on a spec with no seams, on a blocker that isn't a ticket, and on a cycle.
 

@@ -1,6 +1,6 @@
 # NVIDIA OpenShell as a sandbox for SSSF's agents
 
-Researched 2026-11-07, from OpenShell's docs for v0.1.7 and its README. [The test](#the-test) on this machine found that its container drivers can't run under WSL2 here; the microVM driver is untried.
+Researched 2026-11-07, from OpenShell's docs for v0.1.7 and its README, then [tested](#the-test) on this WSL2 machine. The container drivers can't run here. The microVM driver passed all three questions.
 
 The question: would OpenShell have solved the problems behind SSSF's reactive guards ([concepts.md](../concepts.md#guards)), so that fewer of them are needed?
 
@@ -86,11 +86,29 @@ Three questions decide whether it's worth building, run in sssf-sandbox:
 
 ### Results, 2026-11-07
 
-Question 1 failed for the container drivers, for a reason that holds for any container on this WSL2 machine. Questions 2 and 3 wait on the microVM driver.
+The container drivers failed question 1, for a reason that holds for any container on this WSL2 machine. The microVM driver then passed all three; see [the microVM run](#the-microvm-run).
 
 - **Install without root works.** The release ships plain tarballs for the CLI, gateway, supervisor and VM driver. Unpacked into `~/.local/opt/openshell/bin`, each matched NVIDIA's published SHA-256. The official `install.sh` instead runs `sudo apt-get install` and adds a systemd user service. Nothing needs a fork of OpenShell.
 - **The gateway runs on Podman 4.9.3**, though the docs ask for 5.x. It needs a schema-version-2 config (`[openshell] version = 2`), and sandboxes need the gateway's TLS and per-sandbox tokens: `openshell-gateway generate-certs --output-dir ~/.local/state/openshell/tls`, then the gateway with `OPENSHELL_LOCAL_TLS_DIR` set, as the packaged service does. A plaintext gateway with `allow_unauthenticated_users` starts but refuses to launch sandboxes ("Podman sandbox launch authentication is required").
 - **The sandbox dies at its seccomp probe.** The workload container exits with `seccomp notification probe: Resource busy (os error 16)`. The cause is WSL2, not Podman: every process here, `/sbin/init` included, already runs under one seccomp filter, and a test filter that allows everything installs fine without a listener and fails with "Device or resource busy" with `SECCOMP_FILTER_FLAG_NEW_LISTENER`. The kernel allows one listener per process chain, WSL's init holds it, and every container on this machine descends from init. OpenShell's network enforcement depends on that listener, so its Podman and Docker drivers can't work here. That's likely why the support matrix marks WSL2 experimental.
-- **The microVM driver is the way left.** A libkrun guest runs its own kernel, so WSL's filter doesn't reach inside it. `/dev/kvm` exists, but it's `root:kvm` mode 0660 and this user isn't in the `kvm` group, so the test needs the engineer to grant access first.
+- **The microVM driver is the way left.** A libkrun guest runs its own kernel, so WSL's filter doesn't reach inside it. `/dev/kvm` is `root:kvm` mode 0660 and this user isn't in the `kvm` group; the engineer ran `sudo chgrp $USER /dev/kvm`, which lasts until WSL restarts.
 
-Left on the machine for the next try: the binaries in `~/.local/opt/openshell/bin`, the certs in `~/.local/state/openshell/tls`, the test config in `~/.config/openshell-test/`, the CLI's gateway entry `sssf-test`, a Podman network named `openshell` and the pulled images. No gateway or sandbox is running.
+### The microVM run
+
+The gateway ran with `compute_driver = "vm"`. A sandbox came up in about 35 seconds the first time, most of it turning the image into a root disk, running kernel 6.12.109 as user `ubuntu`. OpenShell doesn't build images, so the test image was built with Podman: the default `nvcr.io/nvidia/base/ubuntu:24.04` plus git, curl, python3, Node and Claude Code 2.1.319. The driver reads the local image directly.
+
+The policy allowed one binary, Claude Code's native `.../claude-code/bin/claude.exe`, to reach `api.anthropic.com:443`, and nothing else. The sandbox was created with `--upload ~/github/sssf-sandbox:/sandbox/repo` and `--env-from CLAUDE_CODE_OAUTH_TOKEN`.
+
+1. **Sign-in and a task: yes.** `claude -p ... --permission-mode bypassPermissions` signed in with the setup-token, wrote a file in the uploaded copy and answered in 3 turns for $0.029. `openshell sandbox download` brought the file back.
+2. **A blocked push.** `git push` over HTTPS failed at once: "Failed to connect to github.com port 443 after 1 ms: Couldn't connect to server". `curl` to GitHub failed the same way, and so did `curl` to `api.anthropic.com`, since only `claude.exe` may go there. The agent, told to run the curl, quoted the error and said it couldn't reach github.com. Nothing tells the agent a policy blocked it; it looks like a refused connection. `ssh` isn't in the image, so a push over SSH had nothing to run.
+3. **A gitignored `.env`: kept out.** sssf-sandbox has one, and the upload left it behind. The upload also leaves out `.git`: the sandbox gets the files, no history.
+
+What the run also showed:
+
+- **Every denial is logged** with the binary and destination, as structured OCSF lines from `openshell logs <name> --source sandbox`, such as `NET:OPEN [MED] DENIED /usr/bin/curl(0) -> github.com:443 [reason:transparent_tcp_policy_denied]`. Claude Code's own telemetry call to Datadog was denied the same way, which did no harm. SSSF could read these lines to record a refusal in its trace, instead of matching command text.
+- **The token is readable.** The sandbox's environment held the real token, as expected for `--env-from`; only provider credentials get placeholders. An agent could print it, though with no route but `api.anthropic.com` it could only use it there.
+- **No proxy variables are set.** Connections are caught in the kernel and staged to the supervisor, so a program that ignores `HTTPS_PROXY` is held all the same. OpenShell sets `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE` for its TLS inspection.
+
+For SSSF, that means a `--sandbox openshell` run would follow the Vercel and E2B path: create, upload the worktree, run each agent with `exec`, and bring the commits back. Since no `.git` goes in, the run would need to send a bundle or init a repo inside, as the VM mode does.
+
+Left on the machine for the next try: the binaries in `~/.local/opt/openshell/bin`, the certs in `~/.local/state/openshell/tls`, the test config in `~/.config/openshell-test/`, the CLI's gateway entry `sssf-test`, a Podman network named `openshell`, the test image `localhost/sssf-openshell:test`, a policy in `~/.config/openshell-test/policy.yaml` and the VM driver's state under `~/.local/state/openshell/`. No gateway or sandbox is running.

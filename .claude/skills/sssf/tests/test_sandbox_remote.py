@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -41,6 +42,28 @@ def _words(call: dict) -> str:
     return " ".join(call.get("argv") or [call.get("line", "")])
 
 
+def _vm_path(value, host: str, vm: str):
+    """A host path as the fake VM sees it. The VM's /tmp is its own, so the
+    bundle path goes under `vm` too: on the host's real /tmp, two test runs at
+    once overwrite each other's bundle."""
+    if not isinstance(value, str):
+        return value
+    return value.replace(host, vm).replace("/tmp/sssf-in.bundle", f"{vm}/sssf-in.bundle")
+
+
+def _kill_left_under(folder: Path) -> None:
+    """Kill every process whose command line names `folder`. A relay's
+    follower runs in its own session and outlives a test that never stops it."""
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit() or int(proc.name) == os.getpid():
+            continue
+        try:
+            if str(folder).encode() in (proc / "cmdline").read_bytes():
+                os.kill(int(proc.name), signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
+
+
 def _no_chown(text: str) -> str:
     return re.sub(r"&& chown (-R )?\w+", "&& true", text)
 
@@ -63,7 +86,7 @@ class FakeVercel:
         self.destroyed = False
 
     def _map(self, value):
-        return value.replace(self.host, self.vm) if isinstance(value, str) else value
+        return _vm_path(value, self.host, self.vm)
 
     def run_process(self, command, args=(), *, cwd=None, env=None, sudo=False,
                     capture_output=False, input=None, kill_after=None):
@@ -159,7 +182,7 @@ class FakeE2B:
         self.files = types.SimpleNamespace(write=self._write)
 
     def _map(self, value):
-        return value.replace(self.host, self.vm) if isinstance(value, str) else value
+        return _vm_path(value, self.host, self.vm)
 
     def _write(self, path, data):
         Path(self._map(path)).write_bytes(data.encode() if isinstance(data, str) else data)
@@ -950,6 +973,7 @@ def relaying(box, tmp_path, monkeypatch):
                               pool="sssf-abc", tags=["sssf", "adw-abc"])
     yield box, fake, target
     fake.close()
+    _kill_left_under(tmp_path / "vmtmp")
 
 
 def _poster(events) -> list[str]:

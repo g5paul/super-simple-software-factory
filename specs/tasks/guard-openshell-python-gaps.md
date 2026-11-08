@@ -15,7 +15,7 @@ Guard run 609ad1c5's review found two broken promises in how `--sandbox openshel
 
 ## Settled by guard run 6ff4f245's spec review
 
-Run 6ff4f245 stopped after three spec reviews, each finding a real route in the draft before. Its last draft, `specs/6ff4f245_openshell-python-gaps_v4.md`, has the design they settled on; start from it.
+Run 6ff4f245 stopped after three spec reviews, each finding a real route in the draft before. Its last draft, `adws/adw_data/sessions/6ff4f245/drafts/6ff4f245_openshell-python-gaps_v4.md`, with the reviews beside it in `../context_handoff/`, has the design they settled on; start from it.
 
 - **`uv python find --system`.** Dropping `VIRTUAL_ENV` isn't enough, since `uv run` also puts its `bin` first on `PATH`. `--system` skips both, and a committed `.venv` no longer runs.
 - **`UV_PYTHON` counts only as a version.** `utils.py` loads `.env`, which an agent can edit, so a path there would run on the host. Pass the variable to uv only when it fully matches `\d(\.\d{1,2}){0,2}` with `re.ASCII`. uv reads `3.999`, `256.1` or `99999999999` as a program name and runs a file of that name found on `PATH`; the narrower pattern admits none of those. Anything else is ignored, as the baseline ignores every form.

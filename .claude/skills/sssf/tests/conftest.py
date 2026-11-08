@@ -57,3 +57,46 @@ def no_stray_files():
     stray = sorted(f"{root}/{name}" for root in roots
                    for name in set(os.listdir(root)) - before[root] - _CACHES)
     assert not stray, f"tests left files behind: {stray}"
+
+
+def _left_running(folder: str) -> list[tuple[int, str]]:
+    """Processes, other than this one, whose command line names `folder`."""
+    import os
+    from pathlib import Path
+    found = []
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit() or int(proc.name) == os.getpid():
+            continue
+        try:
+            line = (proc / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+        except OSError:
+            continue
+        if folder in line:
+            found.append((int(proc.name), line.strip()))
+    return found
+
+
+@pytest.fixture(autouse=True, scope="session")
+def no_processes_left(tmp_path_factory):
+    """Fail the run if a process a test started is still running at the end,
+    and kill it. A relay's follower runs in its own session, so it outlives a
+    test that never stops it: 360 had built up on one machine, holding 9 GB,
+    before anyone looked. The folder in each command line names the test."""
+    import os
+    import signal
+    import sys
+    import time
+    yield
+    if not sys.platform.startswith("linux"):
+        return
+    folder = str(tmp_path_factory.getbasetemp())
+    deadline = time.monotonic() + 3
+    while (left := _left_running(folder)) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    for pid, _ in left:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    assert not left, "tests left processes running (now killed):\n" + "\n".join(
+        f"  {pid}: {line[:300]}" for pid, line in left)

@@ -112,8 +112,13 @@ def folder_for(cwd: Path) -> Path:
 def image_python(path: Path) -> str:
     """The Python, as major.minor, the image holds for the repo `path` is in:
     what the host's uv picks in its main checkout, the value a run passes as
-    UV_PYTHON (sandbox_remote._host_python). "" when the host has none."""
-    return sandbox_remote._host_python(repo_root(path))
+    UV_PYTHON (sandbox_remote._host_python). "" when the host has none.
+    Raises ValueError when the interpreter's answer isn't a major.minor."""
+    problems: list[str] = []
+    python = sandbox_remote._host_python(repo_root(path), problems)
+    if problems:
+        raise ValueError(problems[0])
+    return python
 
 
 def containerfile(folder: Path, python: str | None = None) -> str:
@@ -379,6 +384,8 @@ class OpenShell(Remote):
                 f"the OpenShell sandbox name {name} is {len(name)} characters, and the "
                 f"openshell CLI takes at most {self.sandbox_name_max}. The run's id "
                 f"{self.run_.adw_id} is too long for it.")
+        if self.python_problem:
+            raise OpenShellError(self.python_problem)
         from . import repo_settings
         try:
             folder = folder_for(self.tree)

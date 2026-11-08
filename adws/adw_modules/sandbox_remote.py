@@ -47,6 +47,8 @@ from . import obs_relay
 from .sandbox import SandboxFailed
 
 TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"
+MAJOR_MINOR = re.compile(r"\d+\.\d+", re.ASCII)
+ANSWER_MAX = 200    # how much of a bad Python answer a message keeps
 PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with UV_PYTHON
 HELD = ("OBS_AUTH_TOKEN",)          # named variables no VM command gets, whatever PASSED says
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
@@ -174,24 +176,40 @@ def _host_git(*args: str, cwd: Path) -> str:
     return done.stdout.strip()
 
 
-def _host_python(tree: Path) -> str:
+def _host_python(tree: Path, problems: list[str] | None = None) -> str:
     """The Python, as major.minor, that the host's uv picks in the tree.
 
     The VM's uv would pick its own: a `.python-version` is often untracked,
     so the clone doesn't have it, and the VM's image has another Python. A
     repo's tests can depend on the version, as argparse's help text does.
-    "" when the host has no uv or no Python."""
+    The interpreter runs with `-I -S`, so nothing at its startup can print.
+    "" when the host has no uv or no Python. "" too, with one line added to
+    `problems`, when the answer isn't a major.minor."""
+    problem = ""
     try:
         found = subprocess.run(["uv", "python", "find"], cwd=tree, capture_output=True,
                                text=True, timeout=60)
         if found.returncode != 0:
             return ""
-        version = subprocess.run([found.stdout.strip(), "-c",
+        interpreter = found.stdout.strip()
+        version = subprocess.run([interpreter, "-I", "-S", "-c",
                                   "import sys; print('%d.%d' % sys.version_info[:2])"],
-                                 capture_output=True, text=True, timeout=60)
-        return version.stdout.strip() if version.returncode == 0 else ""
+                                 capture_output=True, text=True, errors="replace", timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return ""
+    except ValueError as error:     # uv's stdout didn't decode, or held a NUL
+        problem = f"`uv python find` printed no usable path ({str(error)[:ANSWER_MAX]!r})"
+    else:
+        if version.returncode != 0:
+            return ""
+        answer = version.stdout.strip()
+        if MAJOR_MINOR.fullmatch(answer):
+            return answer
+        problem = (f"the interpreter uv picks, {interpreter[:ANSWER_MAX]!r}, printed "
+                   f"{answer[:ANSWER_MAX]!r}, not a Python major.minor")
+    if problems is not None:
+        problems.append(problem)
+    return ""
 
 
 def _tar(folder: Path) -> bytes:
@@ -441,6 +459,7 @@ class Remote:
         self._relays: set[_Relay] = set()
         self.synced = ""
         self.python = ""
+        self.python_problem = ""
         self.tools: dict[str, str] = {}
         self._token = ""
         self._created = 0.0
@@ -472,7 +491,9 @@ class Remote:
         """Make the VM and put the run's branch in it. Raises SandboxFailed."""
         credentials(self.keys)
         self._token = _token()
-        self.python = _host_python(self.tree)
+        problems: list[str] = []
+        self.python = _host_python(self.tree, problems)
+        self.python_problem = problems[0] if problems else ""
         try:
             self.sandbox = self._create()
             self.vm = self.sandbox.name

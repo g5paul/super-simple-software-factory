@@ -145,7 +145,7 @@ def containerfile(folder: Path, python: str | None = None) -> str:
         f"RUN npm install -g @earendil-works/pi-coding-agent@{sandbox_remote.PI_VERSION}",
         f"RUN mkdir -p {q} && chown -R {SANDBOX_USER}:{SANDBOX_USER} {q}",
         "RUN node --version && uv --version && claude --version && pi --version"
-        " && rg --version && fdfind --version && git --version" + find,
+        ' && v=$(rg --version) && echo "$v" | head -1 && fdfind --version && git --version' + find,
         "",
     ])
 

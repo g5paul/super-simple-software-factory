@@ -92,6 +92,28 @@ Run as the engineer's user with no sudo, from the v0.20.5 tarball (checksums mat
 
 So on this machine, agentsh checks execs only once a tracer has `CAP_SYS_PTRACE` or `ptrace_scope` drops to 0. Both need the engineer's sudo, and the choice is open.
 
+## Why agentsh's docs and this machine disagree
+
+agentsh's WSL2 guide says this, at `docs/windows-wsl2-claude-code.md:6`: WSL2 is a real Linux VM, so you get the full Linux stack, the same 100% score as bare-metal Linux. That sentence is an argument, not a test result. The kernel has the features, but one feature fails on this machine for a reason the docs do not cover.
+
+agentsh's own tool disagrees with its docs. `agentsh detect` gave 40 out of 100 on this machine, and 60 with `agentsh-unixwrap` on `PATH`.
+
+**Why seccomp fails.** agentsh checks commands and file opens with a seccomp listener. A listener stops a system call and decides to allow it or deny it. The kernel has one rule: a process under a listener cannot add a second listener. The kernel returns "device or resource busy". WSL puts a listener on PID 1, and all other processes come from PID 1. So agentsh gets "busy" in every shell.
+
+The agentsh source has no code and no test for this case. Probably the authors tested on a WSL version without this listener. This machine has WSL 3.0.3.0 with kernel 6.18.54.1. An older WSL, or WSL without systemd, is not tested.
+
+**Why ptrace is the fallback.** With ptrace, one process watches another process and stops each system call. On Ubuntu, `ptrace_scope` is 1. With that setting, a process can watch only its own child processes, unless it has the right `CAP_SYS_PTRACE`. In `agentsh wrap`, the server watches the agent, but the server did not start the agent. So the kernel refuses.
+
+**Why a service.** The server must get `CAP_SYS_PTRACE`, and the agent must not get it. There are three ways:
+
+1. `setcap` on the agentsh file. Then any process can start agentsh with the right, the agent too. The agent could write its own config and start a server that allows everything.
+2. Set `ptrace_scope` to 0. Then every process of the engineer can watch every other one, and the whole machine is weaker.
+3. Run the server as a separate user, as a system service, with the right. The agent runs as the engineer, so it cannot change the server's config, stop the server or start a second copy with the right.
+
+Only the third way keeps the right away from the agent. A guard that the agent can turn off is not a guard. The recommendation is the service.
+
+The direction stays correct. agentsh checks the real program and its real arguments after the shell reads the command, so a change in spelling does not matter. On this machine, that check needs ptrace, and ptrace needs one setup step with sudo. The WSL listener issue is worth a report to the agentsh authors, sent by the engineer.
+
 ## Next
 
 1. The proof in sssf-sandbox, per the note's plan, once the ptrace choice above is made. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.

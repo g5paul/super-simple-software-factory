@@ -13,7 +13,8 @@
  * counts a pi refusal only when pi's result shows it never ran the call (no
  * `durationMs`), so a command that slips past here and prints the refusal
  * still stops the run. The search also reads the command with
- * backslash-newlines removed, as a shell reads it. references/config.md also lists the
+ * backslash-newlines removed, as a shell reads it, and again with the tabs right after
+ * them removed too, for a `<<-` heredoc. references/config.md also lists the
  * differences no check catches. SSSF's built-in secret-file rule comes
  * marked `builtin`, and its refusal names it as SSSF's.
  */
@@ -30,6 +31,8 @@ const TAIL = "Nothing ran. Don't try it another way: do the task without it, or 
 
 // rules._CONTINUATION in Python: a backslash-newline and the backslashes right before it.
 const CONTINUATION = /(?<!\\)\\+\n/g;
+// rules._CONTINUATION_TABS in Python: the same and the tabs right after it, as the inner shell of a `<<-` heredoc reads it.
+const CONTINUATION_TABS = /(?<!\\)\\+\n\t*/g;
 
 interface Rule { rule: string; forbid: string[]; builtin?: boolean }
 
@@ -89,9 +92,10 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash") return;
     const command = String((event.input as { command?: unknown })?.command ?? "");
     const joined = command.replace(CONTINUATION, "");
+    const untabbed = command.replace(CONTINUATION_TABS, "");
     for (const { rule, builtin, patterns } of compiled) {
       for (const [source, re] of patterns) {
-        if (re && (re.test(command) || re.test(joined))) {
+        if (re && (re.test(command) || re.test(joined) || re.test(untabbed))) {
           return {
             block: true,
             reason: builtin

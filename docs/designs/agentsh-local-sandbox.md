@@ -177,9 +177,15 @@ A workspace in the engineer's home folder, sssf-sandbox, now opens.
 
 Two gaps stay. The proof policy now denies TCP to the server's port, for the engineer to install. A copied binary needs a Landlock execute list, or a rule on the binary's content, not its name.
 
+**The kill check.** A wrapped `sleep 600` ran from 15:53:40. The engineer installed the updated policy and ran `systemctl kill -s KILL agentsh` at 15:55:56. The results:
+
+- The agent died in the same second, and no process of it stayed. `wrap` exited 255. `PTRACE_O_EXITKILL` works, so a server crash fails closed.
+- systemd restarted the service at 15:55:58, with `NRestarts=1`.
+- After the restart, the agent could not connect to `127.0.0.1:18080`, so the API rule works. `https://api.anthropic.com/` still answered, and `just test live` was still denied.
+
 ## Next
 
-1. The engineer installs the updated policy and kills the server with `kill -9` while a wrapped agent runs. The check: the agent dies, the service comes back, and the API is denied. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
+1. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
 2. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
 2. The decisions above, settled from the proof.
 3. A guard chain run for the wrap.

@@ -100,7 +100,7 @@ names the baseline ref, `main` by default, and `--worktree` runs on branch
 adds module-level state or a `global` to a guard module stops the run, and
 so does the reviewer's `adds_mechanism`.
 
-Every finding lands in `context_handoff/guard_report.md`. A run that
+A finding only a local agent can reach, by writing a file outside the repo that the host later runs, is a local-mode limit, not a bypass: [openshell-sandbox.md](designs/openshell-sandbox.md#decided-by-the-engineer), decision 14, says why. Every finding lands in `context_handoff/guard_report.md`. A run that
 passes commits the code; one that stops leaves it in the tree for the
 engineer. Nothing merges to `main` on its own.
 

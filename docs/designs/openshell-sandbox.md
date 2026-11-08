@@ -24,7 +24,7 @@ From [the test](../research/openshell.md#the-test) on 2026-11-07, on this WSL2 m
 
 ### Decided by the engineer
 
-Each was proposed here and accepted as written on 2026-11-07.
+Decisions 1 to 5 were proposed here and accepted as written on 2026-11-07, and 14 on 2026-11-08.
 
 
 1. **Who runs the gateway.** The gateway is one long-lived process per machine. The engineer runs it as a systemd user service, the way OpenShell's own package does, set up once by a `just openshell-setup` recipe with telemetry off. A run checks `openshell status` before it starts and stops with a plain message if the gateway is down. The other way, SSSF starting a gateway per run, costs about a second each time and makes two runs at once fight over the port.
@@ -32,6 +32,12 @@ Each was proposed here and accepted as written on 2026-11-07.
 3. **What the network allows.** By default, `claude.exe` may reach `api.anthropic.com` with any method, and any program may send read-only GETs to the package registries a repo's setup and checks use, PyPI and `files.pythonhosted.org` for `uv`, `registry.npmjs.org` for `npm` and `bun`. Read-only means an agent can install a package but can't publish one. A repo adds hosts in `repo.yaml`, under a new `sandbox_allow` key, each with a program, a host and `read-only` or `full`. GitHub stays closed: the host fetches and pushes, never the sandbox.
 4. **Access to `/dev/kvm`.** The test used `sudo chgrp $USER /dev/kvm`, which resets when WSL restarts. The setup recipe checks access and prints the two choices, that line again or `sudo usermod -aG kvm $USER` plus one `wsl --shutdown`, and leaves the choice to the engineer, since a shutdown stops every WSL session.
 5. **pi.** Claude Code rosters only in v1. `sandbox.check_roster` refuses a pi agent under `--sandbox openshell`, as it refuses a pi agent on a non-OpenAI model under the other providers. pi needs its own image, and its ChatGPT sign-in, which the host broker feeds with an hour's token per call, is untried in OpenShell.
+
+14. **The guard chain's bar, after the Python gaps** (2026-11-08). Guard runs 6ff4f245 and e3308ebb each found a route that needs a local agent writing the engineer's own files outside the repo: a `python3` on `PATH`, a file in uv's managed folder, an edit to `.env`. A local agent already runs as the engineer's user, so fixing these one at a time never ends. From now on a guard spec sorts each finding by where the agent runs:
+    - **Reachable from a VM run** (`--sandbox openshell`, `vercel` or `e2b`): through the commits, bundles and output that come back to the host, through what the host runs on them, or through the VM's policy. These stay bypasses and block.
+    - **Reachable only by a local agent** (`--sandbox none`) writing a file outside the repo's tree that the host later runs or reads. The spec names these as local-mode limits, and `docs/open.md` records them. They don't block.
+
+    Every rule still applies in every mode, as decision 2 says. The point is where the fixing goes: to the VM's edge and the host code that handles what comes back. Local mode is for supervised work. The repos on Claude Code rosters default to `sandbox: openshell`, starting with sssf-sandbox, a project and an unlisted project, so decision 2 gets its weeks of runs.
 
 ### Settled by the test and the code
 

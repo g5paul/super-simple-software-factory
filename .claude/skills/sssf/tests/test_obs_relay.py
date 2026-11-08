@@ -269,11 +269,15 @@ def relay(tmp_path):
     proc.wait()
 
 
-def _post(url, body: bytes, path="/events"):
+def _post(url, body: bytes, path="/events", timeout=30):
+    # A 5 MB body to a relay on a loaded machine can take more than a few
+    # seconds. This test failed once in a full skill run, cause unrecorded,
+    # and 320 posts under full CPU load didn't repeat it; a timeout is the
+    # likeliest cause, so the posts get 30 seconds.
     req = urllib.request.Request(url + path, data=body, method="POST",
                                  headers={"content-type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=5) as res:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
             return res.status, res.read()
     except urllib.error.HTTPError as error:
         return error.code, b""

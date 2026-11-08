@@ -103,8 +103,14 @@ def alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    stat = Path(f"/proc/{pid}/stat")
-    return not (stat.exists() and stat.read_text().split(")")[-1].split()[0] == "Z")
+    # The process can be reaped between the kill and the read; reading a
+    # vanished process's stat raises ProcessLookupError (ESRCH) or
+    # FileNotFoundError, and either means it's gone.
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return state != "Z"
 
 
 def enforce(agent_name="builder"):

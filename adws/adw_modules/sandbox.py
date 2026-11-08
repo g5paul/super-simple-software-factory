@@ -161,10 +161,6 @@ def check_roster(provider: str, cfg) -> None:
     if provider not in PROVIDERS:
         raise SystemExit(f"--sandbox {provider}: SSSF knows {', '.join(PROVIDERS)}")
     pi = [a for a in cfg.agents if a.coding_agent == "pi"]
-    if provider == "openshell" and pi:
-        raise SystemExit("--sandbox openshell runs Claude Code agents only for now; pi isn't "
-                         f"supported in this mode yet, and {', '.join(a.name for a in pi)} are pi "
-                         "agents. Use --sandbox vercel or e2b for them, or --sandbox none.")
     other = [a.name for a in pi if not str(a.model).startswith("openai/")]
     if other:
         raise SystemExit(f"--sandbox runs pi agents on the ChatGPT sign-in only (openai/ models), "

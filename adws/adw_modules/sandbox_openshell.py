@@ -10,8 +10,9 @@ build time, because the sandbox can't download one. The tag covers both, so a
 changed Python needs `just openshell-setup`. Denials from the sandbox's network policy go in the trace as
 `sandbox_denied` events.
 
-The Claude token, like every env value, travels on stdin in a framed block and
-is exported by a shell inside the sandbox. It is never on a command line, on
+The Claude token and a pi agent's ChatGPT token, like every env value, travel on stdin
+in a framed block and are exported by a shell inside the sandbox. Each roster's policy
+opens only its own harnesses' model hosts. It is never on a command line, on
 the host or in the sandbox (anyone can read another process's argv).
 
 `sweep` reads the adw_id from the sandbox's name, `sssf-<adw_id>-<hex4>`, which is
@@ -50,6 +51,7 @@ BASE_IMAGE = "nvcr.io/nvidia/base/ubuntu:24.04"
 NODE = "24.11.1"
 PYTHON_DIR = "/usr/local/share/uv/python"   # under /usr, which the policy reads
 PYTHON_BIN = "/usr/local/bin"               # on PATH, so uv finds python3.<minor>
+NODE_EXE = "/usr/local/bin/node"
 CLAUDE_EXE = "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 ANY_BINARY = "/**"      # untested reading: the proof run checks it
 READ_ONLY_PATHS = ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
@@ -133,15 +135,17 @@ def containerfile(folder: Path, python: str | None = None) -> str:
     return "\n".join([
         f"FROM {BASE_IMAGE}",
         "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends"
-        " git curl ca-certificates python3 xz-utils && rm -rf /var/lib/apt/lists/*",
+        " git curl ca-certificates python3 xz-utils ripgrep fd-find && rm -rf /var/lib/apt/lists/*",
         f"RUN curl -fsSL https://nodejs.org/dist/v{NODE}/node-v{NODE}-linux-x64.tar.xz"
         " | tar -xJ -C /usr/local --strip-components=1",
         "RUN curl -LsSf https://astral.sh/uv/install.sh"
         " | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh",
         *install,
         "RUN npm install -g @anthropic-ai/claude-code",
+        f"RUN npm install -g @earendil-works/pi-coding-agent@{sandbox_remote.PI_VERSION}",
         f"RUN mkdir -p {q} && chown -R {SANDBOX_USER}:{SANDBOX_USER} {q}",
-        "RUN node --version && uv --version && claude --version && git --version" + find,
+        "RUN node --version && uv --version && claude --version && pi --version"
+        " && rg --version && fdfind --version && git --version" + find,
         "",
     ])
 
@@ -150,7 +154,7 @@ def image_tag(folder: Path, python: str | None = None) -> str:
     return "localhost/sssf-openshell:" + hashlib.sha256(containerfile(folder, python).encode()).hexdigest()[:12]
 
 
-def policy(folder: Path, allow: list) -> dict:
+def policy(folder: Path, allow: list, harnesses=frozenset({"claude_code"})) -> dict:
     def rule(host: str, port: int, access: str, binary: str) -> dict:
         return {"endpoints": [{"host": host, "port": port, "protocol": "rest",
                                "enforcement": "enforce", "access": access}],
@@ -160,8 +164,12 @@ def policy(folder: Path, allow: list) -> dict:
         {"host": host, "port": 443, "protocol": "rest", "enforcement": "enforce",
          "access": "read-only", **({"allow_encoded_slash": True} if host == "registry.npmjs.org" else {})}
         for host in REGISTRIES], "binaries": [{"path": ANY_BINARY}]}
-    rules = {"anthropic_api": rule("api.anthropic.com", 443, "full", CLAUDE_EXE),
-             "package_registries": registries}
+    rules = {}
+    if "claude_code" in harnesses:
+        rules["anthropic_api"] = rule("api.anthropic.com", 443, "full", CLAUDE_EXE)
+    if "pi" in harnesses:
+        rules["openai_api"] = rule("api.openai.com", 443, "full", NODE_EXE)
+    rules["package_registries"] = registries
     for n, entry in enumerate(allow):
         rules[f"repo_allow_{n}"] = rule(entry.host, entry.port, entry.access,
                                         ANY_BINARY if entry.binary == "*" else entry.binary)
@@ -174,8 +182,8 @@ def policy(folder: Path, allow: list) -> dict:
             "network_policies": rules}
 
 
-def policy_yaml(folder: Path, allow: list) -> str:
-    return yaml.safe_dump(policy(folder, allow), sort_keys=False)
+def policy_yaml(folder: Path, allow: list, harnesses=frozenset({"claude_code"})) -> str:
+    return yaml.safe_dump(policy(folder, allow, harnesses), sort_keys=False)
 
 
 # --- require_sdk, sweep ------------------------------------------------------
@@ -376,6 +384,7 @@ class OpenShell(Remote):
     sandbox_name_max = 19
     owner = SANDBOX_USER
     errors = (OpenShellError,)
+    pi_env = {"PI_OFFLINE": "1"}
 
     def _create(self) -> _VM:
         name = f"sssf-{self.run_.adw_id}-{uuid.uuid4().hex[:4]}"
@@ -397,7 +406,8 @@ class OpenShell(Remote):
                 raise OpenShellError(f"{path} is outside the sandbox image's folder {folder}. "
                                      f"Run {_SETUP_HINT} for this layout.")
         file = Path(self.run_.session_dir) / "openshell-policy.yaml"
-        file.write_text(policy_yaml(folder, repo_settings.load(repo_root(self.tree)).sandbox_allow))
+        file.write_text(policy_yaml(folder, repo_settings.load(repo_root(self.tree)).sandbox_allow,
+                                    sandbox_remote.harnesses(getattr(self.run_, "cfg", None))))
         try:
             done = subprocess.run(
                 [CLI, "sandbox", "create", "--name", name, "--from", image_tag(folder, python),

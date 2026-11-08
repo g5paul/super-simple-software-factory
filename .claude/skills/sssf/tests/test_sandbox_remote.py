@@ -12,6 +12,7 @@ Run from the skill root:
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -279,8 +280,8 @@ class E2BView:
 
 # --- one box per provider -------------------------------------------------------
 
-@pytest.fixture(params=["vercel", "e2b"])
-def box(request, tmp_path, monkeypatch):
+def _make_box(provider, tmp_path, monkeypatch, cfg=None, token=True):
+    """The box for `provider`, unopened, with events, fake, raw, host_tree and vm_tree set."""
     from adw_modules import sandbox, sandbox_remote
     host, vm = tmp_path / "host", tmp_path / "vm"
     tree = host / "repo"
@@ -297,18 +298,20 @@ def box(request, tmp_path, monkeypatch):
     handoff = session / "context_handoff"
     handoff.mkdir(parents=True)
     (handoff / "plan.md").write_text("the plan\n")
-    token = tmp_path / "token.env"
-    token.write_text("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test\n")
-    monkeypatch.setattr(sandbox_remote, "TOKEN_FILE", token)
-    if request.param == "vercel":
+    token_file = tmp_path / "token.env"
+    if token:
+        token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test\n")
+    monkeypatch.setattr(sandbox_remote, "TOKEN_FILE", token_file)
+    if provider == "vercel":
         fake, view = vercel_sdk(monkeypatch, host, vm)
     else:
         fake, _ = e2b_sdk(monkeypatch, host, vm)
         view = E2BView(fake)
-    module = sandbox._provider(request.param)
+    module = sandbox._provider(provider)
     for key in module.KEYS:
         monkeypatch.setenv(key, "x")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SSSF_REFUSE_RULES", raising=False)
     monkeypatch.setenv("SSSF_ADW_ID", "abc")
     monkeypatch.chdir(tree)
     events: list[tuple[str, dict]] = []
@@ -316,9 +319,17 @@ def box(request, tmp_path, monkeypatch):
         adw_id="abc", context_handoff_dir=handoff, session_dir=session,
         tracer=types.SimpleNamespace(event=lambda e: events.append((e.name, e.payload))),
         console=types.SimpleNamespace(note=lambda text: None))
+    if cfg is not None:
+        run.cfg = cfg
     b = module.Box(run, "sssf/abc", "repo")
-    b.open()
     b.events, b.fake, b.raw, b.host_tree, b.vm_tree = events, view, fake, tree, vm / "repo"
+    return b
+
+
+@pytest.fixture(params=["vercel", "e2b"])
+def box(request, tmp_path, monkeypatch):
+    b = _make_box(request.param, tmp_path, monkeypatch)
+    b.open()
     return b
 
 
@@ -1257,3 +1268,73 @@ def test_a_start_that_fails_early_uses_up_its_relay_request(relaying):
     box._refresh = real
     process = box.start(["sh", "-c", "echo ${OBS_DISABLE:-on}"], env={"OBS_DISABLE": "true"})
     assert _read(process)[0] == ["true\n"]
+
+
+# --- pi agents and the Claude token ------------------------------------------------
+
+def roster(*kinds):
+    """The shipped config, its agents cycled through `kinds`; each pi agent on an openai/ model."""
+    from adw_modules import agents
+    cfg = agents.load_config(str(SKILL / "templates" / "sssf.config.yaml"))
+    for agent, kind in zip(cfg.agents, itertools.cycle(kinds)):
+        agent.coding_agent = kind
+        if kind == "pi":
+            agent.model = "openai/gpt-5.6-terra"
+    return cfg
+
+
+def _env_of(process) -> dict:
+    out = "".join(process.stdout)
+    process.wait()
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+def test_a_pi_start_gets_no_claude_token(box):
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, "SSSF_PI_TOKEN": "chatgpt-access"}))
+    assert seen["OPENAI_API_KEY"] == "chatgpt-access" and "CLAUDE_CODE_OAUTH_TOKEN" not in seen
+    assert "PI_OFFLINE" not in seen
+
+
+def test_a_pi_start_leaves_the_claude_token_out_of_every_provider_call(box):
+    before = len(box.raw.calls)
+    _env_of(box.start(["sh", "-c", "env"], env={**os.environ, "SSSF_PI_TOKEN": "chatgpt-access"}))
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in repr(box.raw.calls[before:])
+
+
+def test_a_claude_start_keeps_the_token_and_gets_no_pi_env(box):
+    seen = _env_of(box.start(["sh", "-c", "env"], env=dict(os.environ)))
+    assert seen["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat-test"
+    assert "PI_OFFLINE" not in seen and "OPENAI_API_KEY" not in seen
+
+
+def test_a_hosts_pi_offline_does_not_cross(box):
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, "PI_OFFLINE": "1",
+                                                        "SSSF_PI_TOKEN": "chatgpt-access"}))
+    assert "PI_OFFLINE" not in seen
+    assert "PI_OFFLINE" not in box._env({"PI_OFFLINE": "1"})
+
+
+@pytest.fixture(params=["vercel", "e2b"])
+def tokenless(request, tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    monkeypatch.setattr(sandbox_remote.Remote, "_check_tools", lambda self: None)
+    return lambda cfg: _make_box(request.param, tmp_path, monkeypatch, cfg=cfg, token=False)
+
+
+def test_an_all_pi_roster_opens_without_a_token_file(tokenless):
+    b = tokenless(roster("pi"))
+    b.open()
+    assert b.sandbox is not None and b._token == ""
+    seen = _env_of(b.start(["sh", "-c", "env"], env={**os.environ}))
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen
+    seen = _env_of(b.start(["sh", "-c", "env"], env={**os.environ, "SSSF_PI_TOKEN": "chatgpt-access"}))
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen and seen["OPENAI_API_KEY"] == "chatgpt-access"
+
+
+@pytest.mark.parametrize("kinds", [("claude_code",), ("pi", "claude_code")])
+def test_a_roster_with_a_claude_agent_needs_the_token_file(tokenless, kinds):
+    from adw_modules.sandbox import SandboxFailed
+    b = tokenless(roster(*kinds))
+    with pytest.raises(SandboxFailed, match="token"):
+        b.open()
+    assert b.sandbox is None and b.raw.calls == []

@@ -8,8 +8,9 @@ both sides. Each command goes through `run` or `start` below:
 - `run` is a check, git, or setup. It gets SSSF's own and obs variables, never the
   Claude token. No command gets OBS_AUTH_TOKEN (HELD), which would let code in
   the VM copy it into the clone and back to the host branch.
-- `start` is an agent. It gets the token from ~/.config/sssf-sandbox/token.env,
-  and the handoff folder is copied in before it and back out after it. A pi
+- `start` is an agent. A Claude Code agent gets the token from
+  ~/.config/sssf-sandbox/token.env (a roster of pi agents only needs no file); a pi
+  agent gets its ChatGPT token as OPENAI_API_KEY, never the Claude token. And the handoff folder is copied in before it and back out after it. A pi
   agent whose events obs should get (`relay_obs`) gets an obs relay of its own
   for the call, on the VM's loopback (obs_relay.py, sssf_obs_relay.cjs).
 - After each `git commit`, the new commits come back to the host branch as a
@@ -101,6 +102,9 @@ TOOLS = {
     "pi":     {"command": "pi --version", "min": "1.4.0", "tested": 1, "for": "pi"},
 }
 MISSING = "missing"
+# The pi the 2026-11-03 ChatGPT live check ran. Both image scripts (the OpenShell
+# Containerfile and scripts/e2b_template.py) read it.
+PI_VERSION = "1.5.0"
 
 
 def _version(text: str) -> tuple[int, ...] | None:
@@ -108,9 +112,14 @@ def _version(text: str) -> tuple[int, ...] | None:
     return tuple(int(n) for n in found.groups() if n is not None) if found else None
 
 
+def harnesses(cfg) -> set[str]:
+    """The coding agents a roster uses."""
+    return {a.coding_agent for a in getattr(cfg, "agents", None) or []}
+
+
 def tools_needed(cfg) -> list[str]:
     """The TOOLS a roster's agents need in the VM, in TOOLS order."""
-    agents = {a.coding_agent for a in getattr(cfg, "agents", None) or []}
+    agents = harnesses(cfg)
     return [name for name, tool in TOOLS.items() if tool.get("for") in (None, *agents)]
 
 
@@ -467,6 +476,9 @@ class Remote:
         self.cpu_seconds: float | None = 0.0
         self._cpu_base: float | None = None
 
+    # What a provider adds to a pi agent's env (`start` only).
+    pi_env: dict[str, str] = {}
+
     # --- what a provider writes ---------------------------------------------
 
     def _create(self):
@@ -490,7 +502,8 @@ class Remote:
     def open(self) -> None:
         """Make the VM and put the run's branch in it. Raises SandboxFailed."""
         credentials(self.keys)
-        self._token = _token()
+        if harnesses(getattr(self.run_, "cfg", None)) != {"pi"}:
+            self._token = _token()
         problems: list[str] = []
         self.python = _host_python(self.tree, problems)
         self.python_problem = problems[0] if problems else ""
@@ -613,7 +626,11 @@ class Remote:
         self.processes += 1
         relay = self._open_relay(target) if target is not None else None
         sid_file = f"/tmp/sssf-{uuid.uuid4().hex}.sid"
-        agent_env = {**self._env(env), "CLAUDE_CODE_OAUTH_TOKEN": self._token}
+        agent_env = self._env(env)
+        if "OPENAI_API_KEY" in agent_env:    # only _env's rename of agent_pi's token sets this
+            agent_env.update(self.pi_env)
+        elif self._token:
+            agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token
         if relay is not None:
             agent_env["OBS_SERVER_URL"] = relay.url
             agent_env.pop("OBS_DISABLE", None)

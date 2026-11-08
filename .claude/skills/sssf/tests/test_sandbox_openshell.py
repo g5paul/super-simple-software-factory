@@ -8,19 +8,24 @@ Run from the skill root:
 from __future__ import annotations
 
 import base64
+import importlib.util
+import itertools
 import json
 import re
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 
 import pytest
+import yaml
 
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agents, repo_settings, sandbox, sandbox_openshell as osh, utils  # noqa: E402
+from adw_modules import sandbox_remote  # noqa: E402
 from adw_modules.sandbox_remote import Remote  # noqa: E402
 
 FAKE = '''#!{python}
@@ -256,13 +261,128 @@ def shipped():
     return cfg
 
 
-def test_check_roster_refuses_pi_under_openshell():
-    cfg = shipped()
-    cfg.agents[0].coding_agent = "pi"
+def roster(*kinds):
+    """The shipped config, its agents cycled through `kinds`; each pi agent on an openai/ model."""
+    cfg = agents.load_config(str(SKILL / "templates" / "sssf.config.yaml"))
+    for agent, kind in zip(cfg.agents, itertools.cycle(kinds)):
+        agent.coding_agent = kind
+        if kind == "pi":
+            agent.model = "openai/gpt-5.6-terra"
+    return cfg
+
+
+def test_check_roster_lets_a_pi_openai_roster_through_under_openshell():
+    sandbox.check_roster("openshell", roster("pi"))
+
+
+@pytest.mark.parametrize("provider", sandbox.PROVIDERS)
+def test_a_pi_agent_on_another_provider_is_refused_in_every_vm_mode(provider):
+    cfg = roster("pi")
+    sandbox.check_roster(provider, cfg)
+    cfg.agents[0].model = "google/gemini-3.6-flash"
     with pytest.raises(SystemExit) as stop:
-        sandbox.check_roster("openshell", cfg)
-    assert "pi" in str(stop.value) and "Claude Code" in str(stop.value)
+        sandbox.check_roster(provider, cfg)
     assert cfg.agents[0].name in str(stop.value)
+
+
+KINDS = {"pi": ("pi",), "claude": ("claude_code",), "mixed": ("pi", "claude_code")}
+OPENAI = {"endpoints": [{"host": "api.openai.com", "port": 443, "protocol": "rest",
+                         "enforcement": "enforce", "access": "full"}],
+          "binaries": [{"path": "/usr/local/bin/node"}]}
+
+
+@pytest.mark.parametrize("kind, models", [("pi", {"openai_api"}), ("claude", {"anthropic_api"}),
+                                          ("mixed", {"openai_api", "anthropic_api"})])
+def test_policy_has_a_model_rule_only_for_the_harnesses_it_has(kind, models):
+    rules = osh.policy(F, [], sandbox_remote.harnesses(roster(*KINDS[kind])))["network_policies"]
+    assert set(rules) == models | {"package_registries"}
+    if "openai_api" in models:
+        assert rules["openai_api"] == OPENAI
+    assert "github" not in rules
+
+
+def test_an_empty_roster_gets_no_model_rule():
+    assert set(osh.policy(F, [], set())["network_policies"]) == {"package_registries"}
+
+
+@pytest.mark.parametrize("kind, present, absent", [("pi", "api.openai.com", "api.anthropic.com"),
+                                                   ("claude", "api.anthropic.com", "api.openai.com")])
+def test_create_writes_only_its_rosters_model_host(cli, tmp_path, monkeypatch, kind, present, absent):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    run.cfg = roster(*KINDS[kind])
+    monkeypatch.chdir(repo)
+    osh.OpenShell(run, "sssf/abc", "p")._create()
+    text = (run.session_dir / "openshell-policy.yaml").read_text()
+    rules = yaml.safe_load(text)["network_policies"]
+    hosts = {e["host"] for r in rules.values() for e in r["endpoints"]}
+    assert present in hosts and absent not in hosts
+    create = next(c["argv"] for c in cli() if c["argv"][:2] == ["sandbox", "create"])
+    assert "--no-auto-providers" in create
+
+
+def test_containerfile_holds_pi_ripgrep_and_fd():
+    text = osh.containerfile(F, "")
+    assert "RUN npm install -g @earendil-works/pi-coding-agent@1.5.0" in text
+    apt = next(l for l in text.splitlines() if "apt-get install" in l)
+    assert "ripgrep" in apt and "fd-find" in apt
+    check = next(l for l in text.splitlines() if l.startswith("RUN node --version"))
+    assert "pi --version" in check and "rg --version" in check and "fdfind --version" in check
+
+
+def test_the_e2b_script_reads_the_shared_pi_version():
+    path = SKILL / "scripts" / "e2b_template.py"
+    spec = importlib.util.spec_from_file_location("e2b_template_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.PI == sandbox_remote.PI_VERSION == "1.5.0"
+
+
+def _started_env(cli, tmp_path, monkeypatch, env):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    box = osh.OpenShell(run, "sssf/abc", "p")
+    box.sandbox = osh._VM("sb")
+    box._token = TOKEN
+    monkeypatch.setattr(Remote, "_refresh", lambda self, seconds: None)
+    monkeypatch.setattr(Remote, "handoff_in", lambda self: None)
+    box.start(["true"], cwd=repo, env=env)
+    for _ in range(100):
+        calls = cli()
+        if any(c["stdin"] and "setsid" in c["argv"] for c in calls):
+            break
+        time.sleep(0.1)
+    frame = next(stdin_of(c) for c in calls if c["stdin"] and "setsid" in c["argv"])
+    values = {}
+    for line in frame.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            values[key] = base64.b64decode(value).decode()
+    return values, calls
+
+
+def test_a_pi_start_gets_the_chatgpt_token_and_pi_offline_not_the_claude_token(cli, tmp_path, monkeypatch):
+    values, calls = _started_env(cli, tmp_path, monkeypatch, {"SSSF_PI_TOKEN": "chatgpt-access"})
+    assert values["OPENAI_API_KEY"] == "chatgpt-access" and values["PI_OFFLINE"] == "1"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in values
+    assert not any("chatgpt-access" in " ".join(c["argv"]) or TOKEN in " ".join(c["argv"]) for c in calls)
+
+
+def test_a_claude_start_keeps_the_claude_token(cli, tmp_path, monkeypatch):
+    values, calls = _started_env(cli, tmp_path, monkeypatch, {"SSSF_X": "1"})
+    assert values["CLAUDE_CODE_OAUTH_TOKEN"] == TOKEN
+    assert "PI_OFFLINE" not in values and "OPENAI_API_KEY" not in values
+    assert not any(TOKEN in " ".join(c["argv"]) for c in calls)
+
+
+def test_an_all_pi_roster_opens_without_a_token_file(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    run.cfg = roster("pi")
+    monkeypatch.setattr(sandbox_remote, "TOKEN_FILE", tmp_path / "missing.env")
+    monkeypatch.setattr(osh.OpenShell, "_create", lambda self: osh._VM("sb"))
+    for name in ("_clone", "handoff_in", "_check_tools"):
+        monkeypatch.setattr(osh.OpenShell, name, lambda self, *a, **k: None)
+    box = osh.OpenShell(run, "sssf/abc", "p")
+    box.open()
+    assert box._token == ""
 
 
 def test_check_roster_passes_claude_code_under_openshell():
@@ -431,8 +551,8 @@ def test_containerfile_installs_and_checks_the_python():
 def test_containerfile_without_a_python_installs_none():
     text = osh.containerfile(F, "")
     assert "uv python" not in text
-    # the tag at 7813dbf, before the image held a Python
-    assert osh.image_tag(F, "") == "localhost/sssf-openshell:c1f8d90c5594"
+    # the tag from when the image gained pi, ripgrep and fd-find
+    assert osh.image_tag(F, "") == "localhost/sssf-openshell:6d605fa4ff7d"
 
 
 def test_two_pythons_give_two_image_tags():

@@ -8,8 +8,9 @@ E2B's base image is Debian with git, Python and Node 20, 2 vCPUs and 512MB.
 The template adds Node 24 (pi needs 22 or later), uv, bun, `claude` and `pi`,
 and gives the VM 2 vCPUs and 4GB, the size of a Vercel VM. Build it once per
 E2B team, and again to take newer tools. Node and pi are pinned, so a
-rebuild gives the same pi the last proof ran: raise PI here, and rebuild,
-to take a newer one. `claude` installs the latest each build.
+rebuild gives the same pi the last proof ran: raise PI_VERSION in
+sandbox_remote.py, which the OpenShell image reads too (raising it also changes
+the OpenShell tag), and rebuild, to take a newer one. `claude` installs the latest each build.
 
 Run from a repo whose .env has E2B_API_KEY:
     uv run <skill>/scripts/e2b_template.py [--name sssf]
@@ -23,8 +24,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "templates" / "adws"))
+
+from adw_modules.sandbox_remote import PI_VERSION as PI  # noqa: E402
+
 NODE = "24.11.1"
-PI = "1.5.0"      # the pi the 2026-11-03 ChatGPT live check ran
 
 
 def template():

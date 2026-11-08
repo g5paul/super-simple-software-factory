@@ -11,12 +11,14 @@ the repo, so the tag's hash covers both. `just openshell-setup` runs this.
 
     uv run <skill>/scripts/openshell_image.py [--repo .] [--print]
 
---print shows the tag and the Containerfile and runs no Podman.
+--print shows the tag and the Containerfile and runs no Podman. Without --print it
+refuses while SSSF_ADW_ID is set, as `just openshell-setup` does.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -32,6 +34,11 @@ def main() -> int:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--print", action="store_true", dest="show")
     args = parser.parse_args()
+    if os.environ.get("SSSF_ADW_ID") and not args.show:
+        print("Refusing: building the OpenShell image is the engineer's to run, "
+              "outside an SSSF run (SSSF_ADW_ID is set). --print still works.",
+              file=sys.stderr)
+        return 1
     try:
         folder = openshell.folder_for(Path(args.repo).resolve())
         python = openshell.image_python(Path(args.repo).resolve())

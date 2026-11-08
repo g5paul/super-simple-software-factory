@@ -78,6 +78,7 @@ So nothing in the design changes, and the build can start at step 2.
 - **The project label.** `sssf=` is the project name cleaned to `[A-Za-z0-9_.-]` and cut to 50 characters, then `-` and the first 12 hex characters of the exact name's SHA-256, so two projects never share one, and it stays within a Kubernetes label value's 63 characters.
 - **The image tag** hashes the Containerfile, which holds the shared folder, so each repo layout has its own image.
 - **The repo's Python.** The image installs the major.minor uv picks in the main checkout (`image_python`) with uv at build time, under `/usr/local`. The tag covers it, so `require_sdk` refuses a run whose Python changed until `just openshell-setup` rebuilds.
+- **Who runs setup.** `just openshell-setup` and `scripts/openshell_image.py` (without `--print`) refuse while `SSSF_ADW_ID` is set, so an agent in a run can't start them by name. It's the same courtesy check as `pre-push`, and an agent can clear the variable.
 - **`data_dir(repo_root)`** reads `defaults.data_dir` from the shipped config; `folder_for` is the one source of the layout for `require_sdk`, `_create` and `scripts/openshell_image.py`.
 - **`Remote._call_end`** is a hook that logs denials when an agent call ends. A `wait` that raises before it logs none.
 - **`logs --since`** takes a duration, so a denial just before a call can be logged on that call too.

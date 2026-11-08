@@ -1,6 +1,6 @@
 # Design: a local OpenShell sandbox
 
-Status: steps 2, 3 and 5 built 2026-11-07; the proof run (step 4) is next. The engineer accepted decisions 1 to 5 as proposed on 2026-11-07.
+Status: built 2026-11-07, and the proof run (step 4) passed 2026-11-08. The engineer accepted decisions 1 to 5 as proposed on 2026-11-07.
 
 ## Why
 
@@ -81,3 +81,11 @@ So nothing in the design changes, and the build can start at step 2.
 - **`data_dir(repo_root)`** reads `defaults.data_dir` from the shipped config; `folder_for` is the one source of the layout for `require_sdk`, `_create` and `scripts/openshell_image.py`.
 - **`Remote._call_end`** is a hook that logs denials when an agent call ends. A `wait` that raises before it logs none.
 - **`logs --since`** takes a duration, so a denial just before a call can be logged on that call too.
+- **`setsid -w`.** OpenShell starts each exec as a process-group leader, so a bare `setsid` forked and its parent exited at once. OpenShell held the agent's output about 30 seconds, then ended the exec with exit 74, "exec output could not be delivered intact". Three proof runs failed that way, 32 seconds into the planner. `Remote.start` and the obs relay now run `setsid -w`, which waits for the agent and returns its exit code (7813dbf). On Vercel and E2B `setsid` doesn't fork, so nothing changes there.
+- **The image's Python.** The image installs the Python the host's uv picks in the repo, the version every sandbox command gets as `UV_PYTHON`, under `/usr/local/share/uv/python` with `python3.<minor>` on `PATH`. The version is in the image tag, so a run whose Python changed since the setup refuses and names `just openshell-setup` (805664d, guard run 609ad1c5). Without it, `uv run pytest` tried to download the Python, and the policy denied it.
+
+## The proof
+
+Run 700a50bb in sssf-sandbox, 2026-11-08: `adw_simple_sdlc --worktree --sandbox openshell` on "add a `sentence_case` function", with a planted `curl` to GitHub for the builder. All 12 phases passed, for $0.47, and the run committed two changes on its branch. The `curl` got "Failed to connect to github.com port 443 after 1 ms: Couldn't connect to server", exit 7, and the trace logged it as a `sandbox_denied` event, `curl` to `github.com:443`. The only other denials were 7 Claude Code telemetry calls to Datadog. The VM ran 150 seconds and was deleted at the end.
+
+`ANY_BINARY = "/**"` is still unproven: no command in the proof reached a package registry.

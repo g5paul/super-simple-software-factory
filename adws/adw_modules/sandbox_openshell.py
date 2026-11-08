@@ -5,7 +5,9 @@ calls sandbox_remote makes, which follow Vercel's.
 There is no SDK: every call is an `openshell` command. There is no session cap.
 The image comes from scripts/openshell_image.py (`just openshell-setup`); it
 bakes in one folder, shared by the repo and its worktrees, owned by the sandbox
-user. Denials from the sandbox's network policy go in the trace as
+user. The image also holds the repo's Python (`image_python`): uv installs it at
+build time, because the sandbox can't download one. The tag covers both, so a
+changed Python needs `just openshell-setup`. Denials from the sandbox's network policy go in the trace as
 `sandbox_denied` events.
 
 The Claude token, like every env value, travels on stdin in a framed block and
@@ -39,12 +41,15 @@ from pathlib import Path
 import yaml
 
 from .sandbox import SandboxFailed
+from . import sandbox_remote
 from .sandbox_remote import Remote
 
 CLI = "openshell"
 SANDBOX_USER = "ubuntu"
 BASE_IMAGE = "nvcr.io/nvidia/base/ubuntu:24.04"
 NODE = "24.11.1"
+PYTHON_DIR = "/usr/local/share/uv/python"   # under /usr, which the policy reads
+PYTHON_BIN = "/usr/local/bin"               # on PATH, so uv finds python3.<minor>
 CLAUDE_EXE = "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 ANY_BINARY = "/**"      # untested reading: the proof run checks it
 READ_ONLY_PATHS = ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
@@ -104,8 +109,22 @@ def folder_for(cwd: Path) -> Path:
     return shared_folder(root, root / data_dir(root) / "worktrees", Path.home())
 
 
-def containerfile(folder: Path) -> str:
+def image_python(path: Path) -> str:
+    """The Python, as major.minor, the image holds for the repo `path` is in:
+    what the host's uv picks in its main checkout, the value a run passes as
+    UV_PYTHON (sandbox_remote._host_python). "" when the host has none."""
+    return sandbox_remote._host_python(repo_root(path))
+
+
+def containerfile(folder: Path, python: str | None = None) -> str:
+    if python is None:
+        python = image_python(folder)
+    if python and not re.fullmatch(r"\d+\.\d+", python, re.ASCII):
+        raise ValueError(f"not a Python major.minor: {python!r}")
     q = shlex.quote(str(folder))
+    install = ([f"RUN UV_PYTHON_INSTALL_DIR={PYTHON_DIR} UV_PYTHON_BIN_DIR={PYTHON_BIN}"
+                f" uv python install {python}"] if python else [])
+    find = f" && uv python find {python}" if python else ""
     return "\n".join([
         f"FROM {BASE_IMAGE}",
         "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends"
@@ -114,15 +133,16 @@ def containerfile(folder: Path) -> str:
         " | tar -xJ -C /usr/local --strip-components=1",
         "RUN curl -LsSf https://astral.sh/uv/install.sh"
         " | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh",
+        *install,
         "RUN npm install -g @anthropic-ai/claude-code",
         f"RUN mkdir -p {q} && chown -R {SANDBOX_USER}:{SANDBOX_USER} {q}",
-        "RUN node --version && uv --version && claude --version && git --version",
+        "RUN node --version && uv --version && claude --version && git --version" + find,
         "",
     ])
 
 
-def image_tag(folder: Path) -> str:
-    return "localhost/sssf-openshell:" + hashlib.sha256(containerfile(folder).encode()).hexdigest()[:12]
+def image_tag(folder: Path, python: str | None = None) -> str:
+    return "localhost/sssf-openshell:" + hashlib.sha256(containerfile(folder, python).encode()).hexdigest()[:12]
 
 
 def policy(folder: Path, allow: list) -> dict:
@@ -172,16 +192,19 @@ def require_sdk() -> None:
         raise SystemExit(f"--sandbox openshell: no OpenShell gateway answers ({why}). Run {_SETUP_HINT}.")
     try:
         folder = folder_for(Path.cwd())
+        python = image_python(Path.cwd())
     except (ValueError, subprocess.SubprocessError, OSError) as error:
         raise SystemExit(f"--sandbox openshell: {error}. See {_SETUP_HINT}.")
-    tag = image_tag(folder)
+    tag = image_tag(folder, python)
     try:
         have = subprocess.run(["podman", "image", "exists", tag], capture_output=True,
                               timeout=_TIMEOUT).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         have = False
     if not have:
-        raise SystemExit(f"--sandbox openshell: the sandbox image {tag} isn't built. Run {_SETUP_HINT}.")
+        raise SystemExit(f"--sandbox openshell: the sandbox image {tag} isn't built"
+                         f"{f' (with Python {python}, the Python uv picks in this repo)' if python else ''}. "
+                         f"Run {_SETUP_HINT}.")
 
 
 def label(value: str) -> str:
@@ -359,6 +382,7 @@ class OpenShell(Remote):
         from . import repo_settings
         try:
             folder = folder_for(self.tree)
+            python = image_python(self.tree)
         except (ValueError, subprocess.SubprocessError, OSError) as error:
             raise OpenShellError(str(error))
         for path in (self.tree, self.handoff, self.run_.session_dir):
@@ -369,7 +393,7 @@ class OpenShell(Remote):
         file.write_text(policy_yaml(folder, repo_settings.load(repo_root(self.tree)).sandbox_allow))
         try:
             done = subprocess.run(
-                [CLI, "sandbox", "create", "--name", name, "--from", image_tag(folder),
+                [CLI, "sandbox", "create", "--name", name, "--from", image_tag(folder, python),
                  "--policy", str(file), "--label", f"sssf={project_label(self.project)}",
                  "--label", f"adw_id={label(self.run_.adw_id)}", "--detach", "--no-tty",
                  "--no-auto-providers"],

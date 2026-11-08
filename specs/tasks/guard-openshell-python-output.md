@@ -14,7 +14,7 @@ Guard run 609ad1c5's review found two gaps in how `--sandbox openshell` picks th
 
 ## The bar
 
-The change must not run anything the baseline wouldn't. It runs the same `uv python find`, and the same interpreter with more isolation, so any file that runs here and not at the baseline is a bypass.
+The change must not run anything the baseline wouldn't. It runs the same `uv python find`, and the same interpreter with more isolation. Sort a file that runs here and not at the baseline by decision 14 in `docs/designs/openshell-sandbox.md`: one reachable from a VM run is a bypass, and one only a local agent reaches, by writing a file outside the repo's tree, is a local-mode limit the spec names and `docs/open.md` lists.
 
 ## Tests
 

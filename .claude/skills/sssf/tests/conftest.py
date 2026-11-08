@@ -38,6 +38,8 @@ def no_dotenv_keys(monkeypatch):
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "templates" / "adws"))
     from adw_modules import utils
+    for key in utils.DOTENV_KEYS:          # utils' load_dotenv put these in os.environ
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(utils, "DOTENV_KEYS", frozenset())
 
 

@@ -376,6 +376,7 @@ def test_a_claude_start_keeps_the_claude_token(cli, tmp_path, monkeypatch):
 def test_an_all_pi_roster_opens_without_a_token_file(cli, tmp_path, monkeypatch):
     repo, run, _ = layout(tmp_path, monkeypatch)
     run.cfg = roster("pi")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(sandbox_remote, "TOKEN_FILE", tmp_path / "missing.env")
     monkeypatch.setattr(osh.OpenShell, "_create", lambda self: osh._VM("sb"))
     for name in ("_clone", "handoff_in", "_check_tools"):

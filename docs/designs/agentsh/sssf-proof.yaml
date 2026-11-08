@@ -29,6 +29,12 @@ file_rules:
     operations: ['*']
     decision: allow
 network_rules:
+  # The server's HTTP API, upstream finding #29. The socket is already
+  # closed to agents by the default unix-socket deny.
+  - name: sssf-no-agentsh-api
+    cidrs: ['127.0.0.1/32', '::1/128']
+    ports: [18080]
+    decision: deny
   - name: sssf-allow-net
     cidrs: ['0.0.0.0/0', '::/0']
     decision: allow

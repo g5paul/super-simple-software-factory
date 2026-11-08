@@ -157,9 +157,29 @@ The engineer ran `install.sh`. The service is `active`, and its `CapEff` is `0x8
 - **The fix for this machine.** The unit adds `CAP_DAC_READ_SEARCH`. With it, the server can open `/proc/<pid>/mem` to read, and it can reach workspaces in the home folder. It adds little power, because `CAP_SYS_PTRACE` already lets the server read any process's memory.
 - **The fix upstream.** The exec handler must deny when it can't read the filename, and the memory reader must try `process_vm_readv` before it gives up. Both are fork patches or upstream reports. SSSF can't rely on agentsh until the fail-open is fixed, because any read failure lets an exec through.
 
+**After `CAP_DAC_READ_SEARCH`.** The engineer installed the updated unit. `CapEff` is `0x80004`. The checks ran again in a wrapped `bash`:
+
+| Command | Result |
+|---|---|
+| `just test unit`, `cat .env.example` | ran |
+| `just test live`, `j""ust test live`, `gh`, `git push`, `git -c x=y push` | `Permission denied` at exec |
+| `cat .env`, `cat "$(printf ".%s" env)"`, Python `open(".e"+"nv")` | `Permission denied` at open |
+| backslash-newline, split arguments, both `<<-` forms, `cat <<EOF \| bash`, `sh -c`, `j\ust` | `Permission denied` at exec |
+| Python `os.execv` of `just` | denied |
+| a symlink to `.env` | denied. Upstream finding #1 predicted a pass, but the ptrace path resolves the link |
+| a hard link to `.env` | denied at `link` |
+| `systemd-run --user` | denied: the agent can't reach the D-Bus socket |
+| the server's socket, `/run/agentsh/agentsh.sock` | denied by the default unix-socket rule |
+| **a copy of `just` under another name** | **ran**. Command rules match the basename |
+| **the server's HTTP API, `127.0.0.1:18080`** | **HTTP 200**. Upstream finding #29 is real |
+
+A workspace in the engineer's home folder, sssf-sandbox, now opens.
+
+Two gaps stay. The proof policy now denies TCP to the server's port, for the engineer to install. A copied binary needs a Landlock execute list, or a rule on the binary's content, not its name.
+
 ## Next
 
-1. The engineer installs the updated unit and restarts the service. The checks run again. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
+1. The engineer installs the updated policy and kills the server with `kill -9` while a wrapped agent runs. The check: the agent dies, the service comes back, and the API is denied. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
 2. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
 2. The decisions above, settled from the proof.
 3. A guard chain run for the wrap.

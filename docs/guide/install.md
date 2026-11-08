@@ -195,6 +195,8 @@ A container session can't push, since neither `~/.ssh` nor your git config is mo
 
 ## Set up remote VMs
 
+For a local, free microVM instead, `--sandbox openshell` needs only `just openshell-setup` (Claude Code rosters only); no API key. See [run.md](run.md).
+
 `--sandbox vercel` and `--sandbox e2b` run a run's agents, checks and git in a VM made for the run. Set up the provider you'll use:
 
 1. **A Claude token** for Claude Code agents in the VM, in `~/.config/sssf-sandbox/token.env`, made the same way as the container's: `CLAUDE_CODE_OAUTH_TOKEN=<token>`. A pi agent on `openai/` models needs only the host's pi sign-in; SSSF hands each call a short-lived token, and the login stays on your machine.

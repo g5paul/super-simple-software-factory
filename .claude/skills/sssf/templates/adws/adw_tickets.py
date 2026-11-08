@@ -5,7 +5,7 @@
 """ADW Tickets — build an approved feature one ticket at a time, test-first.
 
 Usage:
-    uv run adws/adw_tickets.py .scratch/<feature>/ [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel|e2b|none]
+    uv run adws/adw_tickets.py .scratch/<feature>/ [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel|e2b|openshell|none]
 
 The engineer's half runs first, interactively, with mattpocock/skills:
 `grill-with-docs`, then `to-spec`, then `to-tickets` on the local markdown
@@ -50,7 +50,7 @@ run resumes by rejoining with --adw-id, which starts every agent fresh and
 reuses the scout's notes. While a worktree run holds a feature folder, no
 other run builds it.
 
-With --sandbox vercel or e2b, the feature's worktree run works in a remote VM:
+With --sandbox vercel, e2b or openshell, the feature's worktree run works in a remote VM:
 every ticket, check and commit happens there, and each commit comes back to
 sssf/<adw_id> as it lands. repo.yaml's `sandbox:` sets the default for a new
 run, and `--sandbox none` keeps one run on this machine. A stopped VM run
@@ -359,7 +359,7 @@ if __name__ == "__main__":
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
     parser.add_argument("--worktree", action="store_true",
                         help="build on branch sssf/<adw_id> in its own worktree; `just merge <adw_id>` lands it")
-    parser.add_argument("--sandbox", choices=["vercel", "e2b", "none"], default=None,
+    parser.add_argument("--sandbox", choices=["vercel", "e2b", "openshell", "none"], default=None,
                         help="build in a remote VM (implies --worktree); none keeps this run on this "
                              "machine. Default: repo.yaml's sandbox")
     args = parser.parse_args()

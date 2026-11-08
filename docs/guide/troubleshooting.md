@@ -74,6 +74,8 @@ The message names the file and what's missing. [tickets.md](../../.claude/skills
 
 **`--sandbox runs pi agents on the ChatGPT sign-in only`.** A pi agent in the roster uses a provider other than `openai/`, whose key would have to go into the VM. Use a Claude Code or ChatGPT roster for VM runs.
 
+**`--sandbox openshell` says the CLI isn't on PATH, no gateway answers, or the sandbox image isn't built.** Run `just openshell-setup` (or `just sssf openshell-setup`); it starts the gateway and builds the image. If it stops at `/dev/kvm`, either `sudo chgrp $USER /dev/kvm` (lasts until WSL restarts) or `sudo usermod -aG kvm $USER` and then `wsl --shutdown` from Windows, which stops every WSL session.
+
 **The run stops in its `sandbox` phase.** The message is the provider's or SSSF's. It may name a tool in the VM that's missing or too old, a refused VM past Vercel's Hobby allowance or E2B's credit, or, on E2B, a template that doesn't exist. For the template, run `uv run .claude/skills/sssf/scripts/e2b_template.py`. Nothing in the VM had run yet.
 
 **A VM run stopped with work in it.** Its uncommitted work is in `adws/adw_data/sessions/<adw_id>/sandbox-uncommitted.patch`. SSSF doesn't apply it. Read it, then `git apply` it in the run's worktree if you want it.

@@ -16,11 +16,34 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .rules import AgentRule, text
 
 PATH = "adws/adw_sssf_config/repo.yaml"
+
+
+class SandboxAllow(BaseModel):
+    """One network rule `--sandbox openshell` opens beyond its defaults."""
+    model_config = ConfigDict(extra="forbid")
+    binary: str          # a path in the sandbox starting with /, or "*" for any binary
+    host: str
+    port: int = Field(443, ge=1, le=65535)
+    access: Literal["read-only", "full"]
+
+    @field_validator("binary")
+    @classmethod
+    def _binary(cls, value: str) -> str:
+        if value != "*" and not value.startswith("/"):
+            raise ValueError('binary must be a path in the sandbox starting with "/", or "*"')
+        return value
+
+    @field_validator("host")
+    @classmethod
+    def _host(cls, value: str) -> str:
+        if not value or "/" in value or "://" in value:
+            raise ValueError("host must be a bare host name: no scheme and no /")
+        return value
 
 
 class RepoSettings(BaseModel):
@@ -32,8 +55,10 @@ class RepoSettings(BaseModel):
     # What the repo's runs may spend in the last 24 hours, rolling, in dollars. None = off.
     max_daily_cost: Optional[float] = Field(None, gt=0)
     # Where a chain that takes --sandbox does a new run's work when the flag
-    # is left out: "none" on this machine, or a provider's remote VM.
-    sandbox: Literal["none", "vercel", "e2b"] = "none"
+    # is left out: "none" on this machine, or a provider's VM (openshell is local).
+    sandbox: Literal["none", "vercel", "e2b", "openshell"] = "none"
+    # The hosts `--sandbox openshell` opens beyond its defaults, each one network rule.
+    sandbox_allow: list[SandboxAllow] = Field(default_factory=list)
     # Stop an agent that writes nothing for this many minutes: a hang spends
     # nothing, so the cost caps never see it (silence.py). None = off.
     max_silence_minutes: Optional[float] = Field(15, gt=0)

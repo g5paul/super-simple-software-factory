@@ -1,6 +1,6 @@
 # Design: a local OpenShell sandbox
 
-Status: designed 2026-11-07, not built. The engineer accepted decisions 1 to 5 as proposed on 2026-11-07.
+Status: steps 2, 3 and 5 built 2026-11-07; the proof run (step 4) is next. The engineer accepted decisions 1 to 5 as proposed on 2026-11-07.
 
 ## Why
 
@@ -67,3 +67,15 @@ Run 2026-11-07 on the microVM driver, in a sandbox from the host-path image, dri
 So nothing in the design changes, and the build can start at step 2.
 
 `sandbox_openshell.py` limits what an agent can do, so it's guard code. It goes through the guard-change chain, and `CLAUDE.md`'s list of guard files gains it.
+
+## As built
+
+- **The sentinel.** The CLI documents no exit code of its own for a failure, so the shell line inside the sandbox prints `sssf-openshell-exec-started` as its first stderr line once the env is set. A non-zero exit without it is the CLI's failure and raises `OpenShellError`; with it, the code is the command's. The adapter removes only that first line.
+- **The env frame.** Env values go on stdin as `KEY=<base64>` lines ending with a `.` line; the shell exports them, so no value is on a command line.
+- **`include_workdir: true`** stays, as in both test policies. The proof run checks whether it can go.
+- **`ANY_BINARY = "/**"`** is an untested reading of "any binary". The proof run confirms it.
+- **Sweep** reads the adw_id from the sandbox name `sssf-<adw_id>-<hex6>`, so `sandbox list --names` is enough.
+- **The image tag** hashes the Containerfile, which holds the shared folder, so each repo layout has its own image.
+- **`data_dir(repo_root)`** reads `defaults.data_dir` from the shipped config; `folder_for` is the one source of the layout for `require_sdk`, `_create` and `scripts/openshell_image.py`.
+- **`Remote._call_end`** is a hook that logs denials when an agent call ends. A `wait` that raises before it logs none.
+- **`logs --since`** takes a duration, so a denial just before a call can be logged on that call too.

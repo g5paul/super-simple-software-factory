@@ -231,7 +231,9 @@ vercel, last 30 days: 22 runs, 0.81 VM hours
   active CPU   0.037 h     0.7% of 5 h
 ```
 
-`sandbox: vercel` or `sandbox: e2b` in `repo.yaml` makes a VM the repo's default, and `--sandbox none` keeps one run local. [install.md](install.md#set-up-remote-vms) has the setup.
+`--sandbox openshell` does the same in a local microVM, free and with no API key, for Claude Code rosters only. Its network is closed except `api.anthropic.com` for Claude Code and read-only package registries; denials show as `sandbox_denied` events. Run `just openshell-setup` once first.
+
+`sandbox: vercel`, `sandbox: e2b` or `sandbox: openshell` in `repo.yaml` makes a VM the repo's default, and `--sandbox none` keeps one run local. [install.md](install.md#set-up-remote-vms) has the setup.
 
 ## Chain two runs by hand
 

@@ -144,6 +144,55 @@ tail ADW_ID:
 procs ADW_ID:
     @if [ -f {{db}} ]; then sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"; else echo "no runs yet: {{db}} does not exist"; fi
 
+# It never runs sudo. It creates TLS keys and gateway.toml only when missing, and
+# rewrites its own unit file ~/.config/systemd/user/openshell-gateway.service on every
+# run, which is how a rerun picks up a moved openshell-gateway; keep your own unit under
+# another name.
+# set up the local OpenShell gateway and image for --sandbox openshell
+openshell-setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! { [ -r /dev/kvm ] && [ -w /dev/kvm ]; }; then
+        echo "/dev/kvm isn't readable and writable by you. Pick one fix:" >&2
+        echo "  sudo chgrp $USER /dev/kvm      (lasts until WSL restarts)" >&2
+        echo "  sudo usermod -aG kvm $USER     (then run 'wsl --shutdown' from Windows, which stops every WSL session)" >&2
+        exit 1
+    fi
+    if ! command -v openshell openshell-gateway podman >/dev/null; then
+        echo "openshell, openshell-gateway and podman must all be on PATH. See the install notes in docs/research/openshell.md." >&2
+        exit 1
+    fi
+    tls="$HOME/.local/state/openshell/tls"
+    if [ ! -f "$tls/ca.crt" ]; then
+        openshell-gateway generate-certs --output-dir "$tls"
+    fi
+    conf="$HOME/.config/openshell/gateway.toml"
+    if [ ! -f "$conf" ]; then
+        mkdir -p "$(dirname "$conf")"
+        printf '[openshell]\nversion = 2\n\n[openshell.gateway]\nbind_address = "127.0.0.1:17670"\ncompute_driver = "vm"\n' > "$conf"
+    fi
+    unit="$HOME/.config/systemd/user/openshell-gateway.service"
+    mkdir -p "$(dirname "$unit")"
+    cat > "$unit" <<EOF
+    [Unit]
+    Description=OpenShell gateway for SSSF
+
+    [Service]
+    ExecStart=$(command -v openshell-gateway) --config %h/.config/openshell/gateway.toml
+    Environment=OPENSHELL_TELEMETRY_ENABLED=false
+    Environment=OPENSHELL_LOCAL_TLS_DIR=%h/.local/state/openshell/tls
+    Environment=OPENSHELL_BIND_ADDRESS=127.0.0.1
+    Restart=on-failure
+
+    [Install]
+    WantedBy=default.target
+    EOF
+    systemctl --user daemon-reload
+    systemctl --user enable --now openshell-gateway
+    uv run .claude/skills/sssf/scripts/openshell_image.py --repo .
+    openshell status
+    echo "Next: adw_simple_sdlc --worktree --sandbox openshell"
+
 # Name other repos' traces to add theirs: just sandbox-usage ../other/adws/adw_data/sssf.db
 # what VM runs used of Vercel's and E2B's free allowances
 sandbox-usage *ARGS:

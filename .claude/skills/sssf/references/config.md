@@ -46,7 +46,7 @@ agents:
 | `model` | string | Model id. For Pi, any id registered in `~/.pi/agent/models.json`. Default `google/gemini-3.6-flash`. |
 | `thinking` | string | Reasoning effort, see [Thinking levels](#thinking-levels). SSSF does not check the value. Pi gets it as written, and Claude Code maps a value it doesn't know to `medium`. Default `medium`. |
 | `color` | hex string | Lane color for every agent that does not set its own. Default empty — the visualizer falls back to its own palette. |
-| `harness_engineering` | list[string] | Pi extension paths. Rejected on a `claude_code` agent. SSSF sets `OBS_NAME` to the agent's name for each Pi call, so an observability extension that reads it labels the session `builder` or `reviewer`. It also puts each run in its own pool, `OBS_POOL=sssf-<adw_id>`, unless you set `OBS_POOL` yourself, and adds the tags `sssf` and `adw-<adw_id>` to any `OBS_TAG` you set. Under `--sandbox vercel|e2b`, see [pi extensions in a VM](#pi-extensions-in-a-vm). |
+| `harness_engineering` | list[string] | Pi extension paths. Rejected on a `claude_code` agent. SSSF sets `OBS_NAME` to the agent's name for each Pi call, so an observability extension that reads it labels the session `builder` or `reviewer`. It also puts each run in its own pool, `OBS_POOL=sssf-<adw_id>`, unless you set `OBS_POOL` yourself, and adds the tags `sssf` and `adw-<adw_id>` to any `OBS_TAG` you set. Under `--sandbox vercel|e2b` (`openshell` runs no pi agents), see [pi extensions in a VM](#pi-extensions-in-a-vm). |
 | `tools` | list[string] | Roster-wide tool allowlist. Every agent that omits its own `tools` inherits this. Unset = all tools usable. |
 | `protected_files` | list[string] | Paths **no** agent may modify unless it names them in its own `writes`: the same entry, or a path inside a protected directory. A broad glob such as `**/*.md` does not count. Default in code: `adws/adw_modules/`, `adws/adw_sssf_config/` and `adws/adw_*.py`, so an agent can't edit the machinery that decides whether its work passed, and `specs/`, which is on record once `commit_plan` lands. The starter `sssf.config.yaml` lists those four and adds what Matt Pocock's skills write with the engineer: `.scratch/` for specs and tickets, `GLOSSARY.md`, `GLOSSARY-MAP.md` and `docs/adr/`. A roster that sets the key replaces the code default, so list all of them. |
 | `writes` | list[string] | The roster-wide default for each agent's `writes`. `load_config` copies it into every agent that doesn't set its own. Unset means each agent without `writes` is unrestricted, except for `protected_files`. |
@@ -364,6 +364,12 @@ This fails quietly. The extension still loads, the run still succeeds, and the t
 
 Rule: **every entry in `harness_engineering` that registers a tool must have that tool name added to the agent's `tools` list.** Adding an extension is therefore a two-line change, never one. The alternative is dropping the `tools` key *and* leaving `defaults.tools` unset so the agent resolves to `None` (all tools) — but with a roster-wide `defaults.tools` in place, that escape hatch is closed; naming the tool is the only path.
 
+## A local sandbox: `--sandbox openshell`
+
+`--sandbox openshell` runs the agents, checks and git in a local microVM made with NVIDIA OpenShell. It is free, needs no API key, and runs Claude Code agents only: a roster with a pi agent is refused. Run `just openshell-setup` once (or `just sssf openshell-setup` where SSSF's recipes are a module). It checks `/dev/kvm` access, runs the OpenShell gateway as a systemd user service with telemetry off, and builds the sandbox image with Podman. It never runs `sudo`. It rewrites its own unit file, `~/.config/systemd/user/openshell-gateway.service`, on each run, so keep your own unit under another name; it creates TLS keys and `gateway.toml` only when they're missing.
+
+The sandbox's network is closed except two default rules: Claude Code's binary may reach `api.anthropic.com:443`, and read-only requests (`GET`, `HEAD`, `OPTIONS`) may reach `pypi.org`, `files.pythonhosted.org` and `registry.npmjs.org`. GitHub is closed. A repo opens more with `sandbox_allow` in `repo.yaml`. Each attempt a rule refuses is a `sandbox_denied` event in the trace, and a run is never stopped for one. Env values, the Claude token above all, go in on stdin and never on a command line.
+
 ## Repo settings in `repo.yaml`
 
 `adws/adw_sssf_config/repo.yaml` holds the rules a repo keeps whatever roster runs, and every clone follows it. `repo_settings.py` rejects an unknown key, so a misspelled one fails the run. The SSSF repo's `docs/guide/customize.md` covers the same keys for engineers.
@@ -374,12 +380,22 @@ Rule: **every entry in `harness_engineering` that registers a tool must have tha
 | `max_worktree_runs` | `2` | How many `--worktree` runs may be alive at once. Set `1` if the checks bind a fixed port or share a database. |
 | `max_live_cost` | off | Dollars every live run in the repo may spend together, checked at launch and before each agent call. |
 | `max_daily_cost` | off | Dollars the repo's runs may spend in a rolling 24 hours, finished runs included. |
-| `sandbox` | `none` | Where a chain that takes `--sandbox` runs new work when the flag is left out: `none`, `vercel` or `e2b`. A resume stays where its run started. |
+| `sandbox` | `none` | Where a chain that takes `--sandbox` runs new work when the flag is left out: `none`, `vercel`, `e2b` or `openshell`. A resume stays where its run started. |
+| `sandbox_allow` | `[]` | The hosts `--sandbox openshell` opens beyond its defaults, each entry one network rule: `binary` (a real path in the sandbox, or `*`), `host`, `port` (default `443`) and `access` (`read-only` or `full`). The key only matters under `--sandbox openshell`. See the example below. |
 | `max_silence_minutes` | `15` | See [below](#agents-that-go-quiet--max_silence_minutes). |
 | `worktree_setup` | `[]` | Shell commands run in order from a worktree's root before its first agent, such as `bun install --frozen-lockfile`. |
 | `worktree_setup_timeout` | `600` | Seconds each setup command may take before the run stops. |
 | `agent_rules` | `[]` | See [Rules for every agent](#rules-for-every-agent--agent_rules). |
 | `secret_files`, `agent_env` | `[]` | See [Secret files](#secret-files--secret_files-and-agent_env). |
+
+Example `sandbox_allow`:
+
+```yaml
+sandbox_allow:
+  - binary: "*"
+    host: api.example.com
+    access: read-only
+```
 
 ## Agents that go quiet — `max_silence_minutes`
 
@@ -462,7 +478,7 @@ In the VM, pi loads the file from the run's clone, at the worktree path, so file
 
 In the VM, no command gets `OBS_AUTH_TOKEN`: not a check, git, setup, or an agent of either harness. A pi agent's obs events go through SSSF's relay to the host's obs server (`OBS_SERVER_URL`, or `http://127.0.0.1:43190`) when the agent loads at least one `harness_engineering` extension, the host has `OBS_AUTH_TOKEN`, and `OBS_DISABLE` isn't `true`. The relay listens on the VM's loopback, and the host posts the events with its own token, so the token never enters the VM. The host sets each event's pool, agent name and tags to the call's own. Otherwise obs is off: the agent gets `OBS_DISABLE=true`. If the relay won't start, obs is off for that call, with one warning in SSSF's trace. SSSF's trace records the run either way, with one `obs_relay` event per relayed call. Known limits: the extension flushes at most one batch of 50 as pi exits, and none if a post is already under way, so events still queued in pi then never reach the relay; a call's events past 20,000 or 20 MB aren't posted; and a warning from the live posts, such as obs being down, lands in the trace when the call ends. Every other `OBS_*` and `SSSF_*` variable crosses, and a host run still passes `OBS_AUTH_TOKEN` as before.
 
-**Known limits on secrets in a VM.** Only that one name is held back, so a secret under another `OBS_` or `SSSF_` name crosses. The Claude token and pi's ChatGPT token reach agents in the VM by design, and nothing scans the commits or handoff folder that come back for secrets, so an agent that writes a token into the clone brings it to the host branch. A secret committed in the repo is in the clone too. The pre-push secret scan, when the repo has it, is what stops such a token leaving the machine.
+**Known limits on secrets in a VM.** They hold for `--sandbox openshell` too. Only that one name is held back, so a secret under another `OBS_` or `SSSF_` name crosses. The Claude token and pi's ChatGPT token reach agents in the VM by design, and nothing scans the commits or handoff folder that come back for secrets, so an agent that writes a token into the clone brings it to the host branch. A secret committed in the repo is in the clone too. The pre-push secret scan, when the repo has it, is what stops such a token leaving the machine.
 
 **Known limit:** an agent can edit a committed extension in the VM, and the edited one loads for the next agent call. A host run has the same exposure, since an extension isn't a protected file. Nothing checks it.
 

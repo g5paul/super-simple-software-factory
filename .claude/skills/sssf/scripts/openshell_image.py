@@ -6,8 +6,8 @@
 makes each sandbox from: `localhost/sssf-openshell:<hash>`.
 
 The image is per machine and per repo layout. It bakes in the folder the repo
-and its worktrees share, owned by the sandbox user, so the tag's hash covers
-that folder. `just openshell-setup` runs this.
+and its worktrees share, owned by the sandbox user, and the Python uv picks in
+the repo, so the tag's hash covers both. `just openshell-setup` runs this.
 
     uv run <skill>/scripts/openshell_image.py [--repo .] [--print]
 
@@ -34,10 +34,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         folder = openshell.folder_for(Path(args.repo).resolve())
-    except ValueError as error:
+        python = openshell.image_python(Path(args.repo).resolve())
+    except (ValueError, subprocess.SubprocessError, OSError) as error:
         print(f"openshell_image: {error}", file=sys.stderr)
         return 2
-    tag, text = openshell.image_tag(folder), openshell.containerfile(folder)
+    tag, text = openshell.image_tag(folder, python), openshell.containerfile(folder, python)
     if args.show:
         print(tag)
         print(text)

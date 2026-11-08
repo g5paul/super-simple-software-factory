@@ -410,3 +410,70 @@ def test_other_providers_call_end_is_a_no_op():
     box.__class__ = type("Plain", (Remote,), {})
     box._call_end(0.0)
     assert events == []
+
+
+# --- the repo's Python in the image ------------------------------------------
+
+F = Path("/home/u/repo")
+
+
+def test_containerfile_installs_and_checks_the_python():
+    text = osh.containerfile(F, "3.13")
+    installs = [l for l in text.splitlines() if l.startswith("RUN ") and "uv python install 3.13" in l]
+    assert len(installs) == 1
+    assert "UV_PYTHON_INSTALL_DIR=/usr/" in installs[0] and "UV_PYTHON_BIN_DIR=/usr/local/bin" in installs[0]
+    assert osh.PYTHON_DIR.startswith("/usr/") and osh.PYTHON_BIN.startswith("/usr/")
+    assert "/usr" in osh.READ_ONLY_PATHS
+    runs = [l for l in text.splitlines() if l.startswith("RUN ")]
+    assert runs[-1].endswith("&& uv python find 3.13")
+
+
+def test_containerfile_without_a_python_installs_none():
+    text = osh.containerfile(F, "")
+    assert "uv python" not in text
+    # the tag at 7813dbf, before the image held a Python
+    assert osh.image_tag(F, "") == "localhost/sssf-openshell:c1f8d90c5594"
+
+
+def test_two_pythons_give_two_image_tags():
+    tags = {osh.image_tag(F, "3.12"), osh.image_tag(F, "3.13"), osh.image_tag(F, "")}
+    assert len(tags) == 3
+
+
+@pytest.mark.parametrize("bad", ["3.13; curl x|sh", "3", "3.13.1", "3.13\n"])
+def test_containerfile_refuses_a_malformed_python(bad):
+    with pytest.raises(ValueError):
+        osh.containerfile(F, bad)
+    with pytest.raises(ValueError):
+        osh.image_tag(F, bad)
+
+
+def test_require_sdk_refuses_when_the_image_for_the_hosts_python_is_missing(cli, tmp_path, monkeypatch):
+    podman = tmp_path / "bin" / "podman"
+    podman.write_text(f'#!{sys.executable}\n'
+                      'import os, sys\n'
+                      'ok = sys.argv[1:3] == ["image", "exists"] and sys.argv[3:] == [os.environ["FAKE_PODMAN_HAVE"]]\n'
+                      'sys.exit(0 if ok else 1)\n')
+    podman.chmod(0o755)
+    repo, _, _ = layout(tmp_path, monkeypatch)
+    write_shipped_config(repo)
+    monkeypatch.chdir(repo)
+    folder = osh.folder_for(repo)
+    monkeypatch.setenv("FAKE_PODMAN_HAVE", osh.image_tag(folder, "3.12"))
+    monkeypatch.setattr(osh, "image_python", lambda p: "3.13")
+    with pytest.raises(SystemExit) as refused:
+        osh.require_sdk()
+    text = str(refused.value)
+    assert "openshell-setup" in text and osh.image_tag(folder, "3.13") in text and "isn't built" in text
+    monkeypatch.setattr(osh, "image_python", lambda p: "3.12")
+    assert osh.require_sdk() is None
+
+
+def test_create_builds_from_the_image_for_the_hosts_python(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    write_shipped_config(repo)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(osh, "image_python", lambda p: "3.13")
+    osh.OpenShell(run, "sssf/abc", "my repo")._create()
+    create = next(c["argv"] for c in cli() if c["argv"][:2] == ["sandbox", "create"])
+    assert create[create.index("--from") + 1] == osh.image_tag(osh.folder_for(repo), "3.13")

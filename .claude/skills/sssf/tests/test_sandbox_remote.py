@@ -476,6 +476,18 @@ def e2b_box(box):
     return box
 
 
+def test_an_agent_started_as_a_process_group_leader_keeps_its_exit_code(box, monkeypatch):
+    # OpenShell starts each exec as a process-group leader, so a bare setsid
+    # forks and its parent exits at once. OpenShell then held the agent's
+    # output about 30 seconds and ended the exec with 74, "exec output could
+    # not be delivered intact". setsid -w waits for the agent instead.
+    import functools
+    monkeypatch.setattr(subprocess, "Popen", functools.partial(subprocess.Popen, start_new_session=True))
+    process = box.start(["sh", "-c", "sleep 0.3; echo late; exit 3"])
+    assert list(process.stdout) == ["late\n"]
+    assert process.wait() == 3
+
+
 def test_e2b_chunks_come_back_as_whole_lines_and_stderr_is_kept(e2b_box):
     process = e2b_box.start(["sh", "-c", "printf 'first line\\nsecond'; echo oops >&2; exit 3"])
     assert list(process.stdout) == ["first line\n", "second"]

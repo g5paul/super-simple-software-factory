@@ -597,8 +597,10 @@ class Remote:
             agent_env["OBS_SERVER_URL"] = relay.url
             agent_env.pop("OBS_DISABLE", None)
         try:
+            # -w: where the exec is a process-group leader, as on OpenShell,
+            # setsid forks, and without it the exec ends at once with code 0.
             process = self._call(self.sandbox.create_process, "setsid",
-                                 ["sh", "-c", 'echo $$ > "$0"; exec "$@"', sid_file, *argv],
+                                 ["-w", "sh", "-c", 'echo $$ > "$0"; exec "$@"', sid_file, *argv],
                                  cwd=self._cwd(cwd), env=agent_env)
         except BaseException:
             if relay is not None:
@@ -625,8 +627,8 @@ class Remote:
                        input=obs_relay.RELAY_SCRIPT.read_bytes())
             name = uuid.uuid4().hex
             sid_file, path = f"{self._obs_dir}/{name}.sid", f"{self._obs_dir}/{name}.jsonl"
-            process = self._call(self.sandbox.create_process, "setsid",
-                                 ["sh", "-c", RELAY_SHELL, sid_file, f"{self._obs_dir}/relay.cjs", path])
+            process = self._call(self.sandbox.create_process, "setsid",     # -w: see start
+                                 ["-w", "sh", "-c", RELAY_SHELL, sid_file, f"{self._obs_dir}/relay.cjs", path])
         except Exception as error:
             self._relay_warning("start", f"the obs relay didn't start: {str(error)[-300:]}")
             return None

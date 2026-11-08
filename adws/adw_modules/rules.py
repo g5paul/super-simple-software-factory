@@ -58,6 +58,11 @@ BUILTIN_RULE = "SSSF's secret-file rule"   # how a refusal or breach names secre
 # first. The lookbehind keeps a long run of backslashes linear. sssf_refuse.py
 # and sssf_rules.ts use the same pattern.
 _CONTINUATION = re.compile(r"(?<!\\)\\+\n")
+# The same and the tabs right after it. A `<<-` heredoc strips a body line's
+# leading tabs before the inner shell joins the lines, so that shell reads no tab
+# there. Outside a `<<-` body the shell reads that tab as a word break, so
+# _CONTINUATION's text stays too. sssf_refuse.py and sssf_rules.ts use the same pattern.
+_CONTINUATION_TABS = re.compile(r"(?<!\\)\\+\n\t*")
 _CLAUDE_REFUSED = re.compile(r"Exit code 126\n" + re.escape(REFUSED))
 # An agent refused this many times in one call is looping: stop the run.
 MAX_REFUSALS = 3
@@ -306,14 +311,16 @@ def breach(rules: list, command: str) -> Optional[tuple[AgentRule, str]]:
     same way. Text an agent means only as text belongs in a file written with
     its file tool, which no rule reads.
 
-    It searches the command as written and again with backslash-newlines
-    removed, as a shell reads them, and a match in either counts.
+    It searches the command as written, again with backslash-newlines removed,
+    as a shell reads them, and again with the tabs right after them removed too,
+    as the inner shell of a `<<-` heredoc reads them. A match in any of the
+    three counts.
     """
-    joined = _CONTINUATION.sub("", command)
+    texts = (command, _CONTINUATION.sub("", command), _CONTINUATION_TABS.sub("", command))
     for rule in rules:
         if isinstance(rule, AgentRule):
             for pattern in rule.forbid:
-                if re.search(pattern, command, re.M) or re.search(pattern, joined, re.M):
+                if any(re.search(pattern, text, re.M) for text in texts):
                     return rule, pattern
     return None
 

@@ -1,0 +1,34 @@
+version: 1
+name: sssf-proof
+description: SSSF proof policy, denies live tests, gh, push and .env
+command_rules:
+  - name: sssf-no-live-tests
+    commands: [just]
+    args_patterns: ['(^|\s)test\s+live(\s|$)']
+    decision: deny
+  - name: sssf-no-gh
+    commands: [gh]
+    decision: deny
+  - name: sssf-no-push
+    commands: [git]
+    args_patterns: ['(^|\s)push(\s|$)']
+    decision: deny
+  - name: sssf-allow-rest
+    decision: allow
+file_rules:
+  - name: sssf-env-examples
+    paths: ['**/.env.example']
+    operations: ['*']
+    decision: allow
+  - name: sssf-secret-files
+    paths: ['**/.env', '**/.env.*']
+    operations: ['*']
+    decision: deny
+  - name: sssf-allow-rest
+    paths: ['/**']
+    operations: ['*']
+    decision: allow
+network_rules:
+  - name: sssf-allow-net
+    cidrs: ['0.0.0.0/0', '::/0']
+    decision: allow

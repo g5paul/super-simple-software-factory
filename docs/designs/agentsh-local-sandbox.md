@@ -114,8 +114,40 @@ Only the third way keeps the right away from the agent. A guard that the agent c
 
 The direction stays correct. agentsh checks the real program and its real arguments after the shell reads the command, so a change in spelling does not matter. On this machine, that check needs ptrace, and ptrace needs one setup step with sudo. The WSL listener issue is worth a report to the agentsh authors, sent by the engineer.
 
+## The agentsh service
+
+The engineer chose the service on 2026-11-08. The files are in [agentsh/](agentsh/):
+
+- `agentsh.service` is the systemd unit.
+- `sssf.yaml` is the server config.
+- `sssf-proof.yaml` is the proof policy.
+- `install.sh` installs them. The engineer runs it with sudo in their own terminal.
+
+**The service.** It runs `agentsh server` as the system user `agentsh`, with `CAP_SYS_PTRACE` and no other capability. Its config and policies are owned by root under `/etc/agentsh`. Its state is in `/var/lib/agentsh`.
+
+**The socket.** The server listens on `/run/agentsh/agentsh.sock`. Only the `agentsh` user can write in `/run/agentsh`, so an agent cannot put its own server there. The server makes a socket for each wrap's ptrace handshake in its temp folder, so `TMPDIR` points to `/run/agentsh` too. A private `/tmp` would hide those sockets from `wrap`.
+
+**Before the service.** systemd ran with no failed units. The services running were cron, dbus, polkit, rsyslog, ssh, journald, logind, resolved, timesyncd, udevd, unattended-upgrades and wsl-pro. Nothing used port 18080. The `.deb` has no systemd unit, no install scripts and no `agentsh` user, so the unit and the user are SSSF's.
+
+**WSL can stop at any time.** The engineer can shut WSL down or restart it, and a crash can kill it. The service handles each case like this:
+
+| Event | What happens |
+|---|---|
+| WSL starts, after `wsl --shutdown` or a Windows restart | systemd starts the enabled service with `multi-user.target`. `/run` is new, so no old socket stays |
+| The server crashes or is killed | `Restart=always` starts it again after 2 seconds. After 5 starts in 60 seconds, systemd stops trying |
+| The server dies during a run | The tracer sets `PTRACE_O_EXITKILL` (`internal/ptrace/tracer.go:640` in agentsh), so the kernel kills every agent it traced. The run fails closed, and SSSF reports the failed agent |
+| WSL dies during a run | Everything stops together. On the next start, the service comes up, and SSSF sees an unfinished run |
+| The service is down when SSSF starts an agent | `wrap` would start its own server as the engineer, without the right. SSSF must set `AGENTSH_NO_AUTO=1`, use the socket address, and refuse to start an agent when `systemctl is-active agentsh` is not `active` |
+
+**Not covered yet.**
+
+- The API is open to every local process, upstream finding #29. The socket is mode 0666 because the agent runs as the engineer and `wrap` must reach it.
+- The server cannot `chown` a wrap's socket folder to the engineer, because it has only `CAP_SYS_PTRACE`. The code then uses mode 0711. Whether `wrap` still connects is not tested.
+- `ProtectHome=read-only` lets the server read home folders. Whether ptrace file checks need more is not tested.
+
 ## Next
 
-1. The proof in sssf-sandbox, per the note's plan, once the ptrace choice above is made. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
+1. The engineer runs `install.sh` with sudo. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
+2. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
 2. The decisions above, settled from the proof.
 3. A guard chain run for the wrap.

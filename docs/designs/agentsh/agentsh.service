@@ -1,0 +1,34 @@
+# agentsh policy server for SSSF's local agents.
+# It runs as its own user, so an agent cannot change its config, stop it
+# or start a second copy with CAP_SYS_PTRACE.
+[Unit]
+Description=agentsh policy server for SSSF agents
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=agentsh
+Group=agentsh
+ExecStart=/usr/bin/agentsh server --config /etc/agentsh/sssf.yaml
+WorkingDirectory=/var/lib/agentsh
+# State survives a restart. /run is cleared at each WSL boot.
+StateDirectory=agentsh
+StateDirectoryMode=0750
+RuntimeDirectory=agentsh
+RuntimeDirectoryMode=0755
+# The per-wrap handshake sockets go here, where wrap can reach them and
+# no other user can write.
+Environment=TMPDIR=/run/agentsh
+# The one right the tracer needs, and no other.
+AmbientCapabilities=CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_SYS_PTRACE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

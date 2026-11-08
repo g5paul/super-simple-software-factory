@@ -10,8 +10,9 @@ works. The labels are fine as they are.
 ## What should change
 
 - The name's random suffix is 4 hex characters, so a name is
-  `sssf-<adw_id>-<hex4>`, 18 characters. Name a constant for the CLI's
-  19-character limit, with the error text above as its source, and have
+  `sssf-<adw_id>-<hex4>`, 18 characters. Name the CLI's 19-character limit as a class attribute of `OpenShell`, beside
+  `session_minutes`, with the error text above as its source in a comment. Add
+  no module-level name: the chain counts one as new state and stops, and have
   `_create` raise `SandboxFailed` with a plain message if a name would exceed
   it, instead of letting the CLI refuse it.
 - `sweep` parses names with the new suffix length. It still reads the

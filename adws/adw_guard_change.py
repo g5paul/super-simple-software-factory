@@ -53,7 +53,7 @@ MAX_ROUNDS = 3
 
 GUARD_DIR = ".claude/skills/sssf/templates/adws/adw_modules"
 GUARD_MODULES = ["rules.py", "sssf_refuse.py", "sssf_rules.ts", "secret_files.py", "permissions.py",
-                 "agent_cc.py", "agent_pi.py", "gates.py"]
+                 "agent_cc.py", "agent_pi.py", "gates.py", "sandbox_openshell.py"]
 
 SPEC_SECTIONS = ["Threat model", "Baseline", "Bar", "Out of scope"]
 

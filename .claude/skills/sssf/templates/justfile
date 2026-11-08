@@ -159,7 +159,7 @@ openshell-setup:
         exit 1
     fi
     if ! command -v openshell openshell-gateway podman >/dev/null; then
-        echo "openshell, openshell-gateway and podman must all be on PATH. See the install notes in docs/research/openshell.md." >&2
+        echo "openshell, openshell-gateway and podman must all be on PATH. See 'Installing OpenShell' under 'A local sandbox: --sandbox openshell' in .claude/skills/sssf/references/config.md." >&2
         exit 1
     fi
     tls="$HOME/.local/state/openshell/tls"

@@ -12,7 +12,8 @@ The Claude token, like every env value, travels on stdin in a framed block and
 is exported by a shell inside the sandbox. It is never on a command line, on
 the host or in the sandbox (anyone can read another process's argv).
 
-`sweep` reads the adw_id from the sandbox's name, `sssf-<adw_id>-<hex6>`, so it
+`sweep` reads the adw_id from the sandbox's name, `sssf-<adw_id>-<hex4>`, which is
+kept within the CLI's 19-character limit (`OpenShell.sandbox_name_max`), so it
 needs no JSON from `sandbox list`, whose shape v0.1.7 doesn't document. The
 `adw_id` label is still set. The `sssf`
 label is `project_label(project)`: a readable prefix and a hash of the exact
@@ -37,6 +38,7 @@ from pathlib import Path
 
 import yaml
 
+from .sandbox import SandboxFailed
 from .sandbox_remote import Remote
 
 CLI = "openshell"
@@ -207,7 +209,7 @@ def sweep(project: str, live: set[str]) -> list[str]:
         raise OpenShellError(f"openshell sandbox list failed: {_last(listed.stderr)}")
     gone = []
     for name in listed.stdout.split():
-        if not re.fullmatch(r"sssf-.+-[0-9a-f]{6}", name):
+        if not re.fullmatch(r"sssf-.+-[0-9a-f]{4}", name):
             continue
         adw_id = name[len("sssf-"):].rsplit("-", 1)[0]
         if adw_id in live:
@@ -341,10 +343,19 @@ class OpenShell(Remote):
     name = "openshell"
     keys = ()
     session_minutes = 24 * 60
+    # The CLI's limit on a sandbox name; its --help gives none. OpenShell 0.1.7 said:
+    # "name exceeds maximum length (20 > 19)"
+    sandbox_name_max = 19
     owner = SANDBOX_USER
     errors = (OpenShellError,)
 
     def _create(self) -> _VM:
+        name = f"sssf-{self.run_.adw_id}-{uuid.uuid4().hex[:4]}"
+        if len(name) > self.sandbox_name_max:
+            raise SandboxFailed(
+                f"the OpenShell sandbox name {name} is {len(name)} characters, and the "
+                f"openshell CLI takes at most {self.sandbox_name_max}. The run's id "
+                f"{self.run_.adw_id} is too long for it.")
         from . import repo_settings
         try:
             folder = folder_for(self.tree)
@@ -356,7 +367,6 @@ class OpenShell(Remote):
                                      f"Run {_SETUP_HINT} for this layout.")
         file = Path(self.run_.session_dir) / "openshell-policy.yaml"
         file.write_text(policy_yaml(folder, repo_settings.load(repo_root(self.tree)).sandbox_allow))
-        name = f"sssf-{self.run_.adw_id}-{uuid.uuid4().hex[:6]}"
         try:
             done = subprocess.run(
                 [CLI, "sandbox", "create", "--name", name, "--from", image_tag(folder),

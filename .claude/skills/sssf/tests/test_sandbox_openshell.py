@@ -20,7 +20,7 @@ import pytest
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agents, repo_settings, sandbox, sandbox_openshell as osh  # noqa: E402
+from adw_modules import agents, repo_settings, sandbox, sandbox_openshell as osh, utils  # noqa: E402
 from adw_modules.sandbox_remote import Remote  # noqa: E402
 
 FAKE = '''#!{python}
@@ -217,6 +217,12 @@ def layout(tmp_path, monkeypatch):
     return repo, run, events
 
 
+def write_shipped_config(repo: Path) -> None:
+    config = repo / osh.CONFIG
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text((SKILL / "templates" / "sssf.config.yaml").read_text())
+
+
 def test_create_writes_the_policy_and_passes_no_upload(cli, tmp_path, monkeypatch):
     repo, run, _ = layout(tmp_path, monkeypatch)
     monkeypatch.chdir(repo)
@@ -265,11 +271,52 @@ def test_check_roster_passes_claude_code_under_openshell():
 
 
 def test_sweep_deletes_only_dead_runs_of_this_project(cli, monkeypatch):
-    monkeypatch.setenv("FAKE_OPENSHELL_NAMES", "sssf-live1-aaaaaa\nsssf-dead1-bbbbbb\nother-thing")
-    assert osh.sweep("proj", {"live1"}) == ["sssf-dead1-bbbbbb (dead1)"]
+    monkeypatch.setenv("FAKE_OPENSHELL_NAMES", "sssf-live1-aaaa\nsssf-dead1-bbbb\nsssf-dead2-cccccc\nother-thing")
+    assert osh.sweep("proj", {"live1"}) == ["sssf-dead1-bbbb (dead1)"]
     calls = [c["argv"] for c in cli()]
     assert calls[0][:4] == ["sandbox", "list", "--selector", f"sssf={osh.project_label('proj')}"]
-    assert [c for c in calls if c[:2] == ["sandbox", "delete"]] == [["sandbox", "delete", "sssf-dead1-bbbbbb"]]
+    assert [c for c in calls if c[:2] == ["sandbox", "delete"]] == [["sandbox", "delete", "sssf-dead1-bbbb"]]
+
+
+def test_every_name_create_makes_fits_the_cli_and_sweeps_back(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    write_shipped_config(repo)
+    monkeypatch.chdir(repo)
+    run.adw_id = utils.new_id()
+    names = []
+    for _ in range(3):
+        vm = osh.OpenShell(run, "sssf/x", "my repo")._create()
+        names.append(vm.name)
+    creates = [c["argv"] for c in cli() if c["argv"][:2] == ["sandbox", "create"]]
+    assert len(creates) == 3
+    for vm_name, create in zip(names, creates):
+        assert len(vm_name) <= osh.OpenShell.sandbox_name_max
+        assert vm_name == create[create.index("--name") + 1]
+        assert vm_name.startswith(f"sssf-{run.adw_id}-")
+    monkeypatch.setenv("FAKE_OPENSHELL_NAMES", "\n".join(names))
+    assert osh.sweep("my repo", set()) == [f"{n} ({run.adw_id})" for n in names]
+
+
+def test_create_refuses_a_name_over_the_cli_limit(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    write_shipped_config(repo)
+    monkeypatch.chdir(repo)
+    run.adw_id = "a" * 10
+    with pytest.raises(sandbox.SandboxFailed, match="19"):
+        osh.OpenShell(run, "sssf/x", "my repo")._create()
+    assert not any(c["argv"][:2] == ["sandbox", "create"] for c in cli())
+    assert osh.OpenShell.sandbox_name_max == 19
+
+
+def test_setup_recipe_points_to_the_skills_config_reference():
+    lines = (SKILL / "templates" / "justfile").read_text().splitlines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("openshell-setup:"))
+    end = next((i for i in range(start + 1, len(lines))
+                if lines[i] and not lines[i][0].isspace()), len(lines))
+    recipe = "\n".join(lines[start:end])
+    assert "references/config.md" in recipe and "docs/research" not in recipe
+    config = (SKILL / "references" / "config.md").read_text()
+    assert "**Installing OpenShell.**" in config and "SHA-256" in config
 
 
 LABEL_VALUE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?")

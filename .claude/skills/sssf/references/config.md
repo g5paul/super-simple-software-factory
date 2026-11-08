@@ -368,6 +368,8 @@ Rule: **every entry in `harness_engineering` that registers a tool must have tha
 
 `--sandbox openshell` runs the agents, checks and git in a local microVM made with NVIDIA OpenShell. It is free, needs no API key, and runs Claude Code agents only: a roster with a pi agent is refused. Run `just openshell-setup` once (or `just sssf openshell-setup` where SSSF's recipes are a module). It checks `/dev/kvm` access, runs the OpenShell gateway as a systemd user service with telemetry off, and builds the sandbox image with Podman. It never runs `sudo`. It rewrites its own unit file, `~/.config/systemd/user/openshell-gateway.service`, on each run, so keep your own unit under another name; it creates TLS keys and `gateway.toml` only when they're missing.
 
+**Installing OpenShell.** `just openshell-setup` needs `openshell`, `openshell-gateway` and `podman` on `PATH`, and installs none of them. OpenShell's release ships plain tarballs for the CLI, the gateway, the supervisor and the VM driver. Check each against the SHA-256 NVIDIA publishes for the release, then unpack them all into one folder on `PATH`, such as `~/.local/opt/openshell/bin`. That needs no root; the release's `install.sh` runs `sudo apt-get install` instead.
+
 The sandbox's network is closed except two default rules: Claude Code's binary may reach `api.anthropic.com:443`, and read-only requests (`GET`, `HEAD`, `OPTIONS`) may reach `pypi.org`, `files.pythonhosted.org` and `registry.npmjs.org`. GitHub is closed. A repo opens more with `sandbox_allow` in `repo.yaml`. Each attempt a rule refuses is a `sandbox_denied` event in the trace, and a run is never stopped for one. Env values, the Claude token above all, go in on stdin and never on a command line.
 
 ## Repo settings in `repo.yaml`

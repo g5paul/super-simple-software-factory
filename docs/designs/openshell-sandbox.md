@@ -74,7 +74,7 @@ So nothing in the design changes, and the build can start at step 2.
 - **The env frame.** Env values go on stdin as `KEY=<base64>` lines ending with a `.` line; the shell exports them, so no value is on a command line.
 - **`include_workdir: true`** stays, as in both test policies. The proof run checks whether it can go.
 - **`ANY_BINARY = "/**"`** is an untested reading of "any binary". The proof run confirms it.
-- **Sweep** reads the adw_id from the sandbox name `sssf-<adw_id>-<hex6>`, so `sandbox list --names` is enough.
+- **The sandbox name** is `sssf-<adw_id>-<hex4>`: 18 characters for an 8-character adw_id. OpenShell 0.1.7 refuses a name over 19 characters ("name exceeds maximum length (20 > 19)"), though its `--help` doesn't say so, so `OpenShell.sandbox_name_max` is 19 and `_create` raises `SandboxFailed` for a longer name before calling the CLI. **Sweep** reads the adw_id from the name, so `sandbox list --names` is enough; a name that doesn't parse, the old `<hex6>` form included, is left alone.
 - **The project label.** `sssf=` is the project name cleaned to `[A-Za-z0-9_.-]` and cut to 50 characters, then `-` and the first 12 hex characters of the exact name's SHA-256, so two projects never share one, and it stays within a Kubernetes label value's 63 characters.
 - **The image tag** hashes the Containerfile, which holds the shared folder, so each repo layout has its own image.
 - **`data_dir(repo_root)`** reads `defaults.data_dir` from the shipped config; `folder_for` is the one source of the layout for `require_sdk`, `_create` and `scripts/openshell_image.py`.

@@ -5,7 +5,7 @@
 """ADW Plan Build Test Quality — full agent chain plus deterministic quality.
 
 Usage:
-    uv run adws/adw_plan_build_test_quality.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel|e2b|none]
+    uv run adws/adw_plan_build_test_quality.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4] [--worktree] [--sandbox vercel|e2b|openshell|none]
 
 Phases: engineer(request) -> planner -> builder -> [code(verify) -> code(test) -> builder(fix)] bounded -> git(commit)
 
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
     parser.add_argument("--worktree", action="store_true",
                         help="work on branch sssf/<adw_id> in its own worktree; `just merge <adw_id>` lands it")
-    parser.add_argument("--sandbox", choices=["vercel", "e2b", "none"], default=None,
+    parser.add_argument("--sandbox", choices=["vercel", "e2b", "openshell", "none"], default=None,
                         help="do the run's work in a remote VM, which implies --worktree, or on "
                              "this machine with none; repo.yaml's `sandbox` when left out")
     args = parser.parse_args()

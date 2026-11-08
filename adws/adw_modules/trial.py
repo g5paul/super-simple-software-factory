@@ -7,7 +7,7 @@ reviewer per model family. The scorecard suggests the cheapest attempt that
 passed every gate; the engineer picks, and `just trial-merge` lands it and
 drops the rest.
 
-`just trial --sandbox vercel ...` (or e2b) runs every attempt in its own remote
+`just trial --sandbox vercel ...` (or e2b or openshell) runs every attempt in its own remote
 VM; without the flag, repo.yaml's `sandbox:` decides, and `--sandbox none`
 keeps them all on this machine. The choice is made once, checked for every
 roster before anything starts, and passed to each attempt, so a trial's

@@ -17,7 +17,7 @@ both sides. Each command goes through `run` or `start` below:
 - At the end, uncommitted work is saved as a patch in the run's folder, not
   applied, and the VM is deleted.
 
-A provider (sandbox_vercel, sandbox_e2b) makes the VM and hands back an
+A provider (sandbox_vercel, sandbox_e2b, sandbox_openshell) makes the VM and hands back an
 object with Vercel's SDK calls: run_process, create_process, stop, destroy.
 Sessions are capped, so before a command that might not fit in what is left,
 the VM is stopped and resumed with a fresh session and its files kept.
@@ -230,6 +230,7 @@ class RemoteProcess:
         self._silent = False          # the VM didn't answer the probe
         self._dog = None
         self._done = False
+        self.started = time.time()
         threading.Thread(target=self._pump, args=(process.stdout,), daemon=True,
                          name=f"sssf-{box.name}-stream").start()
         self.stdout = self._read()
@@ -320,6 +321,10 @@ class RemoteProcess:
         self._close_relay(reach)            # the agent has exited, so its extension has flushed
         if not self._done:
             self._done = True
+            try:
+                self._box._call_end(self.started)
+            except Exception:
+                pass
             try:
                 self._box.handoff_out()
             except Exception:
@@ -451,6 +456,11 @@ class Remote:
 
     def _delete(self) -> None:
         raise NotImplementedError
+
+    def _call_end(self, started: float) -> None:
+        """What a provider does when an agent call ends: `started` is the call's
+        start, from time.time(). Must not raise."""
+        return
 
     def _end(self, seconds: float) -> dict:
         """What the provider adds to the run's `sandbox_end` event."""
@@ -587,8 +597,10 @@ class Remote:
             agent_env["OBS_SERVER_URL"] = relay.url
             agent_env.pop("OBS_DISABLE", None)
         try:
+            # -w: where the exec is a process-group leader, as on OpenShell,
+            # setsid forks, and without it the exec ends at once with code 0.
             process = self._call(self.sandbox.create_process, "setsid",
-                                 ["sh", "-c", 'echo $$ > "$0"; exec "$@"', sid_file, *argv],
+                                 ["-w", "sh", "-c", 'echo $$ > "$0"; exec "$@"', sid_file, *argv],
                                  cwd=self._cwd(cwd), env=agent_env)
         except BaseException:
             if relay is not None:
@@ -615,8 +627,8 @@ class Remote:
                        input=obs_relay.RELAY_SCRIPT.read_bytes())
             name = uuid.uuid4().hex
             sid_file, path = f"{self._obs_dir}/{name}.sid", f"{self._obs_dir}/{name}.jsonl"
-            process = self._call(self.sandbox.create_process, "setsid",
-                                 ["sh", "-c", RELAY_SHELL, sid_file, f"{self._obs_dir}/relay.cjs", path])
+            process = self._call(self.sandbox.create_process, "setsid",     # -w: see start
+                                 ["-w", "sh", "-c", RELAY_SHELL, sid_file, f"{self._obs_dir}/relay.cjs", path])
         except Exception as error:
             self._relay_warning("start", f"the obs relay didn't start: {str(error)[-300:]}")
             return None

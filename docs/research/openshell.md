@@ -1,6 +1,6 @@
 # NVIDIA OpenShell as a sandbox for SSSF's agents
 
-Researched 2026-11-07, from OpenShell's docs for v0.1.7 and its README. None of it has been run here yet; [the test](#the-test) below is the next step.
+Researched 2026-11-07, from OpenShell's docs for v0.1.7 and its README. [The test](#the-test) on this machine found that its container drivers can't run under WSL2 here; the microVM driver is untried.
 
 The question: would OpenShell have solved the problems behind SSSF's reactive guards ([concepts.md](../concepts.md#guards)), so that fewer of them are needed?
 
@@ -84,4 +84,13 @@ Three questions decide whether it's worth building, run in sssf-sandbox:
 2. Can a Claude Code agent in it sign in with the `claude setup-token` token and finish a task on an uploaded copy of the repo?
 3. What does the agent see when a policy blocks `git push`, and when it tries to read a gitignored `.env`?
 
-Results go below as they come in.
+### Results, 2026-11-07
+
+Question 1 failed for the container drivers, for a reason that holds for any container on this WSL2 machine. Questions 2 and 3 wait on the microVM driver.
+
+- **Install without root works.** The release ships plain tarballs for the CLI, gateway, supervisor and VM driver. Unpacked into `~/.local/opt/openshell/bin`, each matched NVIDIA's published SHA-256. The official `install.sh` instead runs `sudo apt-get install` and adds a systemd user service. Nothing needs a fork of OpenShell.
+- **The gateway runs on Podman 4.9.3**, though the docs ask for 5.x. It needs a schema-version-2 config (`[openshell] version = 2`), and sandboxes need the gateway's TLS and per-sandbox tokens: `openshell-gateway generate-certs --output-dir ~/.local/state/openshell/tls`, then the gateway with `OPENSHELL_LOCAL_TLS_DIR` set, as the packaged service does. A plaintext gateway with `allow_unauthenticated_users` starts but refuses to launch sandboxes ("Podman sandbox launch authentication is required").
+- **The sandbox dies at its seccomp probe.** The workload container exits with `seccomp notification probe: Resource busy (os error 16)`. The cause is WSL2, not Podman: every process here, `/sbin/init` included, already runs under one seccomp filter, and a test filter that allows everything installs fine without a listener and fails with "Device or resource busy" with `SECCOMP_FILTER_FLAG_NEW_LISTENER`. The kernel allows one listener per process chain, WSL's init holds it, and every container on this machine descends from init. OpenShell's network enforcement depends on that listener, so its Podman and Docker drivers can't work here. That's likely why the support matrix marks WSL2 experimental.
+- **The microVM driver is the way left.** A libkrun guest runs its own kernel, so WSL's filter doesn't reach inside it. `/dev/kvm` exists, but it's `root:kvm` mode 0660 and this user isn't in the `kvm` group, so the test needs the engineer to grant access first.
+
+Left on the machine for the next try: the binaries in `~/.local/opt/openshell/bin`, the certs in `~/.local/state/openshell/tls`, the test config in `~/.config/openshell-test/`, the CLI's gateway entry `sssf-test`, a Podman network named `openshell` and the pulled images. No gateway or sandbox is running.

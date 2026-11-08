@@ -12,7 +12,8 @@
  * which reads the patterns as Python, then stops the run on that command: it
  * counts a pi refusal only when pi's result shows it never ran the call (no
  * `durationMs`), so a command that slips past here and prints the refusal
- * still stops the run. references/config.md also lists the
+ * still stops the run. The search also reads the command with
+ * backslash-newlines removed, as a shell reads it. references/config.md also lists the
  * differences no check catches. SSSF's built-in secret-file rule comes
  * marked `builtin`, and its refusal names it as SSSF's.
  */
@@ -26,6 +27,9 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 const REFUSED = "SSSF refused this command";
 const TAIL = "Nothing ran. Don't try it another way: do the task without it, or say in your "
   + "report that the task needs it.";
+
+// rules._CONTINUATION in Python: a backslash-newline and the backslashes right before it.
+const CONTINUATION = /(?<!\\)\\+\n/g;
 
 interface Rule { rule: string; forbid: string[]; builtin?: boolean }
 
@@ -84,9 +88,10 @@ export default function (pi: ExtensionAPI) {
     }
     if (event.toolName !== "bash") return;
     const command = String((event.input as { command?: unknown })?.command ?? "");
+    const joined = command.replace(CONTINUATION, "");
     for (const { rule, builtin, patterns } of compiled) {
       for (const [source, re] of patterns) {
-        if (re?.test(command)) {
+        if (re && (re.test(command) || re.test(joined))) {
           return {
             block: true,
             reason: builtin

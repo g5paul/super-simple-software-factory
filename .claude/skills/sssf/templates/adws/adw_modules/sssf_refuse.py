@@ -24,7 +24,8 @@ Claude Code wraps the agent's command in its own shell line, which ends
 `&& eval '<command>' < /dev/null && pwd -P ...`. The patterns are searched in
 that command. A line in another shape is searched whole, and so is each
 `eval '...'` argument in it, unquoted, so a pattern anchored to the start of
-a command still finds one. Keep this docstring free of backslashes: a
+a command still finds one. The search also reads the line with
+backslash-newlines removed, so a command split across lines is caught. Keep this docstring free of backslashes: a
 warning on stderr would come before the refusal and hide it. A change in Claude
 Code's wrapping can still make a pattern miss, and SSSF's stream check stays
 the backstop either way. SSSF's built-in secret-file rule comes marked
@@ -45,6 +46,7 @@ TAIL = ("Nothing ran. Don't try it another way: do the task without it, or say i
 EXIT = 126
 EVAL = re.compile(r"&& eval (.*) < /dev/null && pwd -P", re.S)
 ANY_EVAL = re.compile(r"\beval\s+('(?:[^']|'\\'')*')")   # one single-quoted eval argument
+CONTINUATION = re.compile(r"(?<!\\)\\+\n")   # rules._CONTINUATION, and the same in sssf_rules.ts
 
 
 def _unquote(word: str) -> str | None:
@@ -66,7 +68,7 @@ def commands(line: str) -> list[str]:
 
 
 def refusal(line: str, rules: list[dict]) -> str | None:
-    texts = commands(line)
+    texts = [*commands(line), *commands(CONTINUATION.sub("", line))]
     for rule in rules:
         for pattern in rule.get("forbid") or []:
             try:

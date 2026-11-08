@@ -11,7 +11,9 @@ import base64
 import importlib.util
 import itertools
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -552,8 +554,8 @@ def test_containerfile_installs_and_checks_the_python():
 def test_containerfile_without_a_python_installs_none():
     text = osh.containerfile(F, "")
     assert "uv python" not in text
-    # the tag from when the image gained pi, ripgrep and fd-find
-    assert osh.image_tag(F, "") == "localhost/sssf-openshell:6d605fa4ff7d"
+    # the tag from when the image's check trimmed rg to one line
+    assert osh.image_tag(F, "") == "localhost/sssf-openshell:54c9163cc34d"
 
 
 def test_two_pythons_give_two_image_tags():
@@ -598,3 +600,28 @@ def test_create_builds_from_the_image_for_the_hosts_python(cli, tmp_path, monkey
     osh.OpenShell(run, "sssf/abc", "my repo")._create()
     create = next(c["argv"] for c in cli() if c["argv"][:2] == ["sandbox", "create"])
     assert create[create.index("--from") + 1] == osh.image_tag(osh.folder_for(repo), "3.13")
+
+
+@pytest.mark.parametrize("rg", ["present", "missing", "fails"])
+def test_the_image_check_fails_when_rg_is_missing(tmp_path, rg):
+    line = next(l for l in osh.containerfile(F, "").splitlines() if l.startswith("RUN node --version"))[4:]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ran_fd = tmp_path / "fd-ran"
+
+    def stub(name, body):
+        (bin_dir / name).write_text("#!/bin/sh\n" + body + "\n")
+        (bin_dir / name).chmod(0o755)
+    for name in ("node", "uv", "claude", "pi", "git"):
+        stub(name, "echo " + name + " 1.0")
+    stub("fdfind", f"echo ran > {ran_fd}")
+    (bin_dir / "head").symlink_to(shutil.which("head"))
+    if rg != "missing":
+        stub("rg", "echo rg first line\necho rg second line" + ("\nexit 1" if rg == "fails" else ""))
+    done = subprocess.run([shutil.which("sh"), "-c", line], capture_output=True, text=True,
+                          env={"PATH": str(bin_dir)})
+    if rg == "present":
+        assert done.returncode == 0
+        assert "rg first line" in done.stdout and "rg second line" not in done.stdout
+    else:
+        assert done.returncode != 0 and not ran_fd.exists()

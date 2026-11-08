@@ -283,6 +283,7 @@ def test_results_are_read_from_either_harness():
 
 
 def test_pi_always_loads_the_refusing_extension_and_passes_rules_only_when_set(tmp_path, monkeypatch):
+    monkeypatch.delenv("SSSF_REFUSE_RULES", raising=False)
     seen = tmp_path / "seen"
     script = tmp_path / "pi"
     script.write_text(f'#!/bin/sh\necho "$@" > {seen}\nprintf "%s\\n" "${{SSSF_REFUSE_RULES:-none}}" >> {seen}\n')

@@ -53,6 +53,11 @@ SHELL_TOOLS = {"Bash", "bash"}
 # only shell calls are.
 REFUSED = "SSSF refused this command"
 BUILTIN_RULE = "SSSF's secret-file rule"   # how a refusal or breach names secret_files.shell_rule's rule
+# A backslash-newline and any backslashes right before it. A shell drops the
+# pair; the rest of the run matters when an outer level of quoting unescapes it
+# first. The lookbehind keeps a long run of backslashes linear. sssf_refuse.py
+# and sssf_rules.ts use the same pattern.
+_CONTINUATION = re.compile(r"(?<!\\)\\+\n")
 _CLAUDE_REFUSED = re.compile(r"Exit code 126\n" + re.escape(REFUSED))
 # An agent refused this many times in one call is looping: stop the run.
 MAX_REFUSALS = 3
@@ -300,11 +305,15 @@ def breach(rules: list, command: str) -> Optional[tuple[AgentRule, str]]:
     start finds one on any line. sssf_refuse.py and sssf_rules.ts search the
     same way. Text an agent means only as text belongs in a file written with
     its file tool, which no rule reads.
+
+    It searches the command as written and again with backslash-newlines
+    removed, as a shell reads them, and a match in either counts.
     """
+    joined = _CONTINUATION.sub("", command)
     for rule in rules:
         if isinstance(rule, AgentRule):
             for pattern in rule.forbid:
-                if re.search(pattern, command, re.M):
+                if re.search(pattern, command, re.M) or re.search(pattern, joined, re.M):
                     return rule, pattern
     return None
 

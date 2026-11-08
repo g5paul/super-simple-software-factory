@@ -430,6 +430,7 @@ def test_refuse_rules_route_bash_through_sssfs_shell_prefix(tmp_path, fake, monk
 
 
 def test_no_refuse_rules_leaves_the_shell_alone(tmp_path, fake, monkeypatch):
+    monkeypatch.delenv("SSSF_REFUSE_RULES", raising=False)
     monkeypatch.setenv("CLAUDE_CODE_SHELL_PREFIX", "/opt/audit.sh")
     fake(FIXTURES / "cc_turn1.jsonl")
     agent_cc.run(request(tmp_path))

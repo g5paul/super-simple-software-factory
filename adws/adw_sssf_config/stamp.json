@@ -321,7 +321,7 @@
       "source": "adws/adw_worktree.py"
     },
     "justfile": {
-      "sha256": "90901d125cc5c0c17512f1b761e85b3d4de6927e5acaffc73976546c5c2da43e",
+      "sha256": "e99f5827a668be38ef5639a5486842904735f71d9a0fead3dd49151a4080dcbe",
       "source": "justfile"
     }
   }

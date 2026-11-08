@@ -144,6 +144,10 @@ tail ADW_ID:
 procs ADW_ID:
     @if [ -f {{db}} ]; then sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"; else echo "no runs yet: {{db}} does not exist"; fi
 
+# It refuses while SSSF_ADW_ID is set, so an agent in a run can't start it by name.
+# scripts/openshell_image.py refuses the same way, except with --print. Neither stops an
+# agent that clears SSSF_ADW_ID, runs the steps by hand, or starts it through something
+# that gives it a fresh environment, such as ssh, sudo or systemd-run; see config.md.
 # It never runs sudo. It creates TLS keys and gateway.toml only when missing, and
 # rewrites its own unit file ~/.config/systemd/user/openshell-gateway.service on every
 # run, which is how a rerun picks up a moved openshell-gateway; keep your own unit under
@@ -152,6 +156,7 @@ procs ADW_ID:
 openshell-setup:
     #!/usr/bin/env bash
     set -euo pipefail
+    [ -z "${SSSF_ADW_ID:-}" ] || { echo "Refusing: openshell-setup is the engineer's to run, outside an SSSF run (SSSF_ADW_ID is set)." >&2; exit 1; }
     if ! { [ -r /dev/kvm ] && [ -w /dev/kvm ]; }; then
         echo "/dev/kvm isn't readable and writable by you. Pick one fix:" >&2
         echo "  sudo chgrp $USER /dev/kvm      (lasts until WSL restarts)" >&2

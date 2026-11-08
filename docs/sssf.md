@@ -5,6 +5,24 @@ The hub runs SSSF on itself, so guard changes can go through a chain
 `justfile`, `.env.sample` and the config under `adws/adw_sssf_config/` were
 stamped from the skill in `.claude/skills/sssf/`.
 
+## What's here
+
+Most of `adws/` is the install, the same files every repo gets. A few
+parts exist only in the hub; `sssf-update` never copies them.
+
+| Part | Hub only | What it is |
+|---|---|---|
+| `adws/adw_*.py`, `adws/adw_modules/` | no | the chains and their modules, stamped from `templates/adws/` ([concepts.md](concepts.md)) |
+| `adws/adw_data/prompt_engineering/` | no, except two | each agent's prompts; `guard_spec_reviewer/` and `bypass_reviewer/` are the guard chain's ([Guard changes](#guard-changes)) |
+| `adws/adw_data/harness_engineering/` | no | pi extensions: `subagents.ts` and its helper `themeMap.ts` |
+| `adws/adw_guard_change.py` | yes | the chain every change to guard code goes through ([Guard changes](#guard-changes)) |
+| `adws/check_projects.py` | yes | checks each installed repo after an update ([Check the projects' updates](#check-the-projects-updates)) |
+| `adws/levers.py` | yes | the four levers, week by week ([The four levers](#the-four-levers)) |
+| `adws/features.py` | yes | what each feature cost ([What each feature cost](#what-each-feature-cost)) |
+| `adws/tests/` | yes | tests for the four hub scripts above |
+| `.claude/agents/bypass-reviewer.md` | yes | a bypass review outside a chain run ([Guard changes](#guard-changes)) |
+| `.githooks/pre-push` | yes | the secret scan and private-name check on every push ([secret-scan.md](secret-scan.md)) |
+
 ## Ground rules
 
 - `adws/` is main's guard. A run changes the skill in `.claude/skills/sssf/`,

@@ -40,7 +40,7 @@ just obs        # this repo's runs
 just obs-all    # every repo SSSF is installed in, from one process
 ```
 
-Each builds the dashboard and prints its address. It needs bun. `just obs` takes the first free port from 4600, so several repos can run their own at once; `SSSF_OBS_PORT` in `.env` pins one.
+Each builds the dashboard and prints its address. It needs bun. `just obs` takes the first free port from 4600, so several repos can run their own at once; `SSSF_OBS_PORT` in `.env` pins one. `just obs-dev` is only for working on the dashboard itself: it runs this repo's server on port 4600 and Vite's dev server on 4601, which reloads the page on each edit.
 
 <p align="center">
   <img src="../../images/00_swimlane_waterfall.svg" alt="A run as swim lanes: engineer, code, planner, builder, and reviewer phases laid on a time axis, each block labelled with its duration, one phase still running and the next still queued" width="850">

@@ -178,7 +178,7 @@ merged sssf/ae1894b7 into master (fast-forward), now at 009b634; removed its wor
 discarded sssf/70c716ca and its worktree
 ```
 
-Each attempt is a full `adw_simple_sdlc` run, so a trial costs one run per roster plus the panel. The panel has one referee per model family, and each sees the attempts in a different order. `rank*` shows whether a referee favors its own family's attempt. Nothing merges until you pick. `just trial-show <trial>` prints the scorecard at any point, and `just trial-discard <trial>` drops every attempt. A trial needs a free worktree slot per roster.
+Each attempt is a full `adw_simple_sdlc` run, so a trial costs one run per roster plus the panel. The panel has one referee per model family, and each sees the attempts in a different order. `rank*` shows whether a referee favors its own family's attempt. Nothing merges until you pick. `just trial-show <trial>` prints the scorecard at any point, `just trial-review <trial>` runs the panel again if `just trial` died or its panel failed, and `just trial-discard <trial>` drops every attempt. A trial needs a free worktree slot per roster.
 
 ## In the container
 

@@ -1,6 +1,6 @@
 # How SSSF works
 
-This page explains the parts every run is made of: ADWs, phases, agents, envelopes, gates, the trace, and the caps. You don't need it to run SSSF; the [guide](guide/) is enough for that. Read it when you want to change a chain, add a gate, or understand why a run stopped.
+This page explains the parts every run is made of: ADWs, phases, agents, guards, envelopes, gates, the trace, and the caps. You don't need it to run SSSF; the [guide](guide/) is enough for that. Read it when you want to change a chain, add a gate, or understand why a run stopped.
 
 <p align="center">
   <img src="../images/01_factory_spine.svg" alt="A run spine: engineer, agent, and code phases on a deterministic rail, every event dropping into a SQLite trace db that the UI polls" width="850">
@@ -139,6 +139,24 @@ Some commands do harm outside the repo, such as `git push` or a recipe that bill
 SSSF keeps the repo's secret files from every agent: `.env` and its kin, plus any path `secret_files` in `repo.yaml` lists. Agents also get none of `.env`'s keys beyond SSSF's own, unless `agent_env` names them. [config.md](../.claude/skills/sssf/references/config.md#secret-files--secret_files-and-agent_env) says how each route refuses the read, and what it leaves open.
 
 Each Claude Code agent runs with `--safe-mode`, so it never loads your `CLAUDE.md`, skills, hooks or MCP servers. It sees its prompt and the repo.
+
+## Guards
+
+Guard code is the code that limits what an agent can do: the `writes` check, the git-directory guard, the command rules, the secret files and the pre-push hook. The rest of SSSF gets work done. Guard code is there for the run nobody is watching, so that an agent's mistake costs a failed phase instead of lost work, a leaked key or a stray push.
+
+Most of it wasn't planned as a feature. Two pieces were asked for; the rest each answer something an agent did, or a review showed it could do:
+
+- **The `writes` check came from upstream**, after a builder given bash to run the tests ran `git checkout adws/` and threw away uncommitted changes to the quality check it was about to be judged by. Upstream had this check and the gates, and nothing else.
+- **Specs became protected** after a builder ran `ruff format .`, which rewrote a committed spec, and the change rode into the code commit unseen.
+- **An agent's own commits are undone before the check**, because an agent that committed hid its changes from it, and the run then failed with nothing to commit.
+- **The git-directory guard** puts back any agent change under `.git` and stops the run. A review showed that a hook planted in `.git/hooks` runs on the chain's own commit, outside every rule.
+- **Command rules** are the one piece projects asked for. Repos wrote rules such as "never push" and "never run a recipe that bills an API key" into `agent_rules`, and nothing enforced them, so `forbid` patterns came first and `on_match: refuse` followed, since a stopped agent never learned what it did wrong. How the rules match has been fixed again and again since: the starter push rule stopped `git stash push`, and three ways of skipping heredoc bodies each let `cat <<EOF | bash` through.
+- **Secret files** close a gap noted on 2026-11-03: a rule could stop `cat .env`, but not an agent's Read tool or `env`.
+- **The pre-push hook** came with the decision to make this fork public. It scans each push for secrets, and refuses any push from an agent.
+
+Because a bug here passes its tests and quietly lets something through, guard code changes only through the hub's own chain, with a review whose one job is to find a bypass ([sssf.md](sssf.md#guard-changes)).
+
+The guards stop an agent's mistakes. They don't stop an agent set on getting past them: a command can write to its own harness's output stream, for one. Against that, the fix is isolation, a VM or a separate user, not another pattern. [open.md](open.md) tracks what's left.
 
 ## Envelopes
 

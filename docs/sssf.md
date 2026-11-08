@@ -79,6 +79,8 @@ grep -h '"subtype":"init"' adws/adw_data/sessions/*/*/raw_output.jsonl \
 
 ## Guard changes
 
+Guard code fails quietly: a bug passes every test and lets an agent through. The chain exists because that happened twice. A rule change passed its tests and let `cat <<EOF | bash` past every agent rule, and two project sessions caught it only after the update went out. Then the git-directory guard took 17 bypass-review rounds by hand, each finding a way around the newest fix ([the post-mortem](postmortems/git-dir-guard.md)). The chain runs that review on every change, judges each finding against a baseline and a bar the spec sets, and stops after three rounds instead of seventeen. [concepts.md](concepts.md#guards) says what guard code is for.
+
 A change to guard code runs through `adws/adw_guard_change.py`, on its own
 branch cut from `main`:
 

@@ -450,6 +450,8 @@ This stops accidental exposure, not an agent set on a secret. Agents run as the 
 
 **If the extension registers a tool, name that tool in the agent's `tools` list too** — `--tools` filters extension tools exactly like builtins, so an unnamed extension tool is silently unavailable no matter that the extension loaded fine. See [Extension tools must be named explicitly](#extension-tools-must-be-named-explicitly) above. Extensions that only shape output or add flags (no tool registration) need no `tools` change.
 
+`subagents.ts` imports its helper `themeMap.ts`, from the same folder, and calls `applyExtensionDefaults` when a session starts. In an interactive pi session, that sets the color theme named for the extension in `THEME_MAP`, from `.pi/themes/`, falling back to `synthwave`, and the terminal title. SSSF runs its agents without a UI, so in a run it changes nothing. An extension of your own can call it the same way.
+
 ### pi extensions in a VM
 
 Under `--sandbox vercel|e2b`, each `harness_engineering` path must be a file inside the repo, committed at the commit the run starts from. A file committed on the run's branch afterwards doesn't count. SSSF checks this before the VM opens, and if a path fails, it stops the run, naming the agent and the path.

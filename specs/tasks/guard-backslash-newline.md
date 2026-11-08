@@ -24,6 +24,10 @@ A command that runs a forbidden command through a backslash-newline, anywhere in
 
 Accepted, as today: quotes inside a word, and a backslash before an ordinary character inside a word, such as `j\ust test live`. Both are the same class, a deliberate split of the command word, and `config.md:429` already says a rule doesn't stop an agent working around it. Name `j\ust` in that known limit.
 
+Accepted too, by the engineer on 2026-11-08 after guard run 70628873's spec review: **a line the shell doesn't continue, followed by a split command.** Joining every backslash-newline also joins one the shell keeps, so the line before swallows the command's start and a `^` or `\b` anchor misses it. Examples: `x\\` then a newline then `ju\` then a newline then `st test live`, and a comment line ending in a backslash before a split command. Closing it fully means searching from each line after a continuation, which is quadratic. Name it in the spec's known limits and in `config.md`'s, with pinned no-match tests, as the quotes limit is. Every other command split by a backslash-newline must match.
+
+Run 70628873's draft and review, in `adws/adw_data/sessions/70628873/drafts/` and `../context_handoff/spec_review_1.md`, hold the cases the reviewer ran under real bash and a smaller `sssf_refuse` design, `texts = [*commands(line), *commands(CONTINUATION.sub("", line))]`, which met the bar on every case it tried. Start from them.
+
 ## Tests
 
 - Each checker matches `ju\` newline `st test live`, `just test \` newline `live`, and the same inside `bash -c '...'`, inside a heredoc piped to `bash`, and inside Claude Code's `eval '...'` wrapper.
@@ -31,10 +35,12 @@ Accepted, as today: quotes inside a word, and a backslash before an ordinary cha
 - A refuse rule refuses the split command on both harnesses, and the stream check's breach agrees with the refusal.
 - The Python and JavaScript checkers agree on a shared table of cases, as the existing parity tests do.
 - The image's check line still fails when `rg` is missing.
-- Every existing test passes unchanged.
+- Every existing test passes unchanged. `test_pi_always_loads_the_refusing_extension_and_passes_rules_only_when_set` fails today when `SSSF_REFUSE_RULES` is set in the shell, as it is in an agent's, because its stand-in pi echoes the inherited value. Make that test clear the variable with `monkeypatch.delenv`. `agent_pi`'s behaviour stays: inheriting more rules only adds refusals.
 
 ## Out of scope
 
 - Quotes inside a word and other shell unquoting.
+- A line the shell doesn't continue, followed by a split command, as accepted above.
+- The Python and JavaScript regex differences `config.md` lists. They apply to the joined text as to the written text.
 - The model-host rules and the rest of the network policy.
 - Building an image or running a sandbox.

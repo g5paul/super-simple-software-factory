@@ -80,8 +80,20 @@ The research note's recommendations, for the engineer to confirm after the proof
 
 The seam is one place: a new local sandbox whose `start` puts `agentsh wrap --policy <name> --root <cwd> --` before the agent's command. That covers `agent_cc.py` and `agent_pi.py` through `tree.start`, and leaves quality checks and git outside the wrap.
 
+## Proof on this machine, 2026-11-08
+
+Run as the engineer's user with no sudo, from the v0.20.5 tarball (checksums match), with a scratch config and a policy denying `just test live`, `gh`, `git push` and opening `.env`.
+
+- **seccomp is out on this WSL2 host.** `agentsh detect` reports `NEW_LISTENER filter install failed: device or resource busy`. WSL's own `/sbin/init`, PID 1, installs a seccomp filter with a listener, and every process inherits it. The kernel refuses a second listener under an ancestor that holds one. So agentsh's seccomp exec and file checks never run here, from any shell. That contradicts agentsh's WSL2 guide, which promises the full stack. The distro runs `systemd=true`. Whether WSL without systemd differs isn't tested.
+- **What works without root.** With `agentsh-unixwrap` on `PATH`, detect reports `landlock` mode at 60/100: Landlock ABI v5 file limits and Landlock's TCP connect filter. Landlock limits folders and ports. It can't deny one file in an allowed folder or check a command's arguments.
+- **ptrace is the remaining way to check execs, and it needs privilege here.** In `wrap`, the agentsh server attaches to the agent, and the server isn't the agent's ancestor. With `kernel.yama.ptrace_scope` at 1, `PTRACE_SEIZE` fails with `operation not permitted`, in both full ptrace mode and the hybrid mode with `agentsh-unixwrap`.
+- **Fail-closed has a gap.** With `on_attach_failure: fail_closed`, one run still ran `just test unit` untraced before the attach failed and the run stopped. The other run ran nothing. ptrace's `max_hold_ms` also allows a held syscall after 5 seconds by default.
+- **Config notes.** ptrace with the unix-socket wrapper allows exec tracing only. `sandbox.unix_sockets.enabled: false` lets ptrace trace files and network too. `wrap` mounted FUSE over the workspace with `sandbox.fuse.enabled: false` set.
+
+So on this machine, agentsh checks execs only once a tracer has `CAP_SYS_PTRACE` or `ptrace_scope` drops to 0. Both need the engineer's sudo, and the choice is open.
+
 ## Next
 
-1. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
+1. The proof in sssf-sandbox, per the note's plan, once the ptrace choice above is made. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
 2. The decisions above, settled from the proof.
 3. A guard chain run for the wrap.

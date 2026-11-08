@@ -76,6 +76,8 @@ Two limits matter for SSSF:
 
 The reactive guards exist because SSSF's default mode runs agents on the engineer's machine, with its network and files. `open.md` already names the fix for an agent set on getting past them: "a VM, or agents under their own user". OpenShell is a local, free form of that. It would join Vercel and E2B as `--sandbox openshell`, and in that mode the rules against harm outside the repo could be dropped instead of patched. The `writes` check, spec protection and the pre-push hook would stay in every mode.
 
+The design is [openshell-sandbox.md](../designs/openshell-sandbox.md).
+
 ## The test
 
 Three questions decide whether it's worth building, run in sssf-sandbox:
@@ -111,4 +113,6 @@ What the run also showed:
 
 For SSSF, that means a `--sandbox openshell` run would follow the Vercel and E2B path: create, upload the worktree, run each agent with `exec`, and bring the commits back. Since no `.git` goes in, the run would need to send a bundle or init a repo inside, as the VM mode does.
 
-Left on the machine for the next try: the binaries in `~/.local/opt/openshell/bin`, the certs in `~/.local/state/openshell/tls`, the test config in `~/.config/openshell-test/`, the CLI's gateway entry `sssf-test`, a Podman network named `openshell`, the test image `localhost/sssf-openshell:test`, a policy in `~/.config/openshell-test/policy.yaml` and the VM driver's state under `~/.local/state/openshell/`. No gateway or sandbox is running.
+A second run checked SSSF's host paths. A sandbox has no root, so the upload couldn't create `/home/gpaul`. An image that creates `~/github` owned by the sandbox user, with a `read_write` rule on it, let the tree, a run's handoff folder and `git` work at their host paths, while a write elsewhere in the home folder was refused.
+
+Left on the machine for the next try: the binaries in `~/.local/opt/openshell/bin`, the certs in `~/.local/state/openshell/tls`, the test config in `~/.config/openshell-test/`, the CLI's gateway entry `sssf-test`, a Podman network named `openshell`, the test images `localhost/sssf-openshell:test` and `:paths`, two policies in `~/.config/openshell-test/` and the VM driver's state under `~/.local/state/openshell/`. No gateway or sandbox is running.

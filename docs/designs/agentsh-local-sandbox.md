@@ -460,6 +460,41 @@ So that bug is failing closed here. Opens were safe either way, because `handleF
 
 `test_the_checkout_is_set_up` fails with either policy, because the proof workspace has no `.setup-marker`.
 
+### The sixth patch and the rerun
+
+`e97a99c8`, `fix(ptrace): resolve paths in the tracee's view`, on `sssf/patched`, local. Build sha256 `ba85e8d65b19a005341bd2e0cf67bfbf1687aa47e0a20ce4739a4e7f22766701`. It fixes three things in `resolveViaProc`:
+
+- `/proc/self` and `/proc/thread-self` now name the agent. In the failing test, `/proc/self/fd/3` had resolved to `/sys/fs/cgroup/cpu.max`, which was what the tracer held at fd 3, so a rule judged an unrelated file. `/proc/self/cwd` and `/dev/fd` had the same bug.
+- `link/../x` now resolves as the kernel does, beside the link's target. `filepath.Clean` used to collapse it as text and judge it beside the link. Opens were saved by the exit check, but `rm` or `mv` got no such check wherever a symlink left the workspace.
+- A descriptor link to a pipe, a socket or a deleted file is now the end of the path. Otherwise the dangling-symlink guard would have denied writes to `/dev/stdout` on a pipe.
+
+The new tests failed before the fix. The package's unit tests pass, and the integration tag shows the same 8 failures as without the patch.
+
+On that build, with 20 file rules and 143 patterns for Claude Code, 18 and 120 for pi:
+
+| Check | Result |
+|---|---|
+| 46 denial probes, under each policy | all as intended. Each agent could open only its own sign-in, and no fake file or config changed |
+| 9 checks that must work, including a piped `/dev/stdout`, renames through a workspace descriptor, and uv's config search | all passed |
+| Tools: pytest, git commit, uv, node, rg | exit 0, no file denials |
+| Claude Code: edit a file, run tests, git | worked, exit 0 in 8 seconds. 69 `/proc/*/environ` denials did it no harm |
+| pi: the same | worked, exit 0 in 16 seconds, one harmless denial |
+| Bypass corpus | 16 of 16 as before, with the copied `just` running, the accepted limit |
+| Network and fronting checks | as before |
+
+This covers a small task, not a full chain. So far default-deny costs a list of paths and the risk that a new tool's config search hits `EACCES`, and the trace names the path when it does.
+
+The run led to two policy changes, generated but not yet installed or tested:
+
+- Claude Code warned that managed settings "are NOT in effect", because a denied read of `/mnt/c/Program Files/ClaudeCode/managed-settings.d` looks like a failure to read. That folder doesn't exist on this machine, but on one where it does, the deny would switch off the organisation's policy. The Claude policy now allows that path.
+- The git data rule allowed writes to `hooks/` and `config`, which run on the host outside the wrap at the next git command. Those writes are now denied. A worktree commit shouldn't need them, and the probe now checks that.
+
+### Long arguments are refused
+
+**Any single argument over 4096 bytes is refused with exit 126**, on every build and policy so far, by rule `argv_truncated`. `bash -c` with 4000 bytes ran and with 4100 was refused. `git commit -m` with a 6000-byte message was refused. Claude Code's shell-snapshot command is refused on every run, and it carries on without one. An agent's long command or heredoc would fail the same way, and under the settled denial counting these would add up toward the three-refusal stop.
+
+Failing closed is right, since a cut-off argument could hide a token that a rule denies. The limits are too low. `maxArgLen` is a constant of 4096 in `internal/ptrace`, and `tracer.go` hard-codes 1000 arguments and 64 KB in total, so no config changes them. The kernel allows 128 KB per argument. `max_argv_bytes` in the config only applies to the seccomp path.
+
 ## Running the checks
 
 The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspace at `~/sssf-agentsh-proof`: a detached worktree of sssf-sandbox holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with an added `test kind:` recipe that runs `@echo ran test {{kind}}`. Run the rest from that folder. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
@@ -474,5 +509,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Finish the default-deny test, which decides the file policy the wrap generates: a sixth fork patch so `/proc/self` resolves to the agent, the missing read rules, then the test again with Claude Code working.
+3. Raise the tracer's argument limits to the kernel's, then install that build with the two policy changes and rerun the default-deny test. Whether to adopt default-deny is the engineer's call on those results.
 4. Rollout step 1, a guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, and give the agent a `/dev/null` stdin, which `sandbox.start` already does.

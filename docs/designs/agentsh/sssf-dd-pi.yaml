@@ -60,6 +60,18 @@ file_rules:
       - '${HOME}/.claude/.credentials.json'
     operations: ['*']
     decision: deny
+  - name: sssf-git-config
+    paths:
+      - '/home/gpaul/github/sssf-sandbox/.git/hooks'
+      - '/home/gpaul/github/sssf-sandbox/.git/hooks/**'
+      - '/home/gpaul/github/sssf-sandbox/.git/config'
+      - '/home/gpaul/github/sssf-sandbox/.git/config.lock'
+      - '${PROJECT_ROOT}/.git/hooks'
+      - '${PROJECT_ROOT}/.git/hooks/**'
+      - '${PROJECT_ROOT}/.git/config'
+      - '${PROJECT_ROOT}/.git/config.lock'
+    operations: ['write', 'create', 'delete', 'rename', 'link', 'symlink', 'mkdir', 'rmdir', 'chmod', 'chown']
+    decision: deny
   - name: sssf-workspace
     paths:
       - '${PROJECT_ROOT}'
@@ -81,8 +93,11 @@ file_rules:
     decision: allow
   - name: sssf-temp
     paths:
+      - '/tmp'
       - '/tmp/**'
+      - '/var/tmp'
       - '/var/tmp/**'
+      - '/dev/shm'
       - '/dev/shm/**'
     operations: ['*']
     decision: allow
@@ -101,6 +116,28 @@ file_rules:
       - '/dev/stderr'
     operations: ['*']
     decision: allow
+  - name: sssf-fd-leaves
+    paths:
+      - '/proc/*/fd/*'
+      - '/proc/*/task/*/fd/*'
+    operations: ['*']
+    decision: allow
+  - name: sssf-mkdir-parents
+    paths:
+      - '/'
+      - '/home'
+      - '/tmp'
+      - '/run'
+      - '/run/user'
+      - '/run/user/*'
+      - '${HOME}'
+      - '${HOME}/.cache'
+      - '${HOME}/.local'
+      - '${HOME}/.local/state'
+      - '${HOME}/.local/share'
+      - '${HOME}/.config'
+    operations: ['mkdir']
+    decision: allow
   - name: sssf-tool-write
     paths:
       - '${HOME}/.cache/uv'
@@ -118,15 +155,33 @@ file_rules:
       - '${HOME}/.pi/**'
     operations: ['*']
     decision: allow
+  - name: sssf-config-search
+    paths:
+      - '/uv.toml'
+      - '/pyproject.toml'
+      - '/home/uv.toml'
+      - '/home/pyproject.toml'
+      - '${HOME}/uv.toml'
+      - '${HOME}/pyproject.toml'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
   - name: sssf-system-read
     paths:
+      - '/usr'
       - '/usr/**'
+      - '/lib'
       - '/lib/**'
+      - '/lib64'
       - '/lib64/**'
+      - '/bin'
       - '/bin/**'
+      - '/sbin'
       - '/sbin/**'
+      - '/opt'
       - '/opt/**'
+      - '/etc'
       - '/etc/**'
+      - '/sys'
       - '/sys/**'
       - '/proc'
       - '/proc/**'
@@ -135,7 +190,6 @@ file_rules:
       - '/var'
       - '/run'
       - '/mnt'
-      - '/tmp'
     operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
     decision: allow
   - name: sssf-home-read

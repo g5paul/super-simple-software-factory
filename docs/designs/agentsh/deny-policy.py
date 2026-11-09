@@ -33,9 +33,19 @@ CLAUDE_CONFIG = [f"${{HOME}}/.claude/{p}" for p in (
 )]
 WRITE_OPS = ["write", "create", "delete", "rename", "link", "symlink", "mkdir", "rmdir", "chmod", "chown"]
 
-SYSTEM_READ = ["/usr/**", "/lib/**", "/lib64/**", "/bin/**", "/sbin/**", "/opt/**", "/etc/**",
-               "/sys/**", "/proc", "/proc/**", "/", "/home", "/var", "/run", "/mnt", "/tmp"]
-TEMP = ["/tmp/**", "/var/tmp/**", "/dev/shm/**"]
+SYSTEM_READ = ["/usr", "/usr/**", "/lib", "/lib/**", "/lib64", "/lib64/**", "/bin", "/bin/**",
+               "/sbin", "/sbin/**", "/opt", "/opt/**", "/etc", "/etc/**", "/sys", "/sys/**",
+               "/proc", "/proc/**", "/", "/home", "/var", "/run", "/mnt"]
+# A denied file answers EACCES even when it doesn't exist, and uv stops on that as it
+# searches upward for config, where ENOENT would let it go on.
+CONFIG_SEARCH = [f"{d}/{n}" for d in ("", "/home", "${HOME}") for n in ("uv.toml", "pyproject.toml")]
+# A denied mkdir of an existing parent answers EACCES where the kernel says EEXIST.
+MKDIR_PARENTS = ["/", "/home", "/tmp", "/run", "/run/user", "/run/user/*", "${HOME}", "${HOME}/.cache",
+                 "${HOME}/.local", "${HOME}/.local/state", "${HOME}/.local/share", "${HOME}/.config"]
+TEMP = ["/tmp", "/tmp/**", "/var/tmp", "/var/tmp/**", "/dev/shm", "/dev/shm/**"]
+# What's left at this level after the patched tracer resolves: pipes, sockets and
+# deleted files. A descriptor on a real file resolves to that file's own rule.
+FD_LEAVES = ["/proc/*/fd/*", "/proc/*/task/*/fd/*"]
 DEVICES = ["/dev/null", "/dev/zero", "/dev/tty", "/dev/ptmx", "/dev/pts/**", "/dev/urandom",
            "/dev/random", "/dev/fd/**", "/dev/stdin", "/dev/stdout", "/dev/stderr"]
 HOME_READ = [f"${{HOME}}{p}" for p in (
@@ -47,10 +57,12 @@ TOOL_WRITE = [f"${{HOME}}/{p}" for p in (
     ".cache/uv", ".cache/uv/**", ".local/share/uv", ".local/share/uv/**", ".npm/**",
     ".cargo/registry/**", ".cargo/git/**",
 )]
+# The Windows path is where Claude Code looks for managed settings on WSL. Denied, it warns
+# that those policies are NOT in effect, even when the folder doesn't exist.
 CLAUDE_READ = [f"${{HOME}}/{p}" for p in (
     "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".config/anthropic", ".config/anthropic/**",
     "github/skills/**", "github/plugins/**",
-)]
+)] + ["/mnt/c/Program Files/ClaudeCode", "/mnt/c/Program Files/ClaudeCode/**"]
 CLAUDE_WRITE = [f"${{HOME}}/{p}" for p in (
     ".claude", ".claude/**", ".claude.json", ".claude.json.*", ".cache/claude-cli-nodejs/**",
     ".local/state/claude/**", ".local/share/claude/**",
@@ -81,18 +93,24 @@ def file_rules(git_dir, agent):
     if config_deny:
         rules.append(rule("sssf-agent-config", config_deny, WRITE_OPS, "deny"))
     rules += [
+        # Hooks and git config run on the host, outside the wrap, at the next git command.
+        rule("sssf-git-config", [p for d in (git_dir, "${PROJECT_ROOT}/.git") for p in (
+            f"{d}/hooks", f"{d}/hooks/**", f"{d}/config", f"{d}/config.lock")], WRITE_OPS, "deny"),
         rule("sssf-workspace", ["${PROJECT_ROOT}", "${PROJECT_ROOT}/**"], ALL, "allow"),
         rule("sssf-git-data", [git_dir, f"{git_dir}/**"], ALL, "allow"),
         # A worktree's agent also reads the main checkout's project settings.
         rule("sssf-main-config", [main, f"{main}/.claude", f"{main}/.claude/**"], READ, "allow"),
         rule("sssf-temp", TEMP, ALL, "allow"),
         rule("sssf-devices", DEVICES, ALL, "allow"),
+        rule("sssf-fd-leaves", FD_LEAVES, ALL, "allow"),
+        rule("sssf-mkdir-parents", MKDIR_PARENTS, ["mkdir"], "allow"),
         rule("sssf-tool-write", TOOL_WRITE, ALL, "allow"),
         rule("sssf-agent-write", writes, ALL, "allow"),
     ]
     if reads:
         rules.append(rule("sssf-agent-read", reads, READ, "allow"))
     rules += [
+        rule("sssf-config-search", CONFIG_SEARCH, READ, "allow"),
         rule("sssf-system-read", SYSTEM_READ, READ, "allow"),
         rule("sssf-home-read", HOME_READ, READ, "allow"),
         rule("sssf-default-deny", ["/", "/**"], ALL, "deny"),

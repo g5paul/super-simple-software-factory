@@ -595,6 +595,31 @@ The report's six old holes went three ways:
 - **Recorded as limits.** Four more push spellings, an `argv[0]` holding a newline or tab, and two tracebacks on a broken template are in `config.md`. The spellings that pass the text checks are cases in [corpus.sh](agentsh/corpus.sh).
 - **Watch at step 2.** `(?s)` also denies a multi-line commit message or `--grep` value naming `push` after a leading option, and each denial counts toward the three-refusal stop. An agent retrying such a message can end its run. If that happens in practice, the pattern needs another look.
 
+### The first real runs
+
+On 2026-11-09, after the engineer installed the generated policy, sssf-sandbox ran its SDLC chain under the real service on the branch `agentsh-rollout`, `sandbox: none` and `local_guard: agentsh`, Claude roster. These were the first checks that weren't against a fake, and they found what three chain runs couldn't.
+
+| Run | How | Result |
+|---|---|---|
+| d4026dde | `--worktree` | Stopped in 5.6 s, $0.08. The push rule denied five of Claude Code's own git calls, and every Bash call failed on the refuse script |
+| dc693ea9 | `--worktree`, throwaway patch for both | Stopped in 71 s, $0.38. The events API returns `null` past the last page, which SSSF counted as a failed poll |
+| ac34222b | `--worktree`, patch plus the `null` fix | Failed the plan gates, $0.76. The planner couldn't write `plan.md` to the handoff folder in the main checkout |
+| 4827dcf6 | no worktree, same patch | **Passed**, 13 phases in 4 minutes, $1.45, with planner, builder, reviewers and documenter all wrapped |
+
+The patch was the engineer's call: hand-made in the test bed, only to find every failure before one chain run. It doesn't ship.
+
+What held under the real service: the launch checks, the attach, denial counting from the real API, the refusal stop and its spend, and session cleanup. The reviewer tried `github.com`, `~/.ssh/config` and `~/.netrc`, and every agent tried `.env`. All were denied, and none counted as a refusal. Claude Code read `/proc/*/environ` for about 78 processes each call, and every read was denied. It also runs `reg.exe` through WSL interop. Under the wrap, `cmd.exe` and `curl.exe` fail with `connect failed 13`, because the interop socket is denied.
+
+**Why the fakes missed it.** Claude Code's real git calls carry about 40 `-c` options, `hook.pre-push.enabled=false` among them, which the `-.*push` pattern matched. The real API answers `null` for an empty page, where every fake answered `[]`. And a real exec event carries `fields.argv` with no `command`, so the refusal message named nothing. The real argv lists and events are in [first-real-runs/](agentsh/first-real-runs/), as test fixtures.
+
+**The push rule, third form.** `['^\S*\s+push(\s|$)', '(?s)^\S*\s+-.*\spush(\s|$)', '(?s)^\S*\s+-.*\salias\.[^=\s]*=\S*push']`. It needs `push` as a word of its own, or an alias whose value names it, after a leading option. It's tested on the fork's engine at 3 depths, against 34 cases including the 5 real argv lists, and ran under the service in the patch. `git -C` on a path holding `push` now runs.
+
+**The handoff folder, decided 2026-11-09.** A `--worktree` run keeps its handoff in the main checkout, outside the workspace, and an installed policy can't name one run's folder: its variables come from the service, not the run. The engineer chose to allow read and write on the main checkout's `adws/adw_data/sessions/**` for every run. Agents can then reach other runs' handoff files, as text mode allows today. Moving the handoff folder into the worktree is the stronger fix, recorded for later. It changes the session layout for every mode.
+
+**A relative symlink.** One `symlink` with a relative target fell to agentsh's own `default-deny-files`, not to any SSSF rule, so an agent making a relative link in its workspace may be refused.
+
+`specs/tasks/guard-agentsh-wrap-4.md` is the chain run's task, covering all of these.
+
 ## What got built
 
 The first real run must check, beyond the items above:
@@ -617,5 +642,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 2 in sssf-sandbox: a sudo step to install new generated policies, then a full SDLC chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
+3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. Next: the guard chain run from `specs/tasks/guard-agentsh-wrap-4.md`, a sudo install, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
 4. The chain run after step 2: the install script refuses a template that differs from the committed version, plus whatever step 2 turns up, the session folder allow among them.

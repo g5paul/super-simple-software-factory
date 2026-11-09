@@ -1,0 +1,56 @@
+# agentsh server config for SSSF's local agents. Root-owned, read by the
+# agentsh service and by `agentsh wrap`.
+server:
+  http:
+    addr: "127.0.0.1:18080"
+  unix_socket:
+    enabled: true
+    # /run/agentsh is writable only by the agentsh user, so an agent
+    # cannot put its own server here.
+    path: "/run/agentsh/agentsh.sock"
+    permissions: "0666"
+auth:
+  # Upstream finding #29 is open: any local process can use this API.
+  type: "none"
+audit:
+  enabled: true
+  output: "/var/lib/agentsh/audit.jsonl"
+  storage:
+    sqlite_path: "/var/lib/agentsh/events.db"
+sessions:
+  base_dir: "/var/lib/agentsh/sessions"
+sandbox:
+  # The seccomp wrapper cannot install under WSL's PID 1 listener.
+  unix_sockets:
+    enabled: false
+  fuse:
+    enabled: false
+  # The per-session CONNECT proxy. wrap sets HTTPS_PROXY to it, and it
+  # checks the CONNECT host against the domain rules. The patched build
+  # allows a connect to the session's own proxy, and checks that each
+  # tunnel's TLS SNI is its CONNECT host.
+  network:
+    enabled: true
+    require_sni_match: true
+  ptrace:
+    enabled: true
+    attach_mode: "children"
+    trace:
+      execve: true
+      file: true
+      network: true
+      signal: false
+    on_attach_failure: "fail_closed"
+proxy:
+  mode: disabled
+dlp:
+  mode: disabled
+policies:
+  dir: "/etc/agentsh/policies"
+  # adw_agentsh_policy.py fills these in: SSSF's generated policies, one per repo and harness.
+  # SSSF refuses to start without detect_project_root false.
+  detect_project_root: false
+  default: ""
+  # Since upstream 6cb6c7d a session may load only a listed policy, so an
+  # agent can't pick a looser one.
+  allowed: []

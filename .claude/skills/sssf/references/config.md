@@ -389,6 +389,9 @@ The sandbox's network is closed except default rules written per harness: `claud
 | `worktree_setup_timeout` | `600` | Seconds each setup command may take before the run stops. |
 | `agent_rules` | `[]` | See [Rules for every agent](#rules-for-every-agent--agent_rules). |
 | `secret_files`, `agent_env` | `[]` | See [Secret files](#secret-files--secret_files-and-agent_env). |
+| `local_guard` | `text` | `text` keeps SSSF's own command checks alone. `agentsh` also runs each local agent under the agentsh service with a generated default-deny policy. It needs `sandbox: none` and a git checkout. See [Running local agents under agentsh](#running-local-agents-under-agentsh--local_guard). |
+| `deny_exec` | `[]` | With `local_guard: agentsh`: commands the policy refuses to exec. Each has `name` (a slug), `command` (a bare name), optional `args` (a Go regex run over all of argv joined by spaces, `argv[0]` included) and a `reason`. |
+| `network_allow` | `[]` | With `local_guard: agentsh`: bare host names agents may reach on port 443, such as `api.example.com` or `*.example.com`. |
 
 Example `sandbox_allow`:
 
@@ -445,6 +448,17 @@ The agent reads the refusal and carries on, and the run isn't stopped. An agent 
 These rules stop an agent's mistakes, not an agent set on getting past them. Agents run as the engineer's user, and the stream check reads what the agent's harness writes to its stdout, which a command can write to as well: `printf '<event>' > /proc/$PPID/fd/1` adds a forged event to the stream, pi's or Claude Code's. SSSF reads only the running harness's own event types, so a forgery has to use those. A forged result can make a command that ran look refused, and a forged usage-limit error can end a run as `rate_limit_stop` instead of `rule_breach`. A VM, `--sandbox`, is the boundary for an agent you don't trust.
 
 It reads shell commands only. A command another tool runs, such as a pi extension's own tool, isn't checked. A pattern matches text, so a loose one catches ordinary commands: `\bgit\b.*\bpush\b` also stops `git stash push` and `git log --grep push`. The push pattern above allows only git's own options between `git` and `push`. Test a pattern with `re.search` against the commands agents really run before you add it. What an agent may change is enforced by `writes` and `protected_files`. For files agents must not read, see [Secret files](#secret-files--secret_files-and-agent_env). The three-refusal stop described above applies to the repo's own rules.
+
+## Running local agents under agentsh — `local_guard`
+
+With `local_guard: agentsh` in `repo.yaml`, every agent on this machine runs as `agentsh wrap` under a policy SSSF generates from the repo's settings (`secret_files`, `deny_exec`, `network_allow`). The text checks stay on. SSSF reads the setting once, when the run starts; a later edit reaches the next run only.
+
+Install step, once per repo and again after those settings change:
+
+1. Run `uv run adws/adw_agentsh_policy.py`. It writes the policies and a merged server config into a fresh temp folder, which it names, and prints the `sudo install` lines and `sudo systemctl restart agentsh`. It never runs sudo.
+2. Run those lines.
+
+A run refuses to start, with a message, when the service is not active, the binary is not the pinned build, the installed config is not what SSSF renders (apart from `policies.allowed`, where other repos' names may sit), an installed policy differs from the generated one, or the directory is not a git checkout. A denied exec counts toward the three-refusal stop like a text refusal. Denied file and network access goes to the trace with its path and never counts. The wrap sets `JUST_NO_DOTENV=true`, so `just` recipes under `set dotenv-load` don't load a `.env` the policy denies and fail on it. Three denials end the call as a breach even when it was leaving by another stop, such as a rate-limit stop; below three the other stop stands. Limits that remain: a copied binary under a new name, a process that detaches from the run, quality checks, which run outside the wrap, the main checkout's `.claude/` secrets on a `--worktree` run, an `argv[0]` holding a space, a session a signal leaves open, and a service still running on an older config (the check reads the file, and only the printed restart loads it). See `docs/designs/agentsh-local-sandbox.md` in the SSSF repo.
 
 ## Secret files — `secret_files` and `agent_env`
 

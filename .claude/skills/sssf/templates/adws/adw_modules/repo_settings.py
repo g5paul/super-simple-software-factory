@@ -12,11 +12,12 @@ then every rule takes its default.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .rules import AgentRule, text
 
@@ -44,6 +45,69 @@ class SandboxAllow(BaseModel):
         if not value or "/" in value or "://" in value:
             raise ValueError("host must be a bare host name: no scheme and no /")
         return value
+
+
+# The base rule names agentsh_guard writes, which a deny_exec rule may not reuse.
+BASE_RULE_NAMES = {"sssf-no-live-tests", "sssf-no-gh", "sssf-no-push", "sssf-allow-rest"}
+_NO_RE2 = ("(?<", "(?=", "(?!")
+
+
+class DenyExec(BaseModel):
+    """One command `local_guard: agentsh` refuses to exec, beside the built-in ones."""
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    command: str         # a bare name: agentsh rules match the basename
+    args: Optional[str] = None   # a Go (RE2) regex over all of argv joined by spaces, argv[0] included
+    reason: str
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        if not re.fullmatch(r"[a-z0-9-]+", value):
+            raise ValueError("name must be a slug: lower case letters, digits and -")
+        if value in BASE_RULE_NAMES:
+            raise ValueError(f"name {value!r} is a built-in rule name")
+        return value
+
+    @field_validator("command")
+    @classmethod
+    def _command(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9._+-]+", value):
+            raise ValueError("command must be a bare name: letters, digits and . _ + - only")
+        return value
+
+    @field_validator("args")
+    @classmethod
+    def _args(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        try:
+            re.compile(value)
+        except re.error as error:
+            raise ValueError(f"args is not a valid regex: {error}")
+        if any(token in value for token in (*_NO_RE2, "(?P=", "\\k<")) or re.search(r"\\[1-9]", value):
+            raise ValueError("args is read as Go RE2: no lookaround and no backreferences")
+        return value
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, value: str) -> str:
+        if not value.strip() or not value.isprintable():
+            raise ValueError("reason must be one non-empty line")
+        return value
+
+
+def _bare_host(value: str) -> str:
+    last = value.rsplit(".", 1)[-1]
+    # The kernel reads 127.1, 0x7f.1 and 2130706433 as addresses: the last label decides.
+    if (not value or "://" in value or "/" in value or ":" in value or last.lower() == "localhost"
+            or value.startswith(".") or re.fullmatch(r"(0x[0-9a-f]+|[0-9]+)", last, re.I)):
+        raise ValueError(f"{value!r} must be a bare host name: no scheme, /, port or IP literal")
+    if "*" in value and not (value.startswith("*.") and "*" not in value[2:] and "." in value[2:]):
+        raise ValueError(f"{value!r}: the only wildcard allowed is *.a.b")
+    if not re.fullmatch(r"(\*\.)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", value):
+        raise ValueError(f"{value!r} is not a host name")
+    return value
 
 
 class RepoSettings(BaseModel):
@@ -74,6 +138,27 @@ class RepoSettings(BaseModel):
     # Keys from .env that agents still get, besides SSSF_*, OBS_*, CLAUDE_CODE_OAUTH_TOKEN
     # and, for pi, its provider keys (utils.agent_env).
     agent_env: list[str] = Field(default_factory=list)
+    # How a local agent is held to the rules: "text" is SSSF's own command checks alone;
+    # "agentsh" also runs it under the agentsh service (agentsh_guard.py). Not with a VM sandbox.
+    local_guard: Literal["text", "agentsh"] = "text"
+    # Commands `local_guard: agentsh` refuses to exec, besides the built-in ones.
+    deny_exec: list[DenyExec] = Field(default_factory=list)
+    # Hosts (port 443) `local_guard: agentsh` lets agents reach, besides the model hosts and registries.
+    network_allow: list[str] = Field(default_factory=list)
+
+    @field_validator("network_allow")
+    @classmethod
+    def _hosts(cls, values: list[str]) -> list[str]:
+        return [_bare_host(v) for v in values]
+
+    @model_validator(mode="after")
+    def _guard(self):
+        if self.local_guard == "agentsh" and self.sandbox != "none":
+            raise ValueError("local_guard: agentsh wraps agents on this machine; it needs sandbox: none")
+        names = [d.name for d in self.deny_exec]
+        if len(names) != len(set(names)):
+            raise ValueError("deny_exec names must be unique")
+        return self
 
 
 def load(root: Path) -> RepoSettings:

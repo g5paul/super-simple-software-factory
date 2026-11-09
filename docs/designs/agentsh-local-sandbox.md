@@ -583,6 +583,14 @@ I offered to make the last fixes by hand and merge, because the setting is off b
 
 The first real run must also check that the network rules refuse both git spellings, and whether the rename gets round the file rules under the service.
 
+## What got built
+
+The first real run must check, beyond the items above:
+
+- The push cases under the real service: `git push`, `git -c a=b push`, `git -C /x push` and `git -c alias.p=push p` denied; `git commit -m push`, `git stash push` and `git log --grep push` run.
+- That the service accepts the rendered config (`render_config`) and starts on it.
+- That `set dotenv-load` recipes run under the wrap with `JUST_NO_DOTENV=true`.
+
 ## Running the checks
 
 The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspace at `~/sssf-agentsh-proof`: a detached worktree of sssf-sandbox holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with an added `test kind:` recipe that runs `@echo ran test {{kind}}`. Run the rest from that folder. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:

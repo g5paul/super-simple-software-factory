@@ -30,7 +30,7 @@ SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agent_pi, agents, obs_relay, sandbox
-from adw_modules.data_types import AgentRequest
+from adw_modules.data_types import AgentRequest, LocalGuard
 
 KEYS = {"OPENAI_API_KEY": "sk-x", "ANTHROPIC_API_KEY": "sk-y", "OPENROUTER_API_KEY": "sk-z"}
 
@@ -100,7 +100,8 @@ def _fake_pi(tmp_path, monkeypatch, *messages, exit_code=0):
     monkeypatch.setattr(agent_pi, "context_window", lambda provider, model_id: 0)
     return AgentRequest(prompt="go", system_prompt="", model="openai/gpt",
                         session_id="s", session_dir=str(tmp_path / "sessions"),
-                        raw_output_path=str(tmp_path / "raw.jsonl"), cwd=str(tmp_path))
+                        raw_output_path=str(tmp_path / "raw.jsonl"), cwd=str(tmp_path),
+                        local_guard=LocalGuard(mode="text"))
 
 
 def _turn(stop, text="", error=None, cost=0.0):

@@ -82,3 +82,18 @@ secret_files: []
 #   agent_env:
 #     - DATABASE_URL
 agent_env: []
+# How local agents are held. `text` is SSSF's own command checks alone. `agentsh`
+# also runs each agent under the agentsh service (needs sandbox: none, a git
+# checkout, and `uv run adws/adw_agentsh_policy.py` plus its sudo steps).
+#   local_guard: agentsh
+# With agentsh: commands the policy refuses to exec, and hosts agents may reach on 443.
+#   deny_exec:
+#     - name: no-rm-rf
+#       command: rm
+#       args: '(^|\s)-\w*r\w*f'   # a regex over argv joined by spaces, argv[0] included
+#       reason: agents delete through git, not rm -rf
+#   network_allow:
+#     - api.example.com
+local_guard: text
+deny_exec: []
+network_allow: []

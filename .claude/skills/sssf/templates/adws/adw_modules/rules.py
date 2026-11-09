@@ -39,6 +39,7 @@ import os
 import re
 import signal
 import subprocess
+import threading
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -66,6 +67,25 @@ _CONTINUATION_TABS = re.compile(r"(?<!\\)\\+\n\t*")
 _CLAUDE_REFUSED = re.compile(r"Exit code 126\n" + re.escape(REFUSED))
 # An agent refused this many times in one call is looping: stop the run.
 MAX_REFUSALS = 3
+
+
+class RefusalTally:
+    """The refusals one send has counted, from the text guard and from agentsh's
+    exec denials alike. Thread-safe: agentsh's denials arrive on a poll thread."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._total = 0
+
+    def add(self) -> int:
+        with self._lock:
+            self._total += 1
+            return self._total
+
+    @property
+    def total(self) -> int:
+        with self._lock:
+            return self._total
 
 # Python regex syntax that pi's extension, which reads a pattern as
 # new RegExp(pattern, "m") (sssf_rules.ts), can't compile or reads

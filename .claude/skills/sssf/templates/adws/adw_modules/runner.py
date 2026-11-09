@@ -46,6 +46,7 @@ class Run:
         self.tracer = tracer
         self.console = Console(tracer, adw_id)
         self.engineer = engineer
+        self.local_guard = None     # session.ensure fills it; agents.send carries it
         self.phases: list[Phase] = []
         self.tokens = 0
         self.cost = 0.0

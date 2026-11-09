@@ -28,7 +28,7 @@ SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agent_cc, agent_pi, agents, repo_settings, rules, secret_files
-from adw_modules.data_types import AgentRequest
+from adw_modules.data_types import AgentRequest, LocalGuard
 
 PUSH = rules.AgentRule(rule="Never run `git push`.", forbid=[r"\bgit\b(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+push\b"])
 
@@ -127,7 +127,8 @@ def request(tmp_path: Path) -> AgentRequest:
     return AgentRequest(prompt="go", system_prompt="", model="anthropic/claude-sonnet-5-5",
                         session_id="f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
                         session_dir=str(tmp_path / "sessions"),
-                        raw_output_path=str(tmp_path / "raw.jsonl"), cwd=str(tmp_path))
+                        raw_output_path=str(tmp_path / "raw.jsonl"), cwd=str(tmp_path),
+                        local_guard=LocalGuard(mode="text"))
 
 
 def test_a_forbidden_command_kills_a_claude_agent_and_what_it_started(tmp_path, monkeypatch):

@@ -296,9 +296,11 @@ A debug build, local fork branch `debug/tracer-faults`, logged three points: a f
 
 **The fix in the debug build, 2026-11-08.** `agentsh 0.20.6-dev.debug+7aa2437`, three runs of each agent. All six finished with exit 0, in 13 to 16 seconds. Each agent reached only its model host, and each one's `curl` to `example.com` got the proxy's 403. Claude Code's Datadog telemetry was denied each time. The fallback ran 68 times, 50 of them for threads, and found a parent every time. No session was empty, and no file call was denied as unknown session. The watchdog logged two capture-only exec-stall notes for agent processes that ran over 10 seconds, and no wedge. pi's stall did not come back in seven runs.
 
+**The clean build, 2026-11-08.** `agentsh 0.20.6-dev.fork+30dee5c`, sha256 `413a33dd...4986`, with the trace drop-in removed. Every network and fronting check held, and the corpus matched the earlier runs: every text-guard bypass held, and the copied `just` ran. One Claude Code run and one pi run each finished with exit 0, reached only their model hosts, and got the proxy's 403 for `example.com`. The server logged no warnings.
+
 ## Next
 
-1. Install the clean build of the four patches, `agentsh 0.20.6-dev.fork+30dee5c`, sha256 `413a33ddc7d38577c448ff80f23927cd44df2d0ff81a3b0742b83236591a4986`, and remove the trace drop-in. pi's stall stays open: if it comes back, turn the trace on again.
+1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
 3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
 4. The decisions above, settled from the proof.

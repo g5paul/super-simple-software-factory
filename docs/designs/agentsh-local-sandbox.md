@@ -284,9 +284,19 @@ Still open in this design:
 
 So ptrace mode on this machine runs simple tools but not yet the agents SSSF runs. Both failures are closed: a call is denied or a thread waits, and nothing runs unchecked.
 
+## The debug round, 2026-11-08
+
+A debug build, local fork branch `debug/tracer-faults`, logged three points: a file call with an empty session, a minimal tracee state from the fallback, and a session the clone event filled in late. The service ran it with `AGENTSH_PTRACE_TRACE=1`, upstream's trace, which dumps a ring of recent stops and resumes when a thread wedges.
+
+**Both agents worked on the second try.** Claude Code answered, its shell tool ran `curl`, and the proxy refused `example.com` with a 403. pi refreshed its ChatGPT token at `auth.openai.com`, called `api.openai.com`, and got the same 403. Neither run logged a denial or a wedge. pi's stall did not come back. It is intermittent, so the trace stays on for the next runs.
+
+**The empty-session race is real.** In the Claude Code run, 26 new threads got a minimal state with no parent found. All 26 were threads of Claude Code's process. Each reported as its parent the `wrap` client, which isn't traced, because the kernel gives a `CLONE_THREAD` child the PPID of the whole process. The clone event filled in each session later, mostly in under a millisecond, once after 14 ms. No file call landed in the gap this time. In the first run, 118 did.
+
+**The fix, 98bedaf** on local branch `fix/ptrace-thread-session`, cut from a07c789: in both fallback paths, look a new thread up by its own thread group first, and by PPID after that. Every thread in a group shares one session. A unit test covers a new thread with an untraced process parent, a forked child, and two cases with no match. It fails with the thread-group lookup turned off. The `internal/ptrace` unit tests give the same results as the base. The build branch `sssf/patched` now holds four patches, the last 30dee5c.
+
 ## Next
 
-1. Find the two tracer faults: the empty session on Claude Code's file calls, and pi's stopped `openat`. Then run both agents again: each must reach its model host and nothing else.
+1. Run the debug build with the thread fix: the fallback must find a parent for every thread, and no file call may be denied as unknown session. Repeat both agents to catch pi's stall in the trace.
 2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
 3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
 4. The decisions above, settled from the proof.

@@ -672,6 +672,21 @@ Round 1 found one false positive: the temp name grew with the target's, so a han
 
 Old holes, all on `main` too, now in `config.md`: a link at the data folder itself on a plain run, folder creation that follows a folder link, and reads under the session folder that follow links. Remote-sandbox handoff files also come back without their mode bits.
 
+### Rollout step 2 done, 2026-11-09
+
+With the guard work merged and the policy it generates installed, sssf-sandbox ran two SDLC chains under the real service on skill 89e9092, with no patches.
+
+| Run | How | Result |
+|---|---|---|
+| 8152e879 | `--worktree`, a `longest_word` helper | Passed, 14 phases in 3 min 20 s, $0.92 |
+| 16cc2882 | no worktree, a `count_unique_words` helper | Passed, 10 phases in 2 min, $0.59 |
+
+Neither run had a refusal or an error, and no agentsh session was left open. The `--worktree` run wrote its handoff files, `plan.md` among them, to the main checkout's session folder. No link was left in either session folder, and the main checkout was clean after both.
+
+Denials that are expected and harmless: on a `--worktree` run, git and uv search upward from the worktree for config, so they read the main checkout's `.gitignore`, `pyproject.toml`, `adws/adw_modules` and a `uv.toml` above the worktree. On a plain run every agent tries `.env`, which `sssf-secret-files` denies. Telemetry and update checks are denied by the network rules. None counts as a refusal.
+
+**Not run: a real push from each spelling in [corpus.sh](agentsh/corpus.sh).** This session's settings deny push commands, so the engineer runs that check. The proof workspace has no remote, so the check needs one that points at GitHub.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -696,5 +711,6 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. The guard work merged as bf9f648. Next: a sudo install of the new policy in sssf-sandbox, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
-4. The chain run after step 2: the install script refuses a template that differs from the committed version, plus whatever step 2 turns up, the session folder allow among them.
+3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
+4. The chain run after step 2, from `specs/tasks/guard-agentsh-install-check.md`: the install script refuses to build from a file an agent changed.
+5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. It needs a hub policy and one sudo install.

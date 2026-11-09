@@ -294,9 +294,11 @@ A debug build, local fork branch `debug/tracer-faults`, logged three points: a f
 
 **The fix, 98bedaf** on local branch `fix/ptrace-thread-session`, cut from a07c789: in both fallback paths, look a new thread up by its own thread group first, and by PPID after that. Every thread in a group shares one session. A unit test covers a new thread with an untraced process parent, a forked child, and two cases with no match. It fails with the thread-group lookup turned off. The `internal/ptrace` unit tests give the same results as the base. The build branch `sssf/patched` now holds four patches, the last 30dee5c.
 
+**The fix in the debug build, 2026-11-08.** `agentsh 0.20.6-dev.debug+7aa2437`, three runs of each agent. All six finished with exit 0, in 13 to 16 seconds. Each agent reached only its model host, and each one's `curl` to `example.com` got the proxy's 403. Claude Code's Datadog telemetry was denied each time. The fallback ran 68 times, 50 of them for threads, and found a parent every time. No session was empty, and no file call was denied as unknown session. The watchdog logged two capture-only exec-stall notes for agent processes that ran over 10 seconds, and no wedge. pi's stall did not come back in seven runs.
+
 ## Next
 
-1. Run the debug build with the thread fix: the fallback must find a parent for every thread, and no file call may be denied as unknown session. Repeat both agents to catch pi's stall in the trace.
+1. Install the clean build of the four patches, and remove the trace drop-in. pi's stall stays open: if it comes back, turn the trace on again.
 2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
 3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
 4. The decisions above, settled from the proof.

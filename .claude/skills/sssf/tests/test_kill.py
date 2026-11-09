@@ -26,7 +26,7 @@ SLEEPER = "import time\ntime.sleep(60)\n"
 @pytest.fixture
 def trace(tmp_path):
     db = tmp_path / "sssf.db"
-    tracer = Tracer(db, tmp_path / "events.jsonl")
+    tracer = Tracer(db, tmp_path / "events.jsonl", data_root=tmp_path)
     tracer.session_start("k1", "t", adw_name="adw_fake")
     return db, tracer
 

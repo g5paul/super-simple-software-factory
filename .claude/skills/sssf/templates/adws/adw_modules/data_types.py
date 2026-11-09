@@ -516,6 +516,7 @@ class AgentRequest(BaseModel):
     session_id: str                 # pi: any string; claude: a UUID
     session_dir: str                # pi: --session-dir; claude: SSSF's resume/cost ledger
     raw_output_path: str            # JSONL stream lands here
+    data_root: str                  # the folder above `sessions/`; SSSF's own writes under it never follow a link
     tools: Optional[list[str]] = None
     extensions: list[str] = Field(default_factory=list)
     cwd: str = "."                  # set from run.repo_root — the codebase root agents work in

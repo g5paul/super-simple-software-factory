@@ -25,7 +25,7 @@ NOW = datetime(2026, 11, 3, tzinfo=timezone.utc)
 
 def trace(path: Path, ends: list[tuple[int, dict]]) -> Path:
     """A trace with one sandbox_end per (days ago, payload)."""
-    tracer = Tracer(str(path), str(path.with_suffix(".jsonl")))
+    tracer = Tracer(str(path), str(path.with_suffix(".jsonl")), data_root=path.parent)
     for i, (days, end) in enumerate(ends):
         adw_id = f"run{i}"
         tracer.session_start(adw_id, "t")

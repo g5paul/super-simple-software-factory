@@ -68,7 +68,8 @@ def _report_stops_plainly(run: Run) -> None:
 
 def _start(cfg: SSSFConfig, adw_id: str, place: dict | None) -> tuple[Tracer, Run]:
     tracer = Tracer(cfg.observability.db,
-                    f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
+                    f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl",
+                    data_root=cfg.defaults.data_root)
     run = Run(cfg=cfg, adw_id=adw_id, tracer=tracer, engineer=engineer_name())
     tracer.session_start(adw_id, run.engineer, adw_name=Path(sys.argv[0]).stem)
     # This process is the run. Record it before any phase opens, so a run that

@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import sandbox
+from . import sandbox, session_files
 from .data_types import (EventRecord, QualityCheckResult, QualityCheckSpec, QualityResult,
                          VerifyOutput)
 from .utils import now_iso, operator_env
@@ -89,9 +89,11 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
         stderr = str(error)
 
     duration = time.monotonic() - clock
-    output_artifact.write_text(
+    session_files.write(
+        output_artifact,
         f"$ {command}\nexit: {returncode}\nduration_seconds: {duration:.3f}\n"
-        f"\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n"
+        f"\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n",
+        run.data_root,
     )
     passed = returncode == 0
     run.tracer.event(EventRecord(

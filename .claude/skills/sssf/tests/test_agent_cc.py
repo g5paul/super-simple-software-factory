@@ -23,7 +23,7 @@ SKILL = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agent_cc, agents, rules, secret_files
+from adw_modules import agent_cc, agents, prompts, rules, runner, secret_files, tracer
 from adw_modules.repo_settings import RepoSettings
 from adw_modules.data_types import AgentConfig, AgentRequest, SSSFConfig, LocalGuard
 
@@ -66,7 +66,7 @@ def request(tmp_path, **overrides) -> AgentRequest:
     fields = {"prompt": "count the adws", "system_prompt": "You are scout.",
               "model": "anthropic/claude-haiku-5-5", "thinking": "medium",
               "session_id": SESSION, "session_dir": str(tmp_path / "claude_code_sessions"),
-              "raw_output_path": str(tmp_path / "raw_output.jsonl"),
+              "raw_output_path": str(tmp_path / "raw_output.jsonl"), "data_root": str(tmp_path),
               "tools": ["read", "bash", "grep", "find", "ls"], "cwd": str(tmp_path)}
     fields.update(overrides)
     return AgentRequest(local_guard=LocalGuard(mode="text"), **fields)
@@ -606,3 +606,54 @@ def test_a_stop_rule_match_stops_the_run_even_when_claude_code_denies_it(tmp_pat
     with pytest.raises(rules.RuleBreach, match="may have run"):
         forward(_bash_call("toolu_stop"))
     assert _refusals(logged) == []
+
+
+# ── SSSF's own writes under the session folder never follow an agent's link ──
+
+def test_the_ledger_and_raw_log_replace_links_an_agent_left(tmp_path, fake):
+    victim = tmp_path / "outside" / "victim.txt"
+    victim.parent.mkdir()
+    victim.write_text('{"cost": 0.0}')
+    sessions = tmp_path / "claude_code_sessions"
+    sessions.mkdir()
+    (sessions / f"{SESSION}.json").symlink_to(victim)
+    (tmp_path / "raw_output.jsonl").symlink_to(victim)
+    fake(FIXTURES / "cc_turn1.jsonl")
+    agent_cc.run(request(tmp_path))
+    assert victim.read_text() == '{"cost": 0.0}'
+    assert not (sessions / f"{SESSION}.json").is_symlink() and (sessions / f"{SESSION}.json").is_file()
+    assert not (tmp_path / "raw_output.jsonl").is_symlink() and (tmp_path / "raw_output.jsonl").stat().st_size > 0
+
+
+def test_prompts_save_replaces_a_link(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    folder = tmp_path / "sessions" / "a" / "prompts"
+    folder.mkdir(parents=True)
+    (folder / "system.md").symlink_to(victim)
+    prompts.save(folder, "system.md", "text", tmp_path)
+    assert victim.read_text() == "keep" and (folder / "system.md").read_text() == "text"
+
+
+def test_tracer_events_replace_a_link(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    events = tmp_path / "sessions" / "a" / "events.jsonl"
+    events.parent.mkdir(parents=True)
+    events.symlink_to(victim)
+    t = tracer.Tracer(tmp_path / "sssf.db", events, data_root=tmp_path)
+    t.event(tracer.EventRecord(adw_id="a", phase_id="", type="log", name="n", payload={}))
+    assert victim.read_text() == "keep" and not events.is_symlink() and events.read_text().strip()
+
+
+def test_save_agent_map_replaces_a_link(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    run = runner.Run.__new__(runner.Run)
+    run.data_root = tmp_path
+    run.agent_map = {}
+    run._agent_map_path = tmp_path / "sessions" / "a" / "agent_map.json"
+    run._agent_map_path.parent.mkdir(parents=True)
+    run._agent_map_path.symlink_to(victim)
+    run.save_agent_map("planner", {"id": "x"})
+    assert victim.read_text() == "keep" and "planner" in run._agent_map_path.read_text()

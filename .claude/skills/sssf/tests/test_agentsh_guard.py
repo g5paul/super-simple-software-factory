@@ -42,8 +42,11 @@ from test_rules import announce, forwarder, starter_push_rule  # noqa: E402
 
 SHIPPED = SKILL / "templates" / "sssf.config.yaml"
 ROOT_REPO = SKILL.parent.parent.parent
+FIXTURES = SKILL / "tests" / "fixtures"
+REAL = FIXTURES / "agentsh-first-real-runs"
 TEMPLATE = SKILL / "templates" / "adws" / "adw_modules" / "agentsh_sssf.yaml"
 DENY_POLICY = ROOT_REPO / "docs" / "designs" / "agentsh" / "deny-policy.py"
+PATHS = {"sessions": "/r/adws/adw_data/sessions", "refuse_script": "/r/adws/adw_modules/sssf_refuse.py"}
 
 
 def git_repo(path: Path) -> Path:
@@ -69,6 +72,8 @@ class Service:
         self.fail_typed = False      # 500 on the polls, which carry a type
         self.fail_untyped = False    # 500 on the final read, which carries none
         self.typed_delay = 0.0       # seconds a poll waits before it answers 500
+        self.null_past_end = False   # a page past the last row answers the body `null`, as the real service does
+        self.raw_body: bytes | None = None     # answers this for every good request
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -98,6 +103,10 @@ class Service:
                     limit = 200
                 offset = int(q.get("offset", 0))
                 body = json.dumps({"events": rows[offset:offset + limit]}).encode()
+                if outer.null_past_end and offset >= len(rows):
+                    body = (FIXTURES / "agentsh-first-real-runs" / "events-page-past-end.json").read_bytes()
+                if outer.raw_body is not None:
+                    body = outer.raw_body
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(body)
@@ -169,7 +178,7 @@ def machine(tmp_path, monkeypatch, cfg):
     common = str(root / ".git")
     settings = repo_settings.RepoSettings()
     policies = {h: Policy(name=(n := agentsh_guard.policy_name(root, h)),
-                          text=agentsh_guard.policy_text(settings, common, h, n))
+                          text=agentsh_guard.policy_text(settings, common, h, n, **PATHS))
                 for h in ("claude_code", "pi")}
     template = TEMPLATE.read_text()
     guard = LocalGuard(mode="agentsh", root=str(root.resolve()), policies=policies, config_template=template)
@@ -395,7 +404,7 @@ def test_rule_order_in_the_generated_policy():
         secret_files=["*.pem", "./cfg/*.key"],
         deny_exec=[{"name": "no-rm", "command": "rm", "args": "-rf", "reason": "no deletes"}],
         network_allow=["a.example.com"])
-    text = agentsh_guard.policy_text(settings, "/m/proj/.git", "claude_code", "sssf-proj-claude")
+    text = agentsh_guard.policy_text(settings, "/m/proj/.git", "claude_code", "sssf-proj-claude", **PATHS)
     order = names(text)
     assert order.index("sssf-repo-secret-files") < order.index("sssf-env-examples")
     assert order.index("sssf-secret-files") < order.index("sssf-workspace")
@@ -413,7 +422,7 @@ def test_rule_order_in_the_generated_policy():
 def test_a_quote_in_a_value_stays_one_scalar():
     import yaml
     settings = repo_settings.RepoSettings(secret_files=["it's/a.key"])
-    text = agentsh_guard.policy_text(settings, "/m/o'brien/.git", "pi", "sssf-x-pi")
+    text = agentsh_guard.policy_text(settings, "/m/o'brien/.git", "pi", "sssf-x-pi", **PATHS)
     parsed = yaml.safe_load(text)
     paths = [p for r in parsed["file_rules"] for p in r["paths"]]
     assert "${PROJECT_ROOT}/it's/a.key" in paths and "/m/o'brien/.git" in paths
@@ -428,7 +437,9 @@ def test_file_rules_equal_the_designs_deny_policy_output(tmp_path, harness, shor
 
     def section(text):
         return text[text.index("file_rules:"):text.index("network_rules:")]
-    ours = agentsh_guard.policy_text(repo_settings.RepoSettings(), "/m/proj/.git", harness, "n")
+    ours = agentsh_guard.policy_text(
+        repo_settings.RepoSettings(), "/m/proj/.git", harness, "n",
+        sessions="/m/proj/adws/adw_data/sessions", refuse_script="/m/proj/adws/adw_modules/sssf_refuse.py")
     assert section(ours) == section(theirs)
 
 
@@ -650,11 +661,8 @@ def test_a_brace_in_a_secret_pattern_is_literal():
 
 # ── finishing the wrap ───────────────────────────────────────────────────────
 
-FIXTURES = SKILL / "tests" / "fixtures"
-
-
 def push_patterns(harness="pi") -> list[str]:
-    text = agentsh_guard.policy_text(repo_settings.RepoSettings(), "/r/.git", harness, "p")
+    text = agentsh_guard.policy_text(repo_settings.RepoSettings(), "/r/.git", harness, "p", **PATHS)
     rule_ = next(r for r in yaml.safe_load(text)["command_rules"] if r["name"] == "sssf-no-push")
     return rule_["args_patterns"]
 
@@ -667,7 +675,9 @@ def push_denied(argv: list[str]) -> bool:
 @pytest.mark.parametrize("argv", [
     ["git", "commit", "-m", "fix the push path"], ["git", "commit", "-m", "push"],
     ["git", "stash", "push"], ["git", "log", "--grep", "push"],
-    ["git", "commit", "-m", "line one\npush it"], ["git", "log", "--grep", "x\npush"]])
+    ["git", "commit", "-m", "line one\npush it"], ["git", "log", "--grep", "x\npush"],
+    ["git", "-C", "/x/push-tools", "status"], ["git", "-c", "hook.pre-push.enabled=false", "status"],
+    ["git", "-c", "alias.st=status", "st"], ["git", "-c", "alias.lg=log --oneline", "lg"]])
 def test_push_cases_that_run(argv):
     assert not push_denied(argv)
 
@@ -676,7 +686,8 @@ def test_push_cases_that_run(argv):
     ["git", "push"], ["git", "-c", "a=b", "push"], ["git", "-c", "a=b c", "push"],
     ["git", "-C", "/x", "push"], ["git", "--git-dir", "/x", "push"],
     ["git", "-c", "alias.p=push", "p"], ["git", "-c", "a=b", "commit", "-m", "push"], ["", "push"],
-    ["git", "-c", "a=b\nc", "push"], ["git", "-C", "/x\ny", "push"]])
+    ["git", "-c", "a=b\nc", "push"], ["git", "-C", "/x\ny", "push"],
+    ["git", "-c", "alias.p=!git push", "p"]])
 def test_push_cases_that_are_denied(argv):
     assert push_denied(argv)
 
@@ -983,7 +994,7 @@ def test_a_yaml_null_or_true_command_fails_validation(raw):
 def test_null_and_true_as_strings_parse_back_as_strings():
     settings = repo_settings.RepoSettings(deny_exec=[
         {"name": "null", "command": "true", "reason": "r"}, {"name": "x", "command": "null", "reason": "r"}])
-    text = agentsh_guard.policy_text(settings, "/r/.git", "pi", "p")
+    text = agentsh_guard.policy_text(settings, "/r/.git", "pi", "p", **PATHS)
     rules_ = {r["name"]: r for r in yaml.safe_load(text)["command_rules"]}
     assert rules_["null"]["commands"] == ["true"] and rules_["x"]["commands"] == ["null"]
 
@@ -1063,3 +1074,337 @@ def test_a_stop_takes_a_child_with_a_non_utf8_name_and_its_own_child(machine, se
     process.stop_tree()
     time.sleep(3)
     assert not child.exists() and not grandchild.exists()
+
+
+# ── what the first real runs found (rollout step 2) ─────────────────────────
+
+NET_YAML = ROOT_REPO / "docs" / "designs" / "agentsh" / "sssf-net.yaml"
+FIRST_RUNS = ROOT_REPO / "docs" / "designs" / "agentsh" / "first-real-runs"
+
+
+def real_argvs() -> list[list[str]]:
+    return json.loads((REAL / "claude-code-git-argv.json").read_text())
+
+
+@pytest.mark.parametrize("index", range(5))
+def test_the_real_claude_code_git_argv_lists_are_not_push_denied(index):
+    assert not push_denied(real_argvs()[index])
+
+
+def test_the_fixture_keeps_the_hook_name_that_broke_the_baseline():
+    assert any("hook.pre-push.enabled=false" in a for argv in real_argvs() for a in argv)
+
+
+@pytest.mark.parametrize("argv", [
+    ["git", "-c", "ALIAS.p=push", "p"], ["git", "-c", "alias.p=PUSH", "p"],
+    ["git", "-c", "alias.p=!f(){ git push; }; f", "p"], ["git", "-c", "alias.p=!git;push", "p"],
+    ["git", "-c", 'alias.p=!git "push"', "p"], ["git", "-c", "alias.p=!sh -c 'git push'", "p"]])
+def test_any_alias_value_naming_push_is_denied(argv):
+    assert push_denied(argv)
+
+
+@pytest.mark.skipif(not NET_YAML.is_file(), reason="docs/ is not installed in this repo")
+def test_the_push_patterns_equal_the_designs_network_policy():
+    theirs = next(r for r in yaml.safe_load(NET_YAML.read_text())["command_rules"]
+                  if r["name"] == "sssf-no-push")["args_patterns"]
+    assert push_patterns() == theirs and len(theirs) == 3
+
+
+# null events page
+
+@pytest.mark.parametrize("body,expected", [(b"null", []), (b'{"events": null}', []), (b"[]", []),
+                                           (b'{"events": [{"id": 1}, 3]}', [{"id": 1}])])
+def test_get_reads_the_bodies_the_service_can_send(service, body, expected):
+    service.raw_body = body
+    assert bare(service)._get({"limit": 5}) == expected
+
+
+@pytest.mark.parametrize("body", [b'"x"', b"42", b"true", b"1.5", b"{", b'{"events": "x"}', b'{"events": 3}'])
+def test_get_raises_on_a_body_that_is_not_rows(service, body):
+    service.raw_body = body
+    with pytest.raises(Exception):
+        bare(service)._get({"limit": 5})
+
+
+def test_get_raises_on_an_http_error(service):
+    service.status = 500
+    with pytest.raises(Exception):
+        bare(service)._get({"limit": 5})
+
+
+def test_a_null_page_past_the_end_is_not_a_failed_poll(machine, service):
+    service.null_past_end = True
+    service.events = []
+    process = launch(machine, "claude_code", cmd=[sys.executable, "-c", "import time; time.sleep(0.6)"])
+    assert process.wait() == 0                       # the watcher never stopped the tree
+    agentsh_guard.close(process)
+    assert process.failure == "" and process._failed_polls == 0
+    agentsh_guard.check_stopped(process, "b")
+
+
+@pytest.mark.parametrize("body", [None, b'"x"', b"42"])
+def test_three_bad_polls_in_a_row_still_say_the_service_stopped_answering(machine, service, body):
+    if body is None:
+        service.status = 500
+    else:
+        service.raw_body = body
+    process = launch(machine, "pi")
+    process.wait()
+    assert "stopped answering event polls" in process.failure
+
+
+# argv-only exec denial
+
+def argv_event(n: int) -> dict:
+    event = json.loads((REAL / "execve-denial-event.json").read_text())
+    event["id"] = f"argv-{n}"
+    assert "command" not in event and "command" not in event["fields"]
+    return event
+
+
+def test_an_exec_denial_with_argv_only_names_its_command(service):
+    process = bare(service)
+    process._take([argv_event(i) for i in range(3)])
+    assert process.counted == 3
+    name, command = process.last
+    assert name and command.startswith("git") and command.endswith("config user.name")
+    assert len(command) <= agentsh_guard.COMMAND_CHARS + len(" … ")
+    stop = agentsh_guard.breach(process, "b")
+    assert stop is not None
+    text = str(stop)
+    assert "config user.name" in text and "last `` `" not in text and "last ``" not in text
+
+
+def test_a_file_denial_without_a_path_falls_back_to_the_argv_command(service):
+    process = bare(service)
+    event = argv_event(1)
+    event["type"] = "ptrace_file"
+    process._take([event])
+    assert process.other_denials[0]["path"].endswith("config user.name")
+
+
+def test_command_text():
+    command_text = agentsh_guard.command_text
+    assert command_text({"fields": {"argv": ["/usr/bin/git", "status", "-s"]}}) == "git status -s"
+    assert command_text({"command": "gh pr 1", "fields": {"argv": ["/usr/bin/git", "x"]}}) == "gh pr 1"
+    assert command_text({"fields": {"command": "gh pr 2"}}) == "gh pr 2"
+    assert command_text({"fields": {"argv": ["echo", "a\nb\tc\rd"]}}) == "echo a\\nb\\tc\\rd"
+    assert command_text({}) == "" and command_text({"fields": {"argv": []}}) == ""
+    assert command_text({"fields": {"argv": ["git", 3]}}) == ""
+    assert command_text({"command": "", "fields": {"argv": ["git", "log"]}}) == "git log"
+
+
+# file rules, judged by a Python emulation of the engine's glob (gobwas, separator `/`)
+
+def glob_regex(glob: str) -> "re.Pattern":
+    out, i = [], 0
+    while i < len(glob):
+        c = glob[i]
+        if glob.startswith("**", i):
+            out.append(".*")
+            i += 2
+            continue
+        if c == "*":
+            out.append("[^/]*")
+        elif c == "?":
+            out.append("[^/]")
+        elif c == "\\" and i + 1 < len(glob):
+            i += 1
+            out.append(re.escape(glob[i]))
+        elif c == "[":
+            j = glob.index("]", i)
+            body = glob[i + 1:j]
+            out.append("[^" + body[1:] + "]" if body.startswith("!") else "[" + body + "]")
+            i = j
+        elif c == "{":
+            j = glob.index("}", i)
+            out.append("(?:" + "|".join(re.escape(a) for a in glob[i + 1:j].split(",")) + ")")
+            i = j
+        else:
+            out.append(re.escape(c))
+        i += 1
+    return re.compile("".join(out) + r"\Z", re.S)
+
+
+class Rules:
+    def __init__(self, text: str, home: str, root: str):
+        self.rules = yaml.safe_load(text)["file_rules"]
+        self.home, self.root = home, root
+
+    def _globs(self, rule_):
+        return [glob_regex(p.replace("${HOME}", self.home).replace("${PROJECT_ROOT}", self.root))
+                for p in rule_["paths"]]
+
+    def first_match(self, path: str, op: str) -> str:
+        for rule_ in self.rules:
+            if ("*" in rule_["operations"] or op in rule_["operations"]) \
+                    and any(g.match(path) for g in self._globs(rule_)):
+                return rule_["name"]
+        return "" if op in agentsh_guard.READ else "default-deny-files"
+
+    def decision(self, name: str) -> str:
+        return next((r["decision"] for r in self.rules if r["name"] == name), "deny")
+
+    def link(self, link_path: str, target: str) -> str:
+        """The engine checks the link's path and the raw target, and the first deny wins."""
+        for each in (link_path, target):
+            name = self.first_match(each, "symlink")
+            if self.decision(name) == "deny":
+                return name
+        return "allow"
+
+
+HOME = "/home/u"
+WORKSPACE = "/w/wt"      # a `--worktree` run's root, apart from the main checkout
+
+
+def both_harnesses():
+    config = agents.load_config(str(SHIPPED))
+    other = config.agents[0].model_copy(deep=True)
+    other.coding_agent = "claude_code"
+    config.agents.append(other)
+    return config
+
+
+@pytest.fixture(params=["claude_code", "pi"])
+def world(request, tmp_path, monkeypatch):
+    repo = git_repo(tmp_path / "proj").resolve()
+    (repo / "adws/adw_sssf_config").mkdir(parents=True)
+    (repo / "adws/adw_sssf_config/repo.yaml").write_text(
+        "local_guard: agentsh\nsecret_files: ['*.pem', './cfg/*.key']\n")
+    monkeypatch.chdir(repo)
+    config = both_harnesses()
+    guard = agentsh_guard.read(config)
+    text = guard.policies[request.param].text
+    sessions = str(repo / "adws/adw_data/sessions")
+    return type("World", (), {
+        "harness": request.param, "claude": request.param == "claude_code", "text": text,
+        "R": WORKSPACE, "MAIN": str(repo), "S": sessions, "G": str(repo / ".git"), "H": HOME,
+        "refuse": str(Path(agentsh_guard.__file__).resolve().with_name("sssf_refuse.py")),
+        "rules": Rules(text, HOME, WORKSPACE)})
+
+
+def test_the_sessions_folder_is_open_and_the_denies_still_hold_inside_it(world):
+    r = world.rules
+    for op in ("write", "create", "read"):
+        assert r.first_match(f"{world.S}/x/context_handoff/plan.md", op) == "sssf-sessions"
+    assert r.first_match(f"{world.S}/x/.env", "read") == "sssf-secret-files"
+    assert r.first_match(f"{world.S}/x/.env.local", "write") == "sssf-secret-files"
+    assert r.first_match(f"{world.S}/x/a.pem", "read") == "sssf-repo-secret-files"
+    assert r.first_match(f"{HOME}/.ssh/id_rsa", "read") == "sssf-credentials"
+    assert r.first_match("/proc/1/environ", "read") == "sssf-proc-secrets"
+    for path in (f"{world.G}/hooks/pre-commit", f"{world.G}/config"):
+        assert r.first_match(path, "write") == "sssf-git-config"
+    names_ = [x["name"] for x in r.rules]
+    at = names_.index("sssf-sessions")
+    assert all(x["decision"] == "allow" for x in r.rules[at:-1])
+    assert names_[-1] == "sssf-default-deny"
+
+
+def test_the_refuse_script_is_readable_by_claude_only(world):
+    r = world.rules
+    if world.claude:
+        assert r.first_match(world.refuse, "read") == "sssf-refuse-script"
+        assert r.first_match(world.refuse, "write") != "sssf-refuse-script"
+        assert world.refuse.endswith("/adw_modules/sssf_refuse.py") and f"- '{world.refuse}'" in world.text
+    else:
+        assert "sssf-refuse-script" not in [x["name"] for x in r.rules]
+
+
+@pytest.mark.parametrize("target", ["testing", "./x", "dir/file", "../x", ".env"])
+def test_a_relative_symlink_in_the_workspace_is_denied(world, target):
+    # No shipped deny glob matches a bare target: `**/.env` and `**/*.pem` need a `/` before the name.
+    for link_path in (f"{world.R}/l", f"{world.R}/sub/l", f"{world.S}/x/l", "/tmp/l"):
+        assert world.rules.link(link_path, target) == "default-deny-files"
+
+
+def test_relative_symlinks_elsewhere_are_denied(world):
+    r = world.rules
+    for path, target in [
+            (f"{world.G}/x", "config"), (f"{world.G}/worktrees/id/x", "y"),
+            (f"{HOME}/.claude/x", "settings.json"), (f"{HOME}/.claude/projects/x", "y"),
+            (f"{HOME}/.claude.json.x", ".ssh/id_rsa"), (f"{HOME}/.pi", ".ssh"),
+            (f"{HOME}/.cache/uv", "x"), (world.S, "worktrees"),
+            ("/run/user/1000/cc-socks", "gnupg/S.gpg-agent")]:
+        assert r.decision(r.link(path, target)) == "deny", (path, target)
+
+
+def test_no_file_rule_allows_a_relative_path(world):
+    for rule_ in world.rules.rules:
+        if rule_["decision"] == "allow" and rule_["name"] != "sssf-env-examples":
+            assert all(p.startswith(("/", "${")) for p in rule_["paths"]), rule_["name"]
+
+
+def test_absolute_links_work_as_on_main(world):
+    r = world.rules
+    assert r.link(f"{world.R}/.venv/bin/python", f"{HOME}/.local/share/uv/python/cpython/bin/python3.12") == "allow"
+    assert r.link(f"{world.R}/l", f"{world.R}/src/a") == "allow"
+    assert r.link(f"{world.R}/l", f"{world.R}/package.json") == "allow"
+    assert r.link(f"{world.S}/x/l", f"{world.S}/x/plan.md") == "allow"
+    assert r.link(f"{world.R}/l", "/etc/passwd") == "sssf-default-deny"
+    assert r.link(f"{world.R}/l", f"{HOME}/.ssh/id_rsa") == "sssf-credentials"
+    assert r.link(f"{world.R}/l", f"{world.R}/.env") == "sssf-secret-files"
+    assert r.link(f"{world.R}/l", f"{world.R}/cfg/a.key") == "sssf-repo-secret-files"
+    if world.claude:
+        assert r.link(f"{HOME}/.claude/skills/x", f"{world.R}/y") == "sssf-agent-config"
+
+
+MAIN_FILE_RULES = [   # b307ef3's agentsh_guard.py
+    "sssf-repo-secret-files", "sssf-env-examples", "sssf-secret-files", "sssf-credentials",
+    "sssf-proc-secrets", "sssf-other-sign-in", "sssf-git-config",
+    "sssf-workspace", "sssf-git-data", "sssf-main-config", "sssf-temp", "sssf-devices",
+    "sssf-fd-leaves", "sssf-mkdir-parents", "sssf-tool-write", "sssf-agent-write",
+    "sssf-config-search", "sssf-system-read", "sssf-home-read",
+    "sssf-default-deny"]
+
+
+def test_the_file_rule_order_matches_main_around_the_new_allows(world):
+    order = [x["name"] for x in world.rules.rules]
+    assert order.index("sssf-workspace") == order.index("sssf-git-config") + 1
+    assert order.index("sssf-sessions") == order.index("sssf-git-data") + 1
+    assert order[-2:] == ["sssf-home-read", "sssf-default-deny"]
+    wanted = set(MAIN_FILE_RULES) | {"sssf-sessions"} | (
+        {"sssf-refuse-script", "sssf-agent-config", "sssf-agent-read"} if world.claude else set())
+    assert set(order) == wanted and len(order) == len(wanted)
+
+
+
+# paths
+
+def test_read_puts_the_sessions_folder_in_the_main_checkout(tmp_path, monkeypatch):
+    cfg = both_harnesses()
+    repo = git_repo(tmp_path / "proj").resolve()
+    (repo / "adws/adw_sssf_config").mkdir(parents=True)
+    (repo / "adws/adw_sssf_config/repo.yaml").write_text("local_guard: agentsh\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e.com",
+                    "commit", "-qm", "init"], check=True)
+    monkeypatch.chdir(repo)
+    wanted = str(repo / "adws/adw_data/sessions")
+    before = agentsh_guard.read(cfg)
+    assert all(f"- '{wanted}'" in p.text and f"- '{wanted}/**'" in p.text for p in before.policies.values())
+    from adw_modules import worktree
+    worktree.anchor(cfg, repo)
+    after = agentsh_guard.read(cfg)
+    assert {h: p.text for h, p in before.policies.items()} == {h: p.text for h, p in after.policies.items()}
+    link = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(link), "-b", "w"], check=True)
+    monkeypatch.chdir(link)
+    inside = agentsh_guard.read(both_harnesses())
+    assert {h: p.text for h, p in before.policies.items()} == {h: p.text for h, p in inside.policies.items()}
+    claude = before.policies["claude_code"].text
+    assert str(Path(agentsh_guard.__file__).resolve().with_name("sssf_refuse.py")) in claude
+
+
+@pytest.mark.skipif(not FIRST_RUNS.is_dir(), reason="docs/ is not installed in this repo")
+@pytest.mark.parametrize("name", ["claude-code-git-argv.json", "events-page-past-end.json",
+                                  "execve-denial-event.json"])
+def test_the_fixture_copies_equal_their_sources(name):
+    assert (REAL / name).read_bytes() == (FIRST_RUNS / name).read_bytes()
+
+
+# ── bypass review 1 ──────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("key", ["ALIAS", "Alias", "aliaS"])
+def test_an_alias_key_in_another_case_is_still_denied(key):
+    assert push_denied(["git", "-c", f"{key}.p=push", "p"])

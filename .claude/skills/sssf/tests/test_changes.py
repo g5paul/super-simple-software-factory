@@ -47,7 +47,7 @@ def repo(tmp_path, monkeypatch):
         write(path, "new\n")
     write("src/new.py", "x\n")
     write("adws/adw_new.py", "x\n")
-    return SimpleNamespace(context_handoff_dir=tmp_path)
+    return SimpleNamespace(context_handoff_dir=tmp_path / "handoff", data_root=tmp_path)
 
 
 def test_the_documenters_diff_leaves_out_sssf(repo):
@@ -63,3 +63,13 @@ def test_the_documenters_diff_leaves_out_sssf(repo):
 def test_an_empty_exclude_keeps_everything(repo):
     found = changes.capture(repo, ChangeCapture(base="main", exclude=[]))
     assert sorted(found.files) == [".claude/skills/sssf/SKILL.md", "adws/adw_x.py", "src/app.py"]
+
+
+def test_the_diff_write_replaces_a_link_an_agent_left(repo, tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-victim.txt"
+    outside.write_text("keep")
+    repo.context_handoff_dir.mkdir()
+    (repo.context_handoff_dir / changes.DIFF_FILENAME).symlink_to(outside)
+    changes.capture(repo, ChangeCapture(base="main"))
+    assert outside.read_text() == "keep"
+    assert "## diff" in (repo.context_handoff_dir / changes.DIFF_FILENAME).read_text()

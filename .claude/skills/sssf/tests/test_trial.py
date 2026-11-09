@@ -79,7 +79,8 @@ def attempt(trial_id: str, adw_id: str, name: str, *, cost: float = 0.5, ok: boo
            "base": git("rev-parse", "HEAD", cwd=root)}
     cfg = SSSFConfig()
     place = worktree.enter(cfg, adw_id, True)
-    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
+    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl",
+                    data_root=cfg.defaults.data_root)
     tracer.session_start(adw_id, "t", adw_name="adw_simple_sdlc")
     tracer.session_request(adw_id, "make app.txt say two")
     tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="worktree",
@@ -292,7 +293,7 @@ def test_in_the_container_other_providers_still_run_pi_auth_check(container_brok
 def test_too_few_worktree_slots_refuses_naming_the_runs_that_hold_them(repo):
     cfg = SSSFConfig()
     place = worktree.enter(cfg, "busy0001", True)
-    tracer = Tracer(cfg.observability.db, os.devnull)
+    tracer = Tracer(cfg.observability.db, repo / "events.jsonl", data_root=repo)
     tracer.session_start("busy0001", "t", adw_name="adw_build")
     tracer.event(EventRecord(adw_id="busy0001", phase_id="", type="log", name="worktree",
                              payload={k: v for k, v in place.items() if k != "resumed"}))

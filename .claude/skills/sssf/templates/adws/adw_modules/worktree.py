@@ -37,7 +37,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import repo_settings
+from . import repo_settings, session_files
 from .data_types import EventRecord, SSSFConfig
 from .tracer import Tracer
 from .utils import just, new_id
@@ -295,15 +295,15 @@ class SetupFailed(RuntimeError):
     """A worktree_setup command failed, so the run stops before any agent."""
 
 
-def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path, box=None) -> str:
+def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path, root: Path, box=None) -> str:
     """Run repo.yaml's worktree_setup in a worktree. Returns "" when every
     command passed, or why the first that failed did, with its output's tail.
-    Each command's output goes to `log_dir/NN.log`. `box` is the run's sandbox;
+    Each command's output goes to `log_dir/NN.log`, written under `root`, the
+    run's data root, so a link an agent left there is replaced. `box` is the run's sandbox;
     a rebase, which runs after the run has ended, sets up on this machine."""
     from . import sandbox
     from .utils import operator_env
     box = box or sandbox.LOCAL
-    log_dir.mkdir(parents=True, exist_ok=True)
     for n, command in enumerate(commands, 1):
         try:
             done = box.run(["sh", "-c", command], cwd=cwd, env=operator_env(), timeout=timeout)
@@ -315,7 +315,7 @@ def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path, box=N
                           for part in (error.stdout or "", error.stderr or ""))
             out += f"\nTimed out after {timeout}s."
         log = log_dir / f"{n:02d}.log"
-        log.write_text(f"$ {command}\nexit: {code}\n\n{out}")
+        session_files.write(log, f"$ {command}\nexit: {code}\n\n{out}", root)
         if code != 0:
             tail = "\n".join(out.strip().splitlines()[-15:])
             return f"`{command}` exited {code}. The last of its output ({log}):\n{tail}"
@@ -332,7 +332,7 @@ def set_up(run) -> None:
     with run.phase(PhaseParams(name="setup", kind="code", owner="worktree",
                                description="Run repo.yaml's worktree_setup in the new worktree")) as ph:
         why = run_setup(settings.worktree_setup, Path.cwd(), settings.worktree_setup_timeout,
-                        run.context_handoff_dir / "setup", sandbox.current())
+                        run.context_handoff_dir / "setup", run.data_root, sandbox.current())
         ph.log(commands=len(settings.worktree_setup), passed=not why)
         if why:
             raise SetupFailed(f"worktree_setup failed, so no agent started. {why}\n"
@@ -356,7 +356,8 @@ def _own_environment(environment: str | None) -> None:
 def _log(cfg: SSSFConfig, adw_id: str, name: str, payload: dict) -> None:
     """Record how a run's branch ended, so the dashboard can tell a merged or
     discarded branch from one still waiting."""
-    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
+    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl",
+                    data_root=cfg.defaults.data_root)
     tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name=name, payload=payload))
 
 
@@ -508,7 +509,8 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
     settings = repo_settings.load(root)
     why = (_with_environment(record, lambda: run_setup(
         settings.worktree_setup, path, settings.worktree_setup_timeout,
-        Path(cfg.defaults.data_root) / "sessions" / adw_id / "context_handoff" / "rebase_setup"))
+        Path(cfg.defaults.data_root) / "sessions" / adw_id / "context_handoff" / "rebase_setup",
+        Path(cfg.defaults.data_root)))
         if settings.worktree_setup else "")
     if why:
         git("reset", "--hard", old, cwd=path)

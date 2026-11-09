@@ -612,11 +612,14 @@ What held under the real service: the launch checks, the attach, denial counting
 
 **Why the fakes missed it.** Claude Code's real git calls carry about 40 `-c` options, `hook.pre-push.enabled=false` among them, which the `-.*push` pattern matched. The real API answers `null` for an empty page, where every fake answered `[]`. And a real exec event carries `fields.argv` with no `command`, so the refusal message named nothing. The real argv lists and events are in [first-real-runs/](agentsh/first-real-runs/), as test fixtures.
 
-**The push rule, third form.** `['^\S*\s+push(\s|$)', '(?s)^\S*\s+-.*\spush(\s|$)', '(?s)^\S*\s+-.*\salias\.[^=\s]*=\S*push']`. It needs `push` as a word of its own, or an alias whose value names it, after a leading option. It's tested on the fork's engine at 3 depths, against 34 cases including the 5 real argv lists, and ran under the service in the patch. `git -C` on a path holding `push` now runs.
+**The push rule, third form.** `['^\S*\s+push(\s|$)', '(?s)^\S*\s+-.*\spush(\s|$)', '(?is)^\S*\s+-.*\salias\.[^=\s]*=.*push']`. It needs `push` as a word of its own, or an alias whose value names it, after a leading option. Any alias value naming `push` is denied, in any case. It's tested on the fork's engine at 3 depths, against 41 cases including the 5 real argv lists, and ran under the service in the patch. `git -C` on a path holding `push` now runs.
 
 **The handoff folder, decided 2026-11-09.** A `--worktree` run keeps its handoff in the main checkout, outside the workspace, and an installed policy can't name one run's folder: its variables come from the service, not the run. The engineer chose to allow read and write on the main checkout's `adws/adw_data/sessions/**` for every run. Agents can then reach other runs' handoff files, as text mode allows today. Moving the handoff folder into the worktree is the stronger fix, recorded for later. It changes the session layout for every mode.
 
 **A relative symlink.** One `symlink` with a relative target fell to agentsh's own `default-deny-files`, not to any SSSF rule, so an agent making a relative link in its workspace may be refused.
+
+**The refuse script and the sessions folder (built).** agentsh checks a symlink's own path and its target as the raw string the agent passed, both with `symlink`, so no absolute rule can judge a relative target. SSSF adds no link rule. A relative target falls to `default-deny-files`, as on `main`, and the existing rules judge an absolute target. The relative-link allow tried in 8f8304ae was dropped (see below). No `REFUSE_*` files exist in the templates, so the main-checkout allows are the sessions folder (`sssf-sessions`) and `sssf_refuse.py` (`sssf-refuse-script`, Claude Code only).
+**SSSF's session-folder writes (built).** Every host write under `<data_root>/sessions/` goes through `adw_modules/session_files.py`, given the run's data root. It walks from the data root with `O_NOFOLLOW` at every folder, writes a temp file and renames it over the target, and opens appended logs so that anything but SSSF's own single-link regular file is replaced. No file rule judges link targets.
 
 `specs/tasks/guard-agentsh-wrap-4.md` is the chain run's task, covering all of these.
 
@@ -661,9 +664,11 @@ The engineer decided on 2026-11-09:
 
 ## What got built
 
+- A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
 The first real run must check, beyond the items above:
 
-- The push cases under the real service: `git push`, `git -c a=b push`, `git -C /x push`, `git -c alias.p=push p`, `git -c $'a=b\nc' push` and `git -C $'/x\ny' push` denied; `git commit -m push`, `git stash push`, `git log --grep push`, `git commit -m $'line one\npush it'` and `git log --grep $'x\npush'` run.
+- The push cases under the real service: `git push`, `git -c a=b push`, `git -C /x push`, `git -c alias.p=push p`, `git -c $'a=b\nc' push` and `git -C $'/x\ny' push` denied; `git commit -m push`, `git stash push`, `git log --grep push`, `git commit -m $'line one\npush it'`, `git log --grep $'x\npush'` and `git -C /x/push-tools status` run; `git -c 'alias.p=!git push' p`, `git -c ALIAS.p=push p` and `git -c 'alias.p=!f(){ git push; }; f' p` are denied; `git -c alias.st=status st` runs.
+- A relative `ln -s` in the workspace is denied, and `uv venv` works.
 - That the service accepts the rendered config (`render_config`) and starts on it.
 - That `set dotenv-load` recipes run under the wrap with `JUST_NO_DOTENV=true`.
 

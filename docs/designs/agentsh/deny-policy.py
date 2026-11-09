@@ -77,7 +77,7 @@ def rule(name, paths, ops, decision):
     return "\n".join(lines)
 
 
-def file_rules(git_dir, agent):
+def file_rules(git_dir, agent, *, sessions, refuse_script):
     other_sign_in, config_deny, reads, writes = {
         "claude": (PI_SIGN_IN, CLAUDE_CONFIG, CLAUDE_READ, CLAUDE_WRITE),
         "pi": (CLAUDE_SIGN_IN, [], [], PI_WRITE),
@@ -98,6 +98,12 @@ def file_rules(git_dir, agent):
             f"{d}/hooks", f"{d}/hooks/**", f"{d}/config", f"{d}/config.lock")], WRITE_OPS, "deny"),
         rule("sssf-workspace", ["${PROJECT_ROOT}", "${PROJECT_ROOT}/**"], ALL, "allow"),
         rule("sssf-git-data", [git_dir, f"{git_dir}/**"], ALL, "allow"),
+        # A `--worktree` run's handoff folder sits in the main checkout. Every run's, decided 2026-11-09.
+        rule("sssf-sessions", [sessions, f"{sessions}/**"], ALL, "allow"),
+    ]
+    if agent == "claude":
+        rules.append(rule("sssf-refuse-script", [refuse_script], READ, "allow"))
+    rules += [
         # A worktree's agent also reads the main checkout's project settings.
         rule("sssf-main-config", [main, f"{main}/.claude", f"{main}/.claude/**"], READ, "allow"),
         rule("sssf-temp", TEMP, ALL, "allow"),
@@ -120,6 +126,9 @@ def file_rules(git_dir, agent):
 
 def main():
     git_dir, out = sys.argv[1], Path(sys.argv[2])
+    main = str(Path(git_dir).parent)
+    sessions = f"{main}/adws/adw_data/sessions"
+    refuse = f"{main}/adws/adw_modules/sssf_refuse.py"
     base = (Path(__file__).parent / "sssf-net.yaml").read_text()
     commands = base[base.index("command_rules:"):base.index("file_rules:")]
     network = base[base.index("network_rules:"):]
@@ -127,7 +136,7 @@ def main():
         name = f"sssf-dd-{agent}"
         text = (f"version: 1\nname: {name}\n"
                 f"description: SSSF default-deny test policy for {agent}\n"
-                f"{commands}file_rules:\n{file_rules(git_dir, agent)}\n{network}")
+                f"{commands}file_rules:\n{file_rules(git_dir, agent, sessions=sessions, refuse_script=refuse)}\n{network}")
         (out / f"{name}.yaml").write_text(text)
         print(out / f"{name}.yaml")
 

@@ -123,9 +123,13 @@ COMMAND_HEAD = """command_rules:
   - name: sssf-no-push
     commands: [git]
     # The regex runs over all of argv joined by spaces, argv[0] first: the verb itself, or
-    # an option before it (-c a=b, -C /x, --git-dir /x). Any option line naming the verb is denied.
-    # (?s) so a newline in an option's value can't hide the verb.
-    args_patterns: ['^\\S*\\s+push(\\s|$)', '(?s)^\\S*\\s+-.*push']
+    # an option before it (-c a=b, -C /x, --git-dir /x). `push` must be a word of its own after
+    # a leading option, or appear anywhere in an alias's value or after it.
+    # A hook name such as hook.pre-push.enabled, or a path such as /x/push-tools, doesn't match.
+    # The alias pattern ignores case, because git reads config keys in any case. It catches
+    # `ALIAS.p=push` and `alias.p=PUSH`.
+    # (?s) and (?is) are there so a newline in an option's value can't hide the verb.
+    args_patterns: ['^\\S*\\s+push(\\s|$)', '(?s)^\\S*\\s+-.*\\spush(\\s|$)', '(?is)^\\S*\\s+-.*\\salias\\.[^=\\s]*=.*push']
     decision: deny
 """
 COMMAND_TAIL = """  - name: sssf-allow-rest
@@ -188,7 +192,8 @@ def render_config(template: str, allowed: list[str]) -> str:
     return yaml.safe_dump(config, sort_keys=False)
 
 
-def file_rules(git_dir: str, agent: str, secret_files: list[str] = ()) -> str:
+def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,
+               sessions: str, refuse_script: str) -> str:
     other_sign_in, config_deny, reads, writes = {
         "claude": (PI_SIGN_IN, CLAUDE_CONFIG, CLAUDE_READ, CLAUDE_WRITE),
         "pi": (CLAUDE_SIGN_IN, [], [], PI_WRITE),
@@ -214,6 +219,12 @@ def file_rules(git_dir: str, agent: str, secret_files: list[str] = ()) -> str:
             f"{d}/hooks", f"{d}/hooks/**", f"{d}/config", f"{d}/config.lock")], WRITE_OPS, "deny"),
         rule("sssf-workspace", ["${PROJECT_ROOT}", "${PROJECT_ROOT}/**"], ALL, "allow"),
         rule("sssf-git-data", [git_dir, f"{git_dir}/**"], ALL, "allow"),
+        # A `--worktree` run's handoff folder sits in the main checkout. Every run's, decided 2026-11-09.
+        rule("sssf-sessions", [sessions, f"{sessions}/**"], ALL, "allow"),
+    ]
+    if agent == "claude":
+        rules_.append(rule("sssf-refuse-script", [refuse_script], READ, "allow"))
+    rules_ += [
         # A worktree's agent also reads the main checkout's project settings.
         rule("sssf-main-config", [main, f"{main}/.claude", f"{main}/.claude/**"], READ, "allow"),
         rule("sssf-temp", TEMP, ALL, "allow"),
@@ -240,7 +251,7 @@ def policy_name(main: Path, harness: str) -> str:
 
 
 def policy_text(settings: repo_settings.RepoSettings, git_common_dir: str, harness: str,
-                name: str) -> str:
+                name: str, *, sessions: str, refuse_script: str) -> str:
     agent = SHORT[harness]
     commands = COMMAND_HEAD
     for deny in settings.deny_exec:        # before sssf-allow-rest, or they never fire
@@ -257,7 +268,7 @@ def policy_text(settings: repo_settings.RepoSettings, git_common_dir: str, harne
     network += NETWORK_TAIL
     return (f"version: 1\nname: {name}\n"
             f"description: SSSF default-deny policy for {agent}\n"
-            f"{commands}file_rules:\n{file_rules(git_common_dir, agent, settings.secret_files)}\n{network}")
+            f"{commands}file_rules:\n{file_rules(git_common_dir, agent, settings.secret_files, sessions=sessions, refuse_script=refuse_script)}\n{network}")
 
 
 def read(cfg) -> LocalGuard:
@@ -277,11 +288,15 @@ def read(cfg) -> LocalGuard:
         raise SystemExit("local_guard: agentsh needs a git checkout; this directory is not one. "
                          f"Run `git init` here or set `local_guard: text` in {repo_settings.PATH}.")
     common = worktree.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    data_dir = Path(cfg.defaults.data_dir)
+    sessions = str((data_dir if data_dir.is_absolute() else root / data_dir).resolve() / "sessions")
+    refuse_script = str(Path(__file__).resolve().with_name("sssf_refuse.py"))
     harnesses = sorted({"claude_code" if a.coding_agent == "claude_code" else "pi" for a in cfg.agents})
     policies = {}
     for harness in harnesses:
         name = policy_name(root, harness)
-        policies[harness] = Policy(name=name, text=policy_text(settings, common, harness, name))
+        policies[harness] = Policy(name=name, text=policy_text(
+            settings, common, harness, name, sessions=sessions, refuse_script=refuse_script))
     try:
         template = (Path(__file__).parent / "agentsh_sssf.yaml").read_text()
     except OSError as error:
@@ -387,6 +402,29 @@ def _kill_descendants(pid: int) -> None:
             pass
 
 
+COMMAND_CHARS = 160
+
+
+def command_text(event: dict) -> str:
+    """The command an event names: its `command`, else argv joined (argv[0] by basename),
+    with control characters escaped and a long one shortened to its first word and its tail."""
+    fields = event.get("fields") or {}
+    text = event.get("command") or fields.get("command")
+    if not (isinstance(text, str) and text):
+        argv = fields.get("argv") or event.get("argv")
+        if not (isinstance(argv, list) and argv and all(isinstance(a, str) for a in argv)):
+            return ""
+        text = " ".join([os.path.basename(argv[0]), *argv[1:]])
+    text = text.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    if len(text) > COMMAND_CHARS:
+        head = text.split(" ", 1)[0]
+        tail = text[-140:]
+        if " " in tail:
+            tail = tail.split(" ", 1)[1]
+        return f"{head} … {tail}"
+    return text
+
+
 class AgentshProcess:
     """The wrap, in the sandbox.Process shape. `pid` is the wrap's."""
 
@@ -409,7 +447,7 @@ class AgentshProcess:
         self.failure = ""             # why the service failed after attach
         self.tripped = False
         self.counted = 0              # exec denials this process counted
-        self.last = ("", "")          # the last counted denial's rule and command
+        self.last = ("", "")          # the last counted denial's rule and its shortened command
         self.other_denials: list[dict] = []
         self._offset = 0
         self._seen: set[str] = set()
@@ -499,7 +537,11 @@ class AgentshProcess:
         qs = "&".join(f"{k}={v}" for k, v in query.items())
         with _opener().open(f"{API}/api/v1/events/search?{qs}", timeout=5) as reply:
             data = json.loads(reply.read().decode())
-        rows = data.get("events", []) if isinstance(data, dict) else data
+        rows = data.get("events") if isinstance(data, dict) else data
+        if rows is None:
+            return []
+        if not isinstance(rows, list):
+            raise ValueError("unexpected events body")
         return [r for r in rows if isinstance(r, dict)]
 
     def _pages(self, start: int, extra: dict) -> list[dict]:
@@ -523,7 +565,7 @@ class AgentshProcess:
             rule_name = policy.get("rule") or fields.get("rule")
             if decision != "deny":
                 continue
-            command = event.get("command") or fields.get("command") or ""
+            command = command_text(event)
             if event.get("type") == "ptrace_execve" and rule_name:
                 self.counted += 1
                 self.last = (str(rule_name), str(command))

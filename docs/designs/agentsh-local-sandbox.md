@@ -196,11 +196,27 @@ The tests were built in a rootless podman container, `golang:1.25.4-bookworm`, a
 - The memory reader unit tests pass, and `go vet` passes.
 - The full ptrace integration suite gives the same results with and without the patch: 15 failures in both, most because their helpers call `go build` and the host has no Go.
 
+The fork branch stays local until the engineer decides to publish it to the remote fork.
+
+**The patched build.** `agentsh 0.20.6-dev.fork+31b5af0`, built in the container the release's way: CGO on, linked to libseccomp. sha256 `9b703c6c1bc2c39e0f694ea5f307f50e25dd0955723da43d83f7e62c4f9a1cad`. It started with a copy of `/etc/agentsh/sssf.yaml` and answered `/health`. It replaces only `/usr/bin/agentsh`, through `dpkg-divert`, so the package's own binary stays as `/usr/bin/agentsh.distrib` and comes back with `dpkg-divert --rename --remove`. The other files stay at v0.20.5.
+
 The draft upstream report is [agentsh/upstream-report.md](agentsh/upstream-report.md), for the engineer to send. The installed service still runs v0.20.5 without the patch. With the patch, the server could read agent memory without `CAP_DAC_READ_SEARCH`. It still needs that right to reach workspaces in a mode 0750 home folder.
+
+## A copied binary, 2026-11-08
+
+The corpus showed that a copy of `just` under another name runs `just test live`. A Landlock execute list was the planned fix. It doesn't fit:
+
+- **Landlock never runs in this config.** Only `agentsh-unixwrap` applies it (`cmd/agentsh-unixwrap/main.go:193`). `wrap` uses the wrapper only with the unix-socket wrapper on, and ptrace allows that only with exec-only tracing (agentsh `internal/config/config.go:382`), which drops the file checks. The wrapper also goes on without Landlock when it fails to apply: `landlock: ... (continuing without)`.
+- **A path list in policy doesn't hold either.** `CheckExecve` matches the raw filename from the exec, with no resolving (`internal/policy/engine.go:1432`). So `/usr/bin/../../tmp/j` matches an allow glob such as `/usr/**`.
+- **An agent must run what it builds.** `.venv/bin/python`, `node_modules/.bin` and the binaries that `cargo test` builds live in the workspace. The workspace must allow exec, so a copy placed there runs. A byte-edited copy defeats a rule on the file's content too.
+
+**What the copy can reach.** File rules apply to every process, whatever its name. A copy `./j` of `just` with `set dotenv-load` failed at `.env`: `I/O error at .env: Permission denied`. With `--no-dotenv` the recipe ran, with no secrets. `--dotenv-path .env` failed the same way.
+
+So the copied binary is an accepted limit, like running a recipe's body by hand. A command rule stops a mistake or a casual attempt. The file rules on secrets and the network rules stop the harm, and those don't depend on a program's name. The next layer to tighten is the network: allow only the model hosts and the package registries, in place of `sssf-allow-net`. In ptrace mode the server runs a DNS proxy, so domain rules may work without eBPF. That needs a test.
 
 ## Next
 
-1. A Landlock execute list, so a copied binary under another name can't run.
+1. Network rules by domain in ptrace mode: allow the model hosts and the package registries, and deny the rest.
 2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
 2. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
 2. The decisions above, settled from the proof.

@@ -711,6 +711,21 @@ Removing the project's old `adw_agentsh_policy.py` took a change to `install.py 
 
 Left open, in `config.md`: a malformed `stamp.json` record makes `--update` crash before it saves the stamp, which is denial of service only. The version check reads an agent-editable stamp. A forged record can delete an in-repo SSSF file. A FIFO at `repo.yaml` stalls the install.
 
+### Rollout step 3: the hub under agentsh, 2026-11-09
+
+The hub's `repo.yaml` sets `local_guard: agentsh` since dd07d8f. Its policy, `sssf-super-simple-software-factory-claude`, rendered from the install clone `~/github/sssf-install` and matches sssf-sandbox's rule for rule, apart from the project's own config folder. The engineer installed it.
+
+The first guard run under it, 056faf3e, passed in round 1. No phase failed on a denial. What agentsh denied, beyond what sssf-sandbox showed:
+- Claude Code reads every process's `/proc/<pid>/environ` at startup, about 75 a phase, all denied by `sssf-proc-secrets`.
+- Python's user site folder, `~/.local/lib/python3.12/site-packages`, which Python looks in by default.
+- `~/.config/sssf/projects.json`, when the builder's tests ran `install.py`. The tests still passed.
+
+**Links with a relative target are denied everywhere,** in `/tmp` and the sessions folder too: agentsh's own `default-deny-files` takes them, as found in run 8f8304ae. A link with an absolute target works. For the hub this means:
+- the reviewer couldn't build a dangling-link `stamp.json` case and dropped it;
+- `git init` tests whether it can make a link, and sets `core.symlinks=false` when it can't, so all 70 of the reviewer's scratch repos had links off.
+
+The run-8b800eb5 harms were link attacks, so the bypass reviewer's prompt now says to give every link an absolute target, to set `core.symlinks true` in scratch repos, and to report a candidate that needs a relative link instead of dropping it (6c1421d).
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.

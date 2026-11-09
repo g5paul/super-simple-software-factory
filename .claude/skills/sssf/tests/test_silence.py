@@ -22,7 +22,7 @@ SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agent_cc, agent_pi, repo_settings, session, silence
-from adw_modules.data_types import AgentRequest
+from adw_modules.data_types import AgentRequest, LocalGuard
 
 
 class FakeProcess:
@@ -121,7 +121,7 @@ def request(tmp_path, **fields) -> AgentRequest:
             "model": "anthropic/claude-haiku-5-5", "session_id": "f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
             "session_dir": str(tmp_path / "sessions"),
             "raw_output_path": str(tmp_path / "raw.jsonl"), "cwd": str(tmp_path)}
-    return AgentRequest(**{**base, **fields})
+    return AgentRequest(**{**base, "local_guard": LocalGuard(mode="text"), **fields})
 
 
 def test_a_quiet_claude_code_agent_is_stopped_with_its_tree(tmp_path, hang, monkeypatch):

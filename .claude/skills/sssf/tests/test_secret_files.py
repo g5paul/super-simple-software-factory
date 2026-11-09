@@ -25,7 +25,7 @@ TEMPLATES = SKILL / "templates"
 sys.path.insert(0, str(TEMPLATES / "adws"))
 
 from adw_modules import agent_cc, agent_pi, agents, repo_settings, rules, sandbox, secret_files, utils
-from adw_modules.data_types import AgentRequest, SSSFConfig
+from adw_modules.data_types import AgentRequest, SSSFConfig, LocalGuard
 from adw_modules.repo_settings import RepoSettings
 
 REFUSE_SHELL = agent_cc.REFUSE_SHELL
@@ -112,7 +112,7 @@ def request_with(files: list[str], tmp: Path) -> AgentRequest:
     return AgentRequest(prompt="go", system_prompt="", model="anthropic/claude-sonnet-5-5",
                         session_id="f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
                         session_dir=str(tmp / "s"), raw_output_path=str(tmp / "r"),
-                        secret_files=files)
+                        secret_files=files, local_guard=LocalGuard(mode="text"))
 
 
 def test_claude_code_denies_read_of_each_file_once_with_the_double_slash_form(tmp_path):

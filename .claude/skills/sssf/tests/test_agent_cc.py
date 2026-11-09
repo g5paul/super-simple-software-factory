@@ -25,7 +25,7 @@ sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agent_cc, agents, rules, secret_files
 from adw_modules.repo_settings import RepoSettings
-from adw_modules.data_types import AgentConfig, AgentRequest, SSSFConfig
+from adw_modules.data_types import AgentConfig, AgentRequest, SSSFConfig, LocalGuard
 
 SESSION = "f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10"
 
@@ -69,7 +69,7 @@ def request(tmp_path, **overrides) -> AgentRequest:
               "raw_output_path": str(tmp_path / "raw_output.jsonl"),
               "tools": ["read", "bash", "grep", "find", "ls"], "cwd": str(tmp_path)}
     fields.update(overrides)
-    return AgentRequest(**fields)
+    return AgentRequest(local_guard=LocalGuard(mode="text"), **fields)
 
 
 # ── translation of the roster into claude flags ──────────────────────────────

@@ -14,7 +14,7 @@ import signal
 import sys
 from pathlib import Path
 
-from . import (account, agent_cc, agents, budget, changes, permissions, repo_settings,
+from . import (account, agent_cc, agents, agentsh_guard, budget, changes, permissions, repo_settings,
                rules, sandbox, silence, worktree)
 from .data_types import EventRecord, PhaseParams, SSSFConfig
 from .runner import Run
@@ -97,6 +97,16 @@ def choose_sandbox(asked: str | None, db: str, adw_id: str | None) -> str | None
     return None if name == "none" else name
 
 
+def _vm_resume(cfg: SSSFConfig, adw_id: str | None) -> bool:
+    """Whether adw_id is a run that already works in a VM. Wrong either way can only
+    refuse: the wrap depends on the tree being local alone."""
+    if not adw_id:
+        return False
+    db = cfg.observability.db
+    path = Path(db) if Path(db).is_absolute() else budget._root() / db
+    return bool((worktree.recorded(str(path), adw_id) or {}).get("sandbox"))
+
+
 def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False,
            sandbox_name: str | None = None, repo_sandbox: bool = False) -> Run:
     """Join or create the session. With `use_worktree`, or when this adw_id
@@ -114,6 +124,14 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
         sandbox.prepare(sandbox_name, cfg)
     elif os.environ.get("SSSF_PI_TOKEN_SOCKET"):
         sandbox.extensions_in_repo(cfg, worktree.main_checkout())   # the operator container (decision 14)
+    # Read once, here: before worktree.enter moves the process, and before any agent
+    # can rewrite repo.yaml or the worktree's .git file (agentsh_guard.py).
+    guard = agentsh_guard.read(cfg)
+    if guard.mode == "agentsh" and not sandbox_name and not _vm_resume(cfg, adw_id):
+        try:
+            agentsh_guard.check_machine(guard)   # before a worktree or a run row exists
+        except agentsh_guard.AgentshRefused as error:
+            raise SystemExit(str(error)) from None
     try:
         # Held until this run's process and worktree rows are written, so two
         # launches at once can't both count the other runs before either counts.
@@ -142,6 +160,15 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
                                  payload=json.loads(tag)))
     _finalize_when_killed(run)
     _report_stops_plainly(run)
+    if guard.mode == "agentsh":
+        guard = guard.model_copy(update={"root": str(Path(run.repo_root).resolve())})
+        if not (sandbox_name or (place and place.get("sandbox"))):
+            try:
+                agentsh_guard.check_root(guard.root)   # before a VM, set-up or any agent
+            except agentsh_guard.AgentshRefused:
+                tracer.session_finish(adw_id, ok=False)
+                raise
+    run.local_guard = guard
     run.console.session_started(adw_id, run.engineer)
     if place:
         verb = "resuming in" if place["resumed"] else "working in"

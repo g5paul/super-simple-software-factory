@@ -1,0 +1,669 @@
+"""Run local agents under agentsh when a repo's `local_guard` is `agentsh`.
+
+The text guard (rules.py, secret_files.py) stays on. This adds a service that
+checks real execs, opens and connects, under a default-deny policy SSSF
+generates from repo.yaml. See docs/designs/agentsh-local-sandbox.md.
+
+Nothing here re-reads repo.yaml or asks git while a run goes on. `read` runs
+once, in session.ensure, before the process moves into a worktree and before
+any agent has run; the result travels on every AgentRequest as `local_guard`.
+An agent can rewrite the worktree's `.git` file and the main checkout's
+repo.yaml, so a later read could return what the agent chose.
+"""
+
+from __future__ import annotations
+
+import atexit
+import hashlib
+import json
+import os
+import re
+import signal
+import subprocess
+import threading
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Callable, Iterator, Optional
+
+import yaml
+from pydantic import ValidationError
+
+from . import repo_settings, rules, sandbox
+from .data_types import LocalGuard, Policy
+
+BINARY = "/usr/bin/agentsh"
+CONFIG = "/etc/agentsh/sssf.yaml"
+POLICY_DIR = "/etc/agentsh/policies"
+SERVER = "unix:///run/agentsh/agentsh.sock"
+API = "http://127.0.0.1:18080"
+PINNED_SHA256 = "3774b1170d447e8c935fb8c2d7421199b6d3fafc312d6f77de1bb2cd1c5db45d"   # build 41960715
+ATTACH_SECONDS = 30
+PAGE = 5000
+POLL_SECONDS = 5
+TIMEOUT = 10
+
+FIX = ("run `uv run adws/adw_agentsh_policy.py` and the sudo steps it prints, "
+       "or set `local_guard: text` in adws/adw_sssf_config/repo.yaml")
+
+
+class AgentshRefused(sandbox.SandboxFailed):
+    """The agentsh wrap can't be trusted or reached, so no agent starts or the run stops.
+    Not a RuleBreach: nothing here says a forbidden command may have run."""
+
+    partial = None
+
+
+# ── the policy ───────────────────────────────────────────────────────────────
+
+READ = ["open", "read", "stat", "list", "readlink", "access"]
+ALL = ["*"]
+SECRET_ALLOW = ["**/.env.example", "**/.env.sample"]
+SECRETS = ["**/.env", "**/.env.*"]
+CREDENTIALS = [f"${{HOME}}/{p}" for p in (
+    ".ssh/**", ".aws/**", ".azure/**", ".gnupg/**", ".kube/**", ".docker/**",
+    ".config/gh/**", ".config/gcloud/**", ".config/sssf-sandbox/**",
+    ".git-credentials", ".netrc", ".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml",
+)]
+PROC_SECRETS = ["/proc/*/environ", "/proc/*/mem", "/proc/*/task/*/environ", "/proc/*/task/*/mem"]
+CLAUDE_SIGN_IN = ["${HOME}/.claude/.credentials.json"]
+PI_SIGN_IN = ["${HOME}/.pi/agent/auth.json"]
+CLAUDE_CONFIG = [f"${{HOME}}/.claude/{p}" for p in (
+    "settings.json", "settings.local.json", "CLAUDE.md", "AGENTS.md",
+    "skills/**", "rules/**", "hooks/**", "agents/**", "commands/**",
+)]
+WRITE_OPS = ["write", "create", "delete", "rename", "link", "symlink", "mkdir", "rmdir", "chmod", "chown"]
+SYSTEM_READ = ["/usr", "/usr/**", "/lib", "/lib/**", "/lib64", "/lib64/**", "/bin", "/bin/**",
+               "/sbin", "/sbin/**", "/opt", "/opt/**", "/etc", "/etc/**", "/sys", "/sys/**",
+               "/proc", "/proc/**", "/", "/home", "/var", "/run", "/mnt"]
+# A denied file answers EACCES even when it doesn't exist, and uv stops on that as it
+# searches upward for config, where ENOENT would let it go on.
+CONFIG_SEARCH = [f"{d}/{n}" for d in ("", "/home", "${HOME}") for n in ("uv.toml", "pyproject.toml")]
+# A denied mkdir of an existing parent answers EACCES where the kernel says EEXIST.
+MKDIR_PARENTS = ["/", "/home", "/tmp", "/run", "/run/user", "/run/user/*", "${HOME}", "${HOME}/.cache",
+                 "${HOME}/.local", "${HOME}/.local/state", "${HOME}/.local/share", "${HOME}/.config"]
+TEMP = ["/tmp", "/tmp/**", "/var/tmp", "/var/tmp/**", "/dev/shm", "/dev/shm/**"]
+# What's left at this level after the patched tracer resolves: pipes, sockets and
+# deleted files. A descriptor on a real file resolves to that file's own rule.
+FD_LEAVES = ["/proc/*/fd/*", "/proc/*/task/*/fd/*"]
+DEVICES = ["/dev/null", "/dev/zero", "/dev/tty", "/dev/ptmx", "/dev/pts/**", "/dev/urandom",
+           "/dev/random", "/dev/fd/**", "/dev/stdin", "/dev/stdout", "/dev/stderr"]
+HOME_READ = [f"${{HOME}}{p}" for p in (
+    "", "/.bashrc", "/.profile", "/.bash_profile", "/.bash_login", "/.editrc", "/.inputrc",
+    "/.gitconfig", "/.config", "/.config/git/**", "/.config/uv/**", "/.cargo", "/.cargo/env",
+    "/.cargo/bin/**", "/.local", "/.local/bin/**", "/.nvm/**", "/.rustup/**",
+)]
+TOOL_WRITE = [f"${{HOME}}/{p}" for p in (
+    ".cache/uv", ".cache/uv/**", ".local/share/uv", ".local/share/uv/**", ".npm/**",
+    ".cargo/registry/**", ".cargo/git/**",
+)]
+# The Windows path is where Claude Code looks for managed settings on WSL. Denied, it warns
+# that those policies are NOT in effect, even when the folder doesn't exist.
+CLAUDE_READ = [f"${{HOME}}/{p}" for p in (
+    "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".config/anthropic", ".config/anthropic/**",
+    "github/skills/**", "github/plugins/**",
+)] + ["/mnt/c/Program Files/ClaudeCode", "/mnt/c/Program Files/ClaudeCode/**"]
+CLAUDE_WRITE = [f"${{HOME}}/{p}" for p in (
+    ".claude", ".claude/**", ".claude.json", ".claude.json.*", ".cache/claude-cli-nodejs/**",
+    ".local/state/claude/**", ".local/share/claude/**",
+)] + ["/run/user/*/cc-socks", "/run/user/*/cc-socks/**"]
+PI_WRITE = ["${HOME}/.pi", "${HOME}/.pi/**"]
+
+# harness (the interface's HARNESS) -> the name its policy carries
+SHORT = {"claude_code": "claude", "pi": "pi"}
+
+COMMAND_HEAD = """command_rules:
+  - name: sssf-no-live-tests
+    commands: [just]
+    args_patterns: ['(^|\\s)test\\s+live(\\s|$)']
+    decision: deny
+  - name: sssf-no-gh
+    commands: [gh]
+    decision: deny
+  - name: sssf-no-push
+    commands: [git]
+    # The regex runs over all of argv joined by spaces, argv[0] first: the verb itself, or
+    # an option before it (-c a=b, -C /x, --git-dir /x). Any option line naming the verb is denied.
+    # (?s) so a newline in an option's value can't hide the verb.
+    args_patterns: ['^\\S*\\s+push(\\s|$)', '(?s)^\\S*\\s+-.*push']
+    decision: deny
+"""
+COMMAND_TAIL = """  - name: sssf-allow-rest
+    decision: allow
+"""
+NETWORK_HEAD = """network_rules:
+  # The server's HTTP API, upstream finding #29.
+  - name: sssf-no-agentsh-api
+    cidrs: ['127.0.0.1/32', '::1/128']
+    ports: [18080]
+    decision: deny
+  # The session proxy needs no rule: the patched build allows it exactly.
+  # The model hosts: Claude Code and pi on a ChatGPT subscription.
+  - name: sssf-model-hosts
+    domains: ['api.anthropic.com', '*.anthropic.com', 'api.openai.com', 'chatgpt.com', '*.chatgpt.com']
+    ports: [443]
+    decision: allow
+  # The login refresh hosts: pi's ChatGPT token and Claude Code's OAuth token.
+  - name: sssf-auth-hosts
+    domains: ['auth.openai.com', 'platform.claude.com']
+    ports: [443]
+    decision: allow
+  # The package registries.
+  - name: sssf-registries
+    domains: ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org', 'crates.io', 'index.crates.io', 'static.crates.io']
+    ports: [443]
+    decision: allow
+"""
+NETWORK_TAIL = "  # Everything else is denied: no match is a deny.\n"
+
+
+def _q(value: str) -> str:
+    return value.replace("'", "''")      # a value can't break out of its YAML quote
+
+
+def rule(name: str, paths: list[str], ops: list[str], decision: str) -> str:
+    lines = [f"  - name: {name}", "    paths:"]
+    lines += [f"      - '{_q(p)}'" for p in paths]
+    lines += [f"    operations: {ops}".replace('"', "'"), f"    decision: {decision}"]
+    return "\n".join(lines)
+
+
+def secret_glob(pattern: str) -> str:
+    """repo.yaml's secret_files pattern as secret_files._matches reads it, in
+    the policy's glob: no `/` matches a name anywhere; with `/` it's from the
+    root, and fnmatch's `*` crosses `/`, so a lone `*` becomes `**`."""
+    pattern = pattern.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")   # fnmatch reads braces literally
+    if "/" not in pattern:
+        return f"**/{pattern}"
+    pattern = pattern.removeprefix("./")
+    return "${PROJECT_ROOT}/" + re.sub(r"(?<!\*)\*(?!\*)", "**", pattern)
+
+
+def render_config(template: str, allowed: list[str]) -> str:
+    """The server config SSSF installs, for a given policies.allowed. One place for the
+    install script and the check. `default` is derived from the list."""
+    config = yaml.safe_load(template)
+    config["policies"]["allowed"] = list(allowed)
+    config["policies"]["default"] = allowed[0] if allowed else ""
+    return yaml.safe_dump(config, sort_keys=False)
+
+
+def file_rules(git_dir: str, agent: str, secret_files: list[str] = ()) -> str:
+    other_sign_in, config_deny, reads, writes = {
+        "claude": (PI_SIGN_IN, CLAUDE_CONFIG, CLAUDE_READ, CLAUDE_WRITE),
+        "pi": (CLAUDE_SIGN_IN, [], [], PI_WRITE),
+    }[agent]
+    main = str(Path(git_dir).parent)
+    rules_ = []
+    if secret_files:
+        # First: the text guard honours a repo pattern naming .env.sample, so behind
+        # the allow below it would leak.
+        rules_.append(rule("sssf-repo-secret-files", [secret_glob(p) for p in secret_files], ALL, "deny"))
+    rules_ += [
+        rule("sssf-env-examples", SECRET_ALLOW, ALL, "allow"),
+        rule("sssf-secret-files", SECRETS, ALL, "deny"),
+        rule("sssf-credentials", CREDENTIALS, ALL, "deny"),
+        rule("sssf-proc-secrets", PROC_SECRETS, ALL, "deny"),
+        rule("sssf-other-sign-in", other_sign_in, ALL, "deny"),
+    ]
+    if config_deny:
+        rules_.append(rule("sssf-agent-config", config_deny, WRITE_OPS, "deny"))
+    rules_ += [
+        # Hooks and git config run on the host, outside the wrap, at the next git command.
+        rule("sssf-git-config", [p for d in (git_dir, "${PROJECT_ROOT}/.git") for p in (
+            f"{d}/hooks", f"{d}/hooks/**", f"{d}/config", f"{d}/config.lock")], WRITE_OPS, "deny"),
+        rule("sssf-workspace", ["${PROJECT_ROOT}", "${PROJECT_ROOT}/**"], ALL, "allow"),
+        rule("sssf-git-data", [git_dir, f"{git_dir}/**"], ALL, "allow"),
+        # A worktree's agent also reads the main checkout's project settings.
+        rule("sssf-main-config", [main, f"{main}/.claude", f"{main}/.claude/**"], READ, "allow"),
+        rule("sssf-temp", TEMP, ALL, "allow"),
+        rule("sssf-devices", DEVICES, ALL, "allow"),
+        rule("sssf-fd-leaves", FD_LEAVES, ALL, "allow"),
+        rule("sssf-mkdir-parents", MKDIR_PARENTS, ["mkdir"], "allow"),
+        rule("sssf-tool-write", TOOL_WRITE, ALL, "allow"),
+        rule("sssf-agent-write", writes, ALL, "allow"),
+    ]
+    if reads:
+        rules_.append(rule("sssf-agent-read", reads, READ, "allow"))
+    rules_ += [
+        rule("sssf-config-search", CONFIG_SEARCH, READ, "allow"),
+        rule("sssf-system-read", SYSTEM_READ, READ, "allow"),
+        rule("sssf-home-read", HOME_READ, READ, "allow"),
+        rule("sssf-default-deny", ["/", "/**"], ALL, "deny"),
+    ]
+    return "\n".join(rules_)
+
+
+def policy_name(main: Path, harness: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", Path(main).name.lower()).strip("-") or "repo"
+    return f"sssf-{slug}-{SHORT[harness]}"
+
+
+def policy_text(settings: repo_settings.RepoSettings, git_common_dir: str, harness: str,
+                name: str) -> str:
+    agent = SHORT[harness]
+    commands = COMMAND_HEAD
+    for deny in settings.deny_exec:        # before sssf-allow-rest, or they never fire
+        commands += f"  - name: '{deny.name}'\n    # {deny.reason}\n    commands: ['{_q(deny.command)}']\n"
+        if deny.args is not None:
+            commands += f"    args_patterns: ['{_q(deny.args)}']\n"
+        commands += "    decision: deny\n"
+    commands += COMMAND_TAIL
+    network = NETWORK_HEAD
+    if settings.network_allow:
+        hosts = ", ".join(f"'{_q(h)}'" for h in settings.network_allow)
+        network += (f"  - name: sssf-repo-hosts\n    domains: [{hosts}]\n    ports: [443]\n"
+                    "    decision: allow\n")
+    network += NETWORK_TAIL
+    return (f"version: 1\nname: {name}\n"
+            f"description: SSSF default-deny policy for {agent}\n"
+            f"{commands}file_rules:\n{file_rules(git_common_dir, agent, settings.secret_files)}\n{network}")
+
+
+def read(cfg) -> LocalGuard:
+    """What `local_guard` asks, read once. Only session.ensure calls this, before
+    worktree.enter moves the process. A repo is asked for first, because
+    main_checkout() raises outside one."""
+    from . import worktree
+    in_repo = worktree.git("rev-parse", "--git-dir", check=False).returncode == 0
+    root = worktree.main_checkout() if in_repo else Path.cwd().resolve()
+    try:
+        settings = repo_settings.load(root)
+    except (ValidationError, yaml.YAMLError, ValueError, OSError) as error:
+        raise SystemExit(f"{repo_settings.PATH} is invalid: {error}") from None
+    if settings.local_guard == "text":
+        return LocalGuard(mode="text")
+    if not in_repo:
+        raise SystemExit("local_guard: agentsh needs a git checkout; this directory is not one. "
+                         f"Run `git init` here or set `local_guard: text` in {repo_settings.PATH}.")
+    common = worktree.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    harnesses = sorted({"claude_code" if a.coding_agent == "claude_code" else "pi" for a in cfg.agents})
+    policies = {}
+    for harness in harnesses:
+        name = policy_name(root, harness)
+        policies[harness] = Policy(name=name, text=policy_text(settings, common, harness, name))
+    try:
+        template = (Path(__file__).parent / "agentsh_sssf.yaml").read_text()
+    except OSError as error:
+        raise SystemExit(f"can't read agentsh_sssf.yaml ({error})") from None
+    return LocalGuard(mode="agentsh", policies=policies, config_template=template)
+
+
+# ── checks ───────────────────────────────────────────────────────────────────
+
+def _run(command: list[str]) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise AgentshRefused(f"`{' '.join(command[:3])}` failed ({type(error).__name__}); {FIX}") from None
+
+
+def check_machine(guard: LocalGuard) -> None:
+    if _run(["systemctl", "is-active", "agentsh"]).stdout.strip() != "active":
+        raise AgentshRefused(f"the agentsh service is not active; {FIX}")
+    try:
+        digest = hashlib.sha256(Path(BINARY).read_bytes()).hexdigest()
+    except OSError as error:
+        raise AgentshRefused(f"can't read {BINARY} ({error}); {FIX}") from None
+    if digest != PINNED_SHA256:
+        raise AgentshRefused(f"{BINARY} is not the pinned build (sha256 {digest[:12]}); {FIX}")
+    try:
+        installed = Path(CONFIG).read_bytes()
+        allowed = (yaml.safe_load(installed) or {})["policies"]["allowed"]
+        if not isinstance(allowed, list) or not all(isinstance(a, str) for a in allowed):
+            raise TypeError("policies.allowed is not a list of strings")
+    except (OSError, ValueError, yaml.YAMLError, KeyError, AttributeError, TypeError) as error:
+        raise AgentshRefused(f"can't use {CONFIG} ({type(error).__name__}); {FIX}") from None
+    try:
+        rendered = render_config(guard.config_template, allowed).encode()
+    except Exception as error:    # yaml can hand back any shape, or raise several ways, and nothing else runs here
+        raise AgentshRefused(f"agentsh_sssf.yaml can't be rendered ({type(error).__name__}); restore the file from "
+                             "the SSSF skill, or set `local_guard: text` in adws/adw_sssf_config/repo.yaml") from None
+    if installed != rendered:
+        raise AgentshRefused(f"{CONFIG} is not the file SSSF renders; {FIX}")
+    for policy in guard.policies.values():
+        if policy.name not in allowed:
+            raise AgentshRefused(f"policy {policy.name} is not in {CONFIG} policies.allowed; {FIX}")
+        try:
+            on_disk = (Path(POLICY_DIR) / f"{policy.name}.yaml").read_bytes()
+        except OSError:
+            raise AgentshRefused(f"policy {policy.name} is not installed in {POLICY_DIR}; {FIX}") from None
+        if on_disk != policy.text.encode():
+            raise AgentshRefused(f"installed policy {policy.name} is stale; {FIX}")
+
+
+def check_root(root: str) -> None:
+    result = _run(["git", "-C", root, "rev-parse", "--show-toplevel"])
+    if result.returncode != 0 or Path(result.stdout.strip()).resolve() != Path(root).resolve():
+        raise AgentshRefused(f"{root} is not the top of a git checkout, so agentsh can't be rooted there; "
+                             f"{FIX}")
+
+
+# ── the wrapped process ──────────────────────────────────────────────────────
+
+_SESSION = re.compile(r"agentsh: session (\S+) created \(policy: ([^)]+)\)")
+_STARTED = re.compile(r"agentsh: agent .*? started with (\w+) interception")
+
+
+class _Stderr:
+    def __init__(self, process: "AgentshProcess"):
+        self._process = process
+
+    def read(self) -> str:
+        self._process._drain.join(5)
+        return "".join(self._process._other)
+
+
+def _opener():
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _kill_descendants(pid: int) -> None:
+    """SIGKILL everything under `pid`, found by reading /proc. No process is started,
+    so it works when `ps` can't run. The wrap has no parent-death signal, so killing
+    it alone would leave the agent running. `stat` is read as bytes because a process's
+    name needn't be valid UTF-8, and a skipped process would take its subtree out of the walk."""
+    children: dict[int, list[int]] = {}
+    try:
+        entries = [e for e in Path("/proc").iterdir() if e.name.isdigit()]
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            parent = int((entry / "stat").read_bytes().rsplit(b")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(parent, []).append(int(entry.name))
+    seen, queue = set(), [pid]
+    while queue:
+        for child in children.get(queue.pop(), []):
+            if child not in seen:
+                seen.add(child)
+                queue.append(child)
+    for each in seen:
+        try:
+            os.kill(each, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+class AgentshProcess:
+    """The wrap, in the sandbox.Process shape. `pid` is the wrap's."""
+
+    def __init__(self, popen: subprocess.Popen, policy: str, tally: rules.RefusalTally):
+        self._popen = popen
+        self.pid = popen.pid
+        self.policy = policy
+        self.tally = tally
+        self.stdout = self._lines()
+        self.stderr = _Stderr(self)
+        self._other: list[str] = []
+        self._lock = threading.Lock()
+        self._status = threading.Condition()
+        self._stopped = False
+        self._ended = False
+        self._done = threading.Event()
+        self.session: Optional[str] = None
+        self.attached = False
+        self.problem = ""             # why the attach failed
+        self.failure = ""             # why the service failed after attach
+        self.tripped = False
+        self.counted = 0              # exec denials this process counted
+        self.last = ("", "")          # the last counted denial's rule and command
+        self.other_denials: list[dict] = []
+        self._offset = 0
+        self._seen: set[str] = set()
+        self._failed_polls = 0
+        self.trace_notes: list[str] = []
+        self._drain = threading.Thread(target=self._read_stderr, daemon=True)
+        self._drain.start()
+        self._watcher: Optional[threading.Thread] = None
+
+    # output
+    def _lines(self) -> Iterator[str]:
+        for line in self._popen.stdout:
+            if not line.startswith("agentsh:"):
+                yield line
+
+    def _read_stderr(self) -> None:
+        try:
+            for line in self._popen.stderr:
+                if line.startswith("agentsh:"):
+                    self._status_line(line.strip())
+                else:
+                    self._other.append(line)
+        finally:
+            with self._status:
+                self._status.notify_all()
+
+    def _status_line(self, line: str) -> None:
+        with self._status:
+            if "running without interception" in line:
+                self.problem = self.problem or "agentsh reported the agent is running without interception"
+            elif (m := _SESSION.search(line)) and self.session is None:
+                if m.group(2) != self.policy:
+                    self.problem = self.problem or f"agentsh loaded policy {m.group(2)}, not {self.policy}"
+                self.session = m.group(1)
+            elif "agent " in line and "started (pid:" in line and not self.attached:
+                self.problem = self.problem or "agentsh started the agent with no interception mechanism"
+            elif (m := _STARTED.search(line)) and not self.attached:
+                if m.group(1) != "ptrace":
+                    self.problem = self.problem or f"agentsh intercepts with {m.group(1)}, not ptrace"
+                else:
+                    self.attached = True
+            self._status.notify_all()
+
+    def wait_attached(self) -> None:
+        def ready() -> bool:
+            return bool(self.problem) or (self.attached and self.session is not None) \
+                or self._popen.poll() is not None and not self._drain.is_alive()
+        with self._status:
+            self._status.wait_for(ready, timeout=ATTACH_SECONDS)
+            ok = self.attached and self.session is not None and not self.problem
+            problem = self.problem
+        if ok:
+            self._watcher = threading.Thread(target=self._watch, daemon=True)
+            self._watcher.start()
+            return
+        self.stop_tree()
+        self._end_session()
+        atexit.unregister(self._at_exit)
+        why = problem or ("the wrap exited before it attached" if self._popen.poll() is not None
+                          else f"the wrap did not attach in {ATTACH_SECONDS} s")
+        raise AgentshRefused(f"{why}; {FIX}")
+
+    # Process shape
+    def wait(self) -> int:
+        return self._popen.wait()
+
+    def kill(self) -> None:
+        # The wrap's death alone can leave the agent running, reparented; take the tree.
+        self.stop_tree()
+        self._popen.kill()
+
+    def stop_tree(self) -> None:
+        """Kill the tree, once. Ending the session is the main thread's: see `_end_session`."""
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+        _kill_descendants(self.pid)     # from /proc, with no fork: `ps` can fail on a full process table
+        rules.stop_tree(self.pid)
+
+    def _at_exit(self) -> None:
+        self.stop_tree()
+        self._end_session()
+
+    # events
+    def _get(self, query: dict) -> list[dict]:
+        qs = "&".join(f"{k}={v}" for k, v in query.items())
+        with _opener().open(f"{API}/api/v1/events/search?{qs}", timeout=5) as reply:
+            data = json.loads(reply.read().decode())
+        rows = data.get("events", []) if isinstance(data, dict) else data
+        return [r for r in rows if isinstance(r, dict)]
+
+    def _pages(self, start: int, extra: dict) -> list[dict]:
+        out, offset = [], start
+        while True:
+            rows = self._get({"session_id": self.session, **extra, "order": "asc",
+                              "limit": PAGE, "offset": offset})
+            out += rows
+            offset += len(rows)
+            if len(rows) < PAGE:
+                return out
+
+    def _take(self, rows: list[dict]) -> None:
+        for event in rows:
+            key = str(event.get("id") or json.dumps(event, sort_keys=True))
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            policy, fields = event.get("policy") or {}, event.get("fields") or {}
+            decision = policy.get("effective_decision") or fields.get("decision")
+            rule_name = policy.get("rule") or fields.get("rule")
+            if decision != "deny":
+                continue
+            command = event.get("command") or fields.get("command") or ""
+            if event.get("type") == "ptrace_execve" and rule_name:
+                self.counted += 1
+                self.last = (str(rule_name), str(command))
+                if self.tally.add() >= rules.MAX_REFUSALS:
+                    self.tripped = True
+            else:       # file, network and unnamed exec denials: traced, never counted
+                self.other_denials.append({
+                    "type": str(event.get("type") or ""),
+                    "path": str(event.get("path") or fields.get("path") or event.get("domain")
+                                or fields.get("domain") or command),
+                    "rule": str(rule_name or "")})
+
+    def _poll(self) -> None:
+        rows = self._pages(self._offset, {"type": "ptrace_execve"})
+        with self._lock:
+            if self._done.is_set():
+                return
+            self._offset += len(rows)
+            self._take(rows)
+
+    def _watch(self) -> None:
+        while not self._done.wait(POLL_SECONDS):
+            try:
+                self._poll()
+                self._failed_polls = 0
+            except Exception:
+                self._failed_polls += 1
+                if self._failed_polls >= 3:
+                    with self._lock:
+                        if not self._done.is_set():
+                            self.failure = "the agentsh service stopped answering event polls"
+                    self.stop_tree()
+                    return
+                continue
+            if self.tripped:
+                self.stop_tree()
+                return
+
+    def _end_session(self) -> None:
+        """The final read, then the session's DELETE. Once, and only on the main thread."""
+        with self._lock:
+            first = not self._ended and self.session is not None
+            if first:
+                self._ended = True
+                self._done.set()
+        if not first:
+            return
+        try:
+            try:
+                rows = self._pages(0, {})
+                with self._lock:
+                    self._take(rows)
+            except Exception as error:
+                self.trace_notes.append(f"final event read failed: {type(error).__name__}")
+                self.failure = f"the final read of agentsh events failed ({type(error).__name__})"
+        finally:
+            try:
+                request = urllib.request.Request(f"{API}/api/v1/sessions/{self.session}", method="DELETE")
+                _opener().open(request, timeout=5).close()
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    self.trace_notes.append(f"session delete failed: HTTP {error.code}")
+            except Exception as error:
+                self.trace_notes.append(f"session delete failed: {type(error).__name__}")
+
+
+def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[LocalGuard],
+          tally: Optional[rules.RefusalTally] = None):
+    if tree is not sandbox.LOCAL:
+        return tree.start(cmd, cwd=cwd, env=env)
+    if guard is None:
+        raise AgentshRefused("no local_guard reached the launch, so the agent is not started; "
+                             "this is a bug in the caller")
+    if guard.mode == "text":
+        return tree.start(cmd, cwd=cwd, env=env)
+    check_machine(guard)
+    if not guard.root or Path(cwd).resolve() != Path(guard.root):
+        raise AgentshRefused(f"the agent would run in {cwd}, not the guarded root {guard.root or '(none)'}")
+    policy = guard.policies.get(harness)
+    if policy is None:
+        raise AgentshRefused(f"no agentsh policy was generated for {harness}; {FIX}")
+    child = dict(os.environ if env is None else env)
+    child.update({"AGENTSH_CONFIG": CONFIG, "AGENTSH_SERVER": SERVER, "AGENTSH_NO_AUTO": "1",
+                  "NODE_USE_ENV_PROXY": "1", "SSSF_AGENTSH": "1", "JUST_NO_DOTENV": "true"})
+    try:
+        popen = subprocess.Popen(
+            [BINARY, "wrap", "--policy", policy.name, "--root", guard.root, "--report=false", "--", *cmd],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, errors="replace", bufsize=1, cwd=cwd, env=child)
+    except OSError as error:
+        raise AgentshRefused(f"can't run {BINARY} ({error}); {FIX}") from None
+    process = AgentshProcess(popen, policy.name, tally or rules.RefusalTally())
+    # Before the attach wait: on_spawn hasn't run, so `just kill` can't see the wrap yet.
+    atexit.register(process._at_exit)
+    process.wait_attached()
+    return process
+
+
+def close(process, on_event: Optional[Callable[[dict], None]] = None) -> None:
+    """After the agent exits: end the session, and trace the denials that didn't count.
+    Never raises, and does nothing for another process type."""
+    if not isinstance(process, AgentshProcess):
+        return
+    try:
+        process._end_session()
+        atexit.unregister(process._at_exit)
+        if on_event:
+            counts: dict[tuple, int] = {}
+            for d in process.other_denials:
+                key = (d["type"], d["path"], d["rule"])
+                counts[key] = counts.get(key, 0) + 1
+            denials = [{"type": t, "path": p, "rule": r, "count": n} for (t, p, r), n in sorted(counts.items())]
+            if denials or process.trace_notes:
+                try:
+                    on_event({"type": "agentsh_denials", "denials": denials, "notes": process.trace_notes})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def breach(process, agent: str = "") -> Optional[rules.RuleBreach]:
+    """The three-refusal stop if this process reached it, else None."""
+    if not isinstance(process, AgentshProcess):
+        return None
+    total = process.tally.total
+    if process.counted and (process.tripped or total >= rules.MAX_REFUSALS):
+        name, command = process.last
+        return rules.RuleBreach(agent, rules.AgentRule(rule=f"agentsh rule {name}"), name, command,
+                                refusals=total)
+    return None
+
+
+def check_stopped(process, agent: str = "") -> None:
+    """Raise the stop agentsh's watch asked for. Call after `close`, so a denial seen
+    only in the final read counts too."""
+    if not isinstance(process, AgentshProcess):
+        return
+    stop = breach(process, agent)
+    if stop:
+        raise stop
+    if process.failure:
+        raise AgentshRefused(f"{process.failure}; the agent was stopped. {FIX}")

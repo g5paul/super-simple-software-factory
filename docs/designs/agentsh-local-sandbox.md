@@ -272,9 +272,19 @@ Still open in this design:
 
 **A session may load only a listed policy.** The build includes upstream 6cb6c7d from 2026-11-07. A session may load only a policy named in `policies.allowed`, or only the default when the list is empty. It refused `sssf-net`, and also the `agent-default` that `wrap` asks for when given no `--policy`. The config now lists both proof policies, and SSSF must pass `--policy` every time. The rule also keeps an agent from picking a looser policy for itself.
 
+## Real agents under the wrap, 2026-11-08
+
+`agentsh 0.20.6-dev.fork+bcf186b`, policy `sssf-net`, `NODE_USE_ENV_PROXY=1`. Each agent got one prompt: say OK, then run `curl https://example.com` once through its shell tool. Curl, bash and Python all ran clean under the same policy. Both agents failed in the tracer.
+
+**Claude Code 2.1.319, Haiku.** It answered `OK` through `api.anthropic.com` and `mcp-proxy.anthropic.com`. The policy denied one telemetry connect to Datadog, and Claude Code went on without it. Its shell tool failed twice, first with "Working directory ... no longer leads where it did", then with `EACCES` on its temp file under `/tmp/claude-1000`. The server log shows 118 file calls from Claude Code's PID denied as `unknown session for file session_id=""`, spread over the whole 10-second run. The handler denies a call it can't match to a session (`internal/api/ptrace_handlers.go`, `HandleFile`), and logs no policy event for it. The workspace is the real directory, with no FUSE mount. A wrapped bash writes under `/tmp/claude-1000` without trouble. One theory: when a new thread stops before the tracer sees its clone event, the fallback looks up the parent by `readPPID`, which for a thread is the parent of the whole process, here the untraced `wrap` client (`internal/ptrace/tracer.go`, `findParentByTGID` callers). A Python test with 200 threads didn't reproduce it, so the cause is open.
+
+**pi 1.4.0, `openai/gpt-5.6-luna`.** It hung for the full 240-second timeout and made no network call. Its ChatGPT token had expired, so the login refresh at `auth.openai.com`, now allowed, never ran. Four seconds in, the server logged `ptrace WATCHDOG: tracee ptrace-stopped but Run loop not advancing it (#369 #2)` for pi's main thread, stopped in `openat`. The watchdog logged no recovery and no dump. Claude Code's run logged the same warning once, on a `close`. Upstream has six commits on #369, a deadlock between FUSE and clone, and the watchdog that should recover such threads. `wrap` prints "FUSE workspace mount" even with `sandbox.fuse.enabled: false`. When the timeout ended `wrap`, pi died with it.
+
+So ptrace mode on this machine runs simple tools but not yet the agents SSSF runs. Both failures are closed: a call is denied or a thread waits, and nothing runs unchecked.
+
 ## Next
 
-1. Wrapped Claude Code and pi agents with `NODE_USE_ENV_PROXY=1`: each must reach its model host and nothing else.
+1. Find the two tracer faults: the empty session on Claude Code's file calls, and pi's stopped `openat`. Then run both agents again: each must reach its model host and nothing else.
 2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
 3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
 4. The decisions above, settled from the proof.

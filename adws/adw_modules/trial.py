@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 from statistics import mean
 
-from . import agent_cc, agent_pi, agents, budget, gates, kill, repo_settings, sandbox, worktree
+from . import agent_cc, agent_pi, agents, budget, gates, kill, repo_settings, sandbox, session_files, worktree
 from .data_types import (AgentCall, EventRecord, PanelOutput, PhaseParams, PromptEngineering,
                          SSSFConfig, TrialAttempt, TrialAttempts)
 from .tracer import Tracer
@@ -370,7 +370,8 @@ def show(trial: str) -> str:
 # ── starting one ─────────────────────────────────────────────────────────────
 
 def _log(cfg: SSSFConfig, adw_id: str, name: str, payload: dict) -> None:
-    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
+    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl",
+                    data_root=cfg.defaults.data_root)
     tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name=name, payload=payload))
 
 
@@ -473,7 +474,7 @@ def start(request: str, names: list[str], out=sys.stdout, asked: str | None = No
         # Each attempt fetches its provider's SDK itself (sandbox_remote.require_sdk).
         env = {**{k: v for k, v in os.environ.items() if k != "SSSF_SANDBOX_SDK"},
                "SSSF_TRIAL": json.dumps(tag)}
-        with log.open("w") as handle:
+        with session_files.open_append(log, root / cfg.defaults.data_dir) as handle:
             # A session of its own, so stopping `just trial` leaves the attempts running.
             proc = subprocess.Popen(
                 ["uv", "run", str(root / "adws" / f"{CHAIN}.py"), request,
@@ -630,7 +631,7 @@ def review(trial: str, out=sys.stdout) -> int:
                 row = next(r for r in rows if r["adw_id"] == adw_id)
                 text = worktree.git("diff", *diff_args(row["base"], worktree.branch_for(adw_id),
                                                        cfg.defaults.data_dir), cwd=root).stdout
-                (folder / f"{label}.diff").write_text(text)
+                session_files.write(folder / f"{label}.diff", text, run.data_root)
                 shown.append(TrialAttempt(label=label, diff_path=str(folder / f"{label}.diff")))
             with run.phase(PhaseParams(name=f"panel_{fam}", kind="agent", owner=f"referee_{fam}",
                                        description=f"The {fam} reviewer judges every attempt, "

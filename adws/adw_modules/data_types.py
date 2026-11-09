@@ -487,6 +487,23 @@ class EventRecord(BaseModel):
 
 # ── Coding agent interface (agent_pi, agent_cc) ──────────────────────────────
 
+class Policy(BaseModel):
+    """One generated agentsh policy: its name and the exact text installed under it."""
+    model_config = {"frozen": True}
+    name: str
+    text: str
+
+
+class LocalGuard(BaseModel):
+    """How local agents are held, read once by session.ensure and carried on every request.
+    A request without one refuses to start on a local tree; only mode="text" means text."""
+    model_config = {"frozen": True}
+    mode: Literal["text", "agentsh"]
+    root: str = ""                       # the resolved path agents are wrapped at
+    policies: dict[str, Policy] = {}     # by harness: "claude", "pi"
+    config_template: str = ""            # agentsh_sssf.yaml, read once, for the machine check
+
+
 class AgentRequest(BaseModel):
     """Everything one non-interactive coding-agent run needs, pi or claude."""
 
@@ -499,6 +516,7 @@ class AgentRequest(BaseModel):
     session_id: str                 # pi: any string; claude: a UUID
     session_dir: str                # pi: --session-dir; claude: SSSF's resume/cost ledger
     raw_output_path: str            # JSONL stream lands here
+    data_root: str                  # the folder above `sessions/`; SSSF's own writes under it never follow a link
     tools: Optional[list[str]] = None
     extensions: list[str] = Field(default_factory=list)
     cwd: str = "."                  # set from run.repo_root — the codebase root agents work in
@@ -508,6 +526,8 @@ class AgentRequest(BaseModel):
     max_silence_seconds: Optional[float] = None  # stop the agent after this long with no output (silence.py)
     secret_files: list[str] = Field(default_factory=list)  # absolute paths, found at agent start
     agent_env: list[str] = Field(default_factory=list)     # repo.yaml agent_env: .env keys agents keep
+    local_guard: Optional[LocalGuard] = None   # None refuses at launch on a local tree
+    refusal_tally: Any = Field(default=None, exclude=True)   # rules.RefusalTally, shared with the forwarder
 
 
 class UsageBreakdown(BaseModel):

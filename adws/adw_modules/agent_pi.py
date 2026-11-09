@@ -20,7 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import obs_relay, rules, sandbox, silence
+from . import agentsh_guard, obs_relay, rules, sandbox, session_files, silence
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
 from .utils import agent_env, mark_agent, now_iso, operator_env
@@ -700,11 +700,12 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         request.refuse_rules, request.secret_files)
     env = _in_vm(env, tree, request.refuse_rules, request.extensions)
     env = _in_container(env, tree)
-    process = tree.start(cmd, cwd=request.cwd, env=env)
+    process = agentsh_guard.start(tree, HARNESS, cmd, cwd=request.cwd, env=env,
+                                  guard=request.local_guard, tally=request.refusal_tally)
     if on_spawn:
         on_spawn(process.pid)
     with silence.watch(process, request.max_silence_seconds) as dog:
-        with raw_path.open("a") as raw:
+        with session_files.open_append(raw_path, request.data_root) as raw:
             assert process.stdout is not None
             for line in process.stdout:
                 dog.touch()
@@ -747,14 +748,26 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         if isinstance(error, rules.RuleBreach):
                             error.partial = result       # pi priced every turn so far
                         process.wait()
+                        agentsh_guard.close(process, on_event)
                         if on_exit:
                             on_exit(process.pid)
+                        if not isinstance(error, rules.RuleBreach):
+                            stop = agentsh_guard.breach(process, request.agent_name)
+                            if stop:
+                                stop.partial = result
+                                raise stop from error
                         raise
 
     stderr = process.stderr.read() if process.stderr else ""
     result.returncode = process.wait()
+    agentsh_guard.close(process, on_event)
     if on_exit:
         on_exit(process.pid)
+    try:
+        agentsh_guard.check_stopped(process, request.agent_name)
+    except (rules.RuleBreach, agentsh_guard.AgentshRefused) as stop:
+        stop.partial = result           # pi priced every turn so far
+        raise
     if dog.hung:
         stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
         stop.partial = result           # pi priced every turn so far

@@ -35,16 +35,18 @@ import json
 import os
 import queue
 import re
+import shutil
 import socket
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from . import obs_relay
+from . import obs_relay, session_files
 from .sandbox import SandboxFailed
 
 TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"
@@ -576,7 +578,7 @@ class Remote:
                 cwd=str(self.tree), capture_output=True)
             if done.returncode == 0 and (done.stdout or "").strip():
                 path = self.run_.session_dir / "sandbox-uncommitted.patch"
-                path.write_text(done.stdout)
+                session_files.write(path, done.stdout, self.run_.data_root)
                 patch = str(path)
         except Exception as error:   # the VM may already be gone; deleting it still matters
             self._log("sandbox_error", {"vm": self.vm, "error": str(error)[-500:]})
@@ -778,8 +780,17 @@ class Remote:
 
     def handoff_out(self) -> None:
         packed = self._must("sh", ["-c", 'tar -czf - -C "$0" . | base64 -w0', str(self.handoff)])
-        with tarfile.open(fileobj=io.BytesIO(base64.b64decode(packed)), mode="r:gz") as tar:
-            tar.extractall(self.handoff, filter="data")
+        staging = Path(tempfile.mkdtemp())
+        try:
+            with tarfile.open(fileobj=io.BytesIO(base64.b64decode(packed)), mode="r:gz") as tar:
+                tar.extractall(staging, filter="data")
+            for found in sorted(staging.rglob("*")):
+                if found.is_symlink() or not found.is_file():
+                    continue
+                session_files.write(self.handoff / found.relative_to(staging), found.read_bytes(),
+                                    self.run_.data_root)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def commits_out(self) -> None:
         """Fast-forward the host branch to the VM's, through a bundle of the new commits."""
@@ -789,7 +800,7 @@ class Remote:
         packed = self._must("sh", ["-c", f"git bundle create -q - {self.synced}..HEAD | base64 -w0"],
                             cwd=str(self.tree))
         bundle = self.run_.session_dir / "sandbox-out.bundle"
-        bundle.write_bytes(base64.b64decode(packed))
+        session_files.write(bundle, base64.b64decode(packed), self.run_.data_root)
         _host_git("fetch", "-q", str(bundle), "HEAD", cwd=self.tree)
         _host_git("merge", "-q", "--ff-only", "FETCH_HEAD", cwd=self.tree)
         bundle.unlink()

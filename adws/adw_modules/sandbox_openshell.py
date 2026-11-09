@@ -42,7 +42,7 @@ from pathlib import Path
 import yaml
 
 from .sandbox import SandboxFailed
-from . import sandbox_remote
+from . import sandbox_remote, session_files
 from .sandbox_remote import Remote
 
 CLI = "openshell"
@@ -406,8 +406,9 @@ class OpenShell(Remote):
                 raise OpenShellError(f"{path} is outside the sandbox image's folder {folder}. "
                                      f"Run {_SETUP_HINT} for this layout.")
         file = Path(self.run_.session_dir) / "openshell-policy.yaml"
-        file.write_text(policy_yaml(folder, repo_settings.load(repo_root(self.tree)).sandbox_allow,
-                                    sandbox_remote.harnesses(getattr(self.run_, "cfg", None))))
+        session_files.write(file, policy_yaml(folder, repo_settings.load(repo_root(self.tree)).sandbox_allow,
+                                              sandbox_remote.harnesses(getattr(self.run_, "cfg", None))),
+                            self.run_.data_root)
         try:
             done = subprocess.run(
                 [CLI, "sandbox", "create", "--name", name, "--from", image_tag(folder, python),

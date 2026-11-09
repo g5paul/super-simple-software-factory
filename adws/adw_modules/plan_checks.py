@@ -16,7 +16,7 @@ from __future__ import annotations
 import subprocess
 import time
 
-from . import quality, sandbox
+from . import quality, sandbox, session_files
 from .data_types import EventRecord, PlanOutput, QualityCheckResult, QualityResult
 from .utils import now_iso, operator_env
 
@@ -43,7 +43,8 @@ def _run(run, index: int, command: str) -> QualityCheckResult:
         returncode = 124
         out = f"{error.stdout or ''}{error.stderr or ''}\nTimed out after {TIMEOUT_SECONDS}s."
     duration = time.monotonic() - clock
-    log.write_text(f"$ {command}\nexit: {returncode}\nduration_seconds: {duration:.3f}\n\n{out}\n")
+    session_files.write(log, f"$ {command}\nexit: {returncode}\nduration_seconds: {duration:.3f}\n\n{out}\n",
+                        run.data_root)
     passed = returncode == 0
     run.tracer.event(EventRecord(
         adw_id=run.adw_id, phase_id=phase.phase_id, type="tool_call", name=f"quality:{name}",

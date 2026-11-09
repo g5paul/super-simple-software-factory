@@ -10,14 +10,15 @@ disposes.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
-from . import (account, agent_cc, agent_pi, budget, permissions, prices, prompts, repo_settings,
-               rules, sandbox, secret_files, silence)
+from . import (account, agent_cc, agent_pi, agentsh_guard, budget, permissions, prices, prompts, repo_settings,
+               rules, sandbox, secret_files, session_files, silence)
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -176,8 +177,8 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     if builtin:
         enforced.append(builtin)
     user_text = prompts.render(agent.prompt_engineering.user, variables)
-    prompts.save(agent_dir / "prompts", "system.md", system_text)
-    prompts.save(agent_dir / "prompts", "user.md", user_text)
+    prompts.save(agent_dir / "prompts", "system.md", system_text, root=run.data_root)
+    prompts.save(agent_dir / "prompts", "user.md", user_text, root=run.data_root)
 
     session_key = f"{agent.name}:{call.session}" if call.session else agent.name
     session_id = _agent_session_id(run, agent, session_key)
@@ -216,6 +217,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         budget.check_live(run, agent.name, phase.phase_id)
         budget.check_daily(run, agent.name, phase.phase_id)
         budget.check_machine(run, agent.name, phase.phase_id)
+        tally = rules.RefusalTally()     # per send; agentsh's exec denials add to it too
         request = AgentRequest(
             prompt=prompt_text,
             system_prompt=system_text,
@@ -224,9 +226,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             model=agent.model,
             thinking=agent.thinking,
             session_id=session_id,
-            # absolute: these are read by the subprocess, which runs in repo_root
-            session_dir=str((agent_dir / f"{agent.coding_agent}_sessions").resolve()),
-            raw_output_path=str((agent_dir / "raw_output.jsonl").resolve()),
+            # absolute (lexically, never resolve(): it would follow an agent's link);
+            # these are read by the subprocess, which runs in repo_root
+            session_dir=os.path.abspath(agent_dir / f"{agent.coding_agent}_sessions"),
+            raw_output_path=os.path.abspath(agent_dir / "raw_output.jsonl"),
+            data_root=str(run.data_root),
             tools=agent.tools,
             extensions=agent.harness_engineering,
             cwd=str(run.repo_root),
@@ -236,9 +240,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             max_silence_seconds=silent_after,
             secret_files=protected,
             agent_env=settings.agent_env,
+            local_guard=getattr(run, "local_guard", None),
+            refusal_tally=tally,
         )
         forward = _event_forwarder(run, phase, agent.name, interface, enforced,
-                                   uncounted=(builtin,) if builtin else ())
+                                   uncounted=(builtin,) if builtin else (), tally=tally)
         try:
             try:
                 result = interface.run(
@@ -250,8 +256,8 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                     on_exit=lambda pid: run.tracer.process_end(run.adw_id, pid))
             except (rules.RuleBreach, budget.BudgetStop, account.RateLimitStop, silence.SilentStop):
                 raise
-            except Exception:
-                forward.ended()        # the agent died with a refuse-rule call pending
+            except Exception as error:
+                forward.ended(getattr(error, "partial", None))   # the agent died with a refuse-rule call pending
                 raise
             forward.ended(result)
         except budget.CallBudgetStop as stop:
@@ -268,6 +274,9 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                                   "refusals": breach.refusals,
                                                   "spent": breach.partial.cost if breach.partial else 0.0,
                                                   "cost_reported": bool(breach.partial and breach.partial.cost_reported)}))
+            raise
+        except agentsh_guard.AgentshRefused as stop:
+            count_partial(stop)
             raise
         except account.RateLimitStop as stop:
             # Killed mid-call when the plan moved onto usage credits.
@@ -496,7 +505,7 @@ def _secret_guard(run) -> tuple[list[str], Optional[rules.AgentRule]]:
 
 
 def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: list = (),
-                     can_refuse: bool = True, uncounted: tuple = ()):
+                     can_refuse: bool = True, uncounted: tuple = (), tally=None):
     """One tool_call event per real tool call, with its exact args and result.
     Raises RuleBreach the moment a call breaks a forbid rule; the interface
     then kills the agent before the call can finish.
@@ -529,6 +538,7 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
     harness = getattr(interface, "HARNESS", None)   # agent_pi or agent_cc; None only for a test's stand-in
     pending: dict[str, tuple] = {}      # call id -> (rule, pattern, command)
     denied: set[str] = set()            # call ids Claude Code denied itself (permission_denied)
+    tally = tally if tally is not None else rules.RefusalTally()
     refusals = 0
 
     def check(event: dict) -> None:
@@ -557,7 +567,7 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
             if not (by_claude or by_text):
                 raise rules.RuleBreach(agent_name, rule, pattern, command, builtin=is_builtin(rule))
             if not is_builtin(rule):
-                refusals += 1
+                refusals = tally.add()
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="log", name="rule_refused",
                                          payload={"agent": agent_name, "rule": rule.rule,
@@ -570,6 +580,15 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
 
     def forward(event: dict) -> None:
         etype = event.get("type")
+        if etype == "agentsh_denials":
+            # Denials the policy made outside the exec count: traced with their paths,
+            # never counted.
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="agentsh_denials",
+                                         payload={"agent": agent_name,
+                                                  "denials": event.get("denials", []),
+                                                  "notes": event.get("notes", [])}))
+            return
         if harness is None or (isinstance(etype, str) and etype in RULE_EVENT_TYPES[harness]):
             check(event)
         # The call's span rides the columns; duration_ms stays in the payload as
@@ -641,4 +660,4 @@ def _persist_envelope(run, phase: Phase, agent_name: str, call: AgentCall,
         record = {"agent_name": agent_name, "purpose": resolve(run.cfg, agent_name).purpose,
                   "output_type": call.output_type.__name__, "attempt": attempt,
                   **envelope.model_dump()}
-        (run.session_dir / agent_name / "envelope.json").write_text(json.dumps(record, indent=2))
+        session_files.write(run.session_dir / agent_name / "envelope.json", json.dumps(record, indent=2), run.data_root)

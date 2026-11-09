@@ -39,7 +39,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import account, budget, prices, rules, sandbox, silence
+from . import account, agentsh_guard, budget, prices, rules, sandbox, session_files, silence
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import agent_env, mark_agent, operator_env
@@ -276,6 +276,12 @@ def _partial(turns: dict[str, dict], output: dict[str, int]) -> AgentResult:
                        cost_reported=False)
 
 
+def _partial_from_final(final: dict, cost: float) -> AgentResult:
+    usage = _usage(final.get("usage") or {}, cost)
+    return AgentResult(tokens=usage.total_tokens, cost=usage.total_cost, usage=usage,
+                       cost_reported=True)
+
+
 def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None,
         on_spawn: Optional[Callable[[int], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None) -> AgentResult:
@@ -297,15 +303,26 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     background = 0                  # Claude Code's background tasks still running
     # sandbox.start gives the child a DEVNULL stdin, for the reason agent_pi gives.
     tree = sandbox.current()
-    process = tree.start(cmd, cwd=request.cwd,
-                         env=_with_refusals(child_env(request.agent_name, request.adw_id,
-                                                   request.agent_env),
-                                            request.refuse_rules, tree))
+    process = agentsh_guard.start(
+        tree, HARNESS, cmd, cwd=request.cwd,
+        env=_with_refusals(child_env(request.agent_name, request.adw_id, request.agent_env),
+                           request.refuse_rules, tree),
+        guard=request.local_guard, tally=request.refusal_tally)
     if on_spawn:
         on_spawn(process.pid)
+    left_by = None
+
+    def keep_spend(stop) -> None:
+        if final:
+            cumulative = float(final.get("total_cost_usd") or 0.0)
+            session_files.write(ledger, json.dumps({"cost": cumulative}), request.data_root)
+            stop.partial = _partial_from_final(final, max(0.0, cumulative - prior_cost))
+        else:
+            stop.partial = _partial(turns, output)
+
     with silence.watch(process, request.max_silence_seconds) as dog:
         try:
-            with raw_path.open("a") as raw:
+            with session_files.open_append(raw_path, request.data_root) as raw:
                 assert process.stdout is not None
                 for line in process.stdout:
                     dog.touch()
@@ -344,7 +361,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         if not resume:
                             # The session exists from here on, so a send that dies
                             # mid-turn is still resumed next time, never re-created.
-                            ledger.write_text(json.dumps({"cost": 0.0}))
+                            session_files.write(ledger, json.dumps({"cost": 0.0}), request.data_root)
                     if etype == "assistant":
                         # Per message, subagents' too: a killed call never sends the
                         # result event that totals them.
@@ -378,7 +395,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                             if isinstance(error, rules.RuleBreach):
                                 error.partial = _partial(turns, output)
                             raise
-        except BaseException:
+        except BaseException as error:
+            left_by = error
             # Leaving mid-call, by a stop or by `just kill`: the agent must not
             # run on. On the host the kill reaches it too, but in a sandbox VM
             # nothing else does, and the wait below would last until it finished.
@@ -387,9 +405,22 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         finally:
             stderr = process.stderr.read() if process.stderr else ""
             result.returncode = process.wait()
+            agentsh_guard.close(process, on_event)
             if on_exit:
                 on_exit(process.pid)
+            if isinstance(left_by, Exception) and not isinstance(left_by, rules.RuleBreach):
+                # Three denials replace whatever other stop the call was leaving by.
+                stop = agentsh_guard.breach(process, request.agent_name)
+                if stop:
+                    keep_spend(stop)
+                    raise stop from left_by
 
+    try:
+        agentsh_guard.check_stopped(process, request.agent_name)
+    except (rules.RuleBreach, agentsh_guard.AgentshRefused) as stop:
+        # agentsh's denials reached the limit, or its service failed. The call keeps its spend.
+        keep_spend(stop)
+        raise
     if dog.hung:
         stop = silence.SilentStop(request.agent_name, request.max_silence_seconds / 60, request.adw_id)
         stop.partial = _partial(turns, output)
@@ -399,7 +430,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         raise RuntimeError(f"claude exited {result.returncode} without a result: "
                            f"{stderr.strip()[-800:]}")
     cumulative = float(final.get("total_cost_usd") or 0.0)
-    ledger.write_text(json.dumps({"cost": cumulative}))
+    session_files.write(ledger, json.dumps({"cost": cumulative}), request.data_root)
     result.usage = _usage(final.get("usage") or {}, max(0.0, cumulative - prior_cost))
     result.tokens = result.usage.total_tokens
     result.cost = result.usage.total_cost

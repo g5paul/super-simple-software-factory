@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import agents, git_helper
+from . import agents, git_helper, session_files
 from .console import Console
 from .data_types import AgentCall, EnvelopeBase, EventRecord, Phase, PhaseParams
 from .utils import ensure_dir, now_iso
@@ -46,12 +46,14 @@ class Run:
         self.tracer = tracer
         self.console = Console(tracer, adw_id)
         self.engineer = engineer
+        self.local_guard = None     # session.ensure fills it; agents.send carries it
         self.phases: list[Phase] = []
         self.tokens = 0
         self.cost = 0.0
         self._seq = tracer.max_phase_seq(adw_id)   # a joined run continues the sequence
         self.repo_root = git_helper.repo_root()    # where every agent is spawned to work
         data_root = cfg.defaults.data_root or cfg.defaults.data_dir   # absolute once anchored
+        self.data_root = Path(data_root)
         self.session_dir = ensure_dir(Path(data_root) / "sessions" / adw_id)
         self.context_handoff_dir = ensure_dir(self.session_dir / "context_handoff")
         self._agent_map_path = self.session_dir / "agent_map.json"
@@ -61,7 +63,7 @@ class Run:
     # ── agent map (adw_id -> per-agent coding-agent session ids) ────────────
     def save_agent_map(self, agent: str, entry: dict) -> None:
         self.agent_map[agent] = entry
-        self._agent_map_path.write_text(json.dumps(self.agent_map, indent=2))
+        session_files.write(self._agent_map_path, json.dumps(self.agent_map, indent=2), self.data_root)
 
     # ── usage (run totals mirror what the tracer accumulates in sqlite) ─────
     def add_usage(self, tokens: int, cost: float) -> None:

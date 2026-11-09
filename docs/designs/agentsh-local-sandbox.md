@@ -699,6 +699,18 @@ The check runs git and Python inside a repo an agent can change, so each setting
 
 The engineer decided on 2026-11-09 to drop the approach and install from the hub: the skill's source runs the install, reads only `repo.yaml` and `sssf.config.yaml` from the project as data, and shows a diff against what's installed before the sudo lines. The old script stays until that merges. `specs/tasks/guard-agentsh-hub-install.md` is the task.
 
+### The hub-install run, 8b800eb5
+
+The chain ran on 2026-11-09 from `specs/tasks/guard-agentsh-hub-install.md` and passed in round 3, at $6.03. It merged as c065858. The report is [guard-run-8b800eb5.md](agentsh/guard-run-8b800eb5.md).
+
+The install now runs from the hub: `uv run --directory <hub> .claude/skills/sssf/scripts/agentsh_install.py --repo <project>`. The policy code and the config template are the hub's. It reads the project's `repo.yaml`, `sssf.config.yaml` and `stamp.json` as data, imports nothing from the project, and runs no program or git there. It shows a diff against what's installed before the sudo lines. The reviewer planted `yaml.py`, `sitecustomize.py` and fake `adw_modules` in the project, and none ran. A new `network_allow` host and a `data_dir: /` change showed as `+` lines. A `fail_open` in the project's template never reached the output.
+
+Removing the project's old `adw_agentsh_policy.py` took a change to `install.py --update`, which now deletes SSSF files a newer skill retired. That part drew both harms:
+- **Round 1:** a forged `stamp.json` record such as `adws/adw_modules/../../.git/config`, with the target's checksum, made the engineer's update delete it, `~/.bashrc` too. The fix refused `..` and parent links.
+- **Round 2:** an agent still running during the update could swap a folder for a link between the check and the delete, 5 times in 15,000. The fix walks open folder descriptors with `O_NOFOLLOW` and deletes relative to them.
+
+Left open, in `config.md`: a malformed `stamp.json` record makes `--update` crash before it saves the stamp, which is denial of service only. The version check reads an agent-editable stamp. A forged record can delete an in-repo SSSF file. A FIFO at `repo.yaml` stalls the install.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -724,5 +736,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
-4. The chain run after step 2, from `specs/tasks/guard-agentsh-hub-install.md`: install from the hub, reading only data from the project, with a diff before the sudo lines. The first attempt, e027505a, is recorded above.
-5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. It needs a hub policy and one sudo install.
+4. The `install.py --update` crash on a malformed `stamp.json` record, in the next guard run with whatever step 3 turns up.
+5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. The hub install generates its policy, and the engineer runs one sudo install.

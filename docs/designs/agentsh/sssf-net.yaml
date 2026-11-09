@@ -40,6 +40,11 @@ network_rules:
     domains: ['api.anthropic.com', '*.anthropic.com', 'api.openai.com', 'chatgpt.com', '*.chatgpt.com']
     ports: [443]
     decision: allow
+  # The login refresh hosts: pi's ChatGPT token and Claude Code's OAuth token.
+  - name: sssf-auth-hosts
+    domains: ['auth.openai.com', 'platform.claude.com']
+    ports: [443]
+    decision: allow
   # The package registries.
   - name: sssf-registries
     domains: ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org', 'crates.io', 'index.crates.io', 'static.crates.io']

@@ -755,10 +755,15 @@ The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspa
 
 The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the worktree if they get that far. To see the copied `just` run, set `JUST_NO_DOTENV=true` first.
 
+### Status on 2026-11-09: published, opt-in
+
+The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
+
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
-4. What agentsh denies the hub's reviewers: `tar -x` of a tree with subfolders fails into the scratch folder and `/tmp`, though each open on its own passes; uv can't make a venv in `~/.cache/uv`, so a reviewer can't run the suite on another Python; the `../uv.toml` lookup above a worktree.
-5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. The policy renders from the install clone `~/github/sssf-install` (see `docs/sssf.md`), since the install refuses to run from inside the project it installs for. It waits on the engineer's sudo install, then a guard run on the hub.
+4. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` of a tree with subfolders fails in the scratch folder and `/tmp`, though each open on its own passes, and the denial log has no entry for it: diagnose it in the fork first. Package managers unpack tarballs, so `bun install` or `npm install` likely fails the same way. uv can't make a venv in `~/.cache/uv`, so `uv run --with` and a new dependency fail. The `../uv.toml` lookup above a worktree is denied too. The fix to the policy goes through the guard chain.
+5. Rollout step 4, after item 4: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
+6. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.

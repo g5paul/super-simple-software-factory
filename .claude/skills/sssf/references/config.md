@@ -453,6 +453,8 @@ It reads shell commands only. A command another tool runs, such as a pi extensio
 
 With `local_guard: agentsh` in `repo.yaml`, every agent on this machine runs as `agentsh wrap` under a policy SSSF generates from the repo's settings (`secret_files`, `deny_exec`, `network_allow`). The text checks stay on. SSSF reads the setting once, when the run starts; a later edit reaches the next run only.
 
+It's opt-in, and tested so far only on Python repos with a Claude Code roster. Two gaps would break other work: `tar -x` fails on files in subfolders, so a package manager that unpacks tarballs, such as `bun install` or `npm install`, likely fails, and uv can't build an environment in `~/.cache/uv`, so `uv run --with` and a new dependency fail. A pi roster has no policy yet. Keep `local_guard: text` for a repo that needs any of these.
+
 Install step, once per repo and again after those settings change:
 
 1. Run `uv run --directory <hub> .claude/skills/sssf/scripts/agentsh_install.py --repo <project main checkout>`. The hub must be a clean checkout of the SSSF source on this machine, at the skill version in the project's `stamp.json`. The script reads only `repo.yaml`, `sssf.config.yaml` and `stamp.json` from the project and runs nothing from it. It writes the policies and a merged server config into a fresh temp folder, shows a diff against `/etc/agentsh/` (the whole file when nothing is installed), then prints the `sudo install` lines and `sudo systemctl restart agentsh`. Read the diff: a new host or a missing `deny_exec` there is a change to look into. It always prints the restart line, "Nothing to install" included. It never runs sudo.

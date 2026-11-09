@@ -553,6 +553,11 @@ The engineer decided these on 2026-11-09:
 - `git -c a=b commit -m push` is denied. It fails closed, and it's rare.
 - `exec -a "a b" git push` isn't denied, because joined text can't separate that first token from an argument. The old pattern denied it. Getting there takes a deliberate spoof, a copied binary already does the same with less effort, and the network rules still refuse GitHub. A fork patch could match arguments without `argv[0]`, if this ever matters.
 
+The second run's planner found a gap in that pattern, and the engineer decided two more things on 2026-11-09:
+
+- **A newline in a git option.** `.` doesn't cross a newline, so `git -c $'a=b\nc' push` matches neither pattern. The second pattern becomes `(?s)^\S*\s+-.*push`, tested on the fork's engine as above, and a commit message or `--grep` holding a newline stays allowed. Run 8b06e76e builds with the earlier text, so the change goes on the branch after it, in the generated policy's pattern, its tests and `sssf-net.yaml`, and the merge commit says so.
+- **Pi's read loop.** If an exception leaves it outside `on_event`, such as a failed raw log write or a JSON line that isn't an object, no `close` runs, so denials aren't read and that call's spend isn't kept. The call still fails and the wrap ends at exit. `main` behaves the same for pi, so the engineer accepted this as a carve-out from the bar on dropped breaches.
+
 **The first real run must check** these, from the builder's notes:
 
 - Session and handoff paths on a `--worktree` run. `adws/adw_data/sessions/<id>/` and the `REFUSE_*` files may sit in the main checkout, outside `${PROJECT_ROOT}`, so default-deny may refuse them and the chain may fail closed. The fix would be an allow on that folder, which widens what an agent can read across runs. That's the engineer's call at rollout step 2.

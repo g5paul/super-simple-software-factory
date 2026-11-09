@@ -64,19 +64,30 @@ Even so, it guards better than the regexes against an agent's mistakes, which is
 
 ## Decisions
 
-The research note's recommendations, for the engineer to confirm after the proof:
+The engineer settled these on 2026-11-08, after the proof. The direction is that OpenShell stays the local sandbox and agentsh replaces the text guard under `sandbox: none`. How it rolls out is still open.
 
-| Decision | Recommendation |
+| Decision | Settled |
 |---|---|
-| Ship now or wait | A second layer now, behind a `repo.yaml` key such as `local_guard: agentsh`, off by default. The text checkers stay until the proof shows they add nothing |
-| A root server with eBPF | Not yet. The server runs as the engineer's user |
-| The API escape | Closing it is the precondition for calling agentsh a boundary: upstream's fix for #29, or a fix carried in the engineer's fork, with `auth.type: api_key` and the key kept from agents |
-| Install | With sudo, root-owned binaries, config and policies. A file under `~` is one the agent can edit, and policies reload every 30 seconds |
-| Release or `main` | v0.20.6 final for daily use. The proof can test `main` |
-| How a denial counts | A blocked exec counts as a refusal toward the three-refusal stop, not a breach |
-| Rule format | An argv form, such as `deny_exec`, beside `forbid`, which keeps its text uses |
-| Proxy, DLP, FUSE, `BASH_ENV` | All off for SSSF runs. Each changes what the agent sees or where it works |
-| Silent fallback | A failed launch, and an upstream request for `wrap --require-interception` |
+| Direction | agentsh replaces the text guard under `sandbox: none`. `--sandbox openshell` stays the local sandbox and doesn't change. The rollout steps are still open |
+| Who runs the server | A dedicated `agentsh` service user with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`. No root server and no eBPF, and agents can't reach it through ptrace because they run as the engineer |
+| The API escape | Policy denies on the socket, TCP port 18080 and a proxy CONNECT to it, with auth left at `none`. The corpus keeps those checks, so a regression fails loudly. The API stays open to unwrapped local processes |
+| Install | With sudo, root-owned binaries, config and policies. SSSF generates a policy from `repo.yaml` and prints the install command, and a run refuses to start when the installed copy differs, at the cost of one sudo step per rule change |
+| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. v0.20.6 final lacks all five patches |
+| How a denial counts | Only a denied `ptrace_execve` with a named rule counts toward the three-refusal stop, and it's never a breach. File and network denials go to the trace |
+| Rule format | An argv form, `deny_exec`, which becomes agentsh's `command_rules`, beside `forbid`, which keeps its text uses |
+| Proxy, DLP, FUSE, `BASH_ENV` | The session proxy on, because the network allowlist depends on it. The LLM proxy, DLP, FUSE and `BASH_ENV` off |
+| Silent fallback | None. A run refuses to start if the service isn't active or the wrap can't attach. An upstream request for `wrap --require-interception` can wait |
+| Other credentials | A deny list in the policy covering `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.config/sssf-sandbox` and similar, retested with both agents |
+
+## What agentsh-secure-sandbox offers
+
+[g5paul/agentsh-secure-sandbox](https://github.com/g5paul/agentsh-secure-sandbox), at 0e5751b, is a fork of upstream's TypeScript library, version 0.6.3. It installs agentsh inside a cloud VM, replaces `/bin/bash` with a shim and returns a wrapped sandbox object, with adapters for Vercel, E2B and nine other providers. It has no adapter for the local machine, and it pins stock v0.20.5, which has none of the five patches. SSSF is Python and wraps on the host, so it can't use the library directly, and replacing `/bin/bash` isn't something to do on the engineer's machine.
+
+Three parts are still useful:
+
+- **The default policy.** `agentDefault` in `src/policies/presets.ts` ends its file rules with a catch-all deny, and its deny lists are a good source for the credentials decision. Its network list isn't: it allows `github.com`, `*.cloudflare.com` and `*.googleapis.com`, wider than SSSF's allowlist, and the wildcards invite the fronting that the proxy patches closed.
+- **`minimumSecurityMode`.** A run stops when `agentsh detect` reports weaker enforcement than the config requires. SSSF's launch check could do the same.
+- **Credential injection.** `http_services` lets the proxy add a credential so the agent never holds it. The fork has the code in `internal/policy`, but nothing here has tested it, and upstream's review lists finding #41 against its path rule.
 
 The seam is one place: a new local sandbox whose `start` puts `agentsh wrap --policy <name> --root <cwd> --` before the agent's command. That covers `agent_cc.py` and `agent_pi.py` through `tree.start`, and leaves quality checks and git outside the wrap.
 
@@ -428,5 +439,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. The decisions above, settled from the proof.
+3. The rollout and the policy questions still open under Decisions.
 4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, and give the agent a `/dev/null` stdin, which `sandbox.start` already does.

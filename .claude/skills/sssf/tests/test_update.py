@@ -423,3 +423,283 @@ def test_retire_unlinks_through_the_open_parent_not_a_re_resolved_path(repo, tmp
     monkeypatch.setattr(mod.os, "unlink", swap_then_unlink)
     assert mod.retire(Path.cwd(), "adws/adw_modules/sub/x.py", sha(sub / "x.py")) == "removed"
     assert victim.exists() and not Path("adws/adw_modules/sub_moved/x.py").exists()
+
+
+# ── a malformed stamp.json is refused before anything is written ─────────────
+
+def run_update() -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SKILL / "scripts" / "install.py"), "--update"],
+                          capture_output=True, text=True, check=False)
+
+
+def snapshot(root: Path) -> dict:
+    seen = {}
+    for folder, dirs, names in os.walk(root, followlinks=False):
+        for name in [*dirs, *names]:
+            path = Path(folder) / name
+            mode = path.lstat().st_mode
+            if path.is_symlink():
+                data = os.readlink(path)
+            elif path.is_file():
+                data = path.read_bytes()
+            else:
+                data = None
+            seen[str(path)] = (mode, data)
+    registry = Path(os.environ["SSSF_REGISTRY"])
+    seen["registry"] = registry.read_bytes() if registry.exists() else None
+    return seen
+
+
+def assert_refused(result: subprocess.CompletedProcess, *keys: str) -> None:
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    assert "git checkout -- adws/adw_sssf_config/stamp.json" in result.stderr
+    assert "git log -- adws/adw_sssf_config/stamp.json" in result.stderr
+    for key in keys:
+        assert json.dumps(key) in result.stderr
+
+
+def prime() -> None:
+    """Make the cwd a repo where an unchecked update would copy, add and delete."""
+    pretend_an_older_skill_stamped(REVIEWER)
+    for path in Path("adws/adw_data/prompt_engineering").rglob("user.md"):
+        if path != REVIEWER:
+            path.unlink()
+            break
+    RETIRED.write_text("old = 1\n")
+    record_retired(RETIRED)
+
+
+@pytest.fixture
+def primed(repo):
+    """A repo where an unchecked update would copy, add and delete."""
+    prime()
+    return repo
+
+
+@pytest.fixture
+def plain_primed(tmp_path, monkeypatch):
+    """The same, from a plain install that stamps the shipped sssf.config.yaml."""
+    monkeypatch.chdir(tmp_path)
+    install()
+    prime()
+    return tmp_path
+
+
+GOOD = "a" * 64
+GONE = "adws/zz_gone.py"
+NUL_KEY = "adws/adw_modules/a\x00b.py"
+SURROGATE_KEY = "adws/adw_modules/\ud800.py"
+EXTRA_ROSTER = "adws/adw_sssf_config/sssf.config.x.yaml"
+
+MALFORMED_RECORDS = [
+    (NUL_KEY, {"source": "x", "sha256": GOOD}),
+    (SURROGATE_KEY, {"source": "x", "sha256": GOOD}),
+    (GONE, {"source": GONE}),
+    (GONE, {"source": GONE, "sha256": "0" * 63}),
+    (GONE, {"source": GONE, "sha256": "z" * 64}),
+    (GONE, {"source": GONE, "sha256": "0" * 64 + "\n"}),
+    (GONE, "x"),
+    (GONE, []),
+    (GONE, None),
+    (GONE, 1),
+    (GONE, {"sha256": "0" * 64}),
+    (GONE, {"source": 1, "sha256": "0" * 64}),
+    (str(AGENTS), "REMOVE_SHA256"),
+    (str(CONFIG), {"source": "nope.yaml", "sha256": GOOD}),
+    (str(CONFIG), {"source": "adws", "sha256": GOOD}),
+    (str(CONFIG), {"source": "../../../etc/hostname", "sha256": GOOD}),
+    (str(CONFIG), {"source": "sssf.config.yaml\x00", "sha256": GOOD}),
+    (EXTRA_ROSTER, {"source": "adws/adw_modules/agents.py", "sha256": GOOD}),
+]
+
+
+@pytest.mark.parametrize("key,value", MALFORMED_RECORDS)
+def test_a_malformed_record_is_refused_before_any_write(primed, key, value):
+    record = stamp()
+    if value == "REMOVE_SHA256":
+        value = dict(record["files"][key])
+        del value["sha256"]
+    record["files"][key] = value
+    STAMP.write_text(json.dumps(record))
+    before = snapshot(primed)
+    assert_refused(run_update(), key)
+    assert snapshot(primed) == before
+
+
+def test_every_bad_record_is_named_at_once(primed):
+    record = stamp()
+    record["files"][NUL_KEY] = {"source": "x", "sha256": GOOD}
+    record["files"][GONE] = {"source": GONE}
+    STAMP.write_text(json.dumps(record))
+    before = snapshot(primed)
+    assert_refused(run_update(), NUL_KEY, GONE)
+    assert snapshot(primed) == before
+
+
+def _folder() -> None:
+    STAMP.unlink()
+    STAMP.mkdir()
+
+
+@pytest.mark.parametrize("raw", [
+    b"{", b"\xff\xfe", b"[]", b"{}", b'{"files": []}', b"[" * 100000,
+    b'{"files": {}, "skill": "\\ud800"}', b'{"files": {}, "skill": 1}', _folder,
+])
+def test_a_malformed_stamp_file_is_refused(primed, raw):
+    if callable(raw):
+        raw()
+    else:
+        STAMP.write_bytes(raw)
+    before = snapshot(primed)
+    assert_refused(run_update())
+    assert snapshot(primed) == before
+
+
+@pytest.mark.parametrize("args", [[], ["--coding-agent", "claude_code"], ["--chatgpt"], ["--container"]])
+def test_a_stamp_from_every_install_shape_updates(tmp_path, monkeypatch, args):
+    monkeypatch.chdir(tmp_path)
+    install(*args)
+    names = {"sssf.config.yaml": "pi", "sssf.config.claude_code.yaml": "claude_code",
+             "sssf.config.chatgpt.yaml": "chatgpt"}
+    own = stamp()["files"][str(CONFIG)]["source"]
+    for source, name in names.items():
+        if source != own:
+            install("--add-roster", name)
+    for _ in range(2):
+        result = install("--update")
+        assert "refusing" not in result.stderr
+    assert "updated: 0" in result.stdout
+
+
+def test_a_stamp_without_skill_and_with_an_extra_key_updates(repo):
+    record = stamp()
+    record.pop("skill", None)
+    record["note"] = "x"
+    STAMP.write_text(json.dumps(record, indent=2, sort_keys=True))
+    install("--update")
+
+
+# ── a stamp nested too deeply to save is refused, or saved; never a traceback ─
+
+def write_nested(base: str, where: str, depth: int) -> None:
+    """Write `base` with a `depth`-level array in it, by text substitution.
+
+    The test process never parses or encodes the deep value: it would recurse here.
+    """
+    record = json.loads(base)
+    if where == "top":
+        record["note"] = "__DEEP__"
+    else:
+        record["files"][GONE] = {"source": GONE, "sha256": GOOD, "extra": "__DEEP__"}
+    STAMP.write_text(json.dumps(record).replace('"__DEEP__"', "[" * depth + "]" * depth))
+
+
+def unreadable_depth() -> int:
+    for depth in (20_000, 200_000, 2_000_000):
+        try:
+            json.loads("[" * depth + "]" * depth)
+        except RecursionError:
+            return depth
+    pytest.skip("this interpreter reads 2,000,000 levels")
+
+
+def saved_deep(depth: int) -> bool:
+    """Whether stamp.json holds a `depth`-level array. save_stamp indents it onto
+    separate lines, so compare with whitespace removed; nothing is parsed."""
+    return "[" * depth in "".join(STAMP.read_text().split())
+
+
+def assert_refused_or_saved(result: subprocess.CompletedProcess, before: dict, depth: int) -> None:
+    message = result.stdout + result.stderr
+    if result.returncode == 1:
+        assert_refused(result)
+        assert "nested too deeply" in result.stderr, message
+        assert snapshot(Path.cwd()) == before
+    else:
+        assert result.returncode == 0, message
+        assert "Traceback" not in result.stderr and "refusing" not in result.stderr, message
+        assert saved_deep(depth), message
+
+
+@pytest.mark.parametrize("where", ["top", "record"])
+@pytest.mark.parametrize("depth", [900, 990, 1200, 2000, 5000])
+def test_a_deep_stamp_is_refused_before_any_write_or_saved(plain_primed, where, depth):
+    base = STAMP.read_text()
+    write_nested(base, where, depth)
+    before = snapshot(plain_primed)
+    assert_refused_or_saved(run_update(), before, depth)
+
+
+@pytest.mark.parametrize("where", ["top", "record"])
+def test_a_stamp_too_deep_to_read_is_refused_before_any_write(plain_primed, where):
+    base = STAMP.read_text()
+    write_nested(base, where, unreadable_depth())
+    before = snapshot(plain_primed)
+    result = run_update()
+    assert_refused(result)
+    assert "nested too deeply" in result.stderr
+    assert snapshot(plain_primed) == before
+
+
+@pytest.mark.parametrize("where", ["top", "record"])
+def test_a_moderately_nested_stamp_updates(tmp_path, monkeypatch, where):
+    monkeypatch.chdir(tmp_path)
+    install()
+    base = STAMP.read_text()
+    write_nested(base, where, 100)
+    for _ in range(2):
+        result = run_update()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "refusing" not in result.stderr and "Traceback" not in result.stderr
+        assert saved_deep(100)
+
+
+def test_whatever_read_stamp_accepts_saves(tmp_path, monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sssf_install", SKILL / "scripts/install.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.chdir(tmp_path)
+    install()
+    base = STAMP.read_text()
+    root = Path.cwd()
+    too_deep = ["stamp.json is nested too deeply"]
+
+    hi = unreadable_depth()
+    write_nested(base, "top", hi)
+    assert mod.read_stamp(root)[1] == too_deep
+
+    def accepted(depth: int) -> bool:
+        write_nested(base, "top", depth)
+        return mod.read_stamp(root)[1] == []
+
+    lo = 1                      # accepted; the search keeps lo accepted and hi refused
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if accepted(mid):
+            lo = mid
+        else:
+            hi = mid
+    n = lo
+    assert n >= 100
+
+    def read_then_save(depth: int):
+        write_nested(base, "top", depth)
+        record, problems = mod.read_stamp(root)
+        if not problems:
+            mod.save_stamp(root, record)
+        return problems
+
+    assert read_then_save(n) == []
+    assert read_then_save(n + 1) == too_deep
+
+
+def test_read_stamp_has_one_try():
+    import ast
+    tree = ast.parse((SKILL / "scripts/install.py").read_text())
+    func = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "read_stamp")
+    assert sum(isinstance(n, ast.Try) for n in ast.walk(func)) == 1
+    for call in (n for n in ast.walk(func) if isinstance(n, ast.Call)):
+        name = getattr(call.func, "attr", getattr(call.func, "id", ""))
+        assert name != "setrecursionlimit"

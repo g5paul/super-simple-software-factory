@@ -253,11 +253,27 @@ Still open in this design:
 - The SNI check refuses a ClientHello split across TLS records, and Encrypted Client Hello, whose outer SNI is the CDN's public name. Both fail closed.
 - A connect to the proxy isn't logged as a `ptrace_network` event.
 
+## The network allowlist on the patched build, 2026-11-08
+
+`agentsh 0.20.6-dev.fork+bcf186b`, with `require_sni_match: true` and the proxy back on `127.0.0.1:0`. The policy has no loopback allow.
+
+| Check | Result |
+| --- | --- |
+| `api.anthropic.com`, npm, PyPI, `chatgpt.com`, `api.openai.com`, `index.crates.io` with a matching SNI | allowed |
+| Python `urllib`, which reads `HTTPS_PROXY` | allowed |
+| Denied names, raw IPs, port 80, the agentsh API and `sshd` through the proxy | 403 |
+| Fronting through `chatgpt.com`, `api.openai.com`, `registry.npmjs.org`, `api.anthropic.com` and `pypi.org` | the proxy closes the tunnel, and the handshake ends with an EOF |
+| A direct connect: curl with no proxy, Python sockets, `127.0.0.1:22`, `127.0.0.2:22` | `EACCES` |
+| The bypass corpus under `sssf-proof` | as before: every text-guard bypass held, and the copied `just` ran |
+
+**Node's `fetch` ignores `HTTPS_PROXY`**, so it failed with `EACCES`. With `NODE_USE_ENV_PROXY=1`, Node 24 sends it through the proxy, where `registry.npmjs.org` was allowed and `example.com` was refused. SSSF's wrap must set that variable, and the proof must check that Claude Code and pi reach their model host.
+
+**A session may load only a listed policy.** The build includes upstream 6cb6c7d from 2026-11-07. A session may load only a policy named in `policies.allowed`, or only the default when the list is empty. It refused `sssf-net`, and also the `agent-default` that `wrap` asks for when given no `--policy`. The config now lists both proof policies, and SSSF must pass `--policy` every time. The rule also keeps an agent from picking a looser policy for itself.
+
 ## Next
 
-1. Install the patched build and the config, then run the network and fronting checks again, and the service checks.
-2. Check that Claude Code and pi send their traffic through `HTTPS_PROXY`. A client that ignores it fails closed.
-3. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
-4. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
-5. The decisions above, settled from the proof.
-6. A guard chain run for the wrap.
+1. The kill check on the patched build. Then wrapped Claude Code and pi agents with `NODE_USE_ENV_PROXY=1`: each must reach its model host and nothing else.
+2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
+3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
+4. The decisions above, settled from the proof.
+5. A guard chain run for the wrap.

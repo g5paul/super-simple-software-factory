@@ -21,3 +21,9 @@ c "deny: direct to 127.0.0.2:22" --noproxy '*' http://127.0.0.2:22/
 p=${HTTPS_PROXY#http://}
 f() { printf '%-46s ' "$1"; printf 'GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n' "$3" | timeout 15 openssl s_client -quiet -proxy "$p" -connect "$2:443" -servername "$3" 2>&1 | tr -d '\r' | grep -m1 -E '^HTTP/|<title>|error' | cut -c1-80; }
 for h in chatgpt.com api.openai.com registry.npmjs.org api.anthropic.com pypi.org; do f "deny: front via $h, SNI example.com" "$h" example.com; done
+# Controls: a matching SNI through the Cloudflare hosts still works.
+for u in https://chatgpt.com/ https://api.openai.com/v1/models https://registry.npmjs.org/-/ping https://index.crates.io/config.json; do c "allow: $u" "$u"; done
+# Clients and the proxy env.
+printf '%-46s ' "allow: python urllib uses the proxy env"; python3 -c 'import urllib.request as u; print(u.urlopen("https://pypi.org/simple/", timeout=10).status)' 2>&1 | tail -1
+printf '%-46s ' "deny: node fetch ignores the proxy env"; node -e 'fetch("https://registry.npmjs.org/-/ping").then(r=>console.log(r.status)).catch(e=>console.log("fail:", e.cause?.code||e.message))' 2>&1 | tail -1
+printf '%-46s ' "allow: node fetch, NODE_USE_ENV_PROXY=1"; NODE_USE_ENV_PROXY=1 node -e 'fetch("https://registry.npmjs.org/-/ping").then(r=>console.log(r.status)).catch(e=>console.log("fail:", e.cause?.code||e.message))' 2>&1 | tail -1

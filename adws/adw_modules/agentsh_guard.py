@@ -43,8 +43,13 @@ PAGE = 5000
 POLL_SECONDS = 5
 TIMEOUT = 10
 
-FIX = ("run `uv run adws/adw_agentsh_policy.py` and the sudo steps it prints, "
+INSTALL = "uv run --directory <hub> .claude/skills/sssf/scripts/agentsh_install.py --repo <this checkout>"
+# <hub> is the SSSF source checkout on this machine, at this project's skill version.
+FIX = (f"install from the SSSF hub: run `{INSTALL}` and the sudo lines it prints, "
        "or set `local_guard: text` in adws/adw_sssf_config/repo.yaml")
+DIFFERS = ("An agent may have changed adws/. Run `git status adws/` and `git diff adws/` (and "
+           "`git log --stat -- adws/`, since a run may have committed it), discard any change you "
+           "didn't make, then " + FIX)
 
 
 class AgentshRefused(sandbox.SandboxFailed):
@@ -271,6 +276,17 @@ def policy_text(settings: repo_settings.RepoSettings, git_common_dir: str, harne
             f"{commands}file_rules:\n{file_rules(git_common_dir, agent, settings.secret_files, sessions=sessions, refuse_script=refuse_script)}\n{network}")
 
 
+def guard_for(settings, cfg, root: Path, common: str, refuse_script: str, template: str) -> LocalGuard:
+    """The agentsh guard for a checkout, from data alone. `read` and the hub's install script
+    both call it, so the run and the install render the same text."""
+    data_dir = Path(cfg.defaults.data_dir)
+    sessions = str((data_dir if data_dir.is_absolute() else root / data_dir).resolve() / "sessions")
+    harnesses = sorted({"claude_code" if a.coding_agent == "claude_code" else "pi" for a in cfg.agents})
+    policies = {h: Policy(name=(n := policy_name(root, h)), text=policy_text(
+        settings, common, h, n, sessions=sessions, refuse_script=refuse_script)) for h in harnesses}
+    return LocalGuard(mode="agentsh", policies=policies, config_template=template)
+
+
 def read(cfg) -> LocalGuard:
     """What `local_guard` asks, read once. Only session.ensure calls this, before
     worktree.enter moves the process. A repo is asked for first, because
@@ -288,20 +304,12 @@ def read(cfg) -> LocalGuard:
         raise SystemExit("local_guard: agentsh needs a git checkout; this directory is not one. "
                          f"Run `git init` here or set `local_guard: text` in {repo_settings.PATH}.")
     common = worktree.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
-    data_dir = Path(cfg.defaults.data_dir)
-    sessions = str((data_dir if data_dir.is_absolute() else root / data_dir).resolve() / "sessions")
     refuse_script = str(Path(__file__).resolve().with_name("sssf_refuse.py"))
-    harnesses = sorted({"claude_code" if a.coding_agent == "claude_code" else "pi" for a in cfg.agents})
-    policies = {}
-    for harness in harnesses:
-        name = policy_name(root, harness)
-        policies[harness] = Policy(name=name, text=policy_text(
-            settings, common, harness, name, sessions=sessions, refuse_script=refuse_script))
     try:
         template = (Path(__file__).parent / "agentsh_sssf.yaml").read_text()
     except OSError as error:
         raise SystemExit(f"can't read agentsh_sssf.yaml ({error})") from None
-    return LocalGuard(mode="agentsh", policies=policies, config_template=template)
+    return guard_for(settings, cfg, root, common, refuse_script, template)
 
 
 # ── checks ───────────────────────────────────────────────────────────────────
@@ -335,16 +343,16 @@ def check_machine(guard: LocalGuard) -> None:
         raise AgentshRefused(f"agentsh_sssf.yaml can't be rendered ({type(error).__name__}); restore the file from "
                              "the SSSF skill, or set `local_guard: text` in adws/adw_sssf_config/repo.yaml") from None
     if installed != rendered:
-        raise AgentshRefused(f"{CONFIG} is not the file SSSF renders; {FIX}")
+        raise AgentshRefused(f"{CONFIG} differs from what this checkout renders; {DIFFERS}")
     for policy in guard.policies.values():
         if policy.name not in allowed:
-            raise AgentshRefused(f"policy {policy.name} is not in {CONFIG} policies.allowed; {FIX}")
+            raise AgentshRefused(f"policy {policy.name} is not in {CONFIG} policies.allowed; {DIFFERS}")
         try:
             on_disk = (Path(POLICY_DIR) / f"{policy.name}.yaml").read_bytes()
         except OSError:
             raise AgentshRefused(f"policy {policy.name} is not installed in {POLICY_DIR}; {FIX}") from None
         if on_disk != policy.text.encode():
-            raise AgentshRefused(f"installed policy {policy.name} is stale; {FIX}")
+            raise AgentshRefused(f"installed policy {policy.name} differs from what this checkout renders; {DIFFERS}")
 
 
 def check_root(root: str) -> None:

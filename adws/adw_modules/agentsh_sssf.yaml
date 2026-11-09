@@ -47,7 +47,7 @@ dlp:
   mode: disabled
 policies:
   dir: "/etc/agentsh/policies"
-  # adw_agentsh_policy.py fills these in: SSSF's generated policies, one per repo and harness.
+  # agentsh_install.py fills these in: SSSF's generated policies, one per repo and harness.
   # SSSF refuses to start without detect_project_root false.
   detect_project_root: false
   default: ""

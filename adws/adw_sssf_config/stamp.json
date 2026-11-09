@@ -8,10 +8,6 @@
       "sha256": "a447ac1c9492723387c03aa35b9db519e2b52615e9e34fee525a3ece299cddaa",
       "source": "githooks/pre-push"
     },
-    "adws/adw_agentsh_policy.py": {
-      "sha256": "4e747a18c0a49f12ab0f12d79806e951eeddf5c4e53e0fd0f8d75182be633b08",
-      "source": "adws/adw_agentsh_policy.py"
-    },
     "adws/adw_build.py": {
       "sha256": "d6be4a09e536b1556beb724971e48aca1192e6d13d173a86452e209a8a891c17",
       "source": "adws/adw_build.py"
@@ -133,11 +129,11 @@
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
-      "sha256": "05f0e8af0c9f6dd133e2d86d4687e983a691802cd0e8fc476110a9909998616a",
+      "sha256": "f33998a1407599c8a91d015f944ed203efe1974ab4b9fee3448b6c74280b6529",
       "source": "adws/adw_modules/agentsh_guard.py"
     },
     "adws/adw_modules/agentsh_sssf.yaml": {
-      "sha256": "a59d013e1459df1ce36d1afccd675cb3bb1efa3c6dc029eca1322037a24ef1ad",
+      "sha256": "a36a290d7190ed3bdd39ff7fe441565c6b524b94c424a7ac27e9920d7399e51f",
       "source": "adws/adw_modules/agentsh_sssf.yaml"
     },
     "adws/adw_modules/budget.py": {
@@ -317,7 +313,7 @@
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {
-      "sha256": "16954cea00305e4d39bf6c163aa22dc4d8b28b7854c7fa7135e006ac686a307d",
+      "sha256": "59602411237417770de878dbd08f681faeb183e2050bcd1c15d039589d178e14",
       "source": "repo.yaml"
     },
     "adws/adw_sssf_config/sssf.config.yaml": {

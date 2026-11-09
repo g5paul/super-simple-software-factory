@@ -555,13 +555,33 @@ The engineer decided these on 2026-11-09:
 
 The second run's planner found a gap in that pattern, and the engineer decided two more things on 2026-11-09:
 
-- **A newline in a git option.** `.` doesn't cross a newline, so `git -c $'a=b\nc' push` matches neither pattern. The second pattern becomes `(?s)^\S*\s+-.*push`, tested on the fork's engine as above, and a commit message or `--grep` holding a newline stays allowed. Run 8b06e76e builds with the earlier text, so the change goes on the branch after it, in the generated policy's pattern, its tests and `sssf-net.yaml`, and the merge commit says so.
+- **A newline in a git option.** `.` doesn't cross a newline, so `git -c $'a=b\nc' push` matches neither pattern. The second pattern becomes `(?s)^\S*\s+-.*push`, tested on the fork's engine as above, and a commit message or `--grep` holding a newline stays allowed. That run built with the earlier text, so the third run makes the change.
 - **Pi's read loop.** If an exception leaves it outside `on_event`, such as a failed raw log write or a JSON line that isn't an object, no `close` runs, so denials aren't read and that call's spend isn't kept. The call still fails and the wrap ends at exit. `main` behaves the same for pi, so the engineer accepted this as a carve-out from the bar on dropped breaches.
 
 **The first real run must check** these, from the builder's notes:
 
 - Session and handoff paths on a `--worktree` run. `adws/adw_data/sessions/<id>/` and the `REFUSE_*` files may sit in the main checkout, outside `${PROJECT_ROOT}`, so default-deny may refuse them and the chain may fail closed. The fix would be an allow on that folder, which widens what an agent can read across runs. That's the engineer's call at rollout step 2.
 - That the attach lines and event fields match what `internal/cli/wrap.go` and the events API really produce, and that `order=asc` and `type=ptrace_execve` are honoured.
+
+### The second guard run, 8b06e76e
+
+The chain ran on 2026-11-09 from `specs/tasks/guard-agentsh-wrap-2.md` and stopped at three rounds, at $11.20, with one bypass left. The decided changes went in, and text mode matched `main` on all 64 command forms. Stop paths ran under a fake wrap that forks as `wrap.go` does, not under the service. The report is [guard-run-8b06e76e.md](agentsh/guard-run-8b06e76e.md).
+
+Each round closed the bypass before it, and the fixes for rounds 1 and 2 opened the next:
+
+1. A billing refusal killed only the wrap, so the agent ran on unread.
+2. The fix went through `ps`, so a stop with no room to fork left the agent running.
+3. The `/proc` walk added for that read `stat` as text. A child whose name isn't valid UTF-8 raises `ValueError`, the walk skips it, and killing the agent orphans it before `ps` looks. Reading bytes fixes it.
+
+I offered to make the last fixes by hand and merge, because the setting is off by default. The engineer refused on 2026-11-09: guard code goes through the chain, or the chain isn't checking what ships. The engineer also decided:
+
+- `sudo install` follows a link, so an agent running during the install could get a root-only file copied to `/etc/agentsh/sssf.yaml`. The install lines print a warning to stop every agent first, and this stays a limit, because a check in the printed commands would still leave a race.
+- `GIT_CONFIG_COUNT` aliases, `git send-pack` and the `mv .git .git2` rename go in `config.md`'s known limits. The two git spellings also pass the text checks, so they're cases in [corpus.sh](agentsh/corpus.sh).
+- A stop with no file descriptors left, and a signal inside the walk, stay open as limits. Closing the first means recording the agent's pid, which is new state, and no agent action was found that reaches it.
+
+`specs/tasks/guard-agentsh-wrap-3.md` is the third run's task. The branches `sssf/cf9d8014` and `sssf/8b06e76e` and their worktrees stay until it's settled.
+
+The first real run must also check that the network rules refuse both git spellings, and whether the rename gets round the file rules under the service.
 
 ## Running the checks
 
@@ -577,5 +597,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 1, the second guard chain run for the wrap, from `specs/tasks/guard-agentsh-wrap-2.md`.
+3. Rollout step 1, the third guard chain run for the wrap, from `specs/tasks/guard-agentsh-wrap-3.md`.
 4. A sudo step to install new generated policies, then rollout step 2 in sssf-sandbox.

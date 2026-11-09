@@ -280,6 +280,8 @@ Still open in this design:
 
 **pi 1.4.0, `openai/gpt-5.6-luna`.** It hung for the full 240-second timeout and made no network call. Its ChatGPT token had expired, so the login refresh at `auth.openai.com`, now allowed, never ran. Four seconds in, the server logged `ptrace WATCHDOG: tracee ptrace-stopped but Run loop not advancing it (#369 #2)` for pi's main thread, stopped in `openat`. The watchdog logged no recovery and no dump. Claude Code's run logged the same warning once, on a `close`. Upstream has six commits on #369, a deadlock between FUSE and clone, and the watchdog that should recover such threads. `wrap` prints "FUSE workspace mount" even with `sandbox.fuse.enabled: false`. When the timeout ended `wrap`, pi died with it.
 
+**No fix upstream yet, 2026-11-08.** Upstream `main` has nothing past a07c789. Of the 67 upstream branches, the #369 ones are the source branches of squash merges already on `main`. A trial merge leaves only conflicts with code `main` later rewrote, plus diagnostics such as an env-gated stop/resume trace in `fix-369-ptrace-stop-resume-trace`. Issue #369 closed on 2026-05-29 and shipped in v0.20.3. It covered seccomp with unix sockets and FUSE on exe.dev kernels. The watchdog names #369 for any stopped thread, so our stall only shares its label. No upstream issue, open or closed, matches an empty session on file calls, a stall under Node or Bun, or WSL.
+
 So ptrace mode on this machine runs simple tools but not yet the agents SSSF runs. Both failures are closed: a call is denied or a thread waits, and nothing runs unchecked.
 
 ## Next

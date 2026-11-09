@@ -466,6 +466,11 @@ More known limits, each with what still applies:
 - `mv .git .git2`, an edit and a move back, on a run without `--worktree`. The after-call guard undoes it.
 - A repo whose path holds `push` has every `git -C <path>` denied. It fails closed.
 - A stop with the chain out of file descriptors, where neither `ps` nor `/proc` can be read, kills only the wrap. It has no parent-death signal, so the agent can run on until it exits.
+- `git -c include.path=<file> p`, `git --config-env=alias.p=VAR p`, `GIT_CONFIG_GLOBAL=<file> git p` and `/usr/lib/git-core/git-push` also reach exec without the word where the rule looks. The network rules refuse GitHub.
+- An `argv[0]` holding a newline or a tab gets past `sssf-no-push`, as one holding a space does. The network rules refuse GitHub.
+- A multi-line commit message or `--grep` value naming `push`, after a leading option such as `git -C /x commit -m`, is denied. It fails closed, but each denial counts toward the three-refusal stop, so an agent retrying that message can end its run.
+- An agent can edit `adws/adw_modules/agentsh_sssf.yaml`, and if the run then stops, the edit stays. The next run refuses and points at the install step, and installing that config makes `check_machine` pass it, `on_attach_failure: fail_open` included. Run `git status` before following a refusal's install step, and discard any change there.
+- An empty template gives a traceback from `adw_agentsh_policy.py`, and a template that isn't valid UTF-8 gives one when a run starts. Both stop before any agent.
 - A signal landing inside the walk can cut it short, and `_stopped` then blocks a second attempt. `rules.stop_tree` doesn't run again for that process, so what the walk missed can run on.
 
 ## Secret files — `secret_files` and `agent_env`

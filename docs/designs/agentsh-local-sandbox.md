@@ -583,6 +583,18 @@ I offered to make the last fixes by hand and merge, because the setting is off b
 
 The first real run must also check that the network rules refuse both git spellings, and whether the rename gets round the file rules under the service.
 
+### The third guard run, 0cba1ad2
+
+The chain ran on 2026-11-09 from `specs/tasks/guard-agentsh-wrap-3.md` and passed in one round, at $6.19, on 173 candidates and 524 checks. The three runs cost $29.65. The verify phase passed 1696 tests in the skill suite and 57 in the chain's own. The engineer merged it the same day as b5d0b82. The report is [guard-run-0cba1ad2.md](agentsh/guard-run-0cba1ad2.md).
+
+No check ran under the service, so this proves the wrap's code and not that the wrap works. The reviewer judged the push rule with Python's `re`, and the fork test covers Go's RE2 on the policy engine.
+
+The report's six old holes went three ways:
+
+- **Held for a chain run.** The whole-config comparison catches a changed installed file and misses a changed template. The workspace allow lets an agent edit `agentsh_sssf.yaml`, an edit stays after a stop, and the next refusal sends the engineer to the install, which installs it. `check_machine` then passes `fail_open`. The install script should refuse when the template differs from the committed version. That's guard code, so it goes in the task for the chain run after rollout step 2, when the session folder allow is likely to need one too. Until then, `config.md` says to run `git status` before following a refusal's install step. Only the engineer can run that step, and step 2 runs only in sssf-sandbox.
+- **Recorded as limits.** Four more push spellings, an `argv[0]` holding a newline or tab, and two tracebacks on a broken template are in `config.md`. The spellings that pass the text checks are cases in [corpus.sh](agentsh/corpus.sh).
+- **Watch at step 2.** `(?s)` also denies a multi-line commit message or `--grep` value naming `push` after a leading option, and each denial counts toward the three-refusal stop. An agent retrying such a message can end its run. If that happens in practice, the pattern needs another look.
+
 ## What got built
 
 The first real run must check, beyond the items above:
@@ -605,5 +617,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 1, the third guard chain run for the wrap, from `specs/tasks/guard-agentsh-wrap-3.md`.
-4. A sudo step to install new generated policies, then rollout step 2 in sssf-sandbox.
+3. Rollout step 2 in sssf-sandbox: a sudo step to install new generated policies, then a full SDLC chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
+4. The chain run after step 2: the install script refuses a template that differs from the committed version, plus whatever step 2 turns up, the session folder allow among them.

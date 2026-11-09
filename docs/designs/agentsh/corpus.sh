@@ -18,3 +18,8 @@ t "systemd-run escape" 'systemd-run --user --wait -q -P just --justfile $PWD/jus
 t "git -c newline push" $'git -c \'a=b\nc\' push --dry-run'
 t "GIT_CONFIG alias push" 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p --dry-run'
 t "git send-pack" 'git send-pack --dry-run origin main'
+t "git include.path alias" $'printf \'[alias]\\n\\tp = pu%sh\\n\' s > $PWD/gc; git -c include.path=$PWD/gc p --dry-run'
+t "git --config-env alias" 'P=pu""sh git --config-env=alias.p=P p --dry-run'
+t "GIT_CONFIG_GLOBAL alias" $'printf \'[alias]\\n\\tp = pu%sh\\n\' s > $PWD/gc; GIT_CONFIG_GLOBAL=$PWD/gc git p --dry-run'
+t "git-push by its path" '/usr/lib/git-core/git-push --dry-run origin main'
+t "argv0 newline" $'exec -a \'g\nit\' git push --dry-run'

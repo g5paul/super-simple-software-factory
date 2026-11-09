@@ -59,7 +59,15 @@ o "PID 1 environ"           ": < /proc/1/environ"
 o "parent environ"          ": < /proc/\$PPID/environ"
 o "self environ"            ": < /proc/self/environ"
 o "Windows drive"           ": < /mnt/c/Windows/win.ini"
+# Exit 126 is the policy. Any other failure would be the network, so it counts as DID IT.
+w "denied after a 100 KB arg" 'git -c a=$(head -c 100000 /dev/zero | tr "\0" x) push --dry-run origin HEAD; [ $? -ne 126 ]'
+
 echo "--- must work, each line should say DID IT"
+w "bash -c with 100 KB"     '/bin/bash -c "#$(head -c 100000 /dev/zero | tr "\0" x)"'
+w "echo a 120 KB argument"  '/bin/echo "$(head -c 120000 /dev/zero | tr "\0" x)" >/dev/null'
+w "2 thousand arguments"    '/bin/echo $(yes a | head -2000) >/dev/null'
+w "6 KB commit message"     'git commit -q --allow-empty -m "$(head -c 6000 /dev/zero | tr "\0" x)" && git reset -q --soft HEAD~1'
+w "exec with an empty env"  'env -i /bin/true'
 w "write to /dev/stdout"    "echo x > /dev/stdout"
 w "write to a piped stdout" "(echo x > /dev/stdout) | cat"
 w "write /proc/self/fd/1"   "(echo x > /proc/self/fd/1) | cat"

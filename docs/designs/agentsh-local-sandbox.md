@@ -484,7 +484,7 @@ On that build, with 20 file rules and 143 patterns for Claude Code, 18 and 120 f
 
 This covers a small task, not a full chain. So far default-deny costs a list of paths and the risk that a new tool's config search hits `EACCES`, and the trace names the path when it does.
 
-The run led to two policy changes, generated but not yet installed or tested:
+The run led to two policy changes, tested in the third run below:
 
 - Claude Code warned that managed settings "are NOT in effect", because a denied read of `/mnt/c/Program Files/ClaudeCode/managed-settings.d` looks like a failure to read. That folder doesn't exist on this machine, but on one where it does, the deny would switch off the organisation's policy. The Claude policy now allows that path.
 - The git data rule allowed writes to `hooks/` and `config`, which run on the host outside the wrap at the next git command. Those writes are now denied. A worktree commit shouldn't need them, and the probe now checks that.
@@ -494,6 +494,37 @@ The run led to two policy changes, generated but not yet installed or tested:
 **Any single argument over 4096 bytes is refused with exit 126**, on every build and policy so far, by rule `argv_truncated`. `bash -c` with 4000 bytes ran and with 4100 was refused. `git commit -m` with a 6000-byte message was refused. Claude Code's shell-snapshot command is refused on every run, and it carries on without one. An agent's long command or heredoc would fail the same way, and under the settled denial counting these would add up toward the three-refusal stop.
 
 Failing closed is right, since a cut-off argument could hide a token that a rule denies. The limits are too low. `maxArgLen` is a constant of 4096 in `internal/ptrace`, and `tracer.go` hard-codes 1000 arguments and 64 KB in total, so no config changes them. The kernel allows 128 KB per argument. `max_argv_bytes` in the config only applies to the seccomp path.
+
+### The seventh patch and the third run
+
+`41960715`, `fix(ptrace): read argv up to what the kernel allows`, on `sssf/patched`, local. Build sha256 `3774b1170d447e8c935fb8c2d7421199b6d3fafc312d6f77de1bb2cd1c5db45d`. It reads 128 KiB per argument and 2 MiB in total, and still denies an exec above those. Rules see the whole argv. The trace stores a clipped copy, 4 KiB per argument and 64 KiB in all, with `argv_clipped` set, so a rule can act on a part of a command the trace doesn't show. The new limit tests failed before the fix. The `ptrace` and `api` unit tests pass, and the integration tag shows the same 8 failures by name.
+
+On that build, with both policy changes installed:
+
+| Check | Result |
+|---|---|
+| 50 denial probes under each policy: 16 reads, 22 changes, 12 opens | 49 held, and the 50th is each agent opening its own sign-in, as expected. No fake file or mode changed |
+| Writes to `.git/hooks` and `.git/config` | held |
+| A denied command after a 100 KB argument | exit 126, the policy |
+| 16 checks that must work: 100 KB `bash -c`, a 120 KB argument, 2000 arguments, a 6 KB commit message, `env -i`, a worktree commit, and the earlier ones | all passed |
+| Tools | exit 0, no file denials, and no denied execs |
+| Claude Code | worked, exit 0 in 9 seconds. No denied execs, so its shell snapshot now runs. The managed-settings warning is gone. 83 file denials, 68 of them `/proc/*/environ`, did it no harm |
+| pi | worked, exit 0 in 14 seconds, one harmless denial |
+| Bypass corpus | 16 of 16 as before, with the copied `just` running, the accepted limit |
+| Network and fronting checks | as before |
+| Exec with a 120 KB argument | about 6 ms wrapped, against 1 ms bare. `/bin/true` takes about 2 ms wrapped |
+
+Claude Code's one clipped command stored 4109 bytes in the trace.
+
+This is still one small task per agent, not a full chain. The limits to accept with default-deny are unchanged. An agent can read its own sign-in. Claude Code can write `~/.claude.json`, which can hold MCP settings, and can read other projects' transcripts under `~/.claude/projects`. `/tmp` is shared.
+
+### agentsh widens the workspace to the repo top
+
+An earlier attempt at this run was started by mistake from the hub's `docs/designs/agentsh`, and it showed that **`--root` isn't the boundary**. `DetectProjectRoots` walks up from `--root` to the nearest `.git`, or the nearest language marker before it, and sets `${PROJECT_ROOT}` to that. So the wrap with `--root docs/designs/agentsh` allowed the whole hub, including its `.git`. The probe and tool runs made commits on the hub's `main` and reset them. `main` ended where it started and no file changed, but a run must not get that close to a real repo. `deny-test.sh` and `path-harvest.sh` now refuse to start outside the proof workspace.
+
+An SSSF run starts at a checkout or worktree top, which holds `.git`, so the walk stops there. A workspace without `.git` keeps walking, and a `package.json` or `.git` in a parent or in the home folder would widen it. The wrap needs `policies.detect_project_root: false` in `sssf.yaml` and to refuse a `--root` that isn't the checkout's top. Neither is tested yet.
+
+That attempt was useful in one way. With no `hello.py` to edit, Claude Code searched the home folder for it, and default-deny answered 229 opens with `EACCES`, `.gnupg` among them. It then reported that it couldn't find the file and made no edits.
 
 ## Running the checks
 
@@ -509,5 +540,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Raise the tracer's argument limits to the kernel's, then install that build with the two policy changes and rerun the default-deny test. Whether to adopt default-deny is the engineer's call on those results.
-4. Rollout step 1, a guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, and give the agent a `/dev/null` stdin, which `sandbox.start` already does.
+3. Whether to adopt default-deny is the engineer's call on the third run's results.
+4. Rollout step 1, a guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, give the agent a `/dev/null` stdin, which `sandbox.start` already does, and pin the workspace as the section above says.

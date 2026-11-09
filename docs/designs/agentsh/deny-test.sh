@@ -2,6 +2,7 @@
 # Usage: deny-test.sh OUTDIR [probe-only]   From the workspace. Runs the probe under each default-deny
 # policy, reports which fake files it changed, then runs the tools and both agents.
 # Keep OUTDIR outside /tmp.
+case "$PWD" in "$HOME"/sssf-agentsh-proof) ;; *) echo "run this from ~/sssf-agentsh-proof, not $PWD: it edits and commits in the current repo" >&2; exit 2 ;; esac
 OUT=${1:?outdir}; HERE=$(cd "$(dirname "$0")" && pwd); W=$PWD
 D=$HOME/.local/share/agentsh-harvest/secret-probe
 mkdir -p "$D" "$OUT"

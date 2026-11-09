@@ -3,6 +3,7 @@
 # under POLICY and saves each session's file events as OUTDIR/<label>.json, then prints
 # each run's exit code and denials. Keep OUTDIR outside /tmp. Used to build and test the
 # default-deny policy. The workspace's edits are reverted at the end.
+case "$PWD" in "$HOME"/sssf-agentsh-proof) ;; *) echo "run this from ~/sssf-agentsh-proof, not $PWD: it edits and commits in the current repo" >&2; exit 2 ;; esac
 POLICY=${1:?policy}; OUT=${2:?outdir}; W=$PWD
 mkdir -p "$OUT"
 export AGENTSH_CONFIG=/etc/agentsh/sssf.yaml AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock AGENTSH_NO_AUTO=1 NODE_USE_ENV_PROXY=1 JUST_NO_DOTENV=true

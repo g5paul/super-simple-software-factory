@@ -183,9 +183,25 @@ Two gaps stay. The proof policy now denies TCP to the server's port, for the eng
 - systemd restarted the service at 15:55:58, with `NRestarts=1`.
 - After the restart, the agent could not connect to `127.0.0.1:18080`, so the API rule works. `https://api.anthropic.com/` still answered, and `just test live` was still denied.
 
+## The fail-open patch, 2026-11-08
+
+The fork's branch `fix/ptrace-exec-fail-closed`, commit 31b5af0 on a07c789, makes two changes:
+
+- `handleExecve` denies with `EACCES` when it can't read the filename or argv.
+- `getMemReader` falls back to `process_vm_readv` alone when `/proc/<tid>/mem` won't open.
+
+The tests were built in a rootless podman container, `golang:1.25.4-bookworm`, and run on the host. In the container, every attach failed with `wait4 after interrupt ... timed out`.
+
+- `TestIntegration_ExecveUnreadableArgsDenied` fails on the original code with `EFAULT`, because the tracer allows the exec. It passes on the patch with `EACCES`.
+- The memory reader unit tests pass, and `go vet` passes.
+- The full ptrace integration suite gives the same results with and without the patch: 15 failures in both, most because their helpers call `go build` and the host has no Go.
+
+The draft upstream report is [agentsh/upstream-report.md](agentsh/upstream-report.md), for the engineer to send. The installed service still runs v0.20.5 without the patch. With the patch, the server could read agent memory without `CAP_DAC_READ_SEARCH`. It still needs that right to reach workspaces in a mode 0750 home folder.
+
 ## Next
 
-1. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
+1. A Landlock execute list, so a copied binary under another name can't run.
+2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
 2. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
 2. The decisions above, settled from the proof.
 3. A guard chain run for the wrap.

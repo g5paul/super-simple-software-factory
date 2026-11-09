@@ -39,7 +39,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import account, agentsh_guard, budget, prices, rules, sandbox, silence
+from . import account, agentsh_guard, budget, prices, rules, sandbox, session_files, silence
 from .agent_pi import ToolCallTracker as _PiToolCallTracker
 from .data_types import AgentRequest, AgentResult, UsageBreakdown
 from .utils import agent_env, mark_agent, operator_env
@@ -315,14 +315,14 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     def keep_spend(stop) -> None:
         if final:
             cumulative = float(final.get("total_cost_usd") or 0.0)
-            ledger.write_text(json.dumps({"cost": cumulative}))
+            session_files.write(ledger, json.dumps({"cost": cumulative}), request.data_root)
             stop.partial = _partial_from_final(final, max(0.0, cumulative - prior_cost))
         else:
             stop.partial = _partial(turns, output)
 
     with silence.watch(process, request.max_silence_seconds) as dog:
         try:
-            with raw_path.open("a") as raw:
+            with session_files.open_append(raw_path, request.data_root) as raw:
                 assert process.stdout is not None
                 for line in process.stdout:
                     dog.touch()
@@ -361,7 +361,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         if not resume:
                             # The session exists from here on, so a send that dies
                             # mid-turn is still resumed next time, never re-created.
-                            ledger.write_text(json.dumps({"cost": 0.0}))
+                            session_files.write(ledger, json.dumps({"cost": 0.0}), request.data_root)
                     if etype == "assistant":
                         # Per message, subagents' too: a killed call never sends the
                         # result event that totals them.
@@ -430,7 +430,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         raise RuntimeError(f"claude exited {result.returncode} without a result: "
                            f"{stderr.strip()[-800:]}")
     cumulative = float(final.get("total_cost_usd") or 0.0)
-    ledger.write_text(json.dumps({"cost": cumulative}))
+    session_files.write(ledger, json.dumps({"cost": cumulative}), request.data_root)
     result.usage = _usage(final.get("usage") or {}, max(0.0, cumulative - prior_cost))
     result.tokens = result.usage.total_tokens
     result.cost = result.usage.total_cost

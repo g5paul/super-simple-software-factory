@@ -100,7 +100,7 @@ def _fake_pi(tmp_path, monkeypatch, *messages, exit_code=0):
     monkeypatch.setattr(agent_pi, "context_window", lambda provider, model_id: 0)
     return AgentRequest(prompt="go", system_prompt="", model="openai/gpt",
                         session_id="s", session_dir=str(tmp_path / "sessions"),
-                        raw_output_path=str(tmp_path / "raw.jsonl"), cwd=str(tmp_path),
+                        raw_output_path=str(tmp_path / "raw.jsonl"), data_root=str(tmp_path), cwd=str(tmp_path),
                         local_guard=LocalGuard(mode="text"))
 
 

@@ -127,7 +127,7 @@ def request(tmp_path: Path) -> AgentRequest:
     return AgentRequest(prompt="go", system_prompt="", model="anthropic/claude-sonnet-5-5",
                         session_id="f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
                         session_dir=str(tmp_path / "sessions"),
-                        raw_output_path=str(tmp_path / "raw.jsonl"), cwd=str(tmp_path),
+                        raw_output_path=str(tmp_path / "raw.jsonl"), data_root=str(tmp_path), cwd=str(tmp_path),
                         local_guard=LocalGuard(mode="text"))
 
 
@@ -577,7 +577,7 @@ def test_execute_stops_when_the_agent_dies_with_a_refuse_call_pending(tmp_path, 
     monkeypatch.setattr(agents.account, "check", lambda *a, **k: None)
     seen = []
     run = SimpleNamespace(
-        cfg=cfg, adw_id="r1", session_dir=tmp_path / "s", repo_root=root,
+        cfg=cfg, adw_id="r1", session_dir=tmp_path / "s", data_root=tmp_path, repo_root=root,
         context_handoff_dir=tmp_path / "h", agent_map={},
         tracer=SimpleNamespace(event=seen.append, process_start=lambda *a: None,
                                process_end=lambda *a: None, gate_row=lambda *a: None,

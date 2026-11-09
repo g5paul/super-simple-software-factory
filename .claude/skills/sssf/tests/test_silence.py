@@ -120,7 +120,7 @@ def request(tmp_path, **fields) -> AgentRequest:
     base = {"prompt": "go", "system_prompt": "", "agent_name": "builder", "adw_id": "ab12cd34",
             "model": "anthropic/claude-haiku-5-5", "session_id": "f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
             "session_dir": str(tmp_path / "sessions"),
-            "raw_output_path": str(tmp_path / "raw.jsonl"), "cwd": str(tmp_path)}
+            "raw_output_path": str(tmp_path / "raw.jsonl"), "data_root": str(tmp_path), "cwd": str(tmp_path)}
     return AgentRequest(**{**base, "local_guard": LocalGuard(mode="text"), **fields})
 
 

@@ -25,7 +25,7 @@ from adw_modules.data_types import PlanOutput, QualityResult
 def fake_run(tmp_path):
     events = []
     return SimpleNamespace(
-        adw_id="abc", repo_root=tmp_path, context_handoff_dir=tmp_path / "handoff",
+        adw_id="abc", repo_root=tmp_path, context_handoff_dir=tmp_path / "handoff", data_root=tmp_path,
         phases=[SimpleNamespace(seq=5, phase_id="p5")],
         tracer=SimpleNamespace(event=events.append), console=SimpleNamespace(note=lambda m: None),
         events=events)

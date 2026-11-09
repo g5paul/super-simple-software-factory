@@ -39,7 +39,8 @@ SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import agents, git_helper, permissions
-from adw_modules.data_types import AgentConfig, ConfigDefaults, PromptEngineering, SSSFConfig
+from adw_modules.data_types import (AgentCall, AgentConfig, ConfigDefaults, PlanOutput, PromptEngineering,
+                                    SSSFConfig)
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -2291,3 +2292,20 @@ def test_unreadable_keeps_its_message():
         "read it. git said:\n  fatal: x\n\n"
         "Fix the config file or include path git names above, for example a "
         "symlink loop or a directory git can't enter, then run again.")
+
+
+def test_the_envelope_write_replaces_a_link_an_agent_left(tmp_path):
+    cfg = agents.load_config(str(SKILL / "templates" / "sssf.config.yaml"))
+    name = cfg.agents[0].name
+    session = tmp_path / "sessions" / "abcd1234"
+    (session / name).mkdir(parents=True)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    (session / name / "envelope.json").symlink_to(victim)
+    run = SimpleNamespace(cfg=cfg, data_root=tmp_path, session_dir=session,
+                          tracer=SimpleNamespace(envelope_row=lambda *a, **k: None))
+    agents._persist_envelope(run, None, name, AgentCall(output_type=PlanOutput, prompt="p"),
+                             PlanOutput(status="success"), 1, True)
+    assert victim.read_text() == "keep"
+    assert not (session / name / "envelope.json").is_symlink()
+    assert '"status": "success"' in (session / name / "envelope.json").read_text()

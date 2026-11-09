@@ -52,7 +52,8 @@ def start(adw_id: str, requested: bool = True) -> tuple[SSSFConfig, dict | None,
     """What session.ensure does: enter, then record the worktree in the trace."""
     cfg = SSSFConfig()
     place = worktree.enter(cfg, adw_id, requested)
-    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl")
+    tracer = Tracer(cfg.observability.db, f"{cfg.defaults.data_root}/sessions/{adw_id}/events.jsonl",
+                    data_root=cfg.defaults.data_root)
     tracer.session_start(adw_id, "t", adw_name="test")
     if place and not place["resumed"]:
         tracer.event(EventRecord(adw_id=adw_id, phase_id="", type="log", name="worktree",
@@ -476,16 +477,16 @@ def test_a_discard_is_recorded_and_a_refused_merge_is_not(repo):
 def test_setup_runs_each_command_in_order_and_stops_at_the_first_failure(tmp_path):
     logs = tmp_path / "logs"
     assert worktree.run_setup(["echo one > a.txt", "cd sub 2>/dev/null || mkdir sub",
-                               "cat a.txt > sub/b.txt"], tmp_path, 10, logs) == ""
+                               "cat a.txt > sub/b.txt"], tmp_path, 10, logs, tmp_path) == ""
     assert (tmp_path / "sub/b.txt").read_text() == "one\n"
-    why = worktree.run_setup(["true", "echo broken >&2; exit 3", "touch never"], tmp_path, 10, logs)
+    why = worktree.run_setup(["true", "echo broken >&2; exit 3", "touch never"], tmp_path, 10, logs, tmp_path)
     assert "`echo broken >&2; exit 3` exited 3" in why and "broken" in why
     assert not (tmp_path / "never").exists()
     assert "exit: 3" in (logs / "02.log").read_text()
 
 
 def test_a_setup_command_over_its_time_fails(tmp_path):
-    why = worktree.run_setup(["echo started; sleep 5"], tmp_path, 1, tmp_path / "logs")
+    why = worktree.run_setup(["echo started; sleep 5"], tmp_path, 1, tmp_path / "logs", tmp_path)
     assert "exited 124" in why and "Timed out after 1s" in why and "started" in why
 
 

@@ -20,7 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import agentsh_guard, obs_relay, rules, sandbox, silence
+from . import agentsh_guard, obs_relay, rules, sandbox, session_files, silence
 from .account import RateLimitStop
 from .data_types import AgentRequest, AgentResult
 from .utils import agent_env, mark_agent, now_iso, operator_env
@@ -705,7 +705,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     if on_spawn:
         on_spawn(process.pid)
     with silence.watch(process, request.max_silence_seconds) as dog:
-        with raw_path.open("a") as raw:
+        with session_files.open_append(raw_path, request.data_root) as raw:
             assert process.stdout is not None
             for line in process.stdout:
                 dog.touch()

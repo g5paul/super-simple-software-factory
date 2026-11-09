@@ -52,7 +52,7 @@ def test_the_flag_wins_and_none_means_here(repo):
 
 
 def test_a_run_that_exists_is_not_moved_by_the_setting(repo):
-    tracer = Tracer(repo / DB, repo / "events.jsonl")
+    tracer = Tracer(repo / DB, repo / "events.jsonl", data_root=repo)
     tracer.session_start("a1b2c3d4", "T")
     setting(repo, "e2b")
     assert session.choose_sandbox(None, DB, "a1b2c3d4") is None

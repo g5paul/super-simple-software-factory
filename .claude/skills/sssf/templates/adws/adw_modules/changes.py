@@ -15,7 +15,7 @@ measured against.
 
 from __future__ import annotations
 
-from . import git_helper
+from . import git_helper, session_files
 from .data_types import BaseRef, ChangeCapture, ChangeSet, ChangesOutput
 
 
@@ -78,7 +78,7 @@ def capture(run, params: ChangeCapture) -> ChangeSet:
     untracked_block = ("\n".join(f"  {f}" for f in untracked) if untracked
                        else "  (none)")
     diff_path = run.context_handoff_dir / DIFF_FILENAME
-    diff_path.write_text(
+    session_files.write(diff_path,
         f"# changes since {base.label} @ {git_helper.short_sha(base.commit)}\n"
         f"# {base.reason}\n"
         f"# +{insertions} -{deletions} across {len(files)} tracked file(s)\n"
@@ -86,7 +86,7 @@ def capture(run, params: ChangeCapture) -> ChangeSet:
         + "\n"
         f"## stat\n{stat or '  (no tracked changes)'}\n\n"
         f"## untracked files\n{untracked_block}\n\n"
-        f"## diff\n{text}\n")
+        f"## diff\n{text}\n", run.data_root)
 
     return ChangeSet(base=base, files=files, untracked=untracked,
                      insertions=insertions, deletions=deletions, stat=stat,

@@ -59,7 +59,7 @@ def test_the_console_line_says_not_configured(tmp_path):
     from types import SimpleNamespace
     from adw_modules.data_types import QualityCheckSpec
     notes = []
-    run = SimpleNamespace(adw_id="a", repo_root=tmp_path, context_handoff_dir=tmp_path,
+    run = SimpleNamespace(adw_id="a", repo_root=tmp_path, context_handoff_dir=tmp_path, data_root=tmp_path,
                           phases=[SimpleNamespace(seq=1, phase_id="p")],
                           tracer=SimpleNamespace(event=lambda e: None),
                           console=SimpleNamespace(note=notes.append))

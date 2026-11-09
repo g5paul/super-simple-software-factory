@@ -219,6 +219,7 @@ def layout(tmp_path, monkeypatch):
     handoff.mkdir(parents=True)
     events = []
     run = types.SimpleNamespace(adw_id="abc", context_handoff_dir=handoff, session_dir=session,
+                                data_root=repo / "adws" / "adw_data",
                                 tracer=types.SimpleNamespace(event=lambda e: events.append((e.name, e.payload))),
                                 console=types.SimpleNamespace(note=lambda t: None))
     return repo, run, events
@@ -248,8 +249,9 @@ def test_create_writes_the_policy_and_passes_no_upload(cli, tmp_path, monkeypatc
 
 def test_create_refuses_a_tree_outside_the_folder(cli, tmp_path, monkeypatch):
     repo, run, _ = layout(tmp_path, monkeypatch)
-    run.session_dir = tmp_path / "elsewhere"
-    run.session_dir.mkdir()
+    run.data_root = tmp_path / "elsewhere"
+    run.session_dir = run.data_root / "sessions" / "abc"
+    run.session_dir.mkdir(parents=True)
     monkeypatch.chdir(repo)
     with pytest.raises(osh.OpenShellError, match="openshell-setup"):
         osh.OpenShell(run, "sssf/abc", "p")._create()

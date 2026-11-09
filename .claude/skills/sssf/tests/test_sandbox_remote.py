@@ -316,7 +316,7 @@ def _make_box(provider, tmp_path, monkeypatch, cfg=None, token=True):
     monkeypatch.chdir(tree)
     events: list[tuple[str, dict]] = []
     run = types.SimpleNamespace(
-        adw_id="abc", context_handoff_dir=handoff, session_dir=session,
+        adw_id="abc", context_handoff_dir=handoff, session_dir=session, data_root=host / "data",
         tracer=types.SimpleNamespace(event=lambda e: events.append((e.name, e.payload))),
         console=types.SimpleNamespace(note=lambda text: None))
     if cfg is not None:
@@ -386,6 +386,13 @@ def test_a_bad_answer_means_no_uv_python(box, tmp_path, monkeypatch):
     box.python = sandbox_remote._host_python(box.host_tree)
     assert box.python == ""
     assert "UV_PYTHON" not in box.run(["sh", "-c", "env"]).stdout
+
+
+def test_a_handoff_file_with_a_name_near_the_limit_still_comes_back(box):
+    name = "a" * 250
+    process = box.start(["sh", "-c", f"echo long > {box.handoff}/{name}; echo ok"])
+    process.wait()
+    assert (box.handoff / name).read_text() == "long\n"
 
 
 def test_an_agent_writes_the_handoff_folder_and_the_host_gets_it_back(box):

@@ -619,6 +619,8 @@ What held under the real service: the launch checks, the attach, denial counting
 **A relative symlink.** One `symlink` with a relative target fell to agentsh's own `default-deny-files`, not to any SSSF rule, so an agent making a relative link in its workspace may be refused.
 
 **The refuse script and the sessions folder (built).** agentsh checks a symlink's own path and its target as the raw string the agent passed, both with `symlink`, so no absolute rule can judge a relative target. SSSF adds no link rule. A relative target falls to `default-deny-files`, as on `main`, and the existing rules judge an absolute target. The relative-link allow tried in 8f8304ae was dropped (see below). No `REFUSE_*` files exist in the templates, so the main-checkout allows are the sessions folder (`sssf-sessions`) and `sssf_refuse.py` (`sssf-refuse-script`, Claude Code only).
+**SSSF's session-folder writes (built).** Every host write under `<data_root>/sessions/` goes through `adw_modules/session_files.py`, given the run's data root. It walks from the data root with `O_NOFOLLOW` at every folder, writes a temp file and renames it over the target, and opens appended logs so that anything but SSSF's own single-link regular file is replaced. No file rule judges link targets.
+
 `specs/tasks/guard-agentsh-wrap-4.md` is the chain run's task, covering all of these.
 
 ### The chain run for the real-run fixes, 8f8304ae
@@ -662,6 +664,7 @@ The engineer decided on 2026-11-09:
 
 ## What got built
 
+- A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
 The first real run must check, beyond the items above:
 
 - The push cases under the real service: `git push`, `git -c a=b push`, `git -C /x push`, `git -c alias.p=push p`, `git -c $'a=b\nc' push` and `git -C $'/x\ny' push` denied; `git commit -m push`, `git stash push`, `git log --grep push`, `git commit -m $'line one\npush it'`, `git log --grep $'x\npush'` and `git -C /x/push-tools status` run; `git -c 'alias.p=!git push' p`, `git -c ALIAS.p=push p` and `git -c 'alias.p=!f(){ git push; }; f' p` are denied; `git -c alias.st=status st` runs.

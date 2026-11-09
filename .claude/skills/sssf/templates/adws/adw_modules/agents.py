@@ -10,6 +10,7 @@ disposes.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -17,7 +18,7 @@ from typing import Optional
 import yaml
 
 from . import (account, agent_cc, agent_pi, agentsh_guard, budget, permissions, prices, prompts, repo_settings,
-               rules, sandbox, secret_files, silence)
+               rules, sandbox, secret_files, session_files, silence)
 from .data_types import (AgentCall, AgentConfig, AgentRequest, AgentResult,
                          EnvelopeBase, EventRecord, GateCheck, GateReport, Phase,
                          SSSFConfig, UsageBreakdown)
@@ -176,8 +177,8 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     if builtin:
         enforced.append(builtin)
     user_text = prompts.render(agent.prompt_engineering.user, variables)
-    prompts.save(agent_dir / "prompts", "system.md", system_text)
-    prompts.save(agent_dir / "prompts", "user.md", user_text)
+    prompts.save(agent_dir / "prompts", "system.md", system_text, root=run.data_root)
+    prompts.save(agent_dir / "prompts", "user.md", user_text, root=run.data_root)
 
     session_key = f"{agent.name}:{call.session}" if call.session else agent.name
     session_id = _agent_session_id(run, agent, session_key)
@@ -225,9 +226,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             model=agent.model,
             thinking=agent.thinking,
             session_id=session_id,
-            # absolute: these are read by the subprocess, which runs in repo_root
-            session_dir=str((agent_dir / f"{agent.coding_agent}_sessions").resolve()),
-            raw_output_path=str((agent_dir / "raw_output.jsonl").resolve()),
+            # absolute (lexically, never resolve(): it would follow an agent's link);
+            # these are read by the subprocess, which runs in repo_root
+            session_dir=os.path.abspath(agent_dir / f"{agent.coding_agent}_sessions"),
+            raw_output_path=os.path.abspath(agent_dir / "raw_output.jsonl"),
+            data_root=str(run.data_root),
             tools=agent.tools,
             extensions=agent.harness_engineering,
             cwd=str(run.repo_root),
@@ -657,4 +660,4 @@ def _persist_envelope(run, phase: Phase, agent_name: str, call: AgentCall,
         record = {"agent_name": agent_name, "purpose": resolve(run.cfg, agent_name).purpose,
                   "output_type": call.output_type.__name__, "attempt": attempt,
                   **envelope.model_dump()}
-        (run.session_dir / agent_name / "envelope.json").write_text(json.dumps(record, indent=2))
+        session_files.write(run.session_dir / agent_name / "envelope.json", json.dumps(record, indent=2), run.data_root)

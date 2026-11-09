@@ -111,7 +111,7 @@ def request_with(files: list[str], tmp: Path) -> AgentRequest:
     # whatever folder pytest ran in, and two guard builds committed it.
     return AgentRequest(prompt="go", system_prompt="", model="anthropic/claude-sonnet-5-5",
                         session_id="f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
-                        session_dir=str(tmp / "s"), raw_output_path=str(tmp / "r"),
+                        session_dir=str(tmp / "s"), raw_output_path=str(tmp / "r"), data_root=str(tmp),
                         secret_files=files, local_guard=LocalGuard(mode="text"))
 
 
@@ -299,7 +299,7 @@ def test_execute_marks_only_the_built_in_rule_in_the_requests_refuse_rules(tmp_p
     monkeypatch.setattr(agents.agent_cc, "check_login", lambda *a, **k: None)
     monkeypatch.setattr(agents.account, "check", lambda *a, **k: None)
     run = SimpleNamespace(
-        cfg=cfg, adw_id="r1", session_dir=tmp_path / "s", repo_root=root,
+        cfg=cfg, adw_id="r1", session_dir=tmp_path / "s", data_root=tmp_path, repo_root=root,
         context_handoff_dir=tmp_path / "h", agent_map={},
         tracer=SimpleNamespace(event=lambda e: None, process_start=lambda *a: None,
                                process_end=lambda *a: None, gate_row=lambda *a: None,

@@ -12,6 +12,7 @@ import socket
 import sqlite3
 from pathlib import Path
 
+from . import session_files
 from .data_types import AgentConfig, EventRecord, GateReport, Phase
 from .utils import ensure_dir, new_id, now_iso
 
@@ -103,7 +104,10 @@ MIGRATIONS = [("agent_sessions", "color", "TEXT"),
 
 
 class Tracer:
-    def __init__(self, db_path: str | Path, events_jsonl: str | Path):
+    """Events to JSONL and SQLite. `event()` needs `data_root`: the jsonl append never follows a link."""
+
+    def __init__(self, db_path: str | Path, events_jsonl: str | Path, data_root: str | Path | None = None):
+        self.data_root = data_root
         ensure_dir(Path(db_path).parent)
         self.db_path = str(db_path)
         self.events_jsonl = Path(events_jsonl)
@@ -134,7 +138,7 @@ class Tracer:
         event_id = f"evt_{new_id(12)}"
         ts = now_iso()
         line = {"event_id": event_id, "ts": ts, **record.model_dump()}
-        with self.events_jsonl.open("a") as f:
+        with session_files.open_append(self.events_jsonl, self.data_root) as f:
             f.write(json.dumps(line) + "\n")
         self.conn.execute(
             "INSERT INTO events (event_id, adw_id, phase_id, parent_id, type, name,"

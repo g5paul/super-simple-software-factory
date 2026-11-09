@@ -662,6 +662,16 @@ The engineer decided on 2026-11-09:
 
 `specs/tasks/guard-agentsh-wrap-6.md` is the next run's task. It starts from the run's round-2 snapshot, without the `..` rule.
 
+### The chain run for link-safe session writes, bad50afd
+
+The chain ran on 2026-11-09 from `specs/tasks/guard-agentsh-wrap-6.md` and passed in round 2, at $5.46. It merged as bf9f648. The report is [guard-run-bad50afd.md](agentsh/guard-run-bad50afd.md). The three runs of rollout step 2's guard work cost $19.13 in all.
+
+Every SSSF write under the session folder now goes through one helper. It walks from the data folder with `O_NOFOLLOW`, writes a temp file and renames it over the target, and opens logs so a link, hard link or FIFO at the path is replaced. The reviewer tried 91 attacks on the write sites: links absolute, relative and dangling, `/proc/self/fd` and `/dev/fd` links to held-open files, hard links, FIFOs, links in place of each folder, and a thread swapping a folder for a link 400 times. On `main` every one reached the outside file, a SQLite db came out corrupt, and every FIFO write hung. On the merge none did.
+
+Round 1 found one false positive: the temp name grew with the target's, so a handoff name of 234 bytes or more failed on a remote-sandbox run. Round 2 confirmed the fixed-length name.
+
+Old holes, all on `main` too, now in `config.md`: a link at the data folder itself on a plain run, folder creation that follows a folder link, and reads under the session folder that follow links. Remote-sandbox handoff files also come back without their mode bits.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -686,5 +696,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. Next: the guard chain run from `specs/tasks/guard-agentsh-wrap-6.md`, a sudo install, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
+3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. The guard work merged as bf9f648. Next: a sudo install of the new policy in sssf-sandbox, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
 4. The chain run after step 2: the install script refuses a template that differs from the committed version, plus whatever step 2 turns up, the session folder allow among them.

@@ -640,6 +640,25 @@ The engineer decided on 2026-11-09:
 
 `specs/tasks/guard-agentsh-wrap-5.md` is the next run's task. It keeps the reviewed code and removes item 6.
 
+### The chain run without the symlink allow, 1df8cc16
+
+The chain ran on 2026-11-09 from `specs/tasks/guard-agentsh-wrap-5.md` and stopped after round 3, at $6.65, because round 2's fix added a `..` link deny. The report is [guard-run-1df8cc16.md](agentsh/guard-run-1df8cc16.md).
+
+Dropping the symlink allow and the wider alias pattern held through three reviews with no bypass. The finding came from the sessions folder allow. After each agent call, SSSF writes `<agent>/envelope.json` into the session folder by path, and the write follows a symlink. On a `--worktree` run an agent can put a link there, made in place or moved in from its workspace.
+- **Round 1:** a target of `sessions/../../../CLAUDE.md` let SSSF overwrite a file in the main checkout. `main` denies that link.
+- **Round 2:** the fix denied link targets holding `..`.
+- **Round 3:** targets of `/proc/<pid>/fd/<n>` and `/dev/fd/<n>` reach any file SSSF holds open. The reviewer showed the envelope write cutting a held-open `sssf.db` to 29 bytes. On a plain run the session folder sits in the workspace, so `main` has the same hole.
+
+A rule on link targets misses the next spelling, as the symlink allow did. The writer is SSSF, so the fix goes there.
+
+The engineer decided on 2026-11-09:
+
+1. **Fix it on SSSF's side.** Every host write under the session folder writes a temp file in the same folder and renames it over the target. A rename replaces a link instead of following it.
+2. **Keep the sessions folder allow** as it is. A tighter allow without `rename` could break Claude Code's own file writes.
+3. **Accept a limit:** an agent can write `.env.example` and `.env.sample` anywhere, because that allow sits ahead of every deny, as on `main`.
+
+`specs/tasks/guard-agentsh-wrap-6.md` is the next run's task. It starts from the run's round-2 snapshot, without the `..` rule.
+
 ## What got built
 
 The first real run must check, beyond the items above:
@@ -662,5 +681,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. Next: the guard chain run from `specs/tasks/guard-agentsh-wrap-5.md`, a sudo install, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
+3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. Next: the guard chain run from `specs/tasks/guard-agentsh-wrap-6.md`, a sudo install, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
 4. The chain run after step 2: the install script refuses a template that differs from the committed version, plus whatever step 2 turns up, the session folder allow among them.

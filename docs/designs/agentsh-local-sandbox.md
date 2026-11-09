@@ -298,6 +298,14 @@ A debug build, local fork branch `debug/tracer-faults`, logged three points: a f
 
 **The clean build, 2026-11-08.** `agentsh 0.20.6-dev.fork+30dee5c`, sha256 `413a33dd...4986`, with the trace drop-in removed. Every network and fronting check held, and the corpus matched the earlier runs: every text-guard bypass held, and the copied `just` ran. One Claude Code run and one pi run each finished with exit 0, reached only their model hosts, and got the proxy's 403 for `example.com`. The server logged no warnings.
 
+## Running the checks
+
+The scripts are in [agentsh/](agentsh/). Each runs in `/tmp/sssf-agentsh-proof`, a mode 755 directory holding a fake `.env`, a `.env.example`, and a justfile with a `test kind:` recipe. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
+
+- the network and fronting checks: `agentsh wrap --policy sssf-net --root /tmp/sssf-agentsh-proof -- bash net-checks.sh`
+- the bypass corpus: `agentsh wrap --policy sssf-proof --root /tmp/sssf-agentsh-proof -- bash corpus.sh`
+- one real agent: `agent-run.sh claude` or `agent-run.sh pi`, which also lists the session's network events from the server API
+
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.

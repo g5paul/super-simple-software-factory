@@ -687,6 +687,18 @@ Denials that are expected and harmless: on a `--worktree` run, git and uv search
 
 **Not run: a real push from each spelling in [corpus.sh](agentsh/corpus.sh).** This session's settings deny push commands, so the engineer runs that check. The proof workspace has no remote, so the check needs one that points at GitHub.
 
+### The install-check run, e027505a
+
+The chain ran on 2026-11-09 from `specs/tasks/guard-agentsh-install-check.md` and stopped after round 2, at $6.48. The report is [guard-run-e027505a.md](agentsh/guard-run-e027505a.md).
+
+The design had the project's install script tell the engineer's changes from a run's. Each install recorded its commit in a root-owned file, and SSSF marked its own commits with an `SSSF-Run: yes` trailer. The script then refused when a source file was uncommitted or a marked commit had touched one since the record.
+- **Round 1:** the check's `git log` ran an agent's `gpg.program` through `log.showSignature`, where the old script never ran git. CRLF checkouts were refused every time. Six ways around it came from a sourceless `.pyc` package, `.git/shallow` and git config settings that hide or skip the trailer.
+- **Round 2:** the fix kept a growing list of git settings to override, which the reviewer flagged. An agent's `core.sshCommand` still ran through a partial-clone fetch, and `info/grafts` and per-key `trailer.SSSF-Run.*` settings still hid the mark.
+
+The check runs git and Python inside a repo an agent can change, so each setting it overrides leaves the next one.
+
+The engineer decided on 2026-11-09 to drop the approach and install from the hub: the skill's source runs the install, reads only `repo.yaml` and `sssf.config.yaml` from the project as data, and shows a diff against what's installed before the sudo lines. The old script stays until that merges. `specs/tasks/guard-agentsh-hub-install.md` is the task.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -712,5 +724,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
-4. The chain run after step 2, from `specs/tasks/guard-agentsh-install-check.md`: the install script refuses to build from a file an agent changed.
+4. The chain run after step 2, from `specs/tasks/guard-agentsh-hub-install.md`: install from the hub, reading only data from the project, with a diff before the sudo lines. The first attempt, e027505a, is recorded above.
 5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. It needs a hub policy and one sudo install.

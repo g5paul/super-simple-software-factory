@@ -237,9 +237,25 @@ The proxy takes a random port, so the policy allows all of `127.0.0.2`, its own 
 
 So a check in the proxy that the ClientHello's SNI equals the CONNECT host closes the fronting, with no TLS inspection. The proxy already parses the SNI to rewrite redirects (`internal/netmonitor/proxy.go`, `sniRewriteFirstRecord`). The `tls_inspection` config block exists but nothing reads it.
 
+## The proxy patches, 2026-11-08
+
+Two more commits in the fork, on the local branch `fix/proxy-sni-and-self-allow` cut from a07c789. Like the first patch, the branch stays local until the engineer decides to publish it.
+
+1. **SNI check, d3c2d33.** With the new `sandbox.network.require_sni_match`, the first record of a CONNECT tunnel must be a TLS ClientHello. For a host name, its SNI must equal the CONNECT host. For an IP literal, it must carry no SNI. Anything else closes the tunnel before a byte goes upstream, and the server logs `tunnel_sni_mismatch`. A policy SNI rewrite skips the check. The option is off by default, so upstream behavior stays the same.
+2. **Self-allow, 49f20e2.** The ptrace connect check allows a connect to the exact address and port of the session's own proxy. The policy then needs no loopback allow, and the `127.0.0.2` rules are gone.
+
+The tests use real ClientHellos from Go's `crypto/tls`. They cover a matching name, case and a trailing dot, a fronted name, a subdomain, no SNI, an IP with and without a name, non-TLS bytes, and the check turned off. The proxy tests check what reaches a recording upstream. With the fixes turned off, the fronted ClientHello, the SSH banner and the proxy connect went red. With them on, all went green. The `netmonitor`, `api`, `config` and `policy` suites give the same results as the base, apart from two notify-socket tests that fail at random on both.
+
+The build branch `sssf/patched` holds all three patches on a07c789: 95fd0e7, 8d7a904 and bcf186b. The build is `agentsh 0.20.6-dev.fork+bcf186b`, sha256 `2e38026982b6dd454d2861c686bdef16a405eb9f5e60c0cd76a0d2af19b98ce2`. It replaces the earlier single-patch build, which was never installed.
+
+Still open in this design:
+
+- The SNI check refuses a ClientHello split across TLS records, and Encrypted Client Hello, whose outer SNI is the CDN's public name. Both fail closed.
+- A connect to the proxy isn't logged as a `ptrace_network` event.
+
 ## Next
 
-1. The proxy fixes in the fork: deny a tunnel whose SNI differs from the CONNECT host, and let the connect check allow the session's own proxy exactly, in place of all of `127.0.0.2`. Then the fronting checks again.
+1. Install the patched build and the config, then run the network and fronting checks again, and the service checks.
 2. Check that Claude Code and pi send their traffic through `HTTPS_PROXY`. A client that ignores it fails closed.
 3. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
 4. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.

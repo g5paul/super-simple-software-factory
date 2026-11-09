@@ -26,11 +26,12 @@ sandbox:
   fuse:
     enabled: false
   # The per-session CONNECT proxy. wrap sets HTTPS_PROXY to it, and it
-  # checks the CONNECT host against the domain rules. Its own address keeps
-  # the policy's loopback allow away from 127.0.0.1.
+  # checks the CONNECT host against the domain rules. The patched build
+  # allows a connect to the session's own proxy, and checks that each
+  # tunnel's TLS SNI is its CONNECT host.
   network:
     enabled: true
-    proxy_listen_addr: "127.0.0.2:0"
+    require_sni_match: true
   ptrace:
     enabled: true
     attach_mode: "children"

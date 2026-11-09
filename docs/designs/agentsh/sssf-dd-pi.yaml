@@ -12,7 +12,7 @@ command_rules:
   - name: sssf-no-push
     commands: [git]
     # agentsh matches all of argv joined by spaces, argv[0] included.
-    args_patterns: ['^\S*\s+push(\s|$)', '(?s)^\S*\s+-.*\spush(\s|$)', '(?s)^\S*\s+-.*\salias\.[^=\s]*=\S*push']
+    args_patterns: ['^\S*\s+push(\s|$)', '(?s)^\S*\s+-.*\spush(\s|$)', '(?is)^\S*\s+-.*\salias\.[^=\s]*=.*push']
     decision: deny
   - name: sssf-allow-rest
     decision: allow

@@ -620,6 +620,26 @@ What held under the real service: the launch checks, the attach, denial counting
 
 `specs/tasks/guard-agentsh-wrap-4.md` is the chain run's task, covering all of these.
 
+### The chain run for the real-run fixes, 8f8304ae
+
+The chain ran on 2026-11-09 from `specs/tasks/guard-agentsh-wrap-4.md` and stopped after round 2, at $7.02, because round 1's fix added a hand-kept list. The report is [guard-run-8f8304ae.md](agentsh/guard-run-8f8304ae.md).
+
+Items 1 to 5 and 7 passed review on the first try: the push rule, the refuse-script read, the `null` page, the refusal message, the sessions folder allow, and the tests from real data. Round 1 also found that `git -c ALIAS.p=push p` runs `git push`, since git reads config keys in any case, and the fix closed it.
+
+Every other finding came from item 6, the relative-symlink allow. agentsh checks a link's target as the raw string, without resolving it against the link's folder, so no absolute rule can judge a relative target.
+- **Round 1:** a link made at an allowed path outside the workspace, such as `~/.claude.json.x -> .ssh/id_rsa`, pointed at a denied file. The agent still can't read through it inside the wrap, but the engineer's own Claude Code rewrites `~/.claude.json` and would follow it.
+- **Round 2:** the fix listed the folders where links are denied, which missed the workspace root. A `secret_files` glob like `keys/[a-z]*` still denied almost every link.
+
+Each list closes the cases it names and misses the next.
+
+The engineer decided on 2026-11-09:
+
+1. **Drop the symlink allow.** A relative symlink stays denied by agentsh's own fallback, as on `main`. An agent's relative `ln -s`, `bun add` and `npm install` fail. `uv venv` and `worktree_setup` don't. A fork patch that resolves the target against the link's folder would allow it safely, if a repo needs it.
+2. **Widen the alias pattern** to `(?is)^\S*\s+-.*\salias\.[^=\s]*=.*push`, so any alias value naming `push` is denied in any case. It's tested on the fork's engine against 41 cases at 3 depths, the five real argv lists among them.
+3. **Record the workspace-root swap as a limit.** An agent can replace its workspace with a link to a folder it made, which `main` allows too. The after-call guard is expected to catch it.
+
+`specs/tasks/guard-agentsh-wrap-5.md` is the next run's task. It keeps the reviewed code and removes item 6.
+
 ## What got built
 
 The first real run must check, beyond the items above:
@@ -642,5 +662,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. Next: the guard chain run from `specs/tasks/guard-agentsh-wrap-4.md`, a sudo install, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
+3. Rollout step 2 in sssf-sandbox. The first real runs are recorded above. Next: the guard chain run from `specs/tasks/guard-agentsh-wrap-5.md`, a sudo install, then a `--worktree` and a plain chain under the service. Beyond the checks above, it tests that the network rules refuse a real push from each spelling in [corpus.sh](agentsh/corpus.sh).
 4. The chain run after step 2: the install script refuses a template that differs from the committed version, plus whatever step 2 turns up, the session folder allow among them.

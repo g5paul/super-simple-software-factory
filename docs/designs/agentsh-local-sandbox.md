@@ -298,9 +298,21 @@ A debug build, local fork branch `debug/tracer-faults`, logged three points: a f
 
 **The clean build, 2026-11-08.** `agentsh 0.20.6-dev.fork+30dee5c`, sha256 `413a33dd...4986`, with the trace drop-in removed. Every network and fronting check held, and the corpus matched the earlier runs: every text-guard bypass held, and the copied `just` ran. One Claude Code run and one pi run each finished with exit 0, reached only their model hosts, and got the proxy's 403 for `example.com`. The server logged no warnings.
 
+## After a restart
+
+`wsl --shutdown` from Windows on 2026-11-08, on the clean build. WSL booted at 18:12:01 and systemd started the service at 18:12:05. It ran as user `agentsh` with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, and `NRestarts=0`.
+
+Every check matched the clean build's results. A wrapped `bash -c` was denied `just test live` and `.env` and could read `.env.example`. The corpus held except for the copied `just`, the network and fronting checks held, and one Claude Code run and one pi run each finished with exit 0 and reached only their model hosts. The server logged no warnings.
+
+The kill check passed again. A wrapped agent wrote a heartbeat, and the engineer sent `SIGKILL` to the server at 18:19:43. The last heartbeat was at 18:19:43, and the wrap exited at 18:19:43 with code 255. systemd restarted the service at 18:19:45, and `NRestarts` went to 1. A new wrapped agent was denied `just test live` and `.env`.
+
+`/tmp` does not survive a restart. `/usr/lib/tmpfiles.d/tmp.conf` has `D /tmp`, so systemd empties it at every boot, and the test workspace went with it. The check scripts need it rebuilt first, as the next section says, and SSSF's real workspaces can't live there.
+
+**The wrap slows each exec.** The heartbeat loop `date; sleep 1` beat every 2 seconds, so I timed it. Five runs of `/bin/true` took 2 ms bare and 840 ms wrapped, and `sleep 1` took 1004 ms bare and 1975 ms wrapped. Three rounds of the loop took 3012 ms bare and 6410 ms wrapped. Each timing also includes one `date` call to read the clock. The agents don't feel this much, since their runs finished in 15 seconds. A test suite that starts many processes will. I don't know the cause yet, and `sleep 1` loses more than the exec cost alone explains.
+
 ## Running the checks
 
-The scripts are in [agentsh/](agentsh/). Each runs in `/tmp/sssf-agentsh-proof`, a mode 755 directory holding a fake `.env`, a `.env.example`, and a justfile with a `test kind:` recipe. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
+The scripts are in [agentsh/](agentsh/). Each runs in `/tmp/sssf-agentsh-proof`, a mode 755 directory holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with a `test kind:` recipe that runs `@echo ran test {{kind}}`. Rebuild it after a restart, because `/tmp` empties at boot. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
 
 - the network and fronting checks: `agentsh wrap --policy sssf-net --root /tmp/sssf-agentsh-proof -- bash net-checks.sh`
 - the bypass corpus: `agentsh wrap --policy sssf-proof --root /tmp/sssf-agentsh-proof -- bash corpus.sh`
@@ -309,7 +321,6 @@ The scripts are in [agentsh/](agentsh/). Each runs in `/tmp/sssf-agentsh-proof`,
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
-2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
-3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
-4. The decisions above, settled from the proof.
-5. A guard chain run for the wrap.
+2. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus. Time its test suite bare and wrapped, to see what the exec cost does to a real project.
+3. The decisions above, settled from the proof.
+4. A guard chain run for the wrap.

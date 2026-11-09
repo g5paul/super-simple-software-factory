@@ -390,6 +390,26 @@ The 8 tests in `internal/ptrace` that fail under the `integration` tag, in a con
 
 The stall in the debug round looks different: its main thread was stopped in `openat`, and the watchdog logged `not advancing`. It may be a separate bug, so it stays open.
 
+## The daily build, 2026-11-08
+
+`agentsh 0.20.6-dev.fork+9f8ebbb7`, sha256 `b091e7e1f08e1fea92079c2905cd78742a565f534715d00331ba72aca7eb820a`, from `sssf/patched` with five local patches and the spin at 1 ms by default. The `spin.conf` drop-in is gone. A copy of the previous build, `30dee5c`, is in `~/.local/share/agentsh-builds/clean/`, outside `/tmp`.
+
+The full check set passed, apart from one pi hang covered below:
+
+| Check | Result |
+|---|---|
+| Service | `active`, user `agentsh`, `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH` |
+| Plain denies | `just test live`, `.env` and the real `.env` denied, `.env.example` readable |
+| With `JUST_NO_DOTENV=true` | `just test unit` runs, `just test live` denied, the copied `just` runs, the accepted limit |
+| Corpus | 16 of 16 held, with the copied `just` caveat |
+| Network and fronting | all held |
+| Guard agents | Claude Code in 8 seconds and pi in 17, both denied all five actions |
+| Server log | no unknown-session denials, no wedge, no warnings |
+
+Timings: failed open 70 µs, fork and exec 1.2 ms, Python start 28 ms, `git status --short` 49 ms, `python -m pytest -q` about 460 ms, `uv run pytest -q` 508 ms.
+
+**One pi run in 50 hung on the model call.** Session `32f075b2` looked normal up to its connection to `api.openai.com`, then got no answer for 39.6 seconds, until the loop killed it at its 40-second limit. A healthy run gets its answer in about 1.7 seconds. stdin was `/dev/null`, and the server logged no wedge. The 40 runs after it were clean. The records can't tell a slow response from OpenAI apart from a stall in agentsh's proxy, and `pi-loop.sh`'s output from that run was thrown away. Across the spin builds, with stdin closed, that's 1 hang in 118 wrapped pi runs. A bare pi loop of about the same size would tell the two apart, at the cost of that many subscription calls.
+
 ## Running the checks
 
 The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspace at `~/sssf-agentsh-proof`: a detached worktree of sssf-sandbox holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with an added `test kind:` recipe that runs `@echo ran test {{kind}}`. Run the rest from that folder. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
@@ -403,6 +423,6 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
-2. Make 1 ms the spin's default, move the patch onto `sssf/patched`, remove the `spin.conf` drop-in, and install that as the daily build, with the full check set on it.
+2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The decisions above, settled from the proof.
-4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables.
+4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, and give the agent a `/dev/null` stdin, which `sandbox.start` already does.

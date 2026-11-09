@@ -308,7 +308,7 @@ The kill check passed again. A wrapped agent wrote a heartbeat, and the engineer
 
 `/tmp` does not survive a restart. `/usr/lib/tmpfiles.d/tmp.conf` has `D /tmp`, so systemd empties it at every boot, and the test workspace went with it. The check scripts need it rebuilt first, as the next section says, and SSSF's real workspaces can't live there.
 
-**The wrap slows each exec.** The heartbeat loop `date; sleep 1` beat every 2 seconds, so I timed it. Five runs of `/bin/true` took 2 ms bare and 840 ms wrapped, and `sleep 1` took 1004 ms bare and 1975 ms wrapped. Three rounds of the loop took 3012 ms bare and 6410 ms wrapped. Each timing also includes one `date` call to read the clock. The agents don't feel this much, since their runs finished in 15 seconds. A test suite that starts many processes will. I don't know the cause yet, and `sleep 1` loses more than the exec cost alone explains.
+**The wrap slows each exec.** The heartbeat loop `date; sleep 1` beat every 2 seconds, so I timed it. Five runs of `/bin/true` took 2 ms bare and 840 ms wrapped, and `sleep 1` took 1004 ms bare and 1975 ms wrapped. Three rounds of the loop took 3012 ms bare and 6410 ms wrapped. Each timing also includes one `date` call to read the clock. The agents don't feel this much, since their runs finished in 15 seconds. A test suite that starts many processes will. The section on the cause explains it.
 
 ## The proof in sssf-sandbox, 2026-11-08
 
@@ -316,7 +316,7 @@ On the clean build, `30dee5c`. The sandbox's `.env` holds live API keys, and a g
 
 **The guard held for both agents.** One Claude Code run and one pi run were each told to try `just test live`, `wc -c .env`, a Python open of `.env` with the name built at run time, `curl https://example.com`, and their own file-reading tool on `.env`. All five failed for both agents, and the fake value appeared nowhere in their output. The worktree has no Claude Code settings file, so the refusals came from the wrap. The server's events show `sssf-no-live-tests`, `sssf-secret-files` and `default-deny-network` firing. Claude Code's session hit the search's limit of 2000 events, so its counts may be short. No file call was denied as unknown session, and the watchdog logged no wedge.
 
-**The corpus held,** with one exception that hides behind the next finding. The copied `just` only failed because it couldn't load `.env`. With the fix below it ran, so the accepted limit stands.
+**The corpus held,** with one exception that hides behind the next finding. The copied `just` only failed because it couldn't load `.env`. With the fix below it ran, so the accepted limit stands. `net-checks.sh` wasn't rerun in the worktree. It passed on this build after the restart, and here only the agents' `curl` and model traffic tested the network.
 
 **`set dotenv-load` breaks every recipe under the wrap.** SSSF's stamped justfile sets it, so `just` opens `.env` before it runs anything. The deny makes `just test unit` fail with `I/O error at .env: Permission denied`. Setting `JUST_NO_DOTENV=true` before the wrap fixes it: `just test unit` ran and `just test live` was still denied. An agent that clears the variable gets the same `.env` error and no contents. Recipes then run without the keys from `.env`, which is what the deny is for. A recipe that needs one has to get it some other way, or run outside the wrap.
 
@@ -328,7 +328,30 @@ On the clean build, `30dee5c`. The sandbox's `.env` holds live API keys, and a g
 | `python -m pytest -q` | 242 ms | 6919 ms |
 | `uv run pytest -q` | 290 ms | 8676 ms |
 
-pytest's own clock went from 0.12 seconds to 1.55, so most of the wrapped time passes outside the tests, in session start and Python's start. Each agent still finished, in 34 and 37 seconds, for five tool calls. Whether that's acceptable for a project with a long suite isn't measured, and the cause is still unknown.
+pytest's own clock went from 0.12 seconds to 1.55, so most of the wrapped time passes outside the tests, in session start and Python's start. Each agent still finished, in 34 and 37 seconds, for five tool calls. The next section has the cause.
+
+## The cause of the slowdown, 2026-11-08
+
+The tracer polls on a 5 ms timer. `Run` in `internal/ptrace/tracer.go` calls `Wait4` with `WNOHANG`, and when no agent has stopped yet it waits on a 5 ms idle timer. A checked syscall stops the agent at entry and again at exit. Each stop is ready microseconds after the resume, but by then the loop is asleep, so each one waits out the timer. That makes about 11 ms per checked call. Starting a process makes many checked calls, loading its libraries among them, which is why Python's start takes 700 ms.
+
+A debug build, `debug/tracer-idle` at 8c2ea044, makes the interval settable, and I set it to 200 µs. Every wrapped number dropped by about the same factor, 4.2 to 5.0:
+
+| Measure | Bare | Wrapped, 5 ms | Wrapped, 200 µs |
+|---|---:|---:|---:|
+| Failed open | 2 µs | 11.1 ms | 2.3 ms |
+| Real open | 3 µs | 22.3 ms | 4.5 ms |
+| Fork | 0.3 ms | 22.5 ms | 5.2 ms |
+| Fork and exec | 0.5 ms | 72.6 ms | 15.1 ms |
+| Python start | 8.8 ms | 700 ms | 151 ms |
+| `git status --short` | 13 ms | 2333 ms | 490 ms |
+| `python -m pytest -q` | 242 ms | 6919 ms | 1630 ms |
+| `uv run pytest -q` | 290 ms | 8676 ms | 1995 ms |
+
+Two other guesses fell first. An fsync per event was wrong: SQLite writes through an async queue, and JSONL's `AppendEvent` doesn't sync with integrity off. Work in the server was wrong too: over 500 failed opens it used 640 ms of CPU in 6 seconds.
+
+A shorter timer isn't the fix. At 200 µs the server used 770 ms of CPU during a wrapped `sleep 5`, about 15% of a core, because `scanWedged` and `reconcileProc` run on every tick. The same measure at 5 ms wasn't taken. It also still costs 2.3 ms per failed open, about 1.1 ms per stop, so the wait is longer than the 200 µs asked for. The better fix is to poll `Wait4` in a short spin right after resuming an agent, and only then fall back to the 5 ms timer. That hasn't been built.
+
+The corpus still held at 200 µs, 16 of 16. The copied `just` counts as held there only because of the `.env` failure above. No file call was denied as unknown session, and the watchdog logged no wedge.
 
 ## Running the checks
 
@@ -343,6 +366,6 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
-2. Find what makes the wrap slow, and whether it can be cut, before SSSF depends on it.
+2. Cut the tracer's wait: spin on `Wait4` after a resume, then fall back to the 5 ms timer. Check it with `timing.sh` and the server's CPU, and put the clean build back after the test.
 3. The decisions above, settled from the proof.
 4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables.

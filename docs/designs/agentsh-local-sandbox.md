@@ -214,10 +214,34 @@ The corpus showed that a copy of `just` under another name runs `just test live`
 
 So the copied binary is an accepted limit, like running a recipe's body by hand. The engineer accepted it on 2026-11-08, in place of the Landlock execute list. A command rule stops a mistake or a casual attempt. The file rules on secrets and the network rules stop the harm, and those don't depend on a program's name. The next layer to tighten is the network: allow only the model hosts and the package registries, in place of `sssf-allow-net`. In ptrace mode the server runs a DNS proxy, so domain rules may work without eBPF. That needs a test.
 
+## The network allowlist, 2026-11-08
+
+The policy `sssf-net` allows the model hosts and the package registries on port 443, and denies the rest. The checks are in [agentsh/net-checks.sh](agentsh/net-checks.sh), run inside `agentsh wrap --policy sssf-net`.
+
+**Run 1: domain rules alone allow nothing.** In ptrace mode the connect check gets a bare IP (agentsh `internal/api/ptrace_handlers.go`, `HandleNetwork`). A domain rule matches only a host name, so every connect failed, `api.anthropic.com` included. The server records DNS answers, but feeds them only to a TLS watch (`internal/ptrace/tracer.go`, `handleConnectExit`), not to the policy. Denied names got no DNS answer.
+
+**Run 2: the session proxy.** With `sandbox.network.enabled: true` the server starts a CONNECT proxy for each session, and `wrap` sets `HTTPS_PROXY` to it. The proxy checks the CONNECT host against the domain rules. The connect check allows only the proxy's address.
+
+| Check | Result |
+| --- | --- |
+| `api.anthropic.com`, npm, PyPI through the proxy | allowed |
+| `example.com`, `github.com`, a raw IP through the proxy | 403 from the proxy |
+| The agentsh API and `sshd` through the proxy | 403 |
+| Port 80 to an allowed host | 403 |
+| A direct connect that skips the proxy: curl, Python, `127.0.0.1:22`, `127.0.0.2:22` | `EACCES` |
+| DNS for a denied name | no answer |
+
+The proxy takes a random port, so the policy allows all of `127.0.0.2`, its own address. A service bound to `0.0.0.0` answers there too: `sshd` and two more on this machine. The policy denies those three ports by number, which breaks when a new service starts. It must become an exact allow for the session's own proxy.
+
+**Domain fronting gets past it.** The proxy checks the CONNECT host, not the TLS handshake inside the tunnel. A CONNECT to `chatgpt.com` with the SNI `example.com` returned the real `example.com` page and certificate. The same held for `api.openai.com` and `registry.npmjs.org`: all three are on Cloudflare, which routes by SNI to any site it hosts. `api.anthropic.com` returned 403, and the PyPI and crates.io hosts refused the handshake. With a matching SNI and a foreign `Host` header, Cloudflare returned 403 for all three.
+
+So a check in the proxy that the ClientHello's SNI equals the CONNECT host closes the fronting, with no TLS inspection. The proxy already parses the SNI to rewrite redirects (`internal/netmonitor/proxy.go`, `sniRewriteFirstRecord`). The `tls_inspection` config block exists but nothing reads it.
+
 ## Next
 
-1. Network rules by domain in ptrace mode: allow the model hosts and the package registries, and deny the rest.
-2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the proof checks: the service is `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, a `kill -9` of the server kills the wrapped agent and the service comes back, and the service is `active` after `wsl --shutdown`.
-2. The proof in sssf-sandbox, per the note's plan. The engineer installs agentsh, its config and the policy with sudo. Then `agentsh detect`, one wrapped Claude Code agent and one wrapped pi agent, and today's bypass corpus with the escape probes.
-2. The decisions above, settled from the proof.
-3. A guard chain run for the wrap.
+1. The proxy fixes in the fork: deny a tunnel whose SNI differs from the CONNECT host, and let the connect check allow the session's own proxy exactly, in place of all of `127.0.0.2`. Then the fronting checks again.
+2. Check that Claude Code and pi send their traffic through `HTTPS_PROXY`. A client that ignores it fails closed.
+3. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
+4. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
+5. The decisions above, settled from the proof.
+6. A guard chain run for the wrap.

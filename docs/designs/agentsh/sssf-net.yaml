@@ -11,7 +11,8 @@ command_rules:
     decision: deny
   - name: sssf-no-push
     commands: [git]
-    args_patterns: ['(^|\s)push(\s|$)']
+    # agentsh matches all of argv joined by spaces, argv[0] included.
+    args_patterns: ['^\S*\s+push(\s|$)', '^\S*\s+-.*push']
     decision: deny
   - name: sssf-allow-rest
     decision: allow

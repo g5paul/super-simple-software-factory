@@ -80,6 +80,8 @@ The engineer settled these on 2026-11-08, after the proof. OpenShell stays the l
 | Silent fallback | None. A run refuses to start if the service isn't active, the wrap can't attach, or the service reports weaker enforcement than the policy needs. An upstream request for `wrap --require-interception` can wait |
 | Other credentials | A deny list in the policy covering `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.config/sssf-sandbox` and similar, retested with both agents |
 | Default-deny for files | Adopted by the engineer on 2026-11-08, after [the third run](#the-seventh-patch-and-the-third-run). The wrap's policies end in a deny of everything, with 20 file rules for Claude Code and 18 for pi, generated rather than written by hand. It accepts these limits: an agent can read its own sign-in, Claude Code can write `~/.claude.json`, which can hold MCP settings, and can read other projects' transcripts under `~/.claude/projects`, and `/tmp` is shared. A new tool may need a path added, and the trace names the path when it does |
+| Install files and the config check | Decided 2026-11-09, after [the first guard run](#the-first-guard-run-cf9d8014). The install command writes to a fresh temp folder outside the repo, and `check_machine` compares the installed config byte for byte with what SSSF renders, apart from the machine's `policies.allowed` list |
+| The push rule | Decided 2026-11-09. `sssf-no-push` denies `push` as git's first argument, or anywhere after a leading option. It accepts that `git -c a=b commit -m push` is denied and that an `argv[0]` with a space gets past it |
 | Workspace | Pinned, because agentsh [widens `--root` to the repo top](#agentsh-widens-the-workspace-to-the-repo-top). `sssf.yaml` sets `policies.detect_project_root: false`, and the wrap refuses a `--root` that isn't the checkout's top |
 | Sign-ins | One policy per agent type. Claude Code can't open `~/.pi/agent/auth.json` and pi can't open `~/.claude/.credentials.json`. An agent can still read its own sign-in. Credential injection waits: it's untested and may not fit OAuth refresh |
 | Network hosts | The base allowlist stays model hosts, sign-in hosts and package registries. A `network_allow` key in `repo.yaml` adds a repo's own hosts, and each change takes the sudo step |
@@ -527,6 +529,35 @@ An SSSF run starts at a checkout or worktree top, which holds `.git`, so the wal
 
 That attempt was useful in one way. With no `hello.py` to edit, Claude Code searched the home folder for it, and default-deny answered 229 opens with `EACCES`, `.gnupg` among them. It then reported that it couldn't find the file and made no edits.
 
+### The first guard run, cf9d8014
+
+The chain ran on 2026-11-08 from `specs/tasks/guard-agentsh-wrap.md` and stopped for the engineer after two rounds, at $12.26, because round 1's fix added state. It found no bypass, and the text checks judged 135 commands the same on `main` and on the branch. Every agentsh check ran against a fake wrap and service or the reviewer's own evaluator, so no real exec was denied. The report is [guard-run-cf9d8014.md](agentsh/guard-run-cf9d8014.md).
+
+What blocked it:
+
+- The install script could overwrite a file through a link at `adws/adw_data`, a narrower form of round 1's harm.
+- `sssf-no-push` denied `git commit -m "fix the push path"`, `git stash push` and `git log --grep push`. The rule came from the proof policy, and the task asked for it verbatim.
+- Round 1's fix added `_finished` with a 30-second wait, and a failed final read now replaced the three-denial stop and lost a clean call's spend.
+
+Worth more than those: `check_machine` passed a config with `ptrace.trace.execve: false` or `on_attach_failure: fail_open`, and that config waited in an agent-writable folder until the sudo step. Separately, **the build never set `JUST_NO_DOTENV=true`**. The task required it, the spec dropped it, and neither review caught it. I found it reading the builder's notes.
+
+The engineer decided these on 2026-11-09:
+
+1. Narrow the push rule. See below.
+2. Install files leave the repo, and the installed config is compared whole. This removes the link harm, the untracked-files finding and the config hole, where patching each would leave the next.
+3. The new state goes, and the outcome order stays the spec's.
+4. The next run starts from the same code. `specs/tasks/guard-agentsh-wrap-2.md` is its task. It's a new session rather than a joined one, because joining would count cf9d8014's spend against the $20 cap. The branch `sssf/cf9d8014` and its worktree stay until that run is settled.
+
+**The push rule.** `args_patterns: ['^\S*\s+push(\s|$)', '^\S*\s+-.*push']`, tested through `LoadFromFile` and `CheckExecve` in the fork at depths 0, 1 and 3, not yet under the service. agentsh matches against all of argv joined by spaces, **`argv[0]` included**, so the pattern skips a first token. It denies `git push`, `git -c a=b push`, `git -c "a=b c" push`, `git -C /x push`, `git --git-dir /x push`, `git -c alias.p=push p` and an empty `argv[0]`. It allows `git commit -m push`, `git stash push` and `git log --grep push`. Two limits come with it:
+
+- `git -c a=b commit -m push` is denied. It fails closed, and it's rare.
+- `exec -a "a b" git push` isn't denied, because joined text can't separate that first token from an argument. The old pattern denied it. Getting there takes a deliberate spoof, a copied binary already does the same with less effort, and the network rules still refuse GitHub. A fork patch could match arguments without `argv[0]`, if this ever matters.
+
+**The first real run must check** these, from the builder's notes:
+
+- Session and handoff paths on a `--worktree` run. `adws/adw_data/sessions/<id>/` and the `REFUSE_*` files may sit in the main checkout, outside `${PROJECT_ROOT}`, so default-deny may refuse them and the chain may fail closed. The fix would be an allow on that folder, which widens what an agent can read across runs. That's the engineer's call at rollout step 2.
+- That the attach lines and event fields match what `internal/cli/wrap.go` and the events API really produce, and that `order=asc` and `type=ptrace_execve` are honoured.
+
 ## Running the checks
 
 The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspace at `~/sssf-agentsh-proof`: a detached worktree of sssf-sandbox holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with an added `test kind:` recipe that runs `@echo ran test {{kind}}`. Run the rest from that folder. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
@@ -541,4 +572,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Rollout step 1, the guard chain run for the wrap, from `specs/tasks/guard-agentsh-wrap.md`.
+3. Rollout step 1, the second guard chain run for the wrap, from `specs/tasks/guard-agentsh-wrap-2.md`.
+4. A sudo step to install new generated policies, then rollout step 2 in sssf-sandbox.

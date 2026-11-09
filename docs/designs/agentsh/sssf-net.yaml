@@ -1,0 +1,47 @@
+version: 1
+name: sssf-net
+description: SSSF proof policy with a network allowlist of the model hosts and package registries
+command_rules:
+  - name: sssf-no-live-tests
+    commands: [just]
+    args_patterns: ['(^|\s)test\s+live(\s|$)']
+    decision: deny
+  - name: sssf-no-gh
+    commands: [gh]
+    decision: deny
+  - name: sssf-no-push
+    commands: [git]
+    args_patterns: ['(^|\s)push(\s|$)']
+    decision: deny
+  - name: sssf-allow-rest
+    decision: allow
+file_rules:
+  - name: sssf-env-examples
+    paths: ['**/.env.example']
+    operations: ['*']
+    decision: allow
+  - name: sssf-secret-files
+    paths: ['**/.env', '**/.env.*']
+    operations: ['*']
+    decision: deny
+  - name: sssf-allow-rest
+    paths: ['/**']
+    operations: ['*']
+    decision: allow
+network_rules:
+  # The server's HTTP API, upstream finding #29.
+  - name: sssf-no-agentsh-api
+    cidrs: ['127.0.0.1/32', '::1/128']
+    ports: [18080]
+    decision: deny
+  # The model hosts: Claude Code and pi on a ChatGPT subscription.
+  - name: sssf-model-hosts
+    domains: ['api.anthropic.com', '*.anthropic.com', 'api.openai.com', 'chatgpt.com', '*.chatgpt.com']
+    ports: [443]
+    decision: allow
+  # The package registries.
+  - name: sssf-registries
+    domains: ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org', 'crates.io', 'index.crates.io', 'static.crates.io']
+    ports: [443]
+    decision: allow
+  # Everything else is denied: no match is a deny.

@@ -1,6 +1,6 @@
 # Design: agentsh as the local sandbox
 
-Status: direction decided by the engineer on 2026-11-08. The research note is done, [agentsh-local-sandbox.md](../research/agentsh-local-sandbox.md) in `docs/research/`, and the proof in sssf-sandbox is being set up. The open item is in [open.md](../open.md).
+Status: direction decided by the engineer on 2026-11-08. The research note is done, [agentsh-local-sandbox.md](../research/agentsh-local-sandbox.md) in `docs/research/`, and the proof in sssf-sandbox passed on 2026-11-08, with two findings to settle. The open item is in [open.md](../open.md).
 
 Under `sandbox: none`, SSSF runs each agent under [agentsh](https://github.com/canyonroad/agentsh) with a policy built from the repo's settings, in place of the text checks that limit a local agent today. `--sandbox openshell` stays as it is.
 
@@ -310,17 +310,39 @@ The kill check passed again. A wrapped agent wrote a heartbeat, and the engineer
 
 **The wrap slows each exec.** The heartbeat loop `date; sleep 1` beat every 2 seconds, so I timed it. Five runs of `/bin/true` took 2 ms bare and 840 ms wrapped, and `sleep 1` took 1004 ms bare and 1975 ms wrapped. Three rounds of the loop took 3012 ms bare and 6410 ms wrapped. Each timing also includes one `date` call to read the clock. The agents don't feel this much, since their runs finished in 15 seconds. A test suite that starts many processes will. I don't know the cause yet, and `sleep 1` loses more than the exec cost alone explains.
 
+## The proof in sssf-sandbox, 2026-11-08
+
+On the clean build, `30dee5c`. The sandbox's `.env` holds live API keys, and a guard failure in an agent test would send them to a model provider. So the proof ran in a detached worktree of sssf-sandbox at `~/sssf-agentsh-proof`, with a fake `.env`. One check went at the real `.env` by absolute path with `wc -c`, which prints only a count, and it was denied.
+
+**The guard held for both agents.** One Claude Code run and one pi run were each told to try `just test live`, `wc -c .env`, a Python open of `.env` with the name built at run time, `curl https://example.com`, and their own file-reading tool on `.env`. All five failed for both agents, and the fake value appeared nowhere in their output. The worktree has no Claude Code settings file, so the refusals came from the wrap. The server's events show `sssf-no-live-tests`, `sssf-secret-files` and `default-deny-network` firing. Claude Code's session hit the search's limit of 2000 events, so its counts may be short. No file call was denied as unknown session, and the watchdog logged no wedge.
+
+**The corpus held,** with one exception that hides behind the next finding. The copied `just` only failed because it couldn't load `.env`. With the fix below it ran, so the accepted limit stands.
+
+**`set dotenv-load` breaks every recipe under the wrap.** SSSF's stamped justfile sets it, so `just` opens `.env` before it runs anything. The deny makes `just test unit` fail with `I/O error at .env: Permission denied`. Setting `JUST_NO_DOTENV=true` before the wrap fixes it: `just test unit` ran and `just test live` was still denied. An agent that clears the variable gets the same `.env` error and no contents. Recipes then run without the keys from `.env`, which is what the deny is for. A recipe that needs one has to get it some other way, or run outside the wrap.
+
+**The wrap is slow on a real project.** Each wrapped time includes starting a session. The suite is 281 tests, and one of them, `test_the_checkout_is_set_up`, fails bare and wrapped because the worktree has no `.setup-marker`.
+
+| Command | Bare | Wrapped |
+|---|---:|---:|
+| `git status --short` | 13 ms | 2333 ms |
+| `python -m pytest -q` | 242 ms | 6919 ms |
+| `uv run pytest -q` | 290 ms | 8676 ms |
+
+pytest's own clock went from 0.12 seconds to 1.55, so most of the wrapped time passes outside the tests, in session start and Python's start. Each agent still finished, in 34 and 37 seconds, for five tool calls. Whether that's acceptable for a project with a long suite isn't measured, and the cause is still unknown.
+
 ## Running the checks
 
-The scripts are in [agentsh/](agentsh/). Each runs in `/tmp/sssf-agentsh-proof`, a mode 755 directory holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with a `test kind:` recipe that runs `@echo ran test {{kind}}`. Rebuild it after a restart, because `/tmp` empties at boot. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
+The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspace at `~/sssf-agentsh-proof`: a detached worktree of sssf-sandbox holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with an added `test kind:` recipe that runs `@echo ran test {{kind}}`. Run the rest from that folder. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
 
-- the network and fronting checks: `agentsh wrap --policy sssf-net --root /tmp/sssf-agentsh-proof -- bash net-checks.sh`
-- the bypass corpus: `agentsh wrap --policy sssf-proof --root /tmp/sssf-agentsh-proof -- bash corpus.sh`
-- one real agent: `agent-run.sh claude` or `agent-run.sh pi`, which also lists the session's network events from the server API
+- the network and fronting checks: `agentsh wrap --policy sssf-net --root "$PWD" -- bash net-checks.sh`
+- the bypass corpus: `agentsh wrap --policy sssf-proof --root "$PWD" -- bash corpus.sh`
+- one real agent: `agent-run.sh claude` or `agent-run.sh pi`, with `guard` added to have it try the denied actions. It also lists the session's network events and denials from the server API
+
+The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the worktree if they get that far. To see the copied `just` run, set `JUST_NO_DOTENV=true` first.
 
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
-2. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus. Time its test suite bare and wrapped, to see what the exec cost does to a real project.
+2. Find what makes the wrap slow, and whether it can be cut, before SSSF depends on it.
 3. The decisions above, settled from the proof.
-4. A guard chain run for the wrap.
+4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables.

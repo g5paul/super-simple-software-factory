@@ -34,6 +34,15 @@ network_rules:
     cidrs: ['127.0.0.1/32', '::1/128']
     ports: [18080]
     decision: deny
+  # The session proxy on 127.0.0.2. Wildcard listeners answer there too, so
+  # deny their ports first: sshd and the two on 4600 and 4689.
+  - name: sssf-no-wildcard-listeners
+    cidrs: ['127.0.0.2/32']
+    ports: [22, 4600, 4689]
+    decision: deny
+  - name: sssf-session-proxy
+    cidrs: ['127.0.0.2/32']
+    decision: allow
   # The model hosts: Claude Code and pi on a ChatGPT subscription.
   - name: sssf-model-hosts
     domains: ['api.anthropic.com', '*.anthropic.com', 'api.openai.com', 'chatgpt.com', '*.chatgpt.com']

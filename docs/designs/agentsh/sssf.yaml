@@ -25,6 +25,12 @@ sandbox:
     enabled: false
   fuse:
     enabled: false
+  # The per-session CONNECT proxy. wrap sets HTTPS_PROXY to it, and it
+  # checks the CONNECT host against the domain rules. Its own address keeps
+  # the policy's loopback allow away from 127.0.0.1.
+  network:
+    enabled: true
+    proxy_listen_addr: "127.0.0.2:0"
   ptrace:
     enabled: true
     attach_mode: "children"

@@ -77,6 +77,8 @@ uv run .claude/skills/sssf/scripts/install.py --update
 | differs from its recorded hash, and the skill's version has changed since | keeps it and flags it for review (`!`), with a `diff` command to compare |
 | is SSSF code the skill no longer ships, and still matches its recorded hash | removes it (`-`, under `removed`). Changed, or not a regular file: leaves it and lists it |
 
+A malformed `stamp.json` makes `--update` refuse before it writes anything, naming each bad record. Restore the file with `git checkout -- adws/adw_sssf_config/stamp.json`, read `git log` on it, and run the update again.
+
 So a tuned roster, the real commands in `quality.py`, and edited prompts survive an update, and `!` appears only when the skill has something new for a file the repo changed. For each `!` file, choose one. Both are flags of `--update`, and both repeat:
 
 ```bash

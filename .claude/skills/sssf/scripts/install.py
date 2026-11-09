@@ -26,6 +26,8 @@ listed, a missing file is added. --take PATH replaces a kept file anyway;
 skill's version of it changes again.
 
 --update removes SSSF code the skill dropped, if the repo never changed it.
+--update refuses, writing nothing, when stamp.json is malformed: restore it
+with git checkout and run it again.
 
 Install and --update also record the repo in the user's project registry
 (~/.config/sssf/projects.json, or $SSSF_REGISTRY), which `just obs-all`
@@ -269,6 +271,71 @@ def load_stamp(root: Path) -> dict:
     return json.loads(path.read_text()) if path.is_file() else {"files": {}}
 
 
+CONFIG = "adws/adw_sssf_config/sssf.config.yaml"
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+# Every roster template an install has ever recorded; all still ship.
+STARTER_SOURCES = frozenset(p.relative_to(TEMPLATES).as_posix() for p in STARTERS.values())
+
+
+def read_stamp(root: Path) -> tuple[dict, list[str]]:
+    """Read and check stamp.json for --update. Returns (record, problems).
+
+    The file is read and parsed once, in one try, and the caller uses the returned
+    dict for everything after, so an agent rewriting the file mid-update can't make
+    the check and a later read disagree. Roster records are narrowed to a shipped
+    starter as their `source`, because that source becomes a path under TEMPLATES
+    that the copy loop reads; any other value would crash it partway through.
+    """
+    try:
+        record = json.loads((root / STAMP).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"files": {}}, []
+    except OSError:
+        return {}, ["stamp.json can't be read"]
+    except (ValueError, RecursionError):
+        return {}, ["stamp.json is not valid UTF-8 JSON"]
+    if not isinstance(record, dict):
+        return {}, ["stamp.json is not a JSON object"]
+    files = record.get("files")
+    if not isinstance(files, dict):
+        return {}, ['stamp.json has no "files" object']
+    problems = []
+    if "skill" in record:
+        skill = record["skill"]
+        try:
+            if not isinstance(skill, str):
+                raise UnicodeEncodeError("utf-8", "", 0, 1, "not text")
+            skill.encode("utf-8")
+        except UnicodeEncodeError:
+            problems.append('"skill" is not text')
+    for rel, entry in sorted(files.items()):
+        reasons = []
+        if not isinstance(rel, str):
+            reasons.append("key is not text")
+        else:
+            if "\x00" in rel:
+                reasons.append("key holds a null byte")
+            try:
+                rel.encode("utf-8")
+            except UnicodeEncodeError:
+                reasons.append("key is not UTF-8 text")
+        if not isinstance(entry, dict):
+            reasons.append("not an object")
+        else:
+            source = entry.get("source")
+            if not isinstance(source, str):
+                reasons.append('"source" missing or not text')
+            digest = entry.get("sha256")
+            if not isinstance(digest, str) or not SHA256_HEX.fullmatch(digest):
+                reasons.append('"sha256" missing or not 64 lowercase hex characters')
+            if (isinstance(source, str) and source not in STARTER_SOURCES
+                    and isinstance(rel, str) and (rel == CONFIG or ADDED_ROSTER.match(rel))):
+                reasons.append('"source" is not a starter roster')
+        if reasons:
+            problems.append(f"record {json.dumps(rel)}: {'; '.join(reasons)}")
+    return record, problems
+
+
 def skill_version(root: Path) -> str | None:
     """The last commit that changed the skill this install or update came
     from, "+dirty" when its tree has changes. A later commit outside the skill
@@ -427,9 +494,19 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     if not (root / "adws" / "adw_modules").is_dir():
         print(f"no SSSF install in {root}: run install.py first", file=sys.stderr)
         return 1
-    record = load_stamp(root)
+    record, problems = read_stamp(root)
+    if problems:
+        print(f"refusing to update: {STAMP} is malformed, and nothing was written",
+              file=sys.stderr)
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        print("restore it from git, see who changed it, then run the update again:\n"
+              f"  git checkout -- {STAMP}\n"
+              f"  git log -- {STAMP}\n"
+              "  uv run .claude/skills/sssf/scripts/install.py --update", file=sys.stderr)
+        return 1
     files = record["files"]
-    config = "adws/adw_sssf_config/sssf.config.yaml"
+    config = CONFIG
     config_text = (root / config).read_text() if (root / config).is_file() else ""
     if config in files:
         roster = TEMPLATES / files[config]["source"]

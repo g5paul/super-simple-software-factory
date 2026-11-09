@@ -423,3 +423,144 @@ def test_retire_unlinks_through_the_open_parent_not_a_re_resolved_path(repo, tmp
     monkeypatch.setattr(mod.os, "unlink", swap_then_unlink)
     assert mod.retire(Path.cwd(), "adws/adw_modules/sub/x.py", sha(sub / "x.py")) == "removed"
     assert victim.exists() and not Path("adws/adw_modules/sub_moved/x.py").exists()
+
+
+# ── a malformed stamp.json is refused before anything is written ─────────────
+
+def run_update() -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SKILL / "scripts" / "install.py"), "--update"],
+                          capture_output=True, text=True, check=False)
+
+
+def snapshot(root: Path) -> dict:
+    seen = {}
+    for folder, dirs, names in os.walk(root, followlinks=False):
+        for name in [*dirs, *names]:
+            path = Path(folder) / name
+            mode = path.lstat().st_mode
+            if path.is_symlink():
+                data = os.readlink(path)
+            elif path.is_file():
+                data = path.read_bytes()
+            else:
+                data = None
+            seen[str(path)] = (mode, data)
+    registry = Path(os.environ["SSSF_REGISTRY"])
+    seen["registry"] = registry.read_bytes() if registry.exists() else None
+    return seen
+
+
+def assert_refused(result: subprocess.CompletedProcess, *keys: str) -> None:
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    assert "git checkout -- adws/adw_sssf_config/stamp.json" in result.stderr
+    assert "git log -- adws/adw_sssf_config/stamp.json" in result.stderr
+    for key in keys:
+        assert json.dumps(key) in result.stderr
+
+
+@pytest.fixture
+def primed(repo):
+    """A repo where an unchecked update would copy, add and delete."""
+    pretend_an_older_skill_stamped(REVIEWER)
+    for path in Path("adws/adw_data/prompt_engineering").rglob("user.md"):
+        if path != REVIEWER:
+            path.unlink()
+            break
+    RETIRED.write_text("old = 1\n")
+    record_retired(RETIRED)
+    return repo
+
+
+GOOD = "a" * 64
+GONE = "adws/zz_gone.py"
+NUL_KEY = "adws/adw_modules/a\x00b.py"
+SURROGATE_KEY = "adws/adw_modules/\ud800.py"
+EXTRA_ROSTER = "adws/adw_sssf_config/sssf.config.x.yaml"
+
+MALFORMED_RECORDS = [
+    (NUL_KEY, {"source": "x", "sha256": GOOD}),
+    (SURROGATE_KEY, {"source": "x", "sha256": GOOD}),
+    (GONE, {"source": GONE}),
+    (GONE, {"source": GONE, "sha256": "0" * 63}),
+    (GONE, {"source": GONE, "sha256": "z" * 64}),
+    (GONE, {"source": GONE, "sha256": "0" * 64 + "\n"}),
+    (GONE, "x"),
+    (GONE, []),
+    (GONE, None),
+    (GONE, 1),
+    (GONE, {"sha256": "0" * 64}),
+    (GONE, {"source": 1, "sha256": "0" * 64}),
+    (str(AGENTS), "REMOVE_SHA256"),
+    (str(CONFIG), {"source": "nope.yaml", "sha256": GOOD}),
+    (str(CONFIG), {"source": "adws", "sha256": GOOD}),
+    (str(CONFIG), {"source": "../../../etc/hostname", "sha256": GOOD}),
+    (str(CONFIG), {"source": "sssf.config.yaml\x00", "sha256": GOOD}),
+    (EXTRA_ROSTER, {"source": "adws/adw_modules/agents.py", "sha256": GOOD}),
+]
+
+
+@pytest.mark.parametrize("key,value", MALFORMED_RECORDS)
+def test_a_malformed_record_is_refused_before_any_write(primed, key, value):
+    record = stamp()
+    if value == "REMOVE_SHA256":
+        value = dict(record["files"][key])
+        del value["sha256"]
+    record["files"][key] = value
+    STAMP.write_text(json.dumps(record))
+    before = snapshot(primed)
+    assert_refused(run_update(), key)
+    assert snapshot(primed) == before
+
+
+def test_every_bad_record_is_named_at_once(primed):
+    record = stamp()
+    record["files"][NUL_KEY] = {"source": "x", "sha256": GOOD}
+    record["files"][GONE] = {"source": GONE}
+    STAMP.write_text(json.dumps(record))
+    before = snapshot(primed)
+    assert_refused(run_update(), NUL_KEY, GONE)
+    assert snapshot(primed) == before
+
+
+def _folder() -> None:
+    STAMP.unlink()
+    STAMP.mkdir()
+
+
+@pytest.mark.parametrize("raw", [
+    b"{", b"\xff\xfe", b"[]", b"{}", b'{"files": []}', b"[" * 100000,
+    b'{"files": {}, "skill": "\\ud800"}', b'{"files": {}, "skill": 1}', _folder,
+])
+def test_a_malformed_stamp_file_is_refused(primed, raw):
+    if callable(raw):
+        raw()
+    else:
+        STAMP.write_bytes(raw)
+    before = snapshot(primed)
+    assert_refused(run_update())
+    assert snapshot(primed) == before
+
+
+@pytest.mark.parametrize("args", [[], ["--coding-agent", "claude_code"], ["--chatgpt"], ["--container"]])
+def test_a_stamp_from_every_install_shape_updates(tmp_path, monkeypatch, args):
+    monkeypatch.chdir(tmp_path)
+    install(*args)
+    names = {"sssf.config.yaml": "pi", "sssf.config.claude_code.yaml": "claude_code",
+             "sssf.config.chatgpt.yaml": "chatgpt"}
+    own = stamp()["files"][str(CONFIG)]["source"]
+    for source, name in names.items():
+        if source != own:
+            install("--add-roster", name)
+    for _ in range(2):
+        result = install("--update")
+        assert "refusing" not in result.stderr
+    assert "updated: 0" in result.stdout
+
+
+def test_a_stamp_without_skill_and_with_an_extra_key_updates(repo):
+    record = stamp()
+    record.pop("skill", None)
+    record["note"] = "x"
+    STAMP.write_text(json.dumps(record, indent=2, sort_keys=True))
+    install("--update")

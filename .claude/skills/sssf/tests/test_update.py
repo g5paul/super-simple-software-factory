@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -327,3 +328,98 @@ def test_a_flagged_file_shows_the_skills_own_change(repo):
     command = line.split("to copy in: ")[1].split()
     diff = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     assert 'verdict = ("not configured"' in diff
+
+
+RETIRED = Path("adws/adw_retired.py")
+
+
+def record_retired(path: Path, source: str | None = None) -> None:
+    record = stamp()
+    record["files"][str(path)] = {"source": source or str(path), "sha256": sha(path)}
+    STAMP.write_text(json.dumps(record))
+
+
+def test_update_removes_unchanged_retired_code(repo):
+    RETIRED.write_text("old = 1\n")
+    record_retired(RETIRED)
+    out = install("--update").stdout
+    assert not RETIRED.exists() and str(RETIRED) not in stamp()["files"]
+    assert "removed: 1" in out and f"- {RETIRED}" in out
+
+
+def test_update_keeps_changed_retired_code(repo):
+    RETIRED.write_text("old = 1\n")
+    record_retired(RETIRED)
+    RETIRED.write_text("old = 2\n")
+    out = install("--update").stdout
+    assert RETIRED.exists() and "left in place" in out and f"- {RETIRED}" in out
+
+
+def test_update_keeps_retired_non_code(repo):
+    old = Path("adws/adw_data/prompt_engineering/old/user.md")
+    old.parent.mkdir(parents=True)
+    old.write_text("x\n")
+    record_retired(old)
+    install("--update")
+    assert old.exists()
+
+
+def test_update_unlinks_a_retired_link_not_its_target(repo, tmp_path_factory):
+    target = tmp_path_factory.mktemp("outside") / "target.py"
+    target.write_text("old = 1\n")
+    RETIRED.symlink_to(target)
+    record_retired(RETIRED)
+    install("--update")
+    assert not os.path.lexists(RETIRED) and target.read_text() == "old = 1\n"
+
+
+def test_update_leaves_a_retired_link_to_a_folder(repo, tmp_path_factory):
+    target = tmp_path_factory.mktemp("outside")
+    RETIRED.symlink_to(target, target_is_directory=True)
+    record = stamp()
+    record["files"][str(RETIRED)] = {"source": str(RETIRED), "sha256": "0" * 64}
+    STAMP.write_text(json.dumps(record))
+    install("--update")
+    assert RETIRED.is_symlink() and target.exists()
+
+
+def test_update_never_deletes_through_a_traversal_key_or_a_linked_parent(repo, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside")
+    victim = outside / "x.py"
+    victim.write_text("keep\n")
+    git_config = Path(".git/config")
+    git_config.parent.mkdir(exist_ok=True)
+    git_config.write_text("[core]\n")
+    (Path("adws/adw_modules") / "evil").symlink_to(outside, target_is_directory=True)
+    record = stamp()
+    for key, target in (("adws/adw_modules/../../.git/config", git_config),
+                        (f"adws/adw_modules/{os.path.relpath(victim, Path.cwd() / 'adws/adw_modules')}", victim),
+                        ("adws/adw_modules/evil/x.py", victim)):
+        record["files"][key] = {"source": "adws/gone.py", "sha256": sha(target)}
+    STAMP.write_text(json.dumps(record))
+    install("--update")
+    assert git_config.exists() and victim.exists()
+
+
+def test_retire_unlinks_through_the_open_parent_not_a_re_resolved_path(repo, tmp_path_factory, monkeypatch):
+    """A parent folder swapped for a link after the check must not redirect the unlink."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sssf_install", SKILL / "scripts/install.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    outside = tmp_path_factory.mktemp("outside")
+    victim = outside / "x.py"
+    victim.write_text("keep\n")
+    sub = Path("adws/adw_modules/sub")
+    sub.mkdir()
+    (sub / "x.py").write_text("keep\n")
+    real_unlink = os.unlink
+
+    def swap_then_unlink(name, *, dir_fd=None, **kw):
+        sub.rename("adws/adw_modules/sub_moved")
+        sub.symlink_to(outside, target_is_directory=True)
+        return real_unlink(name, dir_fd=dir_fd, **kw)
+
+    monkeypatch.setattr(mod.os, "unlink", swap_then_unlink)
+    assert mod.retire(Path.cwd(), "adws/adw_modules/sub/x.py", sha(sub / "x.py")) == "removed"
+    assert victim.exists() and not Path("adws/adw_modules/sub_moved/x.py").exists()

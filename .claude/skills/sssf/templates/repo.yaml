@@ -84,7 +84,8 @@ secret_files: []
 agent_env: []
 # How local agents are held. `text` is SSSF's own command checks alone. `agentsh`
 # also runs each agent under the agentsh service (needs sandbox: none, a git
-# checkout, and `uv run adws/adw_agentsh_policy.py` plus its sudo steps).
+# checkout, and the hub install: `uv run --directory <hub> .claude/skills/sssf/scripts/agentsh_install.py
+# --repo <this checkout>` plus its sudo steps).
 #   local_guard: agentsh
 # With agentsh: commands the policy refuses to exec, and hosts agents may reach on 443.
 #   deny_exec:

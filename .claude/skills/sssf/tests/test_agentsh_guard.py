@@ -337,7 +337,7 @@ def test_each_machine_refusal_fires_before_an_agent_starts(machine, tmp_path, mo
     monkeypatch.setattr(agentsh_guard, "PINNED_SHA256",
                         hashlib.sha256(Path(agentsh_guard.BINARY).read_bytes()).hexdigest())
     machine.config.write_text(machine.config.read_text().replace("detect_project_root: false", "detect_project_root: true"))
-    refused("not the file SSSF renders")
+    refused("differs from what this checkout renders")
     machine.config.write_text(agentsh_guard.render_config(
         machine.guard.config_template, [p.name for p in machine.guard.policies.values()]))
     broken = machine.guard.model_copy(update={"config_template": "a: 1\n"})
@@ -357,7 +357,7 @@ def test_a_broken_config_template_refuses(machine, template):
 def test_stale_and_missing_policies_and_a_wrong_cwd_refuse(machine, monkeypatch):
     name = machine.guard.policies["pi"].name
     (machine.pdir / f"{name}.yaml").write_text("old")
-    with pytest.raises(agentsh_guard.AgentshRefused, match="stale"):
+    with pytest.raises(agentsh_guard.AgentshRefused, match="differs from what this checkout renders"):
         launch(machine, "pi")
     (machine.pdir / f"{name}.yaml").unlink()
     with pytest.raises(agentsh_guard.AgentshRefused, match="not installed"):
@@ -692,51 +692,212 @@ def test_push_cases_that_are_denied(argv):
     assert push_denied(argv)
 
 
-def test_install_script_writes_nothing_under_the_repo_and_agrees_with_the_check(
-        tmp_path, monkeypatch, machine, capsys):
-    sys.path.insert(0, str(SKILL / "templates" / "adws"))
-    import adw_agentsh_policy as command
-    outside = tmp_path / "outside"
+import importlib.util  # noqa: E402
+
+HUB_SHA = "abc1234" + 33 * "0"
+
+
+@pytest.fixture
+def hub(monkeypatch):
+    spec = importlib.util.spec_from_file_location("agentsh_install", SKILL / "scripts/agentsh_install.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "hub_version", lambda: (HUB_SHA, False))
+    return module
+
+
+def fake_project(tmp_path, local_guard="agentsh", stamp=True):
+    proj = git_repo(tmp_path / "myproj")
+    marker = tmp_path / "marker"
+    boom = f"open({str(marker)!r}, 'w').close()\n"
+    (proj / "adws/adw_modules").mkdir(parents=True)
+    (proj / "adws/adw_sssf_config").mkdir(parents=True)
+    shutil.copy(TEMPLATE, proj / "adws/adw_modules/agentsh_sssf.yaml")
+    (proj / "adws/adw_modules/agentsh_guard.py").write_text(boom)
+    (proj / "adws/adw_modules/sssf_refuse.py").write_text("")
+    (proj / "adws/adw_sssf_config/repo.yaml").write_text(f"local_guard: {local_guard}\n")
+    shutil.copy(SHIPPED, proj / "adws/adw_sssf_config/sssf.config.yaml")
+    if stamp:
+        (proj / "adws/adw_sssf_config/stamp.json").write_text(json.dumps({"files": {}, "skill": "abc1234"}))
+    for name in ("pyproject.toml", "uv.toml", ".python-version"):
+        (proj / name).write_text("nonsense = [\n")
+    (proj / "yaml.py").write_text(boom)
+    (proj / "sitecustomize.py").write_text(boom)
+    outside = tmp_path / "elsewhere"
     outside.mkdir()
-    repo = git_repo(tmp_path / "throwaway")
-    (repo / "adws/adw_sssf_config").mkdir(parents=True)
-    (repo / "adws/adw_sssf_config/repo.yaml").write_text("local_guard: agentsh\n")
-    (repo / "adws/adw_data").symlink_to(outside)
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e.com",
-                    "commit", "-qm", "init"], check=True)
-    monkeypatch.chdir(repo)
+    os.chdir(outside)
+    return proj, marker
 
-    def status():
-        return subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True,
-                              text=True, check=True).stdout
 
-    def install_and_check():
-        before = status()
-        assert command.main(str(SHIPPED)) == 0
-        assert status() == before and list(outside.iterdir()) == []
-        lines = capsys.readouterr().out.splitlines()
-        first = next(i for i, line in enumerate(lines) if line.startswith("sudo "))
-        warning = "\n".join(lines[:first])
-        assert "Every agent must be stopped" in warning and "follows a link" in warning
-        steps = [shlex.split(line) for line in lines if line.startswith("sudo install")]
-        assert steps
-        for step in steps:
-            source = Path(step[-2])
-            assert source.exists() and not source.resolve().is_relative_to(repo.resolve())
-            shutil.copy(source, step[-1])
-        guard = agentsh_guard.read(agents.load_config(str(SHIPPED)))
-        agentsh_guard.check_machine(guard)
-        return guard
+def sudo_lines(out: str) -> list[list[str]]:
+    return [shlex.split(line) for line in out.splitlines() if line.startswith("sudo install")]
 
+
+def apply(out: str) -> None:
+    for step in sudo_lines(out):
+        shutil.copy(step[-2], step[-1])
+
+
+def run_as_project(monkeypatch, proj):
+    monkeypatch.setattr(agentsh_guard, "__file__", str(proj / "adws/adw_modules/agentsh_guard.py"))
+    monkeypatch.chdir(proj)
+    return agentsh_guard.read(agents.load_config(str(SHIPPED)))
+
+
+def test_install_agrees_with_the_run(tmp_path, monkeypatch, machine, capsys, hub):
+    monkeypatch.chdir(tmp_path)
+    proj, marker = fake_project(tmp_path)
+    status = lambda: subprocess.run(["git", "-C", str(proj), "status", "--porcelain"],
+                                    capture_output=True, text=True, check=True).stdout
+    before = status()
     machine.config.unlink()
-    install_and_check()
-    # Another repo's names are already in the installed list.
-    machine.config.write_text(agentsh_guard.render_config(
-        machine.guard.config_template, [p.name for p in machine.guard.policies.values()]))
-    guard = install_and_check()
-    allowed = yaml.safe_load(machine.config.read_text())["policies"]["allowed"]
-    assert set(allowed) >= {p.name for p in machine.guard.policies.values()} | {p.name for p in guard.policies.values()}
+    for other in (False, True):
+        if other:
+            machine.config.write_text(agentsh_guard.render_config(machine.guard.config_template, ["sssf-other-pi"]))
+        assert hub.main(["--repo", str(proj)]) == 0
+        out = capsys.readouterr().out
+        assert out.rstrip().endswith("sudo systemctl restart agentsh")
+        assert "Every agent must be stopped" in out and sudo_lines(out)
+        apply(out)
+        agentsh_guard.check_machine(run_as_project(monkeypatch, proj))
+        os.chdir(tmp_path / "elsewhere")
+    assert "sssf-other-pi" in yaml.safe_load(machine.config.read_text())["policies"]["allowed"]
+    assert status() == before and not marker.exists()
+
+
+def test_install_runs_nothing_from_the_project(tmp_path, monkeypatch, machine, capsys, hub):
+    monkeypatch.chdir(tmp_path)
+    proj, marker = fake_project(tmp_path)
+    calls = []
+    for name in ("run", "Popen"):
+        real = getattr(subprocess, name)
+        monkeypatch.setattr(subprocess, name, lambda *a, _real=real, **k: (calls.append((a, k)), _real(*a, **k))[1])
+    assert hub.main(["--repo", str(proj)]) == 0
+    for args, kwargs in calls:
+        argv = [str(x) for x in args[0]]
+        assert not str(kwargs.get("cwd") or "").startswith(str(proj))
+        assert not any(argv[i] == "-C" and argv[i + 1].startswith(str(proj)) for i in range(len(argv) - 1))
+    assert calls == []
+    assert not marker.exists()
+    assert not any(str(proj) in str(p) for p in sys.path)
+    assert Path(sys.modules["adw_modules.agentsh_guard"].__file__).resolve() == \
+        (SKILL / "templates/adws/adw_modules/agentsh_guard.py").resolve()
+
+
+def test_an_open_failure_setting_in_the_project_never_reaches_the_install(tmp_path, monkeypatch, machine, capsys, hub):
+    monkeypatch.chdir(tmp_path)
+    proj, marker = fake_project(tmp_path)
+    template = proj / "adws/adw_modules/agentsh_sssf.yaml"
+    template.write_text(template.read_text().replace("fail_closed", "fail_open"))
+    assert hub.main(["--repo", str(proj)]) == 0
+    out = capsys.readouterr().out
+    assert "fail_open" not in out
+    apply(out)
+    assert "fail_open" not in machine.config.read_text()
+    guard = run_as_project(monkeypatch, proj)
+    with pytest.raises(agentsh_guard.AgentshRefused) as refusal:
+        agentsh_guard.check_machine(guard)
+    text = str(refusal.value)
+    for part in ("differs", "git status adws/", "git diff adws/", "agentsh_install.py"):
+        assert part in text
+    assert not marker.exists()
+
+
+def test_a_repo_yaml_change_shows_in_the_diff(tmp_path, monkeypatch, machine, capsys, hub):
+    monkeypatch.chdir(tmp_path)
+    proj, _ = fake_project(tmp_path)
+    assert hub.main(["--repo", str(proj)]) == 0
+    apply(capsys.readouterr().out)
+    assert hub.main(["--repo", str(proj)]) == 0
+    out = capsys.readouterr().out
+    assert "Nothing to install" in out and not sudo_lines(out)
+    assert out.rstrip().endswith("sudo systemctl restart agentsh")
+    repo_yaml = proj / "adws/adw_sssf_config/repo.yaml"
+    repo_yaml.write_text(repo_yaml.read_text() + "network_allow: [evil.example.com]\n")
+    assert hub.main(["--repo", str(proj)]) == 0
+    out = capsys.readouterr().out
+    assert any(line.startswith("+") and "evil.example.com" in line for line in out.splitlines())
+    assert sudo_lines(out)
+
+
+def test_an_installed_carriage_return_is_not_unchanged(tmp_path, monkeypatch, machine, capsys, hub):
+    monkeypatch.chdir(tmp_path)
+    proj, _ = fake_project(tmp_path)
+    assert hub.main(["--repo", str(proj)]) == 0
+    out_first = capsys.readouterr().out
+    apply(out_first)
+    target = Path(next(step[-1] for step in sudo_lines(out_first) if step[-1].startswith(str(machine.pdir))))
+    target.write_bytes(target.read_text().replace("\n", "\r\n").encode())
+    assert hub.main(["--repo", str(proj)]) == 0
+    out = capsys.readouterr().out
+    assert "\\x0d" in out and "\r" not in out
+    assert any(str(target) == step[-1] for step in sudo_lines(out))
+    with pytest.raises(agentsh_guard.AgentshRefused, match="differs"):
+        agentsh_guard.check_machine(run_as_project(monkeypatch, proj))
+
+
+def test_hidden_characters_are_shown_escaped(tmp_path, monkeypatch, machine, capsys, hub):
+    monkeypatch.chdir(tmp_path)
+    proj, _ = fake_project(tmp_path)
+    (proj / "adws/adw_sssf_config/repo.yaml").write_text(
+        'local_guard: agentsh\ndeny_exec:\n  - name: no-x\n    command: x\n    reason: "caf\\u00e9"\n')
+    assert hub.main(["--repo", str(proj)]) == 0
+    first = capsys.readouterr().out
+    apply(first)
+    target = Path(next(step[-1] for step in sudo_lines(first) if step[-1].startswith(str(machine.pdir))))
+    target.write_text("\x1b[2K\r\u2028 \u202e\n" + target.read_text(), encoding="utf-8", newline="")
+    assert hub.main(["--repo", str(proj)]) == 0
+    out = capsys.readouterr().out
+    for raw in ("\x1b", "\r", "\u2028", "\u202e"):
+        assert raw not in out
+    assert "\\x1b" in out and "\\u2028" in out and "\\u202e" in out
+    assert out.count("shown escaped") == 1
+
+
+@pytest.mark.parametrize("case", ["skill", "dirtystamp", "dirtyhub", "nostamp", "gitfile", "gitlink",
+                                  "commondir", "text", "inside"])
+def test_install_refuses(tmp_path, monkeypatch, machine, capsys, hub, case):
+    monkeypatch.chdir(tmp_path)
+    proj, _ = fake_project(tmp_path, local_guard="text" if case == "text" else "agentsh", stamp=case != "nostamp")
+    stamp = proj / "adws/adw_sssf_config/stamp.json"
+    if case == "skill":
+        stamp.write_text(json.dumps({"files": {}, "skill": "fffffff"}))
+    elif case == "dirtystamp":
+        stamp.write_text(json.dumps({"files": {}, "skill": "abc1234+dirty"}))
+    elif case == "dirtyhub":
+        monkeypatch.setattr(hub, "hub_version", lambda: (HUB_SHA, True))
+    elif case == "gitfile":
+        shutil.rmtree(proj / ".git")
+        (proj / ".git").write_text("gitdir: /elsewhere\n")
+    elif case == "gitlink":
+        real = tmp_path / "real-git"
+        (proj / ".git").rename(real)
+        (proj / ".git").symlink_to(real)
+    elif case == "commondir":
+        (proj / ".git/commondir").write_text("../other\n")
+    elif case == "inside":
+        monkeypatch.setattr(hub, "__file__", str(proj / "scripts/agentsh_install.py"))
+    assert hub.main(["--repo", str(proj)]) == 1
+    captured = capsys.readouterr()
+    assert "sudo install" not in captured.out + captured.err
+
+
+def test_run_messages_name_what_to_check():
+    assert "agentsh_install.py" in agentsh_guard.FIX and "--directory" in agentsh_guard.FIX
+    assert "git status adws/" in agentsh_guard.DIFFERS and "git diff adws/" in agentsh_guard.DIFFERS
+
+
+def test_not_in_allowed_names_git_status(machine):
+    machine.config.write_text(agentsh_guard.render_config(machine.guard.config_template, ["sssf-other-pi"]))
+    with pytest.raises(agentsh_guard.AgentshRefused, match="git status adws/"):
+        agentsh_guard.check_machine(machine.guard)
+
+
+def test_nothing_names_the_old_script():
+    assert not (SKILL / "templates/adws/adw_agentsh_policy.py").exists()
+    for path in SKILL.rglob("*"):
+        if path.is_file() and "tests" not in path.relative_to(SKILL).parts and "__pycache__" not in path.parts:
+            assert "adw_agentsh_policy" not in path.read_text(errors="ignore"), path
 
 
 def edit_config(machine, path: str, value):
@@ -758,7 +919,7 @@ def edit_config(machine, path: str, value):
     ("audit.enabled", False), ("server.unix_socket.path", "/tmp/x.sock"), ("extra_key", 1)])
 def test_check_machine_refuses_each_changed_key(machine, path, value):
     edit_config(machine, path, value)
-    with pytest.raises(agentsh_guard.AgentshRefused, match="not the file SSSF renders"):
+    with pytest.raises(agentsh_guard.AgentshRefused, match="differs from what this checkout renders"):
         launch(machine, "pi")
 
 
@@ -777,7 +938,7 @@ def test_check_machine_refuses_raw_forms(machine):
             launch(machine, "pi")
     machine.config.write_text(good)
     (machine.pdir / f"{name}.yaml").write_bytes(machine.guard.policies["pi"].text.replace("\n", "\r\n").encode())
-    with pytest.raises(agentsh_guard.AgentshRefused, match="stale"):
+    with pytest.raises(agentsh_guard.AgentshRefused, match="differs from what this checkout renders"):
         launch(machine, "pi")
 
 

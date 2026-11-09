@@ -25,6 +25,8 @@ listed, a missing file is added. --take PATH replaces a kept file anyway;
 --keep PATH records that you reviewed it, so it stays quiet until the
 skill's version of it changes again.
 
+--update removes SSSF code the skill dropped, if the repo never changed it.
+
 Install and --update also record the repo in the user's project registry
 (~/.config/sssf/projects.json, or $SSSF_REGISTRY), which `just obs-all`
 reads to show every repo in one dashboard.
@@ -34,6 +36,7 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 import re
 import shutil
 import subprocess
@@ -216,6 +219,49 @@ def is_sssf_code(rel: str) -> bool:
     return (rel.startswith("adws/adw_modules/")
             or (len(parts) == 2 and parts[0] == "adws" and parts[1].startswith("adw_")
                 and parts[1].endswith(".py")))
+
+
+def retire(root: Path, rel: str, digest: str) -> str:
+    """Delete a retired file whose hash still matches its record, walking from the repo
+    root by open directory handles so nothing is re-resolved between check and unlink.
+    Returns "removed", "absent" (nothing there: drop the record) or "keep"."""
+    rel_path = Path(rel)
+    if rel_path.is_absolute() or ".." in rel_path.parts or "." in rel_path.parts[:-1]:
+        return "keep"
+    *parents, name = rel_path.parts
+    fds = []
+    try:
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        fds.append(fd)
+        for part in parents:
+            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            fds.append(fd)
+        try:
+            kind = os.lstat(name, dir_fd=fd).st_mode
+        except FileNotFoundError:
+            return "absent"
+        flags = os.O_RDONLY | os.O_NONBLOCK
+        if not stat.S_ISLNK(kind):
+            flags |= os.O_NOFOLLOW
+        # A link to a regular file is judged by its content; only the link is unlinked.
+        leaf = os.open(name, flags, dir_fd=fd)
+        try:
+            if not stat.S_ISREG(os.fstat(leaf).st_mode):
+                return "keep"
+            with os.fdopen(os.dup(leaf), "rb") as handle:
+                if hashlib.sha256(handle.read()).hexdigest() != digest:
+                    return "keep"
+        finally:
+            os.close(leaf)
+        os.unlink(name, dir_fd=fd)
+        return "removed"
+    except FileNotFoundError:
+        return "absent"
+    except OSError:
+        return "keep"
+    finally:
+        for open_fd in fds:
+            os.close(open_fd)
 
 
 def load_stamp(root: Path) -> dict:
@@ -439,12 +485,23 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
     version = skill_version(root)
     if version:
         record["skill"] = version
+    sources = {src.relative_to(TEMPLATES).as_posix() for src, _ in pairs}
+    gone = sorted(rel for rel, entry in files.items() if entry["source"] not in sources)
+    removed = []
+    for rel in list(gone):
+        path = root / rel
+        if not is_sssf_code(rel):
+            continue
+        outcome = retire(root, rel, files[rel]["sha256"])
+        if outcome == "keep":
+            continue
+        del files[rel]
+        gone.remove(rel)
+        if outcome == "removed":
+            removed.append(rel)
     save_stamp(root, record)
     gitignore: list = []
     ensure_gitignore(root, gitignore)
-
-    sources = {src.relative_to(TEMPLATES).as_posix() for src, _ in pairs}
-    gone = sorted(rel for rel, entry in files.items() if entry["source"] not in sources)
 
     print(f"sssf updated in {root}")
     register(root)
@@ -494,6 +551,10 @@ def update(root: Path, default_roster: Path, take: set[str], keep: set[str]) -> 
               "   # keep yours, after copying in any skill change you want")
     for line in gitignore:
         print(f"  + {line}")
+    if removed:
+        print(f"  removed: {len(removed)} (SSSF code the skill no longer ships)")
+        for rel in removed:
+            print(f"    - {rel}")
     if gone:
         print(f"  no longer in the skill (left in place): {len(gone)}")
         for rel in gone:

@@ -1,0 +1,191 @@
+version: 1
+name: sssf-dd-pi
+description: SSSF default-deny test policy for pi
+command_rules:
+  - name: sssf-no-live-tests
+    commands: [just]
+    args_patterns: ['(^|\s)test\s+live(\s|$)']
+    decision: deny
+  - name: sssf-no-gh
+    commands: [gh]
+    decision: deny
+  - name: sssf-no-push
+    commands: [git]
+    args_patterns: ['(^|\s)push(\s|$)']
+    decision: deny
+  - name: sssf-allow-rest
+    decision: allow
+file_rules:
+  - name: sssf-env-examples
+    paths:
+      - '**/.env.example'
+      - '**/.env.sample'
+    operations: ['*']
+    decision: allow
+  - name: sssf-secret-files
+    paths:
+      - '**/.env'
+      - '**/.env.*'
+    operations: ['*']
+    decision: deny
+  - name: sssf-credentials
+    paths:
+      - '${HOME}/.ssh/**'
+      - '${HOME}/.aws/**'
+      - '${HOME}/.azure/**'
+      - '${HOME}/.gnupg/**'
+      - '${HOME}/.kube/**'
+      - '${HOME}/.docker/**'
+      - '${HOME}/.config/gh/**'
+      - '${HOME}/.config/gcloud/**'
+      - '${HOME}/.config/sssf-sandbox/**'
+      - '${HOME}/.git-credentials'
+      - '${HOME}/.netrc'
+      - '${HOME}/.npmrc'
+      - '${HOME}/.pypirc'
+      - '${HOME}/.cargo/credentials'
+      - '${HOME}/.cargo/credentials.toml'
+    operations: ['*']
+    decision: deny
+  - name: sssf-proc-secrets
+    paths:
+      - '/proc/*/environ'
+      - '/proc/*/mem'
+      - '/proc/*/task/*/environ'
+      - '/proc/*/task/*/mem'
+    operations: ['*']
+    decision: deny
+  - name: sssf-other-sign-in
+    paths:
+      - '${HOME}/.claude/.credentials.json'
+    operations: ['*']
+    decision: deny
+  - name: sssf-workspace
+    paths:
+      - '${PROJECT_ROOT}'
+      - '${PROJECT_ROOT}/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-git-data
+    paths:
+      - '/home/gpaul/github/sssf-sandbox/.git'
+      - '/home/gpaul/github/sssf-sandbox/.git/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-main-config
+    paths:
+      - '/home/gpaul/github/sssf-sandbox'
+      - '/home/gpaul/github/sssf-sandbox/.claude'
+      - '/home/gpaul/github/sssf-sandbox/.claude/**'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-temp
+    paths:
+      - '/tmp/**'
+      - '/var/tmp/**'
+      - '/dev/shm/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-devices
+    paths:
+      - '/dev/null'
+      - '/dev/zero'
+      - '/dev/tty'
+      - '/dev/ptmx'
+      - '/dev/pts/**'
+      - '/dev/urandom'
+      - '/dev/random'
+      - '/dev/fd/**'
+      - '/dev/stdin'
+      - '/dev/stdout'
+      - '/dev/stderr'
+    operations: ['*']
+    decision: allow
+  - name: sssf-tool-write
+    paths:
+      - '${HOME}/.cache/uv'
+      - '${HOME}/.cache/uv/**'
+      - '${HOME}/.local/share/uv'
+      - '${HOME}/.local/share/uv/**'
+      - '${HOME}/.npm/**'
+      - '${HOME}/.cargo/registry/**'
+      - '${HOME}/.cargo/git/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-agent-write
+    paths:
+      - '${HOME}/.pi'
+      - '${HOME}/.pi/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-system-read
+    paths:
+      - '/usr/**'
+      - '/lib/**'
+      - '/lib64/**'
+      - '/bin/**'
+      - '/sbin/**'
+      - '/opt/**'
+      - '/etc/**'
+      - '/sys/**'
+      - '/proc'
+      - '/proc/**'
+      - '/'
+      - '/home'
+      - '/var'
+      - '/run'
+      - '/mnt'
+      - '/tmp'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-home-read
+    paths:
+      - '${HOME}'
+      - '${HOME}/.bashrc'
+      - '${HOME}/.profile'
+      - '${HOME}/.bash_profile'
+      - '${HOME}/.bash_login'
+      - '${HOME}/.editrc'
+      - '${HOME}/.inputrc'
+      - '${HOME}/.gitconfig'
+      - '${HOME}/.config'
+      - '${HOME}/.config/git/**'
+      - '${HOME}/.config/uv/**'
+      - '${HOME}/.cargo'
+      - '${HOME}/.cargo/env'
+      - '${HOME}/.cargo/bin/**'
+      - '${HOME}/.local'
+      - '${HOME}/.local/bin/**'
+      - '${HOME}/.nvm/**'
+      - '${HOME}/.rustup/**'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-default-deny
+    paths:
+      - '/'
+      - '/**'
+    operations: ['*']
+    decision: deny
+network_rules:
+  # The server's HTTP API, upstream finding #29.
+  - name: sssf-no-agentsh-api
+    cidrs: ['127.0.0.1/32', '::1/128']
+    ports: [18080]
+    decision: deny
+  # The session proxy needs no rule: the patched build allows it exactly.
+  # The model hosts: Claude Code and pi on a ChatGPT subscription.
+  - name: sssf-model-hosts
+    domains: ['api.anthropic.com', '*.anthropic.com', 'api.openai.com', 'chatgpt.com', '*.chatgpt.com']
+    ports: [443]
+    decision: allow
+  # The login refresh hosts: pi's ChatGPT token and Claude Code's OAuth token.
+  - name: sssf-auth-hosts
+    domains: ['auth.openai.com', 'platform.claude.com']
+    ports: [443]
+    decision: allow
+  # The package registries.
+  - name: sssf-registries
+    domains: ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org', 'crates.io', 'index.crates.io', 'static.crates.io']
+    ports: [443]
+    decision: allow
+  # Everything else is denied: no match is a deny.

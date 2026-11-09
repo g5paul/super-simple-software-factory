@@ -444,6 +444,22 @@ Timings: failed open 70 µs, fork and exec 1.2 ms, Python start 28 ms, `git stat
 
 **Tests that fail with or without the patches.** In a container, 8 tests in `internal/ptrace` under the `integration` tag and 24 in `internal/netmonitor/unix` fail, and they fail the same way on the commit before the spin patch. `internal/api` passes. The cause isn't known. The seccomp tests among them may not work in a container at all.
 
+## The default-deny test, 2026-11-08
+
+`deny-policy.py` writes one policy per agent: secrets and other credentials denied first, then the workspace, the worktree's git data, temp, devices, tool caches and the agent's own files allowed, then system paths read-only, then a final deny. `path-harvest.sh` built the list from the file events of a real workload, and `deny-test.sh` runs the test. That's 17 file rules for Claude Code and 15 for pi.
+
+**The denies held.** 42 probes under each policy tried reading, creating, deleting, renaming, chmodding and linking a plain file outside the list, by direct paths, `..`, symlinks, hard links, `dir_fd` and `/proc/self/{root,cwd,fd}`, and tried writing to `~/.bashrc`, `~/.profile` and `~/.claude/settings.json`. No fake file or real config changed. Each agent could open its own sign-in and not the other's. Other repos, `~/.ssh`, the gh token, the VM token, every `/proc/*/environ` and the Windows drive were all denied. An agent's own sign-in stays readable, as decided.
+
+**pi works.** It edited a file and ran the tests, exit 0 in 14 seconds, with one harmless denial, `/mnt/wsl/resolv.conf`.
+
+**Claude Code doesn't, yet.** It exits 0 but can do nothing: its Edit and Bash tools fail with `EACCES`, and it reports that honestly. Its file calls use paths such as `/proc/self/fd/14/hello.py.tmp.123`. `resolveViaProc` in `internal/ptrace/handle_file.go` reads the `/proc/self` link from the tracer's process, so it gets the tracer's PID instead of the agent's. The path then fails to resolve and reaches the rules as raw text, which matches no allow. For the same reason it logged `/proc/self/cwd/innocent` as `/var/lib/agentsh/innocent`.
+
+So that bug is failing closed here. Opens were safe either way, because `handleFile` re-checks the real file behind the descriptor at exit. Other operations get no such check, so allowing `/proc/self/fd/**` to let Claude Code work should open a way around every rule: `exec 3</; rm /proc/self/fd/3/home/...`. That wasn't run, because the policy would have to allow it first. The fix belongs in the tracer: resolve `/proc/self` and `/proc/thread-self` to the agent's own IDs, so the rules see the real path. Whether Claude Code tolerates the `/proc/*/environ` deny can't be judged until then.
+
+**A denied missing file breaks tools.** agentsh answers `EACCES` where the kernel would answer `ENOENT`. `uv` stops on that: `failed to open file '/home/gpaul/uv.toml': Permission denied`. The next policy needs read rules for `uv.toml` and `pyproject.toml` in `~`, `/home` and `/`, for `/tmp` itself, where `uv` makes its temp files, for bare `/etc`, and for `mkdir` on `~`. Each tool's config search may need the same, and that's the real cost of default-deny.
+
+`test_the_checkout_is_set_up` fails with either policy, because the proof workspace has no `.setup-marker`.
+
 ## Running the checks
 
 The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspace at `~/sssf-agentsh-proof`: a detached worktree of sssf-sandbox holding a `.env` with `FAKE=not-a-secret`, a `.env.example` with `FAKE=`, and a justfile with an added `test kind:` recipe that runs `@echo ran test {{kind}}`. Run the rest from that folder. Set `AGENTSH_CONFIG=/etc/agentsh/sssf.yaml`, `AGENTSH_SERVER=unix:///run/agentsh/agentsh.sock` and `AGENTSH_NO_AUTO=1`, then:
@@ -458,5 +474,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. The default-deny test in sssf-sandbox with both agents, which decides the file policy the wrap generates.
+3. Finish the default-deny test, which decides the file policy the wrap generates: a sixth fork patch so `/proc/self` resolves to the agent, the missing read rules, then the test again with Claude Code working.
 4. Rollout step 1, a guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, and give the agent a `/dev/null` stdin, which `sandbox.start` already does.

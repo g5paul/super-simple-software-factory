@@ -50,4 +50,4 @@ policies:
   default: "sssf-proof"
   # Since upstream 6cb6c7d a session may load only a listed policy, so an
   # agent can't pick a looser one.
-  allowed: ["sssf-proof", "sssf-net"]
+  allowed: ["sssf-proof", "sssf-net", "sssf-dd-claude", "sssf-dd-pi"]

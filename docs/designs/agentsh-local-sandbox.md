@@ -212,7 +212,7 @@ The corpus showed that a copy of `just` under another name runs `just test live`
 
 **What the copy can reach.** File rules apply to every process, whatever its name. A copy `./j` of `just` with `set dotenv-load` failed at `.env`: `I/O error at .env: Permission denied`. With `--no-dotenv` the recipe ran, with no secrets. `--dotenv-path .env` failed the same way.
 
-So the copied binary is an accepted limit, like running a recipe's body by hand. A command rule stops a mistake or a casual attempt. The file rules on secrets and the network rules stop the harm, and those don't depend on a program's name. The next layer to tighten is the network: allow only the model hosts and the package registries, in place of `sssf-allow-net`. In ptrace mode the server runs a DNS proxy, so domain rules may work without eBPF. That needs a test.
+So the copied binary is an accepted limit, like running a recipe's body by hand. The engineer accepted it on 2026-11-08, in place of the Landlock execute list. A command rule stops a mistake or a casual attempt. The file rules on secrets and the network rules stop the harm, and those don't depend on a program's name. The next layer to tighten is the network: allow only the model hosts and the package registries, in place of `sssf-allow-net`. In ptrace mode the server runs a DNS proxy, so domain rules may work without eBPF. That needs a test.
 
 ## Next
 

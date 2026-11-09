@@ -183,6 +183,8 @@ Two gaps stay. The proof policy now denies TCP to the server's port, for the eng
 - systemd restarted the service at 15:55:58, with `NRestarts=1`.
 - After the restart, the agent could not connect to `127.0.0.1:18080`, so the API rule works. `https://api.anthropic.com/` still answered, and `just test live` was still denied.
 
+**Again on the patched build, 2026-11-08.** `agentsh 0.20.6-dev.fork+bcf186b`, policy `sssf-net`. The wrapped agent wrote a heartbeat every second, and every fifth second it reached npm through its session proxy with a `200`. The engineer sent `SIGKILL` to the server. The last heartbeat was at 17:16:10, and systemd logged `status=9/KILL` at 17:16:11. No agent process was left. systemd started the service again at 17:16:13, with `NRestarts=1`. A new wrapped agent was guarded: `just test live` and `.env` were denied, npm through the proxy returned `200`, `example.com` got a 403 from the proxy, and a direct connect to the API port was refused.
+
 ## The fail-open patch, 2026-11-08
 
 The fork's branch `fix/ptrace-exec-fail-closed`, commit 31b5af0 on a07c789, makes two changes:
@@ -272,7 +274,7 @@ Still open in this design:
 
 ## Next
 
-1. The kill check on the patched build. Then wrapped Claude Code and pi agents with `NODE_USE_ENV_PROXY=1`: each must reach its model host and nothing else.
+1. Wrapped Claude Code and pi agents with `NODE_USE_ENV_PROXY=1`: each must reach its model host and nothing else.
 2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
 3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
 4. The decisions above, settled from the proof.

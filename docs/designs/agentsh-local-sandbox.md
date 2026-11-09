@@ -370,7 +370,19 @@ A fifth local fork patch, `fix/ptrace-wait-spin` at fb321cc5, built as `agentsh 
 
 The guard Claude Code run went from 34 seconds to 10, and pi from 37 to between 21 and 27. The corpus held, with the copied `just` caveat above, `net-checks.sh` passed, and both agents were denied all five actions. No file call was denied as unknown session, and the watchdog logged no wedge.
 
-**pytest barely moved.** `import pytest` takes 99 ms bare and 1155 ms under the spin. The likely reason, not yet tested, is that Python works for longer than 200 µs between its file opens, so those stops miss the spin and wait out the 5 ms timer. A longer window through `AGENTSH_PTRACE_SPIN_US` would test it.
+**pytest barely moved at 200 µs.** `import pytest` took 99 ms bare and 1155 ms under the spin. Python works for longer than 200 µs between its file opens, so those stops missed the spin and waited out the 5 ms timer. A 1 ms window, set with `AGENTSH_PTRACE_SPIN_US=1000`, confirmed it:
+
+| Measure | Bare | Spin 200 µs | Spin 1 ms |
+|---|---:|---:|---:|
+| Python start | 8.8 ms | 64 to 88 ms | 30 to 33 ms |
+| `import pytest` | 99 ms | 1155 ms | 255 ms |
+| `git status --short` | 13 ms | 58 to 80 ms | 47 to 53 ms |
+| `python -m pytest -q` | 242 ms | about 1500 ms | 460 to 484 ms |
+| `uv run pytest -q` | 290 ms | 1670 ms | 485 ms |
+| Server CPU, 500 failed opens | | 60 ms | 50 to 60 ms |
+| Server CPU, wrapped `sleep 5` | | 290 ms | 290 to 300 ms |
+
+The wider window cost no measurable server CPU, and pytest used 240 ms of server CPU in its 0.48-second run. The corpus held, 16 of 16 with the copied `just` caveat. The guard Claude Code run took 9 seconds and pi 20, and both agents were denied. `net-checks.sh` wasn't rerun at this window. No file call was denied as unknown session, and the watchdog logged no wedge.
 
 The 8 tests in `internal/ptrace` that fail under the `integration` tag, in a container, fail the same way on the unpatched base, so the patch didn't cause them. Why they fail isn't known. They cover file redirect, soft delete, the scratch page, TracerPid masking, three connect-exit cases and write escalation on a TLS connect.
 
@@ -391,6 +403,6 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
-2. Try a longer spin window for Python's imports, and check the server's CPU with `timing.sh`. Then pick the window and install that build as the daily one.
+2. Make 1 ms the spin's default, move the patch onto `sssf/patched`, remove the `spin.conf` drop-in, and install that as the daily build, with the full check set on it.
 3. The decisions above, settled from the proof.
 4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables.

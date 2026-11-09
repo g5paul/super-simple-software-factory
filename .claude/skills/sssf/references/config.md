@@ -456,9 +456,17 @@ With `local_guard: agentsh` in `repo.yaml`, every agent on this machine runs as 
 Install step, once per repo and again after those settings change:
 
 1. Run `uv run adws/adw_agentsh_policy.py`. It writes the policies and a merged server config into a fresh temp folder, which it names, and prints the `sudo install` lines and `sudo systemctl restart agentsh`. It never runs sudo.
-2. Run those lines.
+2. Stop every agent, then run those lines. `sudo install` follows a link, so an agent running during the install could swap a temp file for a link to a root-only file and get it copied to `/etc/agentsh/sssf.yaml` at mode 0644. The command prints the same warning.
 
-A run refuses to start, with a message, when the service is not active, the binary is not the pinned build, the installed config is not what SSSF renders (apart from `policies.allowed`, where other repos' names may sit), an installed policy differs from the generated one, or the directory is not a git checkout. A denied exec counts toward the three-refusal stop like a text refusal. Denied file and network access goes to the trace with its path and never counts. The wrap sets `JUST_NO_DOTENV=true`, so `just` recipes under `set dotenv-load` don't load a `.env` the policy denies and fail on it. Three denials end the call as a breach even when it was leaving by another stop, such as a rate-limit stop; below three the other stop stands. Limits that remain: a copied binary under a new name, a process that detaches from the run, quality checks, which run outside the wrap, the main checkout's `.claude/` secrets on a `--worktree` run, an `argv[0]` holding a space, a session a signal leaves open, and a service still running on an older config (the check reads the file, and only the printed restart loads it). See `docs/designs/agentsh-local-sandbox.md` in the SSSF repo.
+A run refuses to start, with a message, when the service is not active, the binary is not the pinned build, the installed config is not what SSSF renders (apart from `policies.allowed`, where other repos' names may sit), an installed policy differs from the generated one, a config template SSSF can't render, or the directory is not a git checkout. A denied exec counts toward the three-refusal stop like a text refusal. Denied file and network access goes to the trace with its path and never counts. The wrap sets `JUST_NO_DOTENV=true`, so `just` recipes under `set dotenv-load` don't load a `.env` the policy denies and fail on it. Three denials end the call as a breach even when it was leaving by another stop, such as a rate-limit stop; below three the other stop stands. Limits that remain: a copied binary under a new name, a process that detaches from the run, quality checks, which run outside the wrap, the main checkout's `.claude/` secrets on a `--worktree` run, an `argv[0]` holding a space, a session a signal leaves open, and a service still running on an older config (the check reads the file, and only the printed restart loads it). See `docs/designs/agentsh-local-sandbox.md` in the SSSF repo.
+
+More known limits, each with what still applies:
+
+- `GIT_CONFIG_COUNT` with an alias, and `git send-pack`, reach exec without the word `push` where the rule looks. The network rules refuse GitHub.
+- `mv .git .git2`, an edit and a move back, on a run without `--worktree`. The after-call guard undoes it.
+- A repo whose path holds `push` has every `git -C <path>` denied. It fails closed.
+- A stop with the chain out of file descriptors, where neither `ps` nor `/proc` can be read, kills only the wrap. It has no parent-death signal, so the agent can run on until it exits.
+- A signal landing inside the walk can cut it short, and `_stopped` then blocks a second attempt. `rules.stop_tree` doesn't run again for that process, so what the walk missed can run on.
 
 ## Secret files — `secret_files` and `agent_env`
 

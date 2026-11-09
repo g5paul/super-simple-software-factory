@@ -10,7 +10,8 @@ Usage:
 Needed once per repo, and again after repo.yaml's secret_files, deny_exec or
 network_allow change. It never runs sudo: it writes the files in a fresh temp
 folder `tempfile` makes (named in the output) and prints the `sudo install` lines for you
-to run. Nothing is written under the repo.
+to run. Stop every agent before running them, because sudo install follows a link.
+Nothing is written under the repo.
 """
 
 import argparse
@@ -49,6 +50,9 @@ def main(config: str) -> int:
         steps.append(shlex.join(["sudo", "install", "-o", "root", "-g", "root", "-m", "0644", str(path),
                                  f"{agentsh_guard.POLICY_DIR}/{policy.name}.yaml"]))
     steps.append("sudo systemctl restart agentsh")
+    print("Every agent must be stopped before you run these lines. `sudo install` follows a link, so an agent "
+          "running during the install could swap a temp file for a link to a root-only file and get it copied "
+          f"to {agentsh_guard.CONFIG} at mode 0644.\n")
     print("Run these, then start the chain again:\n")
     print("\n".join(steps))
     return 0

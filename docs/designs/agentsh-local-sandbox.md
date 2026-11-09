@@ -587,7 +587,7 @@ The first real run must also check that the network rules refuse both git spelli
 
 The first real run must check, beyond the items above:
 
-- The push cases under the real service: `git push`, `git -c a=b push`, `git -C /x push` and `git -c alias.p=push p` denied; `git commit -m push`, `git stash push` and `git log --grep push` run.
+- The push cases under the real service: `git push`, `git -c a=b push`, `git -C /x push`, `git -c alias.p=push p`, `git -c $'a=b\nc' push` and `git -C $'/x\ny' push` denied; `git commit -m push`, `git stash push`, `git log --grep push`, `git commit -m $'line one\npush it'` and `git log --grep $'x\npush'` run.
 - That the service accepts the rendered config (`render_config`) and starts on it.
 - That `set dotenv-load` recipes run under the wrap with `JUST_NO_DOTENV=true`.
 

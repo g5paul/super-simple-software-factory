@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
@@ -328,6 +329,20 @@ def test_each_machine_refusal_fires_before_an_agent_starts(machine, tmp_path, mo
                         hashlib.sha256(Path(agentsh_guard.BINARY).read_bytes()).hexdigest())
     machine.config.write_text(machine.config.read_text().replace("detect_project_root: false", "detect_project_root: true"))
     refused("not the file SSSF renders")
+    machine.config.write_text(agentsh_guard.render_config(
+        machine.guard.config_template, [p.name for p in machine.guard.policies.values()]))
+    broken = machine.guard.model_copy(update={"config_template": "a: 1\n"})
+    with pytest.raises(agentsh_guard.AgentshRefused, match="agentsh_sssf.yaml"):
+        launch(machine, "pi", cmd=cmd, guard=broken)
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("template", ["", "# only a comment\n", "policies: 5\n", "- a\n", "[1, 2\n",
+                                      "a: 1\n", "a: 2001-13-45\n"])
+def test_a_broken_config_template_refuses(machine, template):
+    guard = machine.guard.model_copy(update={"config_template": template})
+    with pytest.raises(agentsh_guard.AgentshRefused, match="agentsh_sssf.yaml"):
+        agentsh_guard.check_machine(guard)
 
 
 def test_stale_and_missing_policies_and_a_wrong_cwd_refuse(machine, monkeypatch):
@@ -651,7 +666,8 @@ def push_denied(argv: list[str]) -> bool:
 
 @pytest.mark.parametrize("argv", [
     ["git", "commit", "-m", "fix the push path"], ["git", "commit", "-m", "push"],
-    ["git", "stash", "push"], ["git", "log", "--grep", "push"]])
+    ["git", "stash", "push"], ["git", "log", "--grep", "push"],
+    ["git", "commit", "-m", "line one\npush it"], ["git", "log", "--grep", "x\npush"]])
 def test_push_cases_that_run(argv):
     assert not push_denied(argv)
 
@@ -659,7 +675,8 @@ def test_push_cases_that_run(argv):
 @pytest.mark.parametrize("argv", [
     ["git", "push"], ["git", "-c", "a=b", "push"], ["git", "-c", "a=b c", "push"],
     ["git", "-C", "/x", "push"], ["git", "--git-dir", "/x", "push"],
-    ["git", "-c", "alias.p=push", "p"], ["git", "-c", "a=b", "commit", "-m", "push"], ["", "push"]])
+    ["git", "-c", "alias.p=push", "p"], ["git", "-c", "a=b", "commit", "-m", "push"], ["", "push"],
+    ["git", "-c", "a=b\nc", "push"], ["git", "-C", "/x\ny", "push"]])
 def test_push_cases_that_are_denied(argv):
     assert push_denied(argv)
 
@@ -687,8 +704,11 @@ def test_install_script_writes_nothing_under_the_repo_and_agrees_with_the_check(
         before = status()
         assert command.main(str(SHIPPED)) == 0
         assert status() == before and list(outside.iterdir()) == []
-        steps = [shlex.split(line) for line in capsys.readouterr().out.splitlines()
-                 if line.startswith("sudo install")]
+        lines = capsys.readouterr().out.splitlines()
+        first = next(i for i, line in enumerate(lines) if line.startswith("sudo "))
+        warning = "\n".join(lines[:first])
+        assert "Every agent must be stopped" in warning and "follows a link" in warning
+        steps = [shlex.split(line) for line in lines if line.startswith("sudo install")]
         assert steps
         for step in steps:
             source = Path(step[-2])
@@ -1018,3 +1038,28 @@ def test_a_stop_takes_the_forked_agent_down_even_when_ps_cannot_run(machine, ser
     process.stop_tree()
     time.sleep(3)
     assert not marker.exists()
+
+
+def test_a_stop_takes_a_child_with_a_non_utf8_name_and_its_own_child(machine, service, tmp_path, monkeypatch):
+    bad = os.fsencode(tmp_path) + b"/\xff"
+    with open(bad, "wb") as script:
+        script.write(b"#!/bin/sh\n"
+                     b"sh -c 'sleep 2; : > \"$1\"' grandchild \"$2\" &\n"
+                     b"echo $$ > \"$1.pid\"\n"
+                     b"sleep 2\n"
+                     b": > \"$1\"\n")
+    os.chmod(bad, 0o755)
+    child, grandchild = tmp_path / "child", tmp_path / "grandchild"
+    monkeypatch.setenv("FAKE_WRAP", "fork")
+    process = launch(machine, "pi", cmd=[sys.executable, "-c",
+                     f"import subprocess, time; subprocess.Popen([{bad!r}, {str(child)!r}, {str(grandchild)!r}]); "
+                     "time.sleep(30)"])
+    pidfile = tmp_path / "child.pid"
+    deadline = time.time() + 10
+    while time.time() < deadline and not (pidfile.exists() and pidfile.read_text().strip()):
+        time.sleep(0.05)
+    pid = int(pidfile.read_text())
+    assert b"(\xff)" in Path(f"/proc/{pid}/stat").read_bytes()
+    process.stop_tree()
+    time.sleep(3)
+    assert not child.exists() and not grandchild.exists()

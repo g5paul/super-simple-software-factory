@@ -124,7 +124,8 @@ COMMAND_HEAD = """command_rules:
     commands: [git]
     # The regex runs over all of argv joined by spaces, argv[0] first: the verb itself, or
     # an option before it (-c a=b, -C /x, --git-dir /x). Any option line naming the verb is denied.
-    args_patterns: ['^\\S*\\s+push(\\s|$)', '^\\S*\\s+-.*push']
+    # (?s) so a newline in an option's value can't hide the verb.
+    args_patterns: ['^\\S*\\s+push(\\s|$)', '(?s)^\\S*\\s+-.*push']
     decision: deny
 """
 COMMAND_TAIL = """  - name: sssf-allow-rest
@@ -313,7 +314,12 @@ def check_machine(guard: LocalGuard) -> None:
             raise TypeError("policies.allowed is not a list of strings")
     except (OSError, ValueError, yaml.YAMLError, KeyError, AttributeError, TypeError) as error:
         raise AgentshRefused(f"can't use {CONFIG} ({type(error).__name__}); {FIX}") from None
-    if not guard.config_template or installed != render_config(guard.config_template, allowed).encode():
+    try:
+        rendered = render_config(guard.config_template, allowed).encode()
+    except Exception as error:    # yaml can hand back any shape, or raise several ways, and nothing else runs here
+        raise AgentshRefused(f"agentsh_sssf.yaml can't be rendered ({type(error).__name__}); restore the file from "
+                             "the SSSF skill, or set `local_guard: text` in adws/adw_sssf_config/repo.yaml") from None
+    if installed != rendered:
         raise AgentshRefused(f"{CONFIG} is not the file SSSF renders; {FIX}")
     for policy in guard.policies.values():
         if policy.name not in allowed:
@@ -355,7 +361,8 @@ def _opener():
 def _kill_descendants(pid: int) -> None:
     """SIGKILL everything under `pid`, found by reading /proc. No process is started,
     so it works when `ps` can't run. The wrap has no parent-death signal, so killing
-    it alone would leave the agent running."""
+    it alone would leave the agent running. `stat` is read as bytes because a process's
+    name needn't be valid UTF-8, and a skipped process would take its subtree out of the walk."""
     children: dict[int, list[int]] = {}
     try:
         entries = [e for e in Path("/proc").iterdir() if e.name.isdigit()]
@@ -363,7 +370,7 @@ def _kill_descendants(pid: int) -> None:
         return
     for entry in entries:
         try:
-            parent = int((entry / "stat").read_text().rsplit(")", 1)[1].split()[1])
+            parent = int((entry / "stat").read_bytes().rsplit(b")", 1)[1].split()[1])
         except (OSError, ValueError, IndexError):
             continue
         children.setdefault(parent, []).append(int(entry.name))

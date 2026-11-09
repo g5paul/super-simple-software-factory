@@ -298,7 +298,7 @@ A debug build, local fork branch `debug/tracer-faults`, logged three points: a f
 
 ## Next
 
-1. Install the clean build of the four patches, and remove the trace drop-in. pi's stall stays open: if it comes back, turn the trace on again.
+1. Install the clean build of the four patches, `agentsh 0.20.6-dev.fork+30dee5c`, sha256 `413a33ddc7d38577c448ff80f23927cd44df2d0ff81a3b0742b83236591a4986`, and remove the trace drop-in. pi's stall stays open: if it comes back, turn the trace on again.
 2. `wsl --shutdown` from Windows, then a check that the service is `active` when WSL starts again. It ends this session, so it goes last. Then the service checks: `active` with `CAP_SYS_PTRACE`, a wrapped `bash -c` denies `just test live` and `.env`, and a `kill -9` of the server kills the wrapped agent while the service comes back.
 3. The proof in sssf-sandbox: one wrapped Claude Code agent and one wrapped pi agent, and the bypass corpus.
 4. The decisions above, settled from the proof.

@@ -73,13 +73,14 @@ The engineer settled these on 2026-11-08, after the proof. OpenShell stays the l
 | Who runs the server | A dedicated `agentsh` service user with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`. No root server and no eBPF, and agents can't reach it through ptrace because they run as the engineer |
 | The API escape | Policy denies on the socket, TCP port 18080 and a proxy CONNECT to it, with auth left at `none`. The corpus keeps those checks, so a regression fails loudly. The API stays open to unwrapped local processes |
 | Install | With sudo, root-owned binaries, config and policies. SSSF generates a policy from `repo.yaml` and prints the install command, and a run refuses to start when the installed copy differs, at the cost of one sudo step per rule change |
-| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. v0.20.6 final lacks all five patches |
+| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. The current pin is `41960715`, from [the third run](#the-seventh-patch-and-the-third-run). v0.20.6 final lacks all seven patches |
 | How a denial counts | Only a denied `ptrace_execve` with a named rule counts toward the three-refusal stop, and it's never a breach. File and network denials go to the trace |
 | Rule format | An argv form, `deny_exec`, which becomes agentsh's `command_rules`, beside `forbid`, which keeps its text uses |
 | Proxy, DLP, FUSE, `BASH_ENV` | The session proxy on, because the network allowlist depends on it. The LLM proxy, DLP, FUSE and `BASH_ENV` off |
 | Silent fallback | None. A run refuses to start if the service isn't active, the wrap can't attach, or the service reports weaker enforcement than the policy needs. An upstream request for `wrap --require-interception` can wait |
 | Other credentials | A deny list in the policy covering `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.config/sssf-sandbox` and similar, retested with both agents |
-| Default-deny for files | Test it in sssf-sandbox with both agents, because wrapped agents can read the engineer's other repos today. Adopt it if the allow list stays short. Otherwise keep the deny list and add `~/github/**` outside the workspace |
+| Default-deny for files | Adopted by the engineer on 2026-11-08, after [the third run](#the-seventh-patch-and-the-third-run). The wrap's policies end in a deny of everything, with 20 file rules for Claude Code and 18 for pi, generated rather than written by hand. It accepts these limits: an agent can read its own sign-in, Claude Code can write `~/.claude.json`, which can hold MCP settings, and can read other projects' transcripts under `~/.claude/projects`, and `/tmp` is shared. A new tool may need a path added, and the trace names the path when it does |
+| Workspace | Pinned, because agentsh [widens `--root` to the repo top](#agentsh-widens-the-workspace-to-the-repo-top). `sssf.yaml` sets `policies.detect_project_root: false`, and the wrap refuses a `--root` that isn't the checkout's top |
 | Sign-ins | One policy per agent type. Claude Code can't open `~/.pi/agent/auth.json` and pi can't open `~/.claude/.credentials.json`. An agent can still read its own sign-in. Credential injection waits: it's untested and may not fit OAuth refresh |
 | Network hosts | The base allowlist stays model hosts, sign-in hosts and package registries. A `network_allow` key in `repo.yaml` adds a repo's own hosts, and each change takes the sudo step |
 | Secret files | The policy's rules come from `secret_files.py`'s logic: `.env.sample` is allowed, as the guard allows it, and each repo's `secret_files` patterns are added |
@@ -516,7 +517,7 @@ On that build, with both policy changes installed:
 
 Claude Code's one clipped command stored 4109 bytes in the trace.
 
-This is still one small task per agent, not a full chain. The limits to accept with default-deny are unchanged. An agent can read its own sign-in. Claude Code can write `~/.claude.json`, which can hold MCP settings, and can read other projects' transcripts under `~/.claude/projects`. `/tmp` is shared.
+This is still one small task per agent, not a full chain, which is what rollout step 2 is for. The engineer adopted default-deny on this result, and the Decisions table lists the limits that comes with.
 
 ### agentsh widens the workspace to the repo top
 
@@ -540,5 +541,4 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. Whether to adopt default-deny is the engineer's call on the third run's results.
-4. Rollout step 1, a guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, give the agent a `/dev/null` stdin, which `sandbox.start` already does, and pin the workspace as the section above says.
+3. Rollout step 1, the guard chain run for the wrap, from `specs/tasks/guard-agentsh-wrap.md`.

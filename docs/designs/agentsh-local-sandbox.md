@@ -726,6 +726,15 @@ The first guard run under it, 056faf3e, passed in round 1. No phase failed on a 
 
 The run-8b800eb5 harms were link attacks, so the bypass reviewer's prompt now says to give every link an absolute target, to set `core.symlinks true` in scratch repos, and to report a candidate that needs a relative link instead of dropping it (6c1421d).
 
+### The stamp-refusal runs, 056faf3e and 6cfe04c2
+
+The first guard runs under agentsh. 056faf3e passed in round 1, at $4.07. Its one real broken promise was a stamp nested 1,200 deep, which passed the check and crashed in `save_stamp`. 6cfe04c2 started from its code, fixed that, and passed in round 1, at $5.01. They merged as 67bf1a2. The reports are [guard-run-056faf3e.md](agentsh/guard-run-056faf3e.md) and [guard-run-6cfe04c2.md](agentsh/guard-run-6cfe04c2.md).
+
+What agentsh cost the reviewers, beyond relative links:
+- **`tar -x` failed** with "Cannot open: Permission denied" on every file in a subfolder, in the scratch folder and in `/tmp`. A file at the archive's top level extracts. Each piece tested alone works under the same policy: `mkdir`, `O_EXCL` opens, opens through a folder handle (an `O_PATH` one too), and a path with a slash. The denial log has no entry for it. The reviewer unpacked with `git show` per file instead.
+- **uv couldn't make a venv** in `~/.cache/uv`, so the reviewer ran its checks on three interpreters with its own harness, not the suite.
+- One flaky test in build verify: `test_agentsh_guard.py::test_a_non_breach_failure_with_three_denials_becomes_the_breach[cc]` failed once with "the tracer failed" and passed on the same code.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -751,5 +760,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
-4. The `install.py --update` crash on a malformed `stamp.json` record, in the next guard run with whatever step 3 turns up.
+4. What agentsh denies the hub's reviewers: `tar -x` of a tree with subfolders fails into the scratch folder and `/tmp`, though each open on its own passes; uv can't make a venv in `~/.cache/uv`, so a reviewer can't run the suite on another Python; the `../uv.toml` lookup above a worktree.
 5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. The policy renders from the install clone `~/github/sssf-install` (see `docs/sssf.md`), since the install refuses to run from inside the project it installs for. It waits on the engineer's sudo install, then a guard run on the hub.

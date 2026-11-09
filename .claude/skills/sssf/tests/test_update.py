@@ -459,9 +459,8 @@ def assert_refused(result: subprocess.CompletedProcess, *keys: str) -> None:
         assert json.dumps(key) in result.stderr
 
 
-@pytest.fixture
-def primed(repo):
-    """A repo where an unchecked update would copy, add and delete."""
+def prime() -> None:
+    """Make the cwd a repo where an unchecked update would copy, add and delete."""
     pretend_an_older_skill_stamped(REVIEWER)
     for path in Path("adws/adw_data/prompt_engineering").rglob("user.md"):
         if path != REVIEWER:
@@ -469,7 +468,22 @@ def primed(repo):
             break
     RETIRED.write_text("old = 1\n")
     record_retired(RETIRED)
+
+
+@pytest.fixture
+def primed(repo):
+    """A repo where an unchecked update would copy, add and delete."""
+    prime()
     return repo
+
+
+@pytest.fixture
+def plain_primed(tmp_path, monkeypatch):
+    """The same, from a plain install that stamps the shipped sssf.config.yaml."""
+    monkeypatch.chdir(tmp_path)
+    install()
+    prime()
+    return tmp_path
 
 
 GOOD = "a" * 64
@@ -564,3 +578,128 @@ def test_a_stamp_without_skill_and_with_an_extra_key_updates(repo):
     record["note"] = "x"
     STAMP.write_text(json.dumps(record, indent=2, sort_keys=True))
     install("--update")
+
+
+# ── a stamp nested too deeply to save is refused, or saved; never a traceback ─
+
+def write_nested(base: str, where: str, depth: int) -> None:
+    """Write `base` with a `depth`-level array in it, by text substitution.
+
+    The test process never parses or encodes the deep value: it would recurse here.
+    """
+    record = json.loads(base)
+    if where == "top":
+        record["note"] = "__DEEP__"
+    else:
+        record["files"][GONE] = {"source": GONE, "sha256": GOOD, "extra": "__DEEP__"}
+    STAMP.write_text(json.dumps(record).replace('"__DEEP__"', "[" * depth + "]" * depth))
+
+
+def unreadable_depth() -> int:
+    for depth in (20_000, 200_000, 2_000_000):
+        try:
+            json.loads("[" * depth + "]" * depth)
+        except RecursionError:
+            return depth
+    pytest.skip("this interpreter reads 2,000,000 levels")
+
+
+def saved_deep(depth: int) -> bool:
+    """Whether stamp.json holds a `depth`-level array. save_stamp indents it onto
+    separate lines, so compare with whitespace removed; nothing is parsed."""
+    return "[" * depth in "".join(STAMP.read_text().split())
+
+
+def assert_refused_or_saved(result: subprocess.CompletedProcess, before: dict, depth: int) -> None:
+    message = result.stdout + result.stderr
+    if result.returncode == 1:
+        assert_refused(result)
+        assert "nested too deeply" in result.stderr, message
+        assert snapshot(Path.cwd()) == before
+    else:
+        assert result.returncode == 0, message
+        assert "Traceback" not in result.stderr and "refusing" not in result.stderr, message
+        assert saved_deep(depth), message
+
+
+@pytest.mark.parametrize("where", ["top", "record"])
+@pytest.mark.parametrize("depth", [900, 990, 1200, 2000, 5000])
+def test_a_deep_stamp_is_refused_before_any_write_or_saved(plain_primed, where, depth):
+    base = STAMP.read_text()
+    write_nested(base, where, depth)
+    before = snapshot(plain_primed)
+    assert_refused_or_saved(run_update(), before, depth)
+
+
+@pytest.mark.parametrize("where", ["top", "record"])
+def test_a_stamp_too_deep_to_read_is_refused_before_any_write(plain_primed, where):
+    base = STAMP.read_text()
+    write_nested(base, where, unreadable_depth())
+    before = snapshot(plain_primed)
+    result = run_update()
+    assert_refused(result)
+    assert "nested too deeply" in result.stderr
+    assert snapshot(plain_primed) == before
+
+
+@pytest.mark.parametrize("where", ["top", "record"])
+def test_a_moderately_nested_stamp_updates(tmp_path, monkeypatch, where):
+    monkeypatch.chdir(tmp_path)
+    install()
+    base = STAMP.read_text()
+    write_nested(base, where, 100)
+    for _ in range(2):
+        result = run_update()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "refusing" not in result.stderr and "Traceback" not in result.stderr
+        assert saved_deep(100)
+
+
+def test_whatever_read_stamp_accepts_saves(tmp_path, monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sssf_install", SKILL / "scripts/install.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.chdir(tmp_path)
+    install()
+    base = STAMP.read_text()
+    root = Path.cwd()
+    too_deep = ["stamp.json is nested too deeply"]
+
+    hi = unreadable_depth()
+    write_nested(base, "top", hi)
+    assert mod.read_stamp(root)[1] == too_deep
+
+    def accepted(depth: int) -> bool:
+        write_nested(base, "top", depth)
+        return mod.read_stamp(root)[1] == []
+
+    lo = 1                      # accepted; the search keeps lo accepted and hi refused
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if accepted(mid):
+            lo = mid
+        else:
+            hi = mid
+    n = lo
+    assert n >= 100
+
+    def read_then_save(depth: int):
+        write_nested(base, "top", depth)
+        record, problems = mod.read_stamp(root)
+        if not problems:
+            mod.save_stamp(root, record)
+        return problems
+
+    assert read_then_save(n) == []
+    assert read_then_save(n + 1) == too_deep
+
+
+def test_read_stamp_has_one_try():
+    import ast
+    tree = ast.parse((SKILL / "scripts/install.py").read_text())
+    func = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "read_stamp")
+    assert sum(isinstance(n, ast.Try) for n in ast.walk(func)) == 1
+    for call in (n for n in ast.walk(func) if isinstance(n, ast.Call)):
+        name = getattr(call.func, "attr", getattr(call.func, "id", ""))
+        assert name != "setrecursionlimit"

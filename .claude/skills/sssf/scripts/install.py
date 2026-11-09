@@ -273,6 +273,7 @@ def load_stamp(root: Path) -> dict:
 
 CONFIG = "adws/adw_sssf_config/sssf.config.yaml"
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+SURROGATE = re.compile("[\ud800-\udfff]")   # the only str a UTF-8 encode rejects
 # Every roster template an install has ever recorded; all still ship.
 STARTER_SOURCES = frozenset(p.relative_to(TEMPLATES).as_posix() for p in STARTERS.values())
 
@@ -285,15 +286,21 @@ def read_stamp(root: Path) -> tuple[dict, list[str]]:
     the check and a later read disagree. Roster records are narrowed to a shipped
     starter as their `source`, because that source becomes a path under TEMPLATES
     that the copy loop reads; any other value would crash it partway through.
+    The record is encoded the way save_stamp will encode it, inside the same try,
+    so a stamp nested too deeply to save is refused before anything is written.
+    Everything that read_stamp accepts saves.
     """
     try:
         record = json.loads((root / STAMP).read_text(encoding="utf-8"))
+        stamp_text(record)   # what save_stamp will write: a stamp that can't save is malformed
     except FileNotFoundError:
         return {"files": {}}, []
     except OSError:
         return {}, ["stamp.json can't be read"]
-    except (ValueError, RecursionError):
+    except ValueError:
         return {}, ["stamp.json is not valid UTF-8 JSON"]
+    except RecursionError:
+        return {}, ["stamp.json is nested too deeply"]
     if not isinstance(record, dict):
         return {}, ["stamp.json is not a JSON object"]
     files = record.get("files")
@@ -302,11 +309,7 @@ def read_stamp(root: Path) -> tuple[dict, list[str]]:
     problems = []
     if "skill" in record:
         skill = record["skill"]
-        try:
-            if not isinstance(skill, str):
-                raise UnicodeEncodeError("utf-8", "", 0, 1, "not text")
-            skill.encode("utf-8")
-        except UnicodeEncodeError:
+        if not isinstance(skill, str) or SURROGATE.search(skill):
             problems.append('"skill" is not text')
     for rel, entry in sorted(files.items()):
         reasons = []
@@ -315,9 +318,7 @@ def read_stamp(root: Path) -> tuple[dict, list[str]]:
         else:
             if "\x00" in rel:
                 reasons.append("key holds a null byte")
-            try:
-                rel.encode("utf-8")
-            except UnicodeEncodeError:
+            if SURROGATE.search(rel):
                 reasons.append("key is not UTF-8 text")
         if not isinstance(entry, dict):
             reasons.append("not an object")
@@ -388,10 +389,14 @@ def skill_change(root: Path, src: Path, base_sha256: str) -> str | None:
     return None
 
 
+def stamp_text(record: dict) -> str:
+    return json.dumps(record, indent=2, sort_keys=True) + "\n"
+
+
 def save_stamp(root: Path, record: dict) -> None:
     path = root / STAMP
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    path.write_text(stamp_text(record))
 
 
 def copy(src: Path, dest: Path) -> None:

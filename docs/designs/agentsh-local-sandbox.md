@@ -1,6 +1,6 @@
 # Design: agentsh as the local sandbox
 
-Status: direction decided by the engineer on 2026-11-08. The research note is done, [agentsh-local-sandbox.md](../research/agentsh-local-sandbox.md) in `docs/research/`, and the proof in sssf-sandbox passed on 2026-11-08, with two findings to settle. The open item is in [open.md](../open.md).
+Status: direction decided by the engineer on 2026-11-08. The research note is done, [agentsh-local-sandbox.md](../research/agentsh-local-sandbox.md) in `docs/research/`, and the proof in sssf-sandbox passed on 2026-11-08. The engineer settled the decisions and the rollout the same day, and nothing is built in SSSF yet. The open item is in [open.md](../open.md).
 
 Under `sandbox: none`, SSSF runs each agent under [agentsh](https://github.com/canyonroad/agentsh) with a policy built from the repo's settings, in place of the text checks that limit a local agent today. `--sandbox openshell` stays as it is.
 
@@ -24,7 +24,7 @@ agentsh is a product built for this problem by a company, Canyon Road, that open
 | The `.env` guard (`secret_files.py`) | `file_rules` denying the open |
 | No network limit for a local agent | network rules |
 
-SSSF keeps building the policy from `repo.yaml`, launching each agent under `agentsh wrap` in `agent_cc.py` and `agent_pi.py`, and reading agentsh's audit events into the trace. The text checkers can stay as a second layer that gives the friendlier refusal message, until the proof shows they add nothing. OpenShell isolates the host and the network but can't see a recipe's arguments, so the two can also work together later.
+SSSF keeps building the policy from `repo.yaml`, launching each agent under `agentsh wrap` in `agent_cc.py` and `agent_pi.py`, and reading agentsh's audit events into the trace. The text checkers leave the `sandbox: none` path one at a time once the rollout below has its results. They stay for VM runs, because agentsh doesn't run inside those VMs. OpenShell isolates the host and the network but can't see a recipe's arguments, so the two can also work together later.
 
 ## Before SSSF relies on it
 
@@ -64,11 +64,12 @@ Even so, it guards better than the regexes against an agent's mistakes, which is
 
 ## Decisions
 
-The engineer settled these on 2026-11-08, after the proof. The direction is that OpenShell stays the local sandbox and agentsh replaces the text guard under `sandbox: none`. How it rolls out is still open.
+The engineer settled these on 2026-11-08, after the proof. OpenShell stays the local sandbox and agentsh replaces the text guard under `sandbox: none`.
 
 | Decision | Settled |
 |---|---|
-| Direction | agentsh replaces the text guard under `sandbox: none`. `--sandbox openshell` stays the local sandbox and doesn't change. The rollout steps are still open |
+| Direction | agentsh replaces the text guard under `sandbox: none`. `--sandbox openshell` stays the local sandbox and doesn't change, so repos on it aren't part of this rollout. agentsh is a guard, not isolation: agents still run on the machine with its files, and quality checks still run outside the wrap |
+| Text guard patches | Frozen from 2026-11-08. A new spelling that gets past the text checks becomes a case in `docs/designs/agentsh/corpus.sh`, not another regex |
 | Who runs the server | A dedicated `agentsh` service user with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`. No root server and no eBPF, and agents can't reach it through ptrace because they run as the engineer |
 | The API escape | Policy denies on the socket, TCP port 18080 and a proxy CONNECT to it, with auth left at `none`. The corpus keeps those checks, so a regression fails loudly. The API stays open to unwrapped local processes |
 | Install | With sudo, root-owned binaries, config and policies. SSSF generates a policy from `repo.yaml` and prints the install command, and a run refuses to start when the installed copy differs, at the cost of one sudo step per rule change |
@@ -76,8 +77,26 @@ The engineer settled these on 2026-11-08, after the proof. The direction is that
 | How a denial counts | Only a denied `ptrace_execve` with a named rule counts toward the three-refusal stop, and it's never a breach. File and network denials go to the trace |
 | Rule format | An argv form, `deny_exec`, which becomes agentsh's `command_rules`, beside `forbid`, which keeps its text uses |
 | Proxy, DLP, FUSE, `BASH_ENV` | The session proxy on, because the network allowlist depends on it. The LLM proxy, DLP, FUSE and `BASH_ENV` off |
-| Silent fallback | None. A run refuses to start if the service isn't active or the wrap can't attach. An upstream request for `wrap --require-interception` can wait |
+| Silent fallback | None. A run refuses to start if the service isn't active, the wrap can't attach, or the service reports weaker enforcement than the policy needs. An upstream request for `wrap --require-interception` can wait |
 | Other credentials | A deny list in the policy covering `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.config/sssf-sandbox` and similar, retested with both agents |
+| Default-deny for files | Test it in sssf-sandbox with both agents, because wrapped agents can read the engineer's other repos today. Adopt it if the allow list stays short. Otherwise keep the deny list and add `~/github/**` outside the workspace |
+| Sign-ins | One policy per agent type. Claude Code can't open `~/.pi/agent/auth.json` and pi can't open `~/.claude/.credentials.json`. An agent can still read its own sign-in. Credential injection waits: it's untested and may not fit OAuth refresh |
+| Network hosts | The base allowlist stays model hosts, sign-in hosts and package registries. A `network_allow` key in `repo.yaml` adds a repo's own hosts, and each change takes the sudo step |
+| Secret files | The policy's rules come from `secret_files.py`'s logic: `.env.sample` is allowed, as the guard allows it, and each repo's `secret_files` patterns are added |
+
+## Rollout
+
+1. A guard chain run builds the wrap, behind `local_guard: agentsh` in `repo.yaml`.
+2. sssf-sandbox runs a full SDLC chain under it. The proof only ran single agents.
+3. The hub moves, so every guard run tests it.
+4. pi-agent-observability moves, for heavy pi use and the hang question.
+5. fusion-harness moves.
+
+Each project's session makes the change in its own repo.
+
+agentsh becomes the `sandbox: none` default after at least 10 real chain runs across at least two repos, with both agents, no guard miss, no denial that breaks legitimate work, and no hang that a run's timeout fails to stop. New installs then get it. A repo that wants the old guard must say `local_guard: text`, and a machine without the service refuses to run, with no fallback. The patched build exists only on this machine, and agentsh is tested only on this WSL2 setup, so that default reaches no further for now.
+
+The text checkers then leave the `none` path one at a time, in this order of separate guard chain runs: the stream check, Claude Code's prefix, pi's extension and the `.env` guard. The prompt lines telling agents the rules stay.
 
 ## What agentsh-secure-sandbox offers
 
@@ -439,5 +458,5 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. The rollout and the policy questions still open under Decisions.
-4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, and give the agent a `/dev/null` stdin, which `sandbox.start` already does.
+3. The default-deny test in sssf-sandbox with both agents, which decides the file policy the wrap generates.
+4. Rollout step 1, a guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables, and give the agent a `/dev/null` stdin, which `sandbox.start` already does.

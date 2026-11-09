@@ -12,6 +12,8 @@ The `bypass-reviewer` subagent stays for a quick check outside a run, or on a ru
 
 The review exists because a guard change once passed every test and still let `cat <<EOF | bash` past every agent rule. Two project sessions caught it after the update was sent.
 
+The text guard's patches are frozen since 2026-11-08, because agentsh is replacing it under `sandbox: none` ([the design](docs/designs/agentsh-local-sandbox.md)). A new spelling that gets past the text checks becomes a case in `docs/designs/agentsh/corpus.sh`, not another regex.
+
 ## Public and private repos
 
 This repo is public. Some of the repos SSSF is installed in are private or unlisted, and nothing about them belongs here. Keep the two apart:

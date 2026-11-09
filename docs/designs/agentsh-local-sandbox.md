@@ -349,9 +349,34 @@ A debug build, `debug/tracer-idle` at 8c2ea044, makes the interval settable, and
 
 Two other guesses fell first. An fsync per event was wrong: SQLite writes through an async queue, and JSONL's `AppendEvent` doesn't sync with integrity off. Work in the server was wrong too: over 500 failed opens it used 640 ms of CPU in 6 seconds.
 
-A shorter timer isn't the fix. At 200 µs the server used 770 ms of CPU during a wrapped `sleep 5`, about 15% of a core, because `scanWedged` and `reconcileProc` run on every tick. The same measure at 5 ms wasn't taken. It also still costs 2.3 ms per failed open, about 1.1 ms per stop, so the wait is longer than the 200 µs asked for. The better fix is to poll `Wait4` in a short spin right after resuming an agent, and only then fall back to the 5 ms timer. That hasn't been built.
+A shorter timer isn't the fix. At 200 µs the server used 770 ms of CPU during a wrapped `sleep 5`, about 15% of a core, because `scanWedged` and `reconcileProc` run on every tick. The same measure at 5 ms wasn't taken. It also still costs 2.3 ms per failed open, about 1.1 ms per stop, so the wait is longer than the 200 µs asked for. The better fix is to poll `Wait4` in a short spin right after resuming an agent, and only then fall back to the 5 ms timer. The corpus still held at 200 µs, 16 of 16. The copied `just` counts as held there only because of the `.env` failure above. No file call was denied as unknown session, and the watchdog logged no wedge.
 
-The corpus still held at 200 µs, 16 of 16. The copied `just` counts as held there only because of the `.env` failure above. No file call was denied as unknown session, and the watchdog logged no wedge.
+## The spin patch, 2026-11-08
+
+A fifth local fork patch, `fix/ptrace-wait-spin` at fb321cc5, built as `agentsh 0.20.6-dev.spin+fb321cc5`. After each resume the loop keeps polling `Wait4` for 200 µs, and only then falls back to the 5 ms timer. `AGENTSH_PTRACE_SPIN_US` overrides the window, and a single CPU never spins.
+
+| Measure | Bare | Timer 5 ms | Timer 200 µs | Spin 200 µs |
+|---|---:|---:|---:|---:|
+| Failed open | 2 µs | 11.1 ms | 2.3 ms | about 70 µs |
+| Real open | 3 µs | 22.3 ms | 4.5 ms | about 120 µs |
+| Fork | 0.3 ms | 22.5 ms | 5.2 ms | 0.3 ms |
+| Fork and exec | 0.5 ms | 72.6 ms | 15.1 ms | 0.9 to 1.5 ms |
+| `sleep 1` | 1001 ms | 1482 ms | 1098 ms | 1016 to 1036 ms |
+| `git status --short` | 13 ms | 2333 ms | 490 ms | 58 to 80 ms |
+| `python -m pytest -q` | 242 ms | 6919 ms | 1630 ms | about 1500 ms |
+| `uv run pytest -q` | 290 ms | 8676 ms | 1995 ms | 1670 ms |
+| Server CPU, 500 failed opens | | 640 ms | 300 ms | 60 ms |
+| Server CPU, wrapped `sleep 5` | | not measured | 770 ms | 290 ms |
+
+The guard Claude Code run went from 34 seconds to 10, and pi from 37 to between 21 and 27. The corpus held, with the copied `just` caveat above, `net-checks.sh` passed, and both agents were denied all five actions. No file call was denied as unknown session, and the watchdog logged no wedge.
+
+**pytest barely moved.** `import pytest` takes 99 ms bare and 1155 ms under the spin. The likely reason, not yet tested, is that Python works for longer than 200 µs between its file opens, so those stops miss the spin and wait out the 5 ms timer. A longer window through `AGENTSH_PTRACE_SPIN_US` would test it.
+
+The 8 tests in `internal/ptrace` that fail under the `integration` tag, in a container, fail the same way on the unpatched base, so the patch didn't cause them. Why they fail isn't known. They cover file redirect, soft delete, the scratch page, TracerPid masking, three connect-exit cases and write escalation on a TLS connect.
+
+**A hang that looked like the patch, and wasn't.** A pi run hit the 240-second limit on this build, then two more hung the same way. All three stopped at event 407, just after opening `~/.pi/agent/models.json`, with no wedge logged. In the one I caught live, every thread was asleep, none stopped by ptrace, and the main thread sat in `epoll_wait`. Its stdin was a socket inherited from the Claude Code tool's shell, which stays open. `pi -p` waits for the end of stdin when it isn't a terminal. Run bare, with no agentsh, pi hung with stdin as an open pipe or an open socket, and exited at once with `/dev/null` or a closed socket. `agent-run.sh` now gives it `/dev/null`, as `sandbox.start` already does for SSSF's agents, so SSSF runs weren't exposed. With `/dev/null`, 66 wrapped pi runs in a row finished clean. Why earlier foreground runs got through isn't known.
+
+The stall in the debug round looks different: its main thread was stopped in `openat`, and the watchdog logged `not advancing`. It may be a separate bug, so it stays open.
 
 ## Running the checks
 
@@ -366,6 +391,6 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 ## Next
 
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
-2. Cut the tracer's wait: spin on `Wait4` after a resume, then fall back to the 5 ms timer. Check it with `timing.sh` and the server's CPU, and put the clean build back after the test.
+2. Try a longer spin window for Python's imports, and check the server's CPU with `timing.sh`. Then pick the window and install that build as the daily one.
 3. The decisions above, settled from the proof.
 4. A guard chain run for the wrap. It must set `JUST_NO_DOTENV=true` along with the other variables.

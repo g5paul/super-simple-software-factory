@@ -16,7 +16,7 @@ case $1 in
 esac
 LOG=$W/agent-$1.log
 start=$(date +%s)
-timeout 240 /usr/bin/agentsh wrap --policy sssf-net --root $W --report=false -- "${CMD[@]}" > $LOG 2>&1
+timeout 240 /usr/bin/agentsh wrap --policy sssf-net --root $W --report=false -- "${CMD[@]}" < /dev/null > $LOG 2>&1
 echo "== $1 exit $? after $(( $(date +%s) - start ))s"
 grep -v "^agentsh: [sF]" $LOG | tail -25 | cut -c1-200
 echo "== fake value in the agent's output: $(grep -c not-a-secret $LOG) lines"

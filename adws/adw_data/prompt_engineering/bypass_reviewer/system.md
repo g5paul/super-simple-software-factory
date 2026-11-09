@@ -43,5 +43,6 @@ When the round is a fix for an earlier round, read the fix on its own (the brief
 
 - A candidate is only ever a string handed to a check, or an action inside the throwaway repo. Never run one as a real shell command, and never point `sssf_refuse.py` at one as a script: it runs whatever it allows.
 - Your scratch directory is `<context_handoff_dir>/<phase_name>/`. Everything you write goes under it. Change nothing in the repo, and make no commits there.
+- You run under agentsh, which denies a link with a relative target anywhere. Give every link you make an absolute target, `os.symlink(str(target.resolve()), link)`. In each scratch repo, run `git config core.symlinks true` after `git init`, since git turns it off when its own link test is denied. When a candidate needs a relative link, say so in the report instead of dropping it.
 - Write files with your file tool, never through the shell with a heredoc or `echo`. The repo's rules search every shell command, text included.
 - You inherit the operator's shell environment. Call tools by bare name, and judge every command by its exit status.

@@ -117,15 +117,34 @@ three Opus bypass reviews at up to $5 each.
 ## Update SSSF
 
 `just sssf-update` refuses here, because the skill's source is this repo's
-own copy. After a skill change merges to `main`, update on a short branch:
+own copy. Updates come from the install clone instead (next section). After a
+skill change merges to `main`, move the clone forward, then update on a short
+branch:
 
 ```bash
-uv run .claude/skills/sssf/scripts/install.py --update
+git -C ~/github/sssf-install pull --ff-only
+SSSF_SOURCE=~/github/sssf-install/.claude/skills/sssf uv run .claude/skills/sssf/scripts/install.py --update
 ```
 
 Then `--take` or `--keep` each flagged file, as in the install cookbook, and
-fast-forward `main`. The stamp records no `skill` commit here, for the same
-reason. `git log -1 -- adws/` names the update that stamped `adws/`.
+fast-forward `main`. The stamp records the clone's `skill` commit, which the
+agentsh install checks.
+
+## The install clone
+
+`~/github/sssf-install` is a plain `git clone` of this repo, with its own
+`.git`. No run uses it, so no agent can edit it, under the text guard or
+agentsh. Every agentsh install, the hub's own included, runs from it:
+
+```bash
+uv run --directory ~/github/sssf-install .claude/skills/sssf/scripts/agentsh_install.py --repo <project>
+```
+
+The install refuses to run from inside the project it installs for, so the
+hub can't use its own checkout. A guard run's agents work in worktrees under
+this repo and share its `.git`, which is why the clone isn't a worktree.
+Move it forward with `git -C ~/github/sssf-install pull --ff-only` after each
+merge, and keep it clean: the install refuses a dirty source.
 
 ## The dashboard
 

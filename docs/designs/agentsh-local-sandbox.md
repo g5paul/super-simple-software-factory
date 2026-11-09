@@ -737,4 +737,4 @@ The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the workt
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 4. The `install.py --update` crash on a malformed `stamp.json` record, in the next guard run with whatever step 3 turns up.
-5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. The hub install generates its policy, and the engineer runs one sudo install.
+5. Rollout step 3: the hub moves to agentsh, so every guard run tests it. The policy renders from the install clone `~/github/sssf-install` (see `docs/sssf.md`), since the install refuses to run from inside the project it installs for. It waits on the engineer's sudo install, then a guard run on the hub.

@@ -336,5 +336,6 @@
       "sha256": "e99f5827a668be38ef5639a5486842904735f71d9a0fead3dd49151a4080dcbe",
       "source": "justfile"
     }
-  }
+  },
+  "skill": "8145eef"
 }

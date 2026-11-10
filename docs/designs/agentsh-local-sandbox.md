@@ -1015,6 +1015,21 @@ Limits:
 - **Names still show other ways.** `inotify` and `fanotify` events carry the names that change in a watched folder, and `stat` says whether a name exists. Neither is traced.
 - **A false refusal.** A thread that closes or `dup2`s onto a slot while another thread lists it gets `EINTR` or `EBUSY`. Programs don't do that on purpose.
 
+### The links and listing run, 47b4d0ea
+
+Run 47b4d0ea, from `specs/tasks/guard-agentsh-links-listing.md`, passed in one round under `local_guard: agentsh` on 472d63cf, for $4.75. The first spec review sent the bar back for leaving out the brief's must-work and must-refuse lists; the second passed it. The first verify failed only on the flaky `test_a_non_breach_failure_with_three_denials_becomes_the_breach[cc]`, and the builder changed nothing. Merged by fast-forward as `39bce41`:
+
+- `WRITE_OPS` adds `symlink_target`, so the two deny lists refuse a link to a file they guard.
+- `sssf-system-link` names `symlink_target`, and `SYSTEM_LINK` adds `${HOME}/.local/share/uv/python/*/bin/python3.*`.
+- A new `sssf-home-folder` rule gives `${HOME}` itself `FOLDER_OPS` only, and `HOME_READ` drops it, so the home folder can be opened but not listed.
+- `PINNED_SHA256` names build 05b3777f; `config.md`, `install.md` and `deny-policy.py` follow.
+
+The bypass review found no bypass, harm, false positive or broken promise, and three old holes:
+
+- **Claude Code's own folder.** `sssf-agent-write` allows everything on `~/.claude/**` and `~/.claude.json`. The folder names under `~/.claude/projects` and the projects map in `~/.claude.json` name the engineer's other repos, and the transcripts and `~/.claude/file-history` hold their files' contents. The run's new `config.md` line said an agent "can't list your other repos"; the hub session rewrote it by hand after the merge to say how the names and files still reach an agent. It's Next item 13.
+- **`/proc/<pid>/cwd` and `cmdline`.** `sssf-system-read` allows reading `/proc/**`, so the engineer's other processes show their repos' paths. Listing through `/proc/<pid>/cwd` is judged on the resolved folder and refused.
+- **The main checkout's folders on a `--worktree` run.** `adws`, `adws/adw_data` and `adws/adw_data/worktrees` are in `sssf-config-folders`, so on the new build they can be opened and not listed. The spec named the first two only.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -1054,4 +1069,5 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 9. **Signals**, an eleventh fork patch in the same build. Run 8a727544 turned `trace.signal` on, added the rules and pinned the build, in skill 63828cf. Installed and probed on the service on 2026-11-10 ([the probes](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)). The spec's last check, a guard run under `local_guard: agentsh`, passed with run 130ca6e0. The first try, 45742573, stopped on the hub's own tests.
 10. **`config.md`'s example pi pattern** misses pi after a wrapper word (`env pi`, `timeout 60 pi`, `bash -c '...'`), which run 6e904be8's review found. `config.md` should list it as a known limit of the text guard, through the guard chain.
 11. **The three items left by run 130ca6e0** ([the run](#the-tool-config-run-under-agentsh-130ca6e0)): the agent-cache folder as a moved link on a worktree run, uv's hardlinks into the engineer's cache, and whether the engine escapes `${PROJECT_ROOT}`. The last needs a probe on the fork's engine. The other two go in `config.md`'s limits at least, through the guard chain.
-12. **uv's managed Pythons and folder listing**, left by run 98e91ed7. Fork build 05b3777f judges a link's target apart from its path, and a folder's entries as `list` ([the patches](#the-twelfth-and-thirteenth-patches-link-targets-and-listing-2026-11-10)). A guard run adds `symlink_target` to the deny lists, moves `sssf-system-link` to it, adds the managed Pythons, stops the home folder listing and pins the build: `specs/tasks/guard-agentsh-links-listing.md`. Also: pnpm's two `npm_config_*` variables draw a deprecation warning from npm.
+12. **uv's managed Pythons and folder listing**, left by run 98e91ed7. Fork build 05b3777f judges a link's target apart from its path, and a folder's entries as `list` ([the patches](#the-twelfth-and-thirteenth-patches-link-targets-and-listing-2026-11-10)). Run 47b4d0ea moved the policies to it and pinned it ([the run](#the-links-and-listing-run-47b4d0ea)). Left: the engineer installs the build and reinstalls both repos' policies, and the hub session reruns the probes. Also: pnpm's two `npm_config_*` variables draw a deprecation warning from npm.
+13. **Other repos' Claude Code transcripts.** A Claude Code agent under the wrap may read all of `~/.claude`, so it can read the transcripts and file history of every other repo's sessions, and whatever secrets they hold. Narrow `sssf-agent-write` to what Claude Code needs: its own project folder under `~/.claude/projects`, its session files, and the config it reads, then test that Claude Code still works. Through the guard chain. `/proc/<pid>/cwd` and `cmdline` go with it, or are recorded as a limit.

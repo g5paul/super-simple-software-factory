@@ -839,7 +839,7 @@ Run 7047b87c moved the pin, under the text guard, and merged as 7b36e01 for $1.3
 
 ### The ninth patch: link targets, 2026-11-09
 
-`f2ee6845`, `fix(ptrace): judge a symlink at the file it leads to`, and `65e2d4fb`, `fix(ptrace): refuse a symlink target through /proc`, on `sssf/patched` under the namespace fix, local. `sssf/link-targets` also points at `65e2d4fb`. A link's target used to reach the rules as raw text. A relative one matched no rule and fell to the default deny, which broke `uv venv` and npm's and bun's `.bin` links. An absolute one was judged as text, so `<workspace>/../../.ssh/id_rsa` passed any rule allowing the workspace.
+`f2ee6845`, `fix(ptrace): judge a symlink at the file it leads to`, and `65e2d4fb`, `fix(ptrace): refuse a symlink target through /proc`, on `sssf/patched` under the namespace fix, local. They have no branch of their own: `3918a619..65e2d4fb` is the patch to review. A link's target used to reach the rules as raw text. A relative one matched no rule and fell to the default deny, which broke `uv venv` and npm's and bun's `.bin` links. An absolute one was judged as text, so `<workspace>/../../.ssh/id_rsa` passed any rule allowing the workspace.
 
 `symlinkat` and `symlink` now hand the rules the file the link leads to. A relative target is read from the link's folder, and each part that exists is resolved the way the kernel follows it, through links, with `..` after them. A part that doesn't exist yet is judged as text below its deepest existing folder. That only works while the rest has no `..` and the first missing part isn't a dangling link, so either case fails closed.
 

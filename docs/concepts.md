@@ -209,7 +209,7 @@ The **text guard** is the [guards above](#guards), and it's on in every mode, VM
 - the engineer installs the agentsh service as root, running the `sudo` lines that `agentsh_install.py` prints;
 - SSSF accepts only one build of the hub's patched fork of agentsh, by its sha256, and the fork's patches aren't published yet ([install.md](guide/install.md#before-you-start) has the version);
 - it's tested only on Python repos with a Claude Code roster, and a pi roster has no policy yet;
-- uv, pnpm and venvs fail under it in some layouts, which [config.md](../.claude/skills/sssf/references/config.md) lists with the other known limits.
+- uv and pnpm fail under it in some layouts, which [config.md](../.claude/skills/sssf/references/config.md) lists with the other known limits.
 
 [The design](designs/agentsh-local-sandbox.md) has the evidence and the decisions.
 

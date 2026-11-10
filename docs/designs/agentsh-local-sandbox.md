@@ -892,6 +892,28 @@ Probes under the hub's policy, with decoys I started and deleted after:
 
 Not borrowed: `env_policy`, since `agent_env` already drops the `.env` keys and provider keys before launch; `package_rules`; `audit`; and `resource_limits`, not checked under ptrace here.
 
+### The tenth and eleventh patches: DNS and signals, 2026-11-10
+
+Both are on `sssf/dns-signals`, cut from `sssf/races` at `3a36c68f`, local.
+
+`ba8403a0`, `fix(ptrace): forward DNS only to the system resolver, and only the checked question`, is Next item 8. The proxy no longer sends the agent's packet anywhere. It builds a new query from the one question it checked, adds a bare OPT record of its own when the agent's packet had one, and sends that only to the first resolver in `/etc/resolv.conf`, or to the policy's `RedirectUpstream`. A packet with more than one question gets FORMERR, and with no system resolver the answer is SERVFAIL. `dns_forward_test.go` runs the proxy against two fake resolvers, the system's and the agent's pick, and checks that only the system's gets a packet and that bytes after the question, an extra record and EDNS option data never reach it. All six tests failed before the fix.
+
+`472d63cf`, `fix(ptrace): judge signals against signal_rules, and judge signal owners`, is Next item 9. The tracer works out every process a signal reaches: the one named, each member of the group for `kill(0)` and `kill(-pgid)`, and "everyone" for `kill(-1)`. It describes each against the sender (in the session, parent, child, descendant, sibling, same user, command name), and the router judges each with the policy's `signal_rules`. One refusal refuses the call with EPERM, a gone target gets ESRCH, and signal 0 is allowed. A zombie whose parent is in the session counts as in the session, so a shell can still reap its jobs. A policy without `signal_rules` allows every signal, so installing the build changes nothing until the guard chain adds the rules.
+
+The F_SETOWN probe above found a second way to send a signal: `fcntl(F_SETOWN)` on a pipe, `F_SETSIG` set to SIGTERM and `O_ASYNC`, then a write, and the kernel kills the owner itself. The patch judges a new owner from `fcntl` `F_SETOWN` and `F_SETOWN_EX` and from `ioctl` `FIOSETOWN` and `SIOCSPGRP` as a SIGKILL to it. With signal tracing on, the prefilter stops `fcntl` and `ioctl` only for those commands, by a bit test on the command: bit 3 for the two `fcntl` commands, which the everyday ones 0 to 7 and `F_DUPFD_CLOEXEC` lack, and bit 15 for the two `ioctl`s, which terminal ioctls lack. The vfork fast path no longer lets these calls by unjudged.
+
+`signal_integration_test.go` runs a traced C program against a decoy `sleep` outside the session, with and without the prefilter. Each of the six syscalls and each of the six owner calls toward the decoy is refused, a vfork child's `F_SETOWN` too, and the decoy lives. Signals to itself, to its own child and to its own group work, real-time signals included, as do `F_SETOWN` to itself and to its child. On the old code the outside cases succeeded; with the owner handler switched off the owner cases did. Upstream's `TestIntegration_SignalDeny` and `TestIntegration_SignalRedirect` failed on a first draft that skipped the policy for a signal to the sender itself, so self-signals still go to the policy, as target type `self`. The `ptrace`, `api`, `policy`, `signal` and `config` tests show the 9 `api` failures that need cgo and nothing else, and the integration tag the same 10 failures by name as `sssf/patched`. The new tests passed five runs in five.
+
+| Build | Version | sha256 | Folder |
+|---|---|---|---|
+| `sssf/dns-signals` at `472d63cf`: `3a36c68f` with both patches. Built three times with the same bytes | `0.20.6-dev.fork+472d63cf` | `f9da98024093f13634f26d349237eb217dc5b10fab826d222f08d8a88f79933e` | `~/.local/share/agentsh-builds/dns-signals/` |
+
+Limits:
+- **The check comes before delivery.** A target can exit and its pid be reused between the tracer's check and the kernel's delivery. The window is a few `/proc` reads, and the new process would have to be one the agent's user may signal.
+- **DNS session lookup.** The proxy finds the session from the tracer's last redirect, so with two sessions at once a query could be judged under the other's policy. Both are SSSF policies with the same allowed hosts in practice, but not by design.
+- **approve and absorb mean refuse.** The tracer can't hold a signal for approval or swallow it quietly, so either decision refuses the call.
+- **`@all` is 1 to 31** in agentsh, so SSSF's rules name 32 to 63 as well.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -927,5 +949,5 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
    - **The guard chain run** from `specs/tasks/guard-agentsh-tool-config.md`: config lookups above the workspace, which break uv in every repo under `~/github`, and caches of the agents' own.
 6. Rollout step 4, after items 5, 8 and 9: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
 7. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.
-8. **The DNS proxy's forward**, a tenth fork patch ([the probes](#stock-policies-sockets-signals-and-dns-2026-11-10)). The proxy forwards an allowed query only to the resolvers in `/etc/resolv.conf`, never to the address the agent named, and it sends a query rebuilt from the one question it checked, refusing a packet with more than one.
-9. **Signals**, an eleventh fork patch in the same build: ptrace mode judges a signal against the policy's `signal_rules`. Then the guard chain from `specs/tasks/guard-agentsh-signals.md` turns `trace.signal` on, adds the rules and pins the build.
+8. **The DNS proxy's forward**, a tenth fork patch ([the probes](#stock-policies-sockets-signals-and-dns-2026-11-10)). Built as `472d63cf` with item 9 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)); the engineer installs it, then the hub probes the forward on the installed build.
+9. **Signals**, an eleventh fork patch in the same build. After the install, the guard chain from `specs/tasks/guard-agentsh-signals.md` turns `trace.signal` on, adds the rules and pins the build.

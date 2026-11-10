@@ -151,6 +151,7 @@ temp/
 adws/adw_data/sessions/
 adws/adw_data/sssf.db*
 adws/adw_data/worktrees/
+adws/adw_data/agent-cache/
 *.pyc
 .claude/skills/sssf/apps/visualizer/node_modules/
 .claude/skills/sssf/apps/visualizer/dist/

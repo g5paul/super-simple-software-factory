@@ -181,7 +181,8 @@ def machine(tmp_path, monkeypatch, cfg):
                           text=agentsh_guard.policy_text(settings, common, h, n, **PATHS))
                 for h in ("claude_code", "pi")}
     template = TEMPLATE.read_text()
-    guard = LocalGuard(mode="agentsh", root=str(root.resolve()), policies=policies, config_template=template)
+    guard = LocalGuard(mode="agentsh", root=str(root.resolve()), policies=policies, config_template=template,
+                       agent_cache=str(tmp_path / "agent-cache"))
     config = tmp_path / "sssf.yaml"
     config.write_text(agentsh_guard.render_config(template, [p.name for p in policies.values()]))
     pdir = tmp_path / "policies"
@@ -391,6 +392,32 @@ def test_each_harness_gets_its_policy_the_env_and_a_null_stdin(machine, tmp_path
                 "JUST_NO_DOTENV", "SSSF_AGENTSH"):
         assert key in seen["env"]
     assert seen["env"]["JUST_NO_DOTENV"] == "true"
+
+
+def test_the_agents_caches_are_set_for_both_harnesses_and_beat_the_engineers(machine, tmp_path):
+    guard, seen = machine.guard, {}
+    for harness in ("claude_code", "pi"):
+        dump = tmp_path / f"dump-{harness}.json"
+        env = {"FAKE_DUMP": str(dump), "PATH": "/usr/bin:/bin", "UV_CACHE_DIR": "/x",
+               "NPM_CONFIG_CACHE": "/y", "Cargo_Home": "/z"}
+        launch(machine, harness, cmd=[sys.executable, "-c", "pass"], env=env).wait()
+        seen[harness] = json.loads(dump.read_text())["env"]
+    want = agentsh_guard.cache_env(guard.agent_cache)
+    for env in seen.values():
+        assert all(env.get(k) == v and v.startswith(guard.agent_cache + "/") for k, v in want.items())
+        assert {k for k in env if k.lower() in {w.lower() for w in want}} == set(want)
+        assert "NPM_CONFIG_CACHE" not in env and "Cargo_Home" not in env
+    assert {k: seen["pi"][k] for k in want} == {k: seen["claude_code"][k] for k in want}
+    assert want["UV_PYTHON_BIN_DIR"] == want["UV_TOOL_BIN_DIR"] == f"{guard.agent_cache}/bin"
+    assert (Path(guard.agent_cache).stat().st_mode & 0o777) == 0o700
+
+
+def test_an_empty_agent_cache_refuses_and_starts_nothing(machine, tmp_path):
+    dump = tmp_path / "none.json"
+    bare_guard = machine.guard.model_copy(update={"agent_cache": ""})
+    with pytest.raises(agentsh_guard.AgentshRefused):
+        launch(machine, "pi", cmd=[sys.executable, "-c", "pass"], env={"FAKE_DUMP": str(dump)}, guard=bare_guard)
+    assert not dump.exists()
 
 
 # ── generated policies ───────────────────────────────────────────────────────
@@ -1523,7 +1550,10 @@ def test_no_file_rule_allows_a_relative_path(world):
 
 def test_absolute_links_work_as_on_main(world):
     r = world.rules
-    assert r.link(f"{world.R}/.venv/bin/python", f"{HOME}/.local/share/uv/python/cpython/bin/python3.12") == "allow"
+    assert r.link(f"{world.R}/.venv/bin/python",
+                  f"{world.MAIN}/adws/adw_data/agent-cache/uv-python/cpython/bin/python3.12") == "allow"
+    assert r.decision(r.link(f"{world.R}/.venv/bin/python",
+                             f"{HOME}/.local/share/uv/python/cpython/bin/python3.12")) == "deny"
     assert r.link(f"{world.R}/l", f"{world.R}/src/a") == "allow"
     assert r.link(f"{world.R}/l", f"{world.R}/package.json") == "allow"
     assert r.link(f"{world.S}/x/l", f"{world.S}/x/plan.md") == "allow"
@@ -1549,7 +1579,12 @@ def test_the_file_rule_order_matches_main_around_the_new_allows(world):
     assert order.index("sssf-workspace") == order.index("sssf-git-config") + 1
     assert order.index("sssf-sessions") == order.index("sssf-git-data") + 1
     assert order[-2:] == ["sssf-home-read", "sssf-default-deny"]
-    wanted = set(MAIN_FILE_RULES) | {"sssf-sessions"} | (
+    assert order.index("sssf-agent-cache") == order.index("sssf-sessions") + 1
+    assert order.index("sssf-config-folders") == order.index("sssf-config-search") + 1
+    assert order.index("sssf-system-link") == order.index("sssf-system-read") + 1
+    assert "sssf-tool-write" not in order
+    wanted = (set(MAIN_FILE_RULES) - {"sssf-tool-write"}) | {
+        "sssf-sessions", "sssf-agent-cache", "sssf-config-folders", "sssf-system-link"} | (
         {"sssf-refuse-script", "sssf-agent-config", "sssf-agent-read"} if world.claude else set())
     assert set(order) == wanted and len(order) == len(wanted)
 
@@ -1594,3 +1629,150 @@ def test_the_fixture_copies_equal_their_sources(name):
 @pytest.mark.parametrize("key", ["ALIAS", "Alias", "aliaS"])
 def test_an_alias_key_in_another_case_is_still_denied(key):
     assert push_denied(["git", "-c", f"{key}.p=push", "p"])
+
+
+# ── tool config above the workspace, agent caches, system links ──────────────
+
+MAINS = ["/home/u/github/super-simple-software-factory", "/home/u/github/repo"]
+CONFIG_FILES = ("uv.toml", "pyproject.toml", ".python-version", ".python-versions",
+                "package.json", "pnpm-workspace.yaml")
+
+
+def shipped_text(main: str, harness: str) -> str:
+    return agentsh_guard.policy_text(repo_settings.RepoSettings(), f"{main}/.git", harness, "n",
+                                     sessions=f"{main}/adws/adw_data/sessions",
+                                     refuse_script=f"{main}/adws/adw_modules/sssf_refuse.py")
+
+
+def rule_of(text: str, name: str) -> dict:
+    return next(r for r in yaml.safe_load(text)["file_rules"] if r["name"] == name)
+
+
+def folders_of(main: str) -> list[str]:
+    return ["/", "/home", "/home/u", "/home/u/github", main, f"{main}/adws",
+            f"{main}/adws/adw_data", f"{main}/adws/adw_data/worktrees"]
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "pi"])
+@pytest.mark.parametrize("main", MAINS)
+def test_the_rendered_config_lists(main, harness):
+    text = shipped_text(main, harness)
+    folders = rule_of(text, "sssf-config-folders")
+    assert folders["paths"] == folders_of(main) and folders["operations"] == ["open", "stat", "readlink", "access"]
+    search = rule_of(text, "sssf-config-search")
+    want = [f"{d.rstrip('/')}/{n}" for d in folders_of(main) for n in CONFIG_FILES] + ["${HOME}/.bunfig.toml"]
+    assert len(want) == 49 and search["paths"] == want and search["operations"] == agentsh_guard.READ
+
+
+def test_folders_above_with_a_data_root_outside_main():
+    got = agentsh_guard.folders_above("/home/u/p", "/data/x")
+    assert got == sorted(got, key=lambda d: (len(Path(d).parts), d))
+    assert set(got) == {"/", "/home", "/home/u", "/data", "/data/x", "/data/x/worktrees"}
+    assert len(got) == len(set(got))
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "pi"])
+@pytest.mark.parametrize("main", MAINS)
+@pytest.mark.parametrize("worktree", [False, True])
+def test_config_lookups_pass_and_the_rest_is_denied(main, harness, worktree):
+    root = f"{main}/adws/adw_data/worktrees/abc" if worktree else main
+    r = Rules(shipped_text(main, harness), HOME, root)
+    above = [d for d in folders_of(main) if root.startswith(d.rstrip("/") + "/")]
+    assert above
+    for folder in above:
+        for name in CONFIG_FILES:
+            for op in agentsh_guard.READ:
+                assert r.first_match(f"{folder.rstrip('/')}/{name}", op) == "sssf-config-search"
+        for op in agentsh_guard.FOLDER_OPS:
+            assert r.decision(r.first_match(folder, op)) == "allow"
+    assert r.first_match(f"{HOME}/.bunfig.toml", "read") == "sssf-config-search"
+    for op in ("list", "read"):
+        assert r.decision(r.first_match(f"{HOME}/github", op)) == "deny"
+    if worktree:
+        for folder in (f"{main}/adws", f"{main}/adws/adw_data", f"{main}/adws/adw_data/worktrees"):
+            for op in ("list", "read"):
+                assert r.decision(r.first_match(folder, op)) == "deny", (folder, op)
+    for path in (f"{HOME}/github/sibling/pyproject.toml", f"{HOME}/github/sibling",
+                 f"{HOME}/github/notes.txt", f"{HOME}/github/uv.toml.bak", f"{HOME}/github/uv.toml/x",
+                 f"{main}/adws/adw_data/worktrees/other/pyproject.toml",
+                 f"{HOME}/github/other/adws/adw_data/agent-cache/x"):
+        if path.startswith(root + "/"):
+            continue
+        assert r.decision(r.first_match(path, "read")) == "deny", path
+    if worktree:
+        assert r.decision(r.first_match(f"{main}/README.md", "write")) == "deny"
+    listed = [f"{d.rstrip('/')}/{n}" for d in above for n in CONFIG_FILES] + above
+    for path in listed:
+        for op in ("write", "create", "delete", "symlink"):
+            assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "pi"])
+def test_agent_caches_are_open_and_the_engineers_are_closed(harness):
+    main = MAINS[0]
+    r = Rules(shipped_text(main, harness), HOME, f"{main}/adws/adw_data/worktrees/abc")
+    cache = f"{main}/adws/adw_data/agent-cache"
+    for path in (f"{cache}/uv/x", f"{cache}/cargo/registry/x"):
+        assert r.first_match(path, "write") == "sssf-agent-cache"
+    assert r.first_match(f"{cache}/x/" + ".env", "read") == "sssf-secret-files"
+    for path in ("~/.cache/uv/x", "~/.cache/uv", "~/.local/share/uv/python/x", "~/.local/share/uv/tools/x",
+                 "~/.local/share/uv/x", "~/.npm/x", "~/.npm", "~/.cargo/registry/x", "~/.cargo/git/x",
+                 "~/.local/bin/x", "~/.bun/install/cache/x", "~/.cache/node/corepack/x",
+                 f"{HOME}/github/other/adws/adw_data/agent-cache/x"):
+        path = path.replace("~", HOME)
+        for op in ("write", "create", "mkdir"):
+            assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+    for path in ("~/.local/share/uv/python/cpython-3.12/bin/python3.12", "~/.local/share/uv/tools/ruff/bin/ruff"):
+        assert r.decision(r.first_match(path.replace("~", HOME), "read")) == "allow"
+    for path in ("~/.cache/uv/x", "~/.npm/x", "~/.local/share/uv/credentials/credentials.toml"):
+        assert r.decision(r.first_match(path.replace("~", HOME), "read")) == "deny"
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "pi"])
+def test_links_to_system_pythons(harness):
+    main = MAINS[0]
+    r = Rules(shipped_text(main, harness), HOME, main)
+    for target in ("/usr/bin/python3.12", "/bin/python3"):
+        assert r.link(f"{main}/.v/bin/python", target) == "allow"
+    for path in ("/usr/lib/x", "/usr/local/bin/x", "/opt/x", "/opt/a/x", "/mnt/c/x", "/mnt/x", "/etc/x",
+                 "/x", "/home/x", "/var/x"):
+        assert r.decision(r.link(path, "/usr/bin/python3.12")) == "deny", path
+    for target in ("/usr/lib/x86_64-linux-gnu/libc.so.6", "/usr/local/bin/python3", "/opt/py/bin/python3",
+                   "/mnt/c/x", "/etc/passwd", "/proc/self/cwd/x"):
+        assert r.decision(r.link(f"{main}/l", target)) == "deny", target
+    assert agentsh_guard.SYSTEM_LINK == ["/usr/bin/**", "/bin/**"]
+
+
+def test_read_sets_the_agent_cache_in_the_main_checkout(tmp_path, monkeypatch):
+    repo = git_repo(tmp_path / "proj").resolve()
+    (repo / "adws/adw_sssf_config").mkdir(parents=True)
+    (repo / "adws/adw_sssf_config/repo.yaml").write_text("local_guard: agentsh\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e.com",
+                    "commit", "-qm", "init"], check=True)
+    monkeypatch.chdir(repo)
+    wanted = str(repo / "adws/adw_data/agent-cache")
+    assert agentsh_guard.read(both_harnesses()).agent_cache == wanted
+    link = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(link), "-b", "w"], check=True)
+    monkeypatch.chdir(link)
+    assert agentsh_guard.read(both_harnesses()).agent_cache == wanted
+
+
+def test_glob_characters_in_the_checkout_path_match_themselves():
+    main = "/home/u/github/repo[old]"
+    # A worktree run: the workspace is apart from main, whose ${PROJECT_ROOT} the emulation leaves unescaped.
+    for harness in ("claude_code", "pi"):
+        text = shipped_text(main, harness)
+        for root in (f"{main}/adws/adw_data/worktrees/abc",):
+            r = Rules(text, HOME, root)
+            sibling = "/home/u/github/repoo"
+            for path in (f"{sibling}/adws/adw_data/agent-cache/uv/x", f"{sibling}/adws/pyproject.toml",
+                         f"{sibling}/adws/adw_data/worktrees", f"{sibling}/.git/refs/heads/main",
+                         f"{sibling}/adws/adw_data/sessions/x"):
+                for op in ("write", "create", "delete", "symlink", "read", "open"):
+                    assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+    r = Rules(text, HOME, f"{main}/adws/adw_data/worktrees/abc")
+    assert r.first_match(f"{main}/adws/adw_data/agent-cache/uv/x", "write") == "sssf-agent-cache"
+    assert r.first_match(f"{main}/adws/pyproject.toml", "read") == "sssf-config-search"
+    assert agentsh_guard.glob_escape("/a[b]{c}*?\\d") == "/a\\[b\\]\\{c\\}\\*\\?\\\\d"

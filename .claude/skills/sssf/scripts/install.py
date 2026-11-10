@@ -64,6 +64,7 @@ GITIGNORE_ENTRIES = [
     "adws/adw_data/sessions/",
     "adws/adw_data/sssf.db*",
     "adws/adw_data/worktrees/",     # a --worktree run's folder, so the checkout stays clean
+    "adws/adw_data/agent-cache/",  # agents' own tool caches under local_guard: agentsh
     ".env",
     # The ADWs are Python, so importing adw_modules writes bytecode next to it.
     # Chains that end in a commit phase call `git add -A`, so without this a

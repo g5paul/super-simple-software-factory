@@ -7,8 +7,10 @@ file rules differ: first match wins, and the last rule denies everything.
 GIT_COMMON_DIR is literal because a run's worktree keeps its git data in the main
 checkout, and ${GIT_ROOT} is only the worktree.
 """
+import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 READ = ["open", "read", "stat", "list", "readlink", "access"]
 ALL = ["*"]
@@ -36,9 +38,33 @@ WRITE_OPS = ["write", "create", "delete", "rename", "link", "symlink", "mkdir", 
 SYSTEM_READ = ["/usr", "/usr/**", "/lib", "/lib/**", "/lib64", "/lib64/**", "/bin", "/bin/**",
                "/sbin", "/sbin/**", "/opt", "/opt/**", "/etc", "/etc/**", "/sys", "/sys/**",
                "/proc", "/proc/**", "/", "/home", "/var", "/run", "/mnt"]
+# The config files tools look up in every folder above the workspace, with their sources.
 # A denied file answers EACCES even when it doesn't exist, and uv stops on that as it
 # searches upward for config, where ENOENT would let it go on.
-CONFIG_SEARCH = [f"{d}/{n}" for d in ("", "/home", "${HOME}") for n in ("uv.toml", "pyproject.toml")]
+#   uv.toml, pyproject.toml: uv. docs/concepts/configuration-files.md (current directory or
+#     nearest parent); crates/uv-settings/src/lib.rs FilesystemOptions::find walks ancestors();
+#     crates/uv-workspace/src/workspace.rs walks ancestors for a workspace root.
+#   .python-version, .python-versions: uv. docs/concepts/python-versions.md;
+#     crates/uv-python/src/version_files.rs (PYTHON_VERSION_FILENAME, PYTHON_VERSIONS_FILENAME, discover).
+#   package.json: Corepack (README, sources/specUtils.ts loadSpec walks up); bun
+#     (docs/install/workspaces.md); npm (docs/content/configuring-npm/folders.md); Node
+#     (doc/api/packages.md, nearest parent package.json).
+#   pnpm-workspace.yaml: pnpm, @pnpm/find-workspace-dir (find-up); pnpm-workspace_yaml.md.
+#   .bunfig.toml, in ${HOME} only: bun's global config (docs/runtime/bunfig.md).
+CONFIG_NAMES = ("uv.toml", "pyproject.toml", ".python-version", ".python-versions",
+                "package.json", "pnpm-workspace.yaml")
+HOME_CONFIG = ["${HOME}/.bunfig.toml"]
+# What a lookup needs of a folder above the workspace, on its exact path. Not `list` and not
+# `read`: uv walks ancestors with is_dir/metadata/canonicalize (stat, access, readlink) and
+# opens the file by path, never reading a folder's entries. bun opens each folder, and on
+# EACCES from listing it treats the folder as empty and goes on. Corepack makes no folder call.
+FOLDER_OPS = ["open", "stat", "readlink", "access"]
+# An absolute link into a system folder, for `uv venv`'s bin/python -> /usr/bin/python3.12.
+# Safe because /usr/bin is root:root 755 and flat, and /bin is a root-owned link to it (or a
+# root-owned 755 folder), so no agent can make a link whose own path is inside them: the
+# kernel refuses. /usr/lib, /usr/local, /opt, /mnt and /etc are left out on purpose: users
+# own or can write folders there.
+SYSTEM_LINK = ["/usr/bin/**", "/bin/**"]
 # A denied mkdir of an existing parent answers EACCES where the kernel says EEXIST.
 MKDIR_PARENTS = ["/", "/home", "/tmp", "/run", "/run/user", "/run/user/*", "${HOME}", "${HOME}/.cache",
                  "${HOME}/.local", "${HOME}/.local/state", "${HOME}/.local/share", "${HOME}/.config"]
@@ -52,10 +78,8 @@ HOME_READ = [f"${{HOME}}{p}" for p in (
     "", "/.bashrc", "/.profile", "/.bash_profile", "/.bash_login", "/.editrc", "/.inputrc",
     "/.gitconfig", "/.config", "/.config/git/**", "/.config/uv/**", "/.cargo", "/.cargo/env",
     "/.cargo/bin/**", "/.local", "/.local/bin/**", "/.nvm/**", "/.rustup/**",
-)]
-TOOL_WRITE = [f"${{HOME}}/{p}" for p in (
-    ".cache/uv", ".cache/uv/**", ".local/share/uv", ".local/share/uv/**", ".npm/**",
-    ".cargo/registry/**", ".cargo/git/**",
+    "/.local/share/uv/python", "/.local/share/uv/python/**",
+    "/.local/share/uv/tools", "/.local/share/uv/tools/**",
 )]
 # The Windows path is where Claude Code looks for managed settings on WSL. Denied, it warns
 # that those policies are NOT in effect, even when the folder doesn't exist.
@@ -77,12 +101,35 @@ def rule(name, paths, ops, decision):
     return "\n".join(lines)
 
 
+def folders_above(main: str, data_root: str) -> list[str]:
+    """The folders above a plain run's or a worktree run's workspace, shallowest first."""
+    worktrees = Path(data_root) / "worktrees"
+    found = {str(p) for p in Path(main).parents} | {str(worktrees)} | {str(p) for p in worktrees.parents}
+    return sorted(found, key=lambda d: (len(Path(d).parts), d))
+
+
+def glob_escape(path: str) -> str:
+    """A literal path as a policy glob: a checkout named `repo[old]` must not match `repoo`."""
+    return re.sub(r"([\\*?\[\]{}])", r"\\\1", path)
+
+
+def config_search(main: str, data_root: str, quote: Callable[[str], str] = str) -> list[str]:
+    """Every config name in every folder above the workspace, then the home-level ones."""
+    return [f"{quote(d).rstrip('/')}/{n}" for d in folders_above(main, data_root) for n in CONFIG_NAMES] + HOME_CONFIG
+
+
 def file_rules(git_dir, agent, *, sessions, refuse_script):
     other_sign_in, config_deny, reads, writes = {
         "claude": (PI_SIGN_IN, CLAUDE_CONFIG, CLAUDE_READ, CLAUDE_WRITE),
         "pi": (CLAUDE_SIGN_IN, [], [], PI_WRITE),
     }[agent]
     main = str(Path(git_dir).parent)
+    data_root = str(Path(sessions).parent)
+    # Every literal path below is escaped, so glob characters in the checkout's path match themselves.
+    cache = glob_escape(f"{data_root}/agent-cache")
+    search = config_search(main, data_root, glob_escape)
+    folders = [glob_escape(d) for d in folders_above(main, data_root)]
+    git_dir, sessions, refuse_script, main = (glob_escape(x) for x in (git_dir, sessions, refuse_script, main))
     rules = [
         rule("sssf-env-examples", SECRET_ALLOW, ALL, "allow"),
         rule("sssf-secret-files", SECRETS, ALL, "deny"),
@@ -100,6 +147,7 @@ def file_rules(git_dir, agent, *, sessions, refuse_script):
         rule("sssf-git-data", [git_dir, f"{git_dir}/**"], ALL, "allow"),
         # A `--worktree` run's handoff folder sits in the main checkout. Every run's, decided 2026-11-09.
         rule("sssf-sessions", [sessions, f"{sessions}/**"], ALL, "allow"),
+        rule("sssf-agent-cache", [cache, f"{cache}/**"], ALL, "allow"),
     ]
     if agent == "claude":
         rules.append(rule("sssf-refuse-script", [refuse_script], READ, "allow"))
@@ -110,14 +158,15 @@ def file_rules(git_dir, agent, *, sessions, refuse_script):
         rule("sssf-devices", DEVICES, ALL, "allow"),
         rule("sssf-fd-leaves", FD_LEAVES, ALL, "allow"),
         rule("sssf-mkdir-parents", MKDIR_PARENTS, ["mkdir"], "allow"),
-        rule("sssf-tool-write", TOOL_WRITE, ALL, "allow"),
         rule("sssf-agent-write", writes, ALL, "allow"),
     ]
     if reads:
         rules.append(rule("sssf-agent-read", reads, READ, "allow"))
     rules += [
-        rule("sssf-config-search", CONFIG_SEARCH, READ, "allow"),
+        rule("sssf-config-search", search, READ, "allow"),
+        rule("sssf-config-folders", folders, FOLDER_OPS, "allow"),
         rule("sssf-system-read", SYSTEM_READ, READ, "allow"),
+        rule("sssf-system-link", SYSTEM_LINK, ["symlink"], "allow"),
         rule("sssf-home-read", HOME_READ, READ, "allow"),
         rule("sssf-default-deny", ["/", "/**"], ALL, "deny"),
     ]

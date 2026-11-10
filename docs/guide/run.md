@@ -296,7 +296,7 @@ On this machine, a repo can also run its agents under agentsh with `local_guard:
 
 ```bash
 just plan "add a /health endpoint"                     # prints adw_id a1b2c3d4
-uv run adws/adw_build_test.py "implement the plan" --adw-id a1b2c3d4
+just build-test "implement the plan" --adw-id a1b2c3d4
 ```
 
 In Claude Code, ask for the plan first, read it, then: `/sssf build and test the plan from run a1b2c3d4`.
@@ -309,3 +309,41 @@ just kill <adw_id>     # stop the chain first, so it can't retry, then its agent
 ```
 
 A killed run marks itself `fail` in the trace. [watch.md](watch.md) shows how to follow a run while it goes. In Claude Code, "stop run a1b2c3d4" does the same.
+
+## Every recipe
+
+`just` with no arguments lists them. Each wraps one line, which you can run yourself when `just` isn't there. In a repo that loads SSSF as a module, put `sssf` before each name, as in `just sssf sdlc`.
+
+| Recipe | What it does | Runs |
+|---|---|---|
+| `demo` | two cheap read-only runs, to check the install | `adw_prompt`, then `adw_scout` |
+| `prompt`, `scout`, `plan` | one agent, recon, a plan | `adw_prompt.py`, `adw_scout.py`, `adw_plan.py` |
+| `build`, `build-test`, `build-review` | the builder on an existing plan, alone, with tests, or with a reviewer | `adw_build.py`, `adw_build_test.py`, `adw_build_review.py` |
+| `plan-build`, `sdlc`, `sdlc-quality`, `simple-sdlc` | the chains above, from smallest to fullest | `adw_plan_build.py`, `adw_plan_build_test.py`, `adw_plan_build_test_quality.py`, `adw_simple_sdlc.py` |
+| `document` | a write-up of what shipped | `adw_document.py` |
+| `quality` | `quality.py`'s checks, no agent | `adw_quality.py` |
+| `tickets` | a feature from its tickets | `adw_tickets.py` |
+| `trial`, `trial-show`, `trial-review`, `trial-merge`, `trial-discard` | race rosters, then land one | `adw_trial.py start`, `show`, `review`, `merge`, `discard` |
+| `merge`, `rebase`, `discard` | land, move or drop a worktree run | `adw_worktree.py` |
+| `kill`, `procs` | stop a run, and see what it has alive | `adw_kill.py`, a trace query |
+| `sessions`, `phases`, `tail` | the trace from the terminal | `sqlite3` queries |
+| `obs`, `obs-all`, `obs-dev` | the dashboard | the visualizer under `apps/visualizer/` |
+| `rosters` | each roster and its models | reads `adws/adw_sssf_config/` |
+| `login-check` | that Claude Code agents can sign in | `agent_cc.check_login()` |
+| `container` | the operator session in Podman | `container/run.sh` |
+| `openshell-setup` | the gateway and image for `--sandbox openshell` | `scripts/openshell_image.py` and systemd |
+| `e2b-template` | SSSF's E2B VM template, once per team | `scripts/e2b_template.py` |
+| `sandbox-usage` | what VM runs used of the free allowances | `adw_sandbox_usage.py` |
+| `agentsh-install` | this repo's agentsh policy, and the `sudo` lines to install it | the hub's `scripts/agentsh_install.py` |
+| `sssf-update`, `take`, `keep` | update to a newer skill, and settle a flagged file | `scripts/install.py --update` |
+
+`container`, `openshell-setup`, `e2b-template` and `agentsh-install` refuse inside a run, since they're the engineer's to run.
+
+A few commands have no recipe:
+
+- `install.py` for the first install and `--add-roster`, since the justfile doesn't exist until it runs;
+- `scripts/make_adw.py` and `scripts/make_config.py`, which start a new chain or roster ([customize.md](customize.md));
+- `scripts/check_prices.py`, which compares `prices.json` with the providers' list prices;
+- `scripts/statusline.py`, Claude Code's status line, which Claude Code runs itself.
+
+Recipes of your own go in `local.just` beside the justfile. The justfile loads it when it's there, and an update never touches it.

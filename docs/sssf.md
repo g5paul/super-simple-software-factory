@@ -20,6 +20,7 @@ parts exist only in the hub; `sssf-update` never copies them.
 | `adws/levers.py` | yes | the four levers, week by week ([The four levers](#the-four-levers)) |
 | `adws/features.py` | yes | what each feature cost ([What each feature cost](#what-each-feature-cost)) |
 | `adws/tests/` | yes | tests for the four hub scripts above |
+| `local.just` | yes | the hub's recipes, which the justfile loads: `guard-change`, `projects`, `levers`, `features` and `hub-update` |
 | `.claude/agents/bypass-reviewer.md` | yes | a bypass review outside a chain run ([Guard changes](#guard-changes)) |
 | `.githooks/pre-push` | yes | the secret scan and private-name check on every push ([secret-scan.md](secret-scan.md)) |
 
@@ -86,7 +87,7 @@ branch cut from `main`:
 
 ```bash
 git checkout -b guard-<slug> main
-uv run adws/adw_guard_change.py specs/tasks/<task>.md
+just guard-change specs/tasks/<task>.md      # uv run adws/adw_guard_change.py ...
 ```
 
 The planner writes a spec with a threat model, a baseline, a bar and what's
@@ -122,11 +123,14 @@ skill change merges to `main`, move the clone forward, then update on a short
 branch:
 
 ```bash
-git -C ~/github/sssf-install pull --ff-only
-SSSF_SOURCE=~/github/sssf-install/.claude/skills/sssf uv run .claude/skills/sssf/scripts/install.py --update
+just hub-update
 ```
 
-Then `--take` or `--keep` each flagged file, as in the install cookbook, and
+It runs `git -C ~/github/sssf-install pull --ff-only`, then
+`SSSF_SOURCE=~/github/sssf-install/.claude/skills/sssf uv run .claude/skills/sssf/scripts/install.py --update`.
+`SSSF_INSTALL_CLONE` in `.env` names another clone.
+
+Then `just take` or `just keep` each flagged file, as in the install cookbook, and
 fast-forward `main`. The stamp records the clone's `skill` commit, which the
 agentsh install checks.
 
@@ -137,8 +141,11 @@ agentsh install checks.
 agentsh. Every agentsh install, the hub's own included, runs from it:
 
 ```bash
-uv run --directory ~/github/sssf-install .claude/skills/sssf/scripts/agentsh_install.py --repo <project>
+just agentsh-install ~/github/sssf-install      # from the project, for its policy
 ```
+
+The recipe runs `uv run --directory ~/github/sssf-install .claude/skills/sssf/scripts/agentsh_install.py --repo <project>`.
+Name the clone: the recipe's default, the repo holding `SSSF_SOURCE`, is the hub itself here.
 
 The install refuses to run from inside the project it installs for, so the
 hub can't use its own checkout. A guard run's agents work in worktrees under
@@ -164,7 +171,7 @@ a project still shows that one repo.
 After the hub asks each project session to update, check their reports with
 
 ```bash
-uv run adws/check_projects.py
+just projects      # uv run adws/check_projects.py
 ```
 
 It reads every repo in the install registry except this one, and fails a
@@ -181,7 +188,7 @@ like the guard chain.
 
 ## The four levers
 
-`uv run adws/levers.py` prints one row per ISO week, across every repo in
+`just levers` (`uv run adws/levers.py`) prints one row per ISO week, across every repo in
 the install registry, for the levers `docs/research/thinking-in-threads.md`
 describes: runs and the most at once, minutes and agent tool calls per agent
 run, agents per run, and touches with agent tool calls per touch. A touch is
@@ -197,7 +204,7 @@ and it is hub-only.
 
 ## What each feature cost
 
-`uv run adws/features.py` joins each repo's agent runs to the commits that
+`just features` (`uv run adws/features.py`) joins each repo's agent runs to the commits that
 reached its main line, the current branch unless `--branch REPO=BRANCH`
 says otherwise. Runs that landed at one point are one feature, with its
 cost, run count and lead time; a rebased commit is matched by patch-id, then

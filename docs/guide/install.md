@@ -207,7 +207,7 @@ On the host, Claude Code asks you to approve each chain launch. The container ru
 3. Start a session from a login shell, in a terminal of its own:
 
    ```bash
-   container/run.sh
+   just container      # runs container/run.sh; add -p '<request>' for one headless request
    ```
 
    The first start builds the image. A pi roster also needs the host signed in to pi: the host keeps the sign-in, and a broker hands each pi agent a one-hour token.
@@ -232,7 +232,7 @@ For a local, free microVM instead, `--sandbox openshell` needs only `just opensh
 3. **E2B only:** build SSSF's VM template once per E2B team, from a repo whose `.env` has the key:
 
    ```bash
-   uv run .claude/skills/sssf/scripts/e2b_template.py
+   just e2b-template
    ```
 
 A Vercel or E2B run uploads the repo's code to that provider; an OpenShell run keeps it on this machine. Keep a private repo on `sandbox: none`, the default, or `sandbox: openshell` in `adws/adw_sssf_config/repo.yaml`, and use a VM only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [run.md](run.md#in-a-vm) has an example run.
@@ -247,10 +247,11 @@ It needs the agentsh service, installed as root, with the one build SSSF pins. T
 2. From the repo, run the installer from a clean checkout of the SSSF hub at the repo's skill version:
 
    ```bash
-   uv run --directory ~/github/super-simple-software-factory .claude/skills/sssf/scripts/agentsh_install.py --repo "$PWD"
+   just agentsh-install                 # the hub is found from SSSF_SOURCE in .env
+   just agentsh-install ~/path/to/hub   # or named
    ```
 
-   It writes the repo's policy and shows a diff against what's in `/etc/agentsh/`, then prints `sudo` lines. It never runs `sudo` itself.
+   It runs the hub's `scripts/agentsh_install.py` for this repo's main checkout. It writes the repo's policy and shows a diff against what's in `/etc/agentsh/`, then prints `sudo` lines. It never runs `sudo` itself.
 3. Read the diff, stop every agent, and run the printed lines yourself.
 
 A run checks the service, the build and the installed policy before it starts, and refuses with a message naming the fix. [config.md](../../.claude/skills/sssf/references/config.md) has the full list of checks and known limits.
@@ -264,7 +265,7 @@ echo "SSSF_SOURCE=$HOME/github/super-simple-software-factory/.claude/skills/sssf
 just sssf-update
 ```
 
-It copies the skill in and runs `install.py --update`. A file you never changed is replaced. A file you changed, such as `quality.py`, is kept and listed. A file you changed that the skill also changed is flagged for review with a `diff` command. Settle each one with `--take <path>`, which takes the skill's version, or `--keep <path>`, which keeps yours. Then commit the update on its own and run `uv run adws/adw_quality.py "check after the SSSF update"`.
+It copies the skill in and runs `install.py --update`. A file you never changed is replaced. A file you changed, such as `quality.py`, is kept and listed. A file you changed that the skill also changed is flagged for review with a `diff` command. Settle each one with `just take <path>`, which takes the skill's version, or `just keep <path>`, which keeps yours. Then commit the update on its own and run `just quality "check after the SSSF update"`.
 
 `just sssf-update` refuses while the tree has uncommitted changes or a chain is running, and when the source checkout is on a branch with commits that aren't on its `main`. [The install cookbook](../../.claude/skills/sssf/cookbooks/install.md#update-an-installed-repo) has the details.
 

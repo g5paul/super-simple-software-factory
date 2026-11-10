@@ -32,7 +32,7 @@ Write `argv` as a list, never a shell string, and call each tool by its bare nam
 Check your wiring with no agent at all:
 
 ```bash
-uv run adws/adw_quality.py "check the quality blocks"
+just quality "check the quality blocks"
 ```
 
 A block still on its placeholder reports `not configured`.
@@ -112,6 +112,10 @@ A stop rule may let the command start before the stop, so say what must not happ
 [ -n "$SSSF_ADW_ID" ] && { echo "not from an SSSF agent" >&2; exit 1; }
 ```
 
+## Your recipes
+
+The justfile is the skill's, and an update replaces it. Put recipes of your own in `local.just` beside it, which the justfile loads when it's there and an update never touches. [run.md](run.md#every-recipe) lists the shipped ones.
+
 ## Your chains
 
 An ADW is a short Python script in `adws/`. Copy the closest one and edit its phase list. To start from agents in your roster:
@@ -146,6 +150,7 @@ This fork is built to be cut down. The parts that serve only this hub, and are s
 
 - the guard chain, which reviews changes to SSSF's own guard code: `adws/adw_guard_change.py`, `.claude/agents/bypass-reviewer.md`, `adws/tests/test_guard_change.py`, `docs/designs/hub-guard-chain.md`, the guard section of `CLAUDE.md`, and the run specs it left in `specs/`;
 - the hub's read-only reports on its projects: `adws/check_projects.py`, `adws/levers.py`, `adws/features.py`, and their tests `adws/tests/test_check_projects.py`, `adws/tests/test_levers.py` and `adws/tests/test_features.py`;
+- `local.just`, the hub's recipes for those reports and the guard chain;
 - `docs/projects.md`, `docs/sssf.md` and `docs/open.md`: the repos this hub runs, how it runs SSSF on itself, and its list of open work.
 
 Keep the `agent_rules` in this hub's `repo.yaml` unless you want agents to push. They refuse `git push` and the `gh` commands their pattern lists, such as `gh pr create` and `gh api`.

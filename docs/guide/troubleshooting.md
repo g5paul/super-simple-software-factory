@@ -16,7 +16,7 @@ Start with the trace. `just phases <adw_id>` shows which phase failed, and the r
 
 **A pi agent fails partway through a chain.** A key that's set but wrong passes the launch check and fails when its agent first calls the provider.
 
-**Every test phase passes, whatever the builder wrote.** `quality.py` is still on its placeholders. `uv run adws/adw_quality.py "check"` reports each placeholder block as `not configured`. [customize.md](customize.md#your-checks) shows the fix.
+**Every test phase passes, whatever the builder wrote.** `quality.py` is still on its placeholders. `just quality "check"` reports each placeholder block as `not configured`. [customize.md](customize.md#your-checks) shows the fix.
 
 ## Stops
 
@@ -84,7 +84,7 @@ The message names the file and what's missing. [tickets.md](../../.claude/skills
 
 **`just sssf-update` refuses.** It won't run while the tree has uncommitted changes or a chain is running, or when the skill source is on a branch with commits that aren't on its `main`. Commit, wait for the chain, or check out `main` in the source. `SSSF_ALLOW_UNMERGED=1` updates from the branch anyway.
 
-**An update flags a file.** You changed it and the skill changed it too. Run the `diff` the update prints, then `--take <path>` for the skill's version or `--keep <path>` for yours.
+**An update flags a file.** You changed it and the skill changed it too. Run the `diff` the update prints, then `just take <path>` for the skill's version or `just keep <path>` for yours.
 
 **The installer prints `skill: unknown (no git source)`.** `SSSF_SOURCE` wasn't set when it ran, so it couldn't read the source's commit, and `stamp.json` has no `skill` key. Set it in `.env` and update.
 

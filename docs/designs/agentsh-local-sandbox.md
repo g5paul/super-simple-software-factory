@@ -914,6 +914,8 @@ Limits:
 - **approve and absorb mean refuse.** The tracer can't hold a signal for approval or swallow it quietly, so either decision refuses the call.
 - **`@all` is 1 to 31** in agentsh, so SSSF's rules name 32 to 63 as well.
 
+**Installed 2026-11-10.** The engineer installed `472d63cf`. Under the hub's policy, a query for `api.anthropic.com` sent to 192.0.2.1 or 8.8.8.8 was answered by the system resolver, where before the dead address gave SERVFAIL; `example.com` still got NXDOMAIN, and a packet with a second question got FORMERR. Signals can't be probed until the chain run turns `trace.signal` on. The check set gave the same results as on `3a36c68f`, apart from pids and timings: 98 probes held, Claude Code exited 0 in 7 seconds with 86 file denials and pi in 14 seconds with one, all on the same paths, the corpus held 24 of 24, and the 28 network verdicts were the same. Results are in `~/.local/share/agentsh-harvest/dd8/`.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -949,5 +951,5 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
    - **The guard chain run** from `specs/tasks/guard-agentsh-tool-config.md`: config lookups above the workspace, which break uv in every repo under `~/github`, and caches of the agents' own.
 6. Rollout step 4, after items 5, 8 and 9: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
 7. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.
-8. **The DNS proxy's forward**, a tenth fork patch ([the probes](#stock-policies-sockets-signals-and-dns-2026-11-10)). Built as `472d63cf` with item 9 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)); the engineer installs it, then the hub probes the forward on the installed build.
-9. **Signals**, an eleventh fork patch in the same build. After the install, the guard chain from `specs/tasks/guard-agentsh-signals.md` turns `trace.signal` on, adds the rules and pins the build.
+8. **The DNS proxy's forward**, a tenth fork patch ([the probes](#stock-policies-sockets-signals-and-dns-2026-11-10)). Built as `472d63cf` with item 9 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)), installed and probed on 2026-11-10. The pin moves with item 9's chain run.
+9. **Signals**, an eleventh fork patch in the same build, installed. Next, the guard chain from `specs/tasks/guard-agentsh-signals.md` turns `trace.signal` on, adds the rules and pins the build.

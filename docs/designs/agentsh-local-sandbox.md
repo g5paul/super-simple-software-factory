@@ -758,12 +758,31 @@ On that build:
 | pi | worked, exit 0 in 13 seconds, one harmless denial |
 | Bypass corpus | 24 of 24 held |
 | Network and fronting checks | as before |
-| `npm install` and `bun add` of a local tarball with nested folders | installed, the nested file in place |
+| `npm install` and `bun add` of a local tarball with nested folders and no `bin` | installed, the nested file in place. A package with a `bin` fails on its relative `node_modules/.bin` link, as before |
 | `pnpm add`, the same | fails. Corepack searches upward for a `package.json`, gets `EACCES` on one above the workspace, and stops |
 
-Whether npm and bun failed on `41960715` wasn't tested. The `pnpm` failure is the same kind as uv's `../uv.toml` lookup: a config search above the workspace that gets `EACCES` and treats it as an error, where a missing file would have been fine.
+Whether npm and bun failed on `41960715` wasn't tested. The `pnpm` failure is the same kind as uv's `../uv.toml` lookup: a config search above the workspace that gets `EACCES` and treats it as an error, where a missing file would have been fine. Corepack's pnpm also fails on this machine outside the wrap, so pnpm can't be tested past that point here.
 
 `agentsh wrap` runs the command in the `--root` folder, not the caller's. A test that starts it elsewhere needs a `cd` inside the wrapped command.
+
+### Tool config and caches, 2026-11-09
+
+To find everything uv, npm, bun, Corepack and Node touch outside a `--worktree` workspace, each ran under `sssf-proof`, which allows every file but `.env`. The service's event log gave 2,935 operations outside the workspace. A small Go program then judged each one against the hub's installed policy with the fork's own engine (`LoadFromFile`, `NewEngineWithVariables`, `CheckFile`). The script is `cfgharvest.sh`, in the job's temp folder, and the events are in `~/.local/share/agentsh-harvest/cfg1/`. uv 0.10.3, npm 11.6.2, bun 1.4.4, Node 24.11.1.
+
+Three things the docs had wrong:
+- **`uv venv` needs a relative link.** It makes `bin/python3 -> python`, so it fails under any policy, `sssf-proof` included, and so does any uv command that has to create an environment: `uv run` in a fresh checkout, `uv run --with`, `uvx`. The engineer's decision of 2026-11-09 on the relative-link allow said `uv venv` needed none, which held for the uv tested then, not for this one. The venv in `~/.cache/uv` fails for this reason, not because of a cache rule.
+- **uv fails in a plain run too.** It reads `uv.toml` and `pyproject.toml` in every folder up to `/`, and stops on `EACCES` for `~/github/uv.toml`. Every repo under `~/github` is hit, sssf-sandbox among them. `CONFIG_SEARCH` covers only `/`, `/home` and `$HOME`.
+- **npm and bun fail on a package with a `bin`**, on its relative `node_modules/.bin` link: `npm error syscall symlink`, `error: failed to link bin-pkg: EACCES`. A package with no `bin` installs. The decision record said this, and the eighth patch's first table said npm and bun install without that qualifier.
+
+What the hub's policy would also deny: `package.json` in every folder above the workspace, which Corepack stops on and bun skips; `~/.bunfig.toml`; bun's `~/.bun/install/cache` and Corepack's `~/.cache/node/corepack`; `mkdir ~/.npm`; and `~/.npmrc`, which the credential rule means to deny.
+
+A cache an agent writes is also a way out of the wrap. `TOOL_WRITE` lets agents write `~/.cache/uv`, `~/.local/share/uv`, `~/.npm` and cargo's registry. The engineer's own uv links unpacked wheels from its cache without checking them again, `~/.local/share/uv` holds Pythons and tools, and cargo builds extracted crate sources. So an agent's edit there runs on the host, outside SSSF, in later work in any repo.
+
+The engineer decided on 2026-11-09:
+
+1. **Agents get caches of their own.** Under the wrap, each tool's cache and install folders point at a folder only this repo's wrapped agents use, through the tools' environment variables. The policy stops allowing writes to the engineer's own caches.
+2. **A fork patch for relative link targets comes first.** It resolves a relative target against the link's folder and judges the result with the file rules, so `~/.claude.json.x -> .ssh/id_rsa` is still denied. The decision of 2026-11-09 named this as the safe way to allow relative links if a repo needs them, and every Python repo needs them for a venv.
+3. **The config lookups and the caches go through the guard chain**, from `specs/tasks/guard-agentsh-tool-config.md`, after the patch is installed.
 
 ## What got built
 
@@ -794,6 +813,8 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
-4. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` is fixed by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09), and npm and bun install on it. Left: uv can't make a venv in `~/.cache/uv`, so `uv run --with` and a new dependency fail. Config searches above the workspace get `EACCES` and stop: uv's `../uv.toml`, and Corepack's `package.json`, so `pnpm` fails. The fix to the policy goes through the guard chain.
+4. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` is fixed by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09). Left, from [Tool config and caches](#tool-config-and-caches-2026-11-09):
+   - **A ninth fork patch for relative link targets**, which `uv venv` and npm's and bun's `.bin` links need. Then the engineer's sudo install and the check set.
+   - **The guard chain run** from `specs/tasks/guard-agentsh-tool-config.md`: config lookups above the workspace, which break uv in every repo under `~/github`, and caches of the agents' own.
 5. Rollout step 4, after item 4: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
 6. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.

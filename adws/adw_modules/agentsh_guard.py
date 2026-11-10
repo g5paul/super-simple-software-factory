@@ -81,9 +81,33 @@ WRITE_OPS = ["write", "create", "delete", "rename", "link", "symlink", "mkdir", 
 SYSTEM_READ = ["/usr", "/usr/**", "/lib", "/lib/**", "/lib64", "/lib64/**", "/bin", "/bin/**",
                "/sbin", "/sbin/**", "/opt", "/opt/**", "/etc", "/etc/**", "/sys", "/sys/**",
                "/proc", "/proc/**", "/", "/home", "/var", "/run", "/mnt"]
+# The config files tools look up in every folder above the workspace, with their sources.
 # A denied file answers EACCES even when it doesn't exist, and uv stops on that as it
 # searches upward for config, where ENOENT would let it go on.
-CONFIG_SEARCH = [f"{d}/{n}" for d in ("", "/home", "${HOME}") for n in ("uv.toml", "pyproject.toml")]
+#   uv.toml, pyproject.toml: uv. docs/concepts/configuration-files.md (current directory or
+#     nearest parent); crates/uv-settings/src/lib.rs FilesystemOptions::find walks ancestors();
+#     crates/uv-workspace/src/workspace.rs walks ancestors for a workspace root.
+#   .python-version, .python-versions: uv. docs/concepts/python-versions.md;
+#     crates/uv-python/src/version_files.rs (PYTHON_VERSION_FILENAME, PYTHON_VERSIONS_FILENAME, discover).
+#   package.json: Corepack (README, sources/specUtils.ts loadSpec walks up); bun
+#     (docs/install/workspaces.md); npm (docs/content/configuring-npm/folders.md); Node
+#     (doc/api/packages.md, nearest parent package.json).
+#   pnpm-workspace.yaml: pnpm, @pnpm/find-workspace-dir (find-up); pnpm-workspace_yaml.md.
+#   .bunfig.toml, in ${HOME} only: bun's global config (docs/runtime/bunfig.md).
+CONFIG_NAMES = ("uv.toml", "pyproject.toml", ".python-version", ".python-versions",
+                "package.json", "pnpm-workspace.yaml")
+HOME_CONFIG = ["${HOME}/.bunfig.toml"]
+# What a lookup needs of a folder above the workspace, on its exact path. Not `list` and not
+# `read`: uv walks ancestors with is_dir/metadata/canonicalize (stat, access, readlink) and
+# opens the file by path, never reading a folder's entries. bun opens each folder, and on
+# EACCES from listing it treats the folder as empty and goes on. Corepack makes no folder call.
+FOLDER_OPS = ["open", "stat", "readlink", "access"]
+# An absolute link into a system folder, for `uv venv`'s bin/python -> /usr/bin/python3.12.
+# Safe because /usr/bin is root:root 755 and flat, and /bin is a root-owned link to it (or a
+# root-owned 755 folder), so no agent can make a link whose own path is inside them: the
+# kernel refuses. /usr/lib, /usr/local, /opt, /mnt and /etc are left out on purpose: users
+# own or can write folders there.
+SYSTEM_LINK = ["/usr/bin/**", "/bin/**"]
 # A denied mkdir of an existing parent answers EACCES where the kernel says EEXIST.
 MKDIR_PARENTS = ["/", "/home", "/tmp", "/run", "/run/user", "/run/user/*", "${HOME}", "${HOME}/.cache",
                  "${HOME}/.local", "${HOME}/.local/state", "${HOME}/.local/share", "${HOME}/.config"]
@@ -97,10 +121,8 @@ HOME_READ = [f"${{HOME}}{p}" for p in (
     "", "/.bashrc", "/.profile", "/.bash_profile", "/.bash_login", "/.editrc", "/.inputrc",
     "/.gitconfig", "/.config", "/.config/git/**", "/.config/uv/**", "/.cargo", "/.cargo/env",
     "/.cargo/bin/**", "/.local", "/.local/bin/**", "/.nvm/**", "/.rustup/**",
-)]
-TOOL_WRITE = [f"${{HOME}}/{p}" for p in (
-    ".cache/uv", ".cache/uv/**", ".local/share/uv", ".local/share/uv/**", ".npm/**",
-    ".cargo/registry/**", ".cargo/git/**",
+    "/.local/share/uv/python", "/.local/share/uv/python/**",
+    "/.local/share/uv/tools", "/.local/share/uv/tools/**",
 )]
 # The Windows path is where Claude Code looks for managed settings on WSL. Denied, it warns
 # that those policies are NOT in effect, even when the folder doesn't exist.
@@ -202,6 +224,42 @@ def render_config(template: str, allowed: list[str]) -> str:
     return yaml.safe_dump(config, sort_keys=False)
 
 
+def folders_above(main: str, data_root: str) -> list[str]:
+    """The folders above a plain run's or a worktree run's workspace, shallowest first."""
+    worktrees = Path(data_root) / "worktrees"
+    found = {str(p) for p in Path(main).parents} | {str(worktrees)} | {str(p) for p in worktrees.parents}
+    return sorted(found, key=lambda d: (len(Path(d).parts), d))
+
+
+def glob_escape(path: str) -> str:
+    """A literal path as a policy glob: a checkout named `repo[old]` must not match `repoo`."""
+    return re.sub(r"([\\*?\[\]{}])", r"\\\1", path)
+
+
+def config_search(main: str, data_root: str, quote: Callable[[str], str] = str) -> list[str]:
+    """Every config name in every folder above the workspace, then the home-level ones."""
+    return [f"{quote(d).rstrip('/')}/{n}" for d in folders_above(main, data_root) for n in CONFIG_NAMES] + HOME_CONFIG
+
+
+def cache_env(folder: str) -> dict[str, str]:
+    """The variables that move every tool's cache and install folders into `folder`, the
+    agents' own. Set on the wrapped agent only, so the engineer's tools never look there."""
+    return {
+        "UV_CACHE_DIR": f"{folder}/uv",
+        "UV_PYTHON_INSTALL_DIR": f"{folder}/uv-python",
+        "UV_PYTHON_BIN_DIR": f"{folder}/bin",
+        "UV_TOOL_DIR": f"{folder}/uv-tools",
+        "UV_TOOL_BIN_DIR": f"{folder}/bin",
+        "npm_config_cache": f"{folder}/npm",
+        "BUN_INSTALL_CACHE_DIR": f"{folder}/bun",
+        "BUN_RUNTIME_TRANSPILER_CACHE_PATH": f"{folder}/bun-transpiler",
+        "COREPACK_HOME": f"{folder}/corepack",
+        "npm_config_store_dir": f"{folder}/pnpm-store",
+        "npm_config_cache_dir": f"{folder}/pnpm-cache",
+        "CARGO_HOME": f"{folder}/cargo",
+    }
+
+
 def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,
                sessions: str, refuse_script: str) -> str:
     other_sign_in, config_deny, reads, writes = {
@@ -209,6 +267,12 @@ def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,
         "pi": (CLAUDE_SIGN_IN, [], [], PI_WRITE),
     }[agent]
     main = str(Path(git_dir).parent)
+    data_root = str(Path(sessions).parent)
+    # Every literal path below is escaped, so glob characters in the checkout's path match themselves.
+    cache = glob_escape(f"{data_root}/agent-cache")
+    search = config_search(main, data_root, glob_escape)
+    folders = [glob_escape(d) for d in folders_above(main, data_root)]
+    git_dir, sessions, refuse_script, main = (glob_escape(x) for x in (git_dir, sessions, refuse_script, main))
     rules_ = []
     if secret_files:
         # First: the text guard honours a repo pattern naming .env.sample, so behind
@@ -231,6 +295,8 @@ def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,
         rule("sssf-git-data", [git_dir, f"{git_dir}/**"], ALL, "allow"),
         # A `--worktree` run's handoff folder sits in the main checkout. Every run's, decided 2026-11-09.
         rule("sssf-sessions", [sessions, f"{sessions}/**"], ALL, "allow"),
+        # The agents' own tool caches. Every deny above stays ahead of it.
+        rule("sssf-agent-cache", [cache, f"{cache}/**"], ALL, "allow"),
     ]
     if agent == "claude":
         rules_.append(rule("sssf-refuse-script", [refuse_script], READ, "allow"))
@@ -241,14 +307,15 @@ def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,
         rule("sssf-devices", DEVICES, ALL, "allow"),
         rule("sssf-fd-leaves", FD_LEAVES, ALL, "allow"),
         rule("sssf-mkdir-parents", MKDIR_PARENTS, ["mkdir"], "allow"),
-        rule("sssf-tool-write", TOOL_WRITE, ALL, "allow"),
         rule("sssf-agent-write", writes, ALL, "allow"),
     ]
     if reads:
         rules_.append(rule("sssf-agent-read", reads, READ, "allow"))
     rules_ += [
-        rule("sssf-config-search", CONFIG_SEARCH, READ, "allow"),
+        rule("sssf-config-search", search, READ, "allow"),
+        rule("sssf-config-folders", folders, FOLDER_OPS, "allow"),
         rule("sssf-system-read", SYSTEM_READ, READ, "allow"),
+        rule("sssf-system-link", SYSTEM_LINK, ["symlink"], "allow"),
         rule("sssf-home-read", HOME_READ, READ, "allow"),
         rule("sssf-default-deny", ["/", "/**"], ALL, "deny"),
     ]
@@ -304,7 +371,8 @@ def guard_for(settings, cfg, root: Path, common: str, refuse_script: str, templa
     harnesses = sorted({"claude_code" if a.coding_agent == "claude_code" else "pi" for a in cfg.agents})
     policies = {h: Policy(name=(n := policy_name(root, h)), text=policy_text(
         settings, common, h, n, sessions=sessions, refuse_script=refuse_script)) for h in harnesses}
-    return LocalGuard(mode="agentsh", policies=policies, config_template=template)
+    return LocalGuard(mode="agentsh", policies=policies, config_template=template,
+                      agent_cache=str(Path(sessions).parent / "agent-cache"))
 
 
 def read(cfg) -> LocalGuard:
@@ -675,7 +743,15 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     policy = guard.policies.get(harness)
     if policy is None:
         raise AgentshRefused(f"no agentsh policy was generated for {harness}; {FIX}")
+    if not guard.agent_cache:
+        raise AgentshRefused("no agent cache folder reached the launch; this is a bug in the caller")
+    Path(guard.agent_cache).mkdir(mode=0o700, parents=True, exist_ok=True)   # outside the wrap
     child = dict(os.environ if env is None else env)
+    ours = cache_env(guard.agent_cache)
+    wanted = {k.lower() for k in ours}
+    for key in [k for k in child if k.lower() in wanted]:
+        del child[key]
+    child.update(ours)
     child.update({"AGENTSH_CONFIG": CONFIG, "AGENTSH_SERVER": SERVER, "AGENTSH_NO_AUTO": "1",
                   "NODE_USE_ENV_PROXY": "1", "SSSF_AGENTSH": "1", "JUST_NO_DOTENV": "true"})
     try:

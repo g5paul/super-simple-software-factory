@@ -502,6 +502,7 @@ class LocalGuard(BaseModel):
     root: str = ""                       # the resolved path agents are wrapped at
     policies: dict[str, Policy] = {}     # by harness: "claude", "pi"
     config_template: str = ""            # agentsh_sssf.yaml, read once, for the machine check
+    agent_cache: str = ""                # the agents' own tool caches, under agentsh
 
 
 class AgentRequest(BaseModel):

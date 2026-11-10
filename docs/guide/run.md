@@ -1,25 +1,68 @@
 # Run SSSF
 
-Every example on this page is a real run, made on 2026-11-05 in [sssf-sandbox](../projects.md), a small Python text library, on skill 7decd41. Output is trimmed to the lines that matter, and long lines are cut short. Costs are list price; on a subscription you aren't charged them. All eight runs together came to $2.65.
+Every example on this page is a real run in [sssf-sandbox](../projects.md), a small Python text library. The first ran on 2026-11-09 on skill 7b36e01, and the rest on 2026-11-05 on skill 7decd41. Output is trimmed to the lines that matter, and long lines are cut short. Costs are list price; on a subscription you aren't charged them.
 
-You can ask for any of these in plain words in a Claude Code session in the repo, starting with `/sssf`. The session writes the prompt, launches the chain and reports back. The commands below are what it runs, and you can run them yourself.
+There are two ways to start any of them. Ask the [operator session](../concepts.md#the-operator-session), the Claude Code session in your repo, in plain words starting with `/sssf`. It picks the chain, writes the prompt, launches it, and reports back. Or run the `just` recipe yourself. Each section shows the request both ways.
+
+## Ask in Claude Code
+
+Start here. In Claude Code, in the repo:
+
+```
+/sssf add textkit.is_palindrome(text), which says whether a text reads the same backwards once case, spaces and punctuation are ignored, so "A man, a plan, a canal: Panama" gives True. Export it and test it. Run it on its own branch, then tell me the adw_id, status, cost and commits.
+```
+
+On the host, Claude Code asks you to approve the launch. The session picked `adw_simple_sdlc` with `--worktree`, wrote the chain's prompt with what's in and out of scope, and followed the trace while the run went. Its report, trimmed:
+
+```
+Run b5b5d40a succeeded: all 11 phases passed and it cost $0.6292 (539,140 tokens).
+The work is on branch sssf/b5b5d40a, and nothing is on agentsh-rollout yet.
+
+Commits:
+- 3014011 Add spec for exporting is_palindrome from textkit
+- 058292e Export is_palindrome from textkit with tests and docs
+- ece5bf2 Document the is_palindrome package export
+
+One surprise. is_palindrome already existed in textkit/palindrome.py, but textkit
+didn't export it. So the run didn't write a new function. It added the export,
+a module docstring, and tests that cover the Panama case.
+
+What the checks proved. Only `uv run pytest -q` actually ran, and it passed.
+Lint, format, typecheck and build are still placeholder echoes in quality.py.
+
+`just merge b5b5d40a` lands the branch on agentsh-rollout, and `just discard
+b5b5d40a` drops it. I'll merge only when you tell me to.
+```
+
+The run took 2 minutes 22 seconds, under `local_guard: agentsh`. Then, in the same session, "merge it", or yourself:
+
+```console
+$ just merge b5b5d40a
+merged sssf/b5b5d40a into agentsh-rollout (fast-forward), now at ece5bf2; removed its worktree and branch
+```
+
+The same request without the session is `just simple-sdlc "<request>" --worktree`. You then write the prompt and read the trace yourself, with `just phases <adw_id>` or the [dashboard](watch.md).
 
 ## Pick a chain
 
-| You want | Run |
-|---|---|
-| one answer from one agent | `just prompt "summarize this repo"` |
-| read-only recon | `just scout "where is auth handled"` |
-| a plan, no code | `just plan "add a /health endpoint"` |
-| plan, build, commit, no tests | `just plan-build "..."` |
-| plan, build, test, commit | `just sdlc "..."` |
-| the same, plus every quality check, a review and docs | `just simple-sdlc "..."` |
-| a feature with a spec and tickets | `just tickets .scratch/<feature>/` |
-| two rosters on one request | `just trial "..." main chatgpt` |
+The session picks a chain from what you ask for, and you can name one. Run it yourself with the recipe.
 
-A prompt can be a string or a path to a Markdown file. For a bug fix, a rename, or a change that follows an existing pattern, use `just simple-sdlc`. For a new mode, a new file format, or work that splits into slices you can check one at a time, use tickets. [choose_a_flow.md](../../.claude/skills/sssf/cookbooks/choose_a_flow.md) has the two questions that decide it.
+| You want | Ask in Claude Code | Or run |
+|---|---|---|
+| one answer from one agent | `/sssf ask the scout to summarize this repo` | `just prompt "summarize this repo" --agent scout` |
+| read-only recon | `/sssf find where auth is handled, change nothing` | `just scout "where is auth handled"` |
+| a plan, no code | `/sssf plan a /health endpoint, don't build it` | `just plan "add a /health endpoint"` |
+| plan, build, commit, no tests | `/sssf add a /health endpoint with the plan-build chain` | `just plan-build "..."` |
+| plan, build, test, commit | `/sssf add a /health endpoint with the plan-build-test chain` | `just sdlc "..."` |
+| the same, plus every quality check, a review and docs | `/sssf add a /health endpoint` | `just simple-sdlc "..."` |
+| a feature with a spec and tickets | `/sssf build the case-convert tickets` | `just tickets .scratch/<feature>/` |
+| two rosters on one request | `/sssf race main and chatgpt on adding a /health endpoint` | `just trial "..." main chatgpt` |
+
+Add "on its own branch" to the request, or `--worktree` to the recipe, for a branch and worktree of its own. A prompt can be a string or a path to a Markdown file. For a bug fix, a rename, or a change that follows an existing pattern, use `just simple-sdlc`. For a new mode, a new file format, or work that splits into slices you can check one at a time, use tickets. [choose_a_flow.md](../../.claude/skills/sssf/cookbooks/choose_a_flow.md) has the two questions that decide it.
 
 ## A plain build
+
+In Claude Code: `/sssf add textkit.snake_case(text) with the plan-build-test chain`. Or:
 
 ```console
 $ just sdlc "Add textkit.snake_case(text), which lowercases the text and joins its words with underscores, so 'Hello World' becomes 'hello_world'. Export it from textkit and test it."
@@ -48,7 +91,7 @@ Next: `git show` to read the change, or `just phases d36de4d2` for each phase's 
 
 ## On its own branch
 
-Add `--worktree`, and the run gets its own branch and folder. You can keep working in your checkout while it runs.
+Add `--worktree`, or "on its own branch" when you ask in Claude Code, and the run gets its own branch and folder. You can keep working in your checkout while it runs.
 
 ```console
 $ SSSF_CONFIG=adws/adw_sssf_config/sssf.config.chatgpt.yaml just sdlc "Add textkit.kebab_case(text), ..." --worktree
@@ -82,7 +125,7 @@ just rebase <adw_id>     # for a repo that only takes fast-forwards: move the br
 
 ## Two runs at once
 
-Worktree runs can go side by side, up to `max_worktree_runs` in `repo.yaml`, 2 by default. Each is its own launch, merged on its own.
+Worktree runs can go side by side, up to `max_worktree_runs` in `repo.yaml`, 2 by default. Each is its own launch, merged on its own. In Claude Code, ask for both in one message, each on its own branch, and the session launches them together.
 
 ```console
 $ export SSSF_CONFIG=adws/adw_sssf_config/sssf.config.chatgpt.yaml
@@ -158,7 +201,7 @@ Each ticket gets a fresh builder and lands as its own commit once every check pa
 
 ## Two rosters on one request
 
-A trial runs one request on several rosters at once, each as a worktree run from the same commit, then a panel of referees compares the diffs blind. `main` is `sssf.config.yaml`; any other name is `sssf.config.<name>.yaml`.
+In Claude Code: `/sssf race the main and chatgpt rosters on adding textkit.swap_case(text)`. A trial runs one request on several rosters at once, each as a worktree run from the same commit, then a panel of referees compares the diffs blind. `main` is `sssf.config.yaml`; any other name is `sssf.config.<name>.yaml`.
 
 ```console
 $ just trial "Add textkit.swap_case(text), which flips the case of every letter, ..." main chatgpt
@@ -256,6 +299,8 @@ just plan "add a /health endpoint"                     # prints adw_id a1b2c3d4
 uv run adws/adw_build_test.py "implement the plan" --adw-id a1b2c3d4
 ```
 
+In Claude Code, ask for the plan first, read it, then: `/sssf build and test the plan from run a1b2c3d4`.
+
 ## Stop a run
 
 ```bash
@@ -263,4 +308,4 @@ just procs <adw_id>    # what the run has alive, with pids
 just kill <adw_id>     # stop the chain first, so it can't retry, then its agents
 ```
 
-A killed run marks itself `fail` in the trace. [watch.md](watch.md) shows how to follow a run while it goes.
+A killed run marks itself `fail` in the trace. [watch.md](watch.md) shows how to follow a run while it goes. In Claude Code, "stop run a1b2c3d4" does the same.

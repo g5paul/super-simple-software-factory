@@ -37,7 +37,7 @@ CONFIG = "/etc/agentsh/sssf.yaml"
 POLICY_DIR = "/etc/agentsh/policies"
 SERVER = "unix:///run/agentsh/agentsh.sock"
 API = "http://127.0.0.1:18080"
-PINNED_SHA256 = "0e4430b5eb9f77ddb8014bcc6cd1fad3c8eda6a4deeb7b041777f74c46440886"   # build 3a36c68f on sssf/races
+PINNED_SHA256 = "f9da98024093f13634f26d349237eb217dc5b10fab826d222f08d8a88f79933e"   # build 472d63cf on sssf/dns-signals
 ATTACH_SECONDS = 30
 PAGE = 5000
 POLL_SECONDS = 5
@@ -164,6 +164,11 @@ NETWORK_HEAD = """network_rules:
     decision: allow
 """
 NETWORK_TAIL = "  # Everything else is denied: no match is a deny.\n"
+# agentsh's @all is signals 1 to 31, and a signal no rule names is refused, so the real-time
+# signals are named too: glibc uses 32 and 33 between a program's own threads. agentsh
+# can't name 64.
+EVERY_SIGNAL = ["@all"] + [str(n) for n in range(32, 64)]
+SIGNAL_REFUSAL = "SSSF: an agent may signal only its own processes"
 
 
 def _q(value: str) -> str:
@@ -250,6 +255,21 @@ def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,
     return "\n".join(rules_)
 
 
+def signal_rules() -> str:
+    """Signals to the agent's own processes, and nothing else. The first rule that matches
+    decides, so the allows come first: a process may signal its parent when the parent is
+    in the session too. The SSSF runner, the agent's real parent, is outside it: `external`."""
+    signals = str(EVERY_SIGNAL)          # ['@all', '32', ...]: quoted strings, as agentsh reads them
+    lines = ["signal_rules:"]
+    for target, decision in (("self", "allow"), ("session", "allow"),
+                             ("parent", "deny"), ("external", "deny"), ("system", "deny")):
+        lines += [f"  - name: sssf-signal-{target}", f"    signals: {signals}",
+                  "    target:", f"      type: {target}", f"    decision: {decision}"]
+        if decision == "deny":
+            lines.append(f"    message: '{_q(SIGNAL_REFUSAL)}'")
+    return "\n".join(lines) + "\n"
+
+
 def policy_name(main: Path, harness: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", Path(main).name.lower()).strip("-") or "repo"
     return f"sssf-{slug}-{SHORT[harness]}"
@@ -273,7 +293,7 @@ def policy_text(settings: repo_settings.RepoSettings, git_common_dir: str, harne
     network += NETWORK_TAIL
     return (f"version: 1\nname: {name}\n"
             f"description: SSSF default-deny policy for {agent}\n"
-            f"{commands}file_rules:\n{file_rules(git_common_dir, agent, settings.secret_files, sessions=sessions, refuse_script=refuse_script)}\n{network}")
+            f"{commands}file_rules:\n{file_rules(git_common_dir, agent, settings.secret_files, sessions=sessions, refuse_script=refuse_script)}\n{network}{signal_rules()}")
 
 
 def guard_for(settings, cfg, root: Path, common: str, refuse_script: str, template: str) -> LocalGuard:

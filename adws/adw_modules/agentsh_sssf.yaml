@@ -39,7 +39,7 @@ sandbox:
       execve: true
       file: true
       network: true
-      signal: false
+      signal: true
     on_attach_failure: "fail_closed"
 proxy:
   mode: disabled

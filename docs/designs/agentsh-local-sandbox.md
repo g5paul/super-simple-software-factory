@@ -784,6 +784,53 @@ The engineer decided on 2026-11-09:
 2. **A fork patch for relative link targets comes first.** It resolves a relative target against the link's folder and judges the result with the file rules, so `~/.claude.json.x -> .ssh/id_rsa` is still denied. The decision of 2026-11-09 named this as the safe way to allow relative links if a repo needs them, and every Python repo needs them for a venv.
 3. **The config lookups and the caches go through the guard chain**, from `specs/tasks/guard-agentsh-tool-config.md`, after the patch is installed.
 
+### The namespace hole, 2026-11-09
+
+An agent under the wrap could read any file it can read outside it. It makes a user and mount namespace of its own, with `unshare(CLONE_NEWUSER|CLONE_NEWNS)` and no uid map. It then bind-mounts a denied folder onto a folder in its workspace and reads the file there. The tracer resolves every path through `/proc/<tid>/root`, in the agent's view, so it judged `<workspace>/b/secret.txt` and allowed it. `chroot` worked too.
+
+It turned up while the ninth patch's link resolver was being checked by hand: that resolver walks the agent's view, and the question was whether the agent can make that view differ from the host's. On the installed build, `3918a619`, under the hub's policy:
+
+| Step | Result |
+|---|---|
+| `cat` of a canary file in `~/sssf-ns-canary/`, outside every allow | `Permission denied` |
+| `unshare(USER\|NS)`, `/` made private, the canary's folder bind-mounted over `<workspace>/b`, then `b/secret.txt` read | every step OK, and the canary's text came back |
+| `chroot(".")` in the same namespace | OK |
+| `unshare -Ur` | fails, since it writes `/proc/self/uid_map`, which the policy denies. The calls don't need the map: the process keeps its own uid for file access and holds every capability in its new namespace |
+
+That gets past every file read rule, the credential denies included, in every repo on `local_guard: agentsh`, which today means the hub and sssf-sandbox. The exec rules and the network rules don't depend on the agent's view of the files, so push stays denied. A secret read this way still reaches the model's context, and the agent can write it into the workspace. The probes are `nsprobe.c` and `nsbind.c`, in the job's temp folder. agentsh has a seccomp syscall blocklist, with `mount` among its documented defaults, but the machine's config runs ptrace mode with no `sandbox.seccomp` section, and whether that blocklist stacks with ptrace wasn't tested.
+
+A second gap came from the same reading. When the tracer fails to inject its BPF prefilter into a tracee, it logs a warning and stops on every syscall instead. io_uring is denied only by that filter, so such a tracee could use it.
+
+**The fix.** `87c6994d`, `fix(ptrace): refuse namespaces, mounts and chroot in tracees`, on `sssf/patched`, local. Each of the tracer's three BPF builders refuses, before any other rule:
+- `mount`, `umount2`, `chroot`, `pivot_root`, `setns` and the new mount API (`open_tree`, `open_tree_attr`, `move_mount`, `fsopen`, `fsconfig`, `fsmount`, `fspick`, `mount_setattr`), with `EPERM`;
+- `unshare` and `clone` whose first argument asks for a namespace, with `EPERM`. Threads and forks run as before;
+- `clone3`, with `ENOSYS`. Its flags sit in a struct the filter can't read, and libc then falls back to `clone`, as it does under Docker's default seccomp profile.
+
+`dispatch` refuses the same calls, which covers a tracee without the prefilter, io_uring included. The new test loads each builder into a child process and makes 22 calls there, so the kernel answers. Before the fix every mount call reached the kernel and `clone(CLONE_NEWUSER)` made a child; after it, each gets the refusal. A second test checks `dispatch`'s list against the same table. `go vet` is clean, the `ptrace`, `api` and `policy` tests pass, and the integration tag shows the same 8 failures by name. The fork and clone tracking tests pass under the new filter.
+
+Two builds, neither installed yet:
+
+| Build | Version | sha256 | Folder |
+|---|---|---|---|
+| The namespace fix alone: `3918a619`'s tree with `87c6994d`'s diff applied, built from a `git archive` copy. No commit holds this tree | `0.20.6-dev.fork+3918a619+ns.87c6994d` | `ee6cd37e03bdd1461cb1c622a15adcf9264c19bc27b5301c2d94355b27120bce` | `~/.local/share/agentsh-builds/confine-only/` |
+| `sssf/patched` at `87c6994d`, with the ninth patch's two commits under it | `0.20.6-dev.fork+87c6994d` | `7dc7d9615b958157337bbe5787bab344d174a6610cfcbe9db4bfb8b439b29334` | `~/.local/share/agentsh-builds/confine-combined/` |
+
+After the install, `nsbind` should be refused at `unshare`, and the check set should hold. A tool that needs a namespace gets `EPERM` under the wrap: bubblewrap, Chrome's and Electron's sandboxes, rootless podman. Claude Code and pi don't use one in SSSF's runs, but the check set's agent runs should confirm that.
+
+### The ninth patch: link targets, 2026-11-09
+
+`f2ee6845`, `fix(ptrace): judge a symlink at the file it leads to`, and `65e2d4fb`, `fix(ptrace): refuse a symlink target through /proc`, on `sssf/patched` under the namespace fix, local. `sssf/link-targets` also points at `65e2d4fb`. A link's target used to reach the rules as raw text. A relative one matched no rule and fell to the default deny, which broke `uv venv` and npm's and bun's `.bin` links. An absolute one was judged as text, so `<workspace>/../../.ssh/id_rsa` passed any rule allowing the workspace.
+
+`symlinkat` and `symlink` now hand the rules the file the link leads to. A relative target is read from the link's folder, and each part that exists is resolved the way the kernel follows it, through links, with `..` after them. A part that doesn't exist yet is judged as text below its deepest existing folder. That only works while the rest has no `..` and the first missing part isn't a dangling link, so either case fails closed.
+
+The first review run asked how `/proc` resolves, which led to a hole in `f2ee6845`. The walk read `/proc/self` as the agent, which is right for the agent's own opens and wrong for a link, since whoever follows it later reads `/proc/self` as itself. So `ln -s /proc/self/cwd/.ssh/id_rsa x` was judged as `<cwd>/.ssh/id_rsa` and allowed, and a tool following `x` from `$HOME` would reach `~/.ssh/id_rsa`. `3918a619` denied it, since no rule allows `symlink` under `/proc`. `65e2d4fb` makes the walk for link targets fail closed when it enters `/proc`, directly or through a link: `/dev/fd`, `/dev/stdin`, a relative target that climbs to `/proc`, or an earlier link into it. It also fixes a link whose own folder is missing, where `filepath.Dir` had applied the `..` as text.
+
+The new tests failed before each fix and pass after: 7 resolution cases, 5 fail-closed cases, 9 cases through `/proc` and the missing folder. The `ptrace`, `api` and `policy` tests pass. The integration tag shows the 8 known failures, and `ReadExitSkipForNonStatusFd` fails about one run in three, on `3918a619` as well.
+
+Limits:
+- **The check happens when the link is made.** A relative link that resolves inside the workspace can be moved later to a shallower folder the agent may write, such as `/tmp/x`, and lead to `~/.ssh/id_rsa`. Swapping a folder on its path for a link does the same for an absolute target. Inside the wrap every read through a link is judged at the file it reaches, so this only matters to a tool that follows such a link outside the wrap. `3918a619` allows the same link in one step.
+- **No independent review yet.** Two `bypass-reviewer` runs were stopped by a safety classifier before they wrote a probe. The hand check found the namespace hole, which split the agent's view from a later reader's, and the namespace fix closes it. It found no error in the prefix loop that becomes an allow. `symlinkat` and `symlink` handle the target the same way. A target that only fails for the reader, such as one past the kernel's 40-link limit while the walk allows 255, leaves that reader with an error, not a different file.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -810,11 +857,12 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 
 ## Next
 
-1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
-2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
-3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
-4. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` is fixed by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09). Left, from [Tool config and caches](#tool-config-and-caches-2026-11-09):
-   - **A ninth fork patch for relative link targets**, which `uv venv` and npm's and bun's `.bin` links need. Then the engineer's sudo install and the check set.
+1. **Install the namespace fix.** The engineer picks [a build](#the-namespace-hole-2026-11-09), the fix alone or with the ninth patch under it, and runs the sudo install. Then `nsbind` under the wrap, which should be refused at `unshare`, and the check set. The pin moves to the installed build.
+2. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
+3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
+4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
+5. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` is fixed by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09). Left, from [Tool config and caches](#tool-config-and-caches-2026-11-09):
+   - **[The ninth fork patch](#the-ninth-patch-link-targets-2026-11-09) for relative link targets**, which `uv venv` and npm's and bun's `.bin` links need. Built and tested, waiting on an independent review. Then the engineer's sudo install and the check set.
    - **The guard chain run** from `specs/tasks/guard-agentsh-tool-config.md`: config lookups above the workspace, which break uv in every repo under `~/github`, and caches of the agents' own.
-5. Rollout step 4, after item 4: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
-6. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.
+6. Rollout step 4, after item 5: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
+7. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.

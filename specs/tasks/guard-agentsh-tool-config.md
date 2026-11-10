@@ -1,6 +1,6 @@
 # Let tools read their config above the workspace, and give agents their own caches
 
-Item 4 of the Next list in `docs/designs/agentsh-local-sandbox.md`. Start from `main`, once the ninth fork patch, which lets agentsh judge relative link targets, is installed. The design doc's section "Tool config and caches, 2026-11-09" has the evidence and the engineer's decisions, so don't reopen them.
+Item 5 of the Next list in `docs/designs/agentsh-local-sandbox.md`. Start from `main`, once the namespace fix and the ninth fork patch, which lets agentsh judge relative link targets, are installed. The design doc's section "Tool config and caches, 2026-11-09" has the evidence and the engineer's decisions, so don't reopen them.
 
 ## The problem
 

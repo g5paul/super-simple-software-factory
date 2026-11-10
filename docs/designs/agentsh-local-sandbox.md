@@ -73,7 +73,7 @@ The engineer settled these on 2026-11-08, after the proof. OpenShell stays the l
 | Who runs the server | A dedicated `agentsh` service user with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`. No root server and no eBPF, and agents can't reach it through ptrace because they run as the engineer |
 | The API escape | Policy denies on the socket, TCP port 18080 and a proxy CONNECT to it, with auth left at `none`. The corpus keeps those checks, so a regression fails loudly. The API stays open to unwrapped local processes |
 | Install | With sudo, root-owned binaries, config and policies. SSSF generates a policy from `repo.yaml` and prints the install command, and a run refuses to start when the installed copy differs, at the cost of one sudo step per rule change |
-| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. The installed build is `241cd393` on `sssf/confine`, from [the namespace hole](#the-namespace-hole-2026-11-09). The guard's `PINNED_SHA256` still names `41960715`, so every run under `local_guard: agentsh` refuses until `specs/tasks/guard-agentsh-pin.md` lands. v0.20.6 final lacks all nine patches |
+| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. The installed build is `241cd393` on `sssf/confine`, from [the namespace hole](#the-namespace-hole-2026-11-09). The guard pins it: `PINNED_SHA256` is `ee6cd37e…20bce` since run 7047b87c, merged as 7b36e01. v0.20.6 final lacks all nine patches |
 | How a denial counts | Only a denied `ptrace_execve` with a named rule counts toward the three-refusal stop, and it's never a breach. File and network denials go to the trace |
 | Rule format | An argv form, `deny_exec`, which becomes agentsh's `command_rules`, beside `forbid`, which keeps its text uses |
 | Proxy, DLP, FUSE, `BASH_ENV` | The session proxy on, because the network allowlist depends on it. The LLM proxy, DLP, FUSE and `BASH_ENV` off |
@@ -833,7 +833,9 @@ The engineer installed the fix alone. On it:
 
 Results are in `~/.local/share/agentsh-harvest/dd6/`. A tool that needs a namespace gets `EPERM` under the wrap: bubblewrap, Chrome's and Electron's sandboxes, rootless podman. Claude Code and pi don't use one in SSSF's runs.
 
-The pin in the guard was never moved for the eighth patch: `PINNED_SHA256` is still build `41960715`'s, and the docs said `3918a619`. So `check_machine` has refused every run under `local_guard: agentsh` since the eighth patch went in. The refusal also stops the guard chain, which runs under agentsh on the hub, so the pin task needs the hub on `local_guard: text` for one run.
+The pin in the guard was never moved for the eighth patch: `PINNED_SHA256` is still build `41960715`'s, and the docs said `3918a619`. So `check_machine` has refused every run under `local_guard: agentsh` since the eighth patch went in. The refusal also stops the guard chain, which runs under agentsh on the hub, so the pin task needed the hub on `local_guard: text` for one run.
+
+Run 7047b87c moved the pin, under the text guard, and merged as 7b36e01 for $1.30. The bypass review found nothing blocking and two old holes, both in the pin check itself. An agent that edits the project's copy of `agentsh_guard.py` can set `PINNED_SHA256` or `BINARY` to a binary it picks, since the runner reads the constant from that copy and the "differs" check covers the config and policies, not this module. And `check_machine` hashes the file on disk, so a service still running an older binary after an install without a restart passes. The hub went back to `local_guard: agentsh`, and the real `check_machine` passes on the hub and sssf-sandbox, both on skill 7b36e01.
 
 ### The ninth patch: link targets, 2026-11-09
 
@@ -875,7 +877,7 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 
 ## Next
 
-1. **Move the guard's pin** to the installed build, [`241cd393`](#the-namespace-hole-2026-11-09), through the guard chain from `specs/tasks/guard-agentsh-pin.md`. Until it lands, every run under `local_guard: agentsh` refuses, and so does the chain itself, so that run goes under `local_guard: text`.
+1. **Close or record the pin check's two old holes** that run 7047b87c's review found ([the namespace hole](#the-namespace-hole-2026-11-09)): an agent's edit to the project's `agentsh_guard.py` can repoint the pin, and a service left on an older binary passes. At least `config.md` lists both as known limits, through the guard chain.
 2. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.

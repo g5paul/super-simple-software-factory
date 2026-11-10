@@ -453,7 +453,7 @@ It reads shell commands only. A command another tool runs, such as a pi extensio
 
 With `local_guard: agentsh` in `repo.yaml`, every agent on this machine runs as `agentsh wrap` under a policy SSSF generates from the repo's settings (`secret_files`, `deny_exec`, `network_allow`). The text checks stay on. SSSF reads the setting once, when the run starts; a later edit reaches the next run only.
 
-It's opt-in, and tested so far only on Python repos with a Claude Code roster. Two gaps would break other work: `tar -x` fails on files in subfolders, so a package manager that unpacks tarballs, such as `bun install` or `npm install`, likely fails, and uv can't build an environment in `~/.cache/uv`, so `uv run --with` and a new dependency fail. A pi roster has no policy yet. Keep `local_guard: text` for a repo that needs any of these.
+It's opt-in, and tested so far only on Python repos with a Claude Code roster. Two gaps would break other work. uv can't build an environment in `~/.cache/uv`, so `uv run --with` and a new dependency fail. A tool that searches folders above the repo for its config stops on the denial there, as `pnpm` does through Corepack; npm and bun install. It needs agentsh `0.20.6-dev.fork+3918a619` or later, since earlier builds fail `tar -x` on files in subfolders. A pi roster has no policy yet. Keep `local_guard: text` for a repo that needs any of these.
 
 Install step, once per repo and again after those settings change:
 

@@ -73,7 +73,7 @@ The engineer settled these on 2026-11-08, after the proof. OpenShell stays the l
 | Who runs the server | A dedicated `agentsh` service user with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`. No root server and no eBPF, and agents can't reach it through ptrace because they run as the engineer |
 | The API escape | Policy denies on the socket, TCP port 18080 and a proxy CONNECT to it, with auth left at `none`. The corpus keeps those checks, so a regression fails loudly. The API stays open to unwrapped local processes |
 | Install | With sudo, root-owned binaries, config and policies. SSSF generates a policy from `repo.yaml` and prints the install command, and a run refuses to start when the installed copy differs, at the cost of one sudo step per rule change |
-| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. The current pin is `41960715`, from [the third run](#the-seventh-patch-and-the-third-run). v0.20.6 final lacks all seven patches |
+| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. The current pin is `3918a619`, from [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09). v0.20.6 final lacks all eight patches |
 | How a denial counts | Only a denied `ptrace_execve` with a named rule counts toward the three-refusal stop, and it's never a breach. File and network denials go to the trace |
 | Rule format | An argv form, `deny_exec`, which becomes agentsh's `command_rules`, beside `forbid`, which keeps its text uses |
 | Proxy, DLP, FUSE, `BASH_ENV` | The session proxy on, because the network allowlist depends on it. The LLM proxy, DLP, FUSE and `BASH_ENV` off |
@@ -731,9 +731,39 @@ The run-8b800eb5 harms were link attacks, so the bypass reviewer's prompt now sa
 The first guard runs under agentsh. 056faf3e passed in round 1, at $4.07. Its one real broken promise was a stamp nested 1,200 deep, which passed the check and crashed in `save_stamp`. 6cfe04c2 started from its code, fixed that, and passed in round 1, at $5.01. They merged as 67bf1a2. The reports are [guard-run-056faf3e.md](agentsh/guard-run-056faf3e.md) and [guard-run-6cfe04c2.md](agentsh/guard-run-6cfe04c2.md).
 
 What agentsh cost the reviewers, beyond relative links:
-- **`tar -x` failed** with "Cannot open: Permission denied" on every file in a subfolder, in the scratch folder and in `/tmp`. A file at the archive's top level extracts. Each piece tested alone works under the same policy: `mkdir`, `O_EXCL` opens, opens through a folder handle (an `O_PATH` one too), and a path with a slash. The denial log has no entry for it. The reviewer unpacked with `git show` per file instead.
+- **`tar -x` failed** with "Cannot open: Permission denied" on every file in a subfolder, in the scratch folder and in `/tmp`. A file at the archive's top level extracts. Each piece tested alone works under the same policy: `mkdir`, `O_EXCL` opens, opens through a folder handle (an `O_PATH` one too), and a path with a slash. The denial log has no entry for it. The reviewer unpacked with `git show` per file instead. The cause and the fix are [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09).
 - **uv couldn't make a venv** in `~/.cache/uv`, so the reviewer ran its checks on three interpreters with its own harness, not the suite.
 - One flaky test in build verify: `test_agentsh_guard.py::test_a_non_breach_failure_with_three_denials_becomes_the_breach[cc]` failed once with "the tracer failed" and passed on the same code.
+
+### The eighth patch: tar and openat2, 2026-11-09
+
+`3918a619`, `fix(ptrace): allow openat2 resolve flags that only restrict`, on `sssf/patched`, local. Build sha256 `4ff5df413d75a3c826625a82b4fa3a515a68374cfd21e15738d7d49d978cc6a9`, in `~/.local/share/agentsh-builds/openat2/`, built as `41960715` was. A copy of `41960715` stays in `~/.local/share/agentsh-builds/argv/`.
+
+**The cause.** GNU tar 1.35 opens each parent folder with `openat2(dirfd, "foo/", O_PATH|O_DIRECTORY|O_NOFOLLOW, RESOLVE_BENEATH)`, then opens the file relative to the handle it gets back. The tracer's `extractFileArgs` refused every `openat2` with a resolve flag, as upstream wrote it in 448913e6, because "the kernel applies restricted path resolution ... that we cannot replicate. Fail closed." The handler then returns `EACCES` before any rule sees the call, and logs `handleFile: cannot extract args, denying` to the service's journal only. That's why the policy's denial log had no entry. A top-level file needs no parent handle, so it extracted. The journal held 1,491 of these lines from the two stamp-refusal runs and the diagnosis. A ptrace logger written for the diagnosis showed tar's calls, since the machine has no strace, and a two-call C repro failed under the wrap with `RESOLVE_BENEATH` or `RESOLVE_NO_SYMLINKS` and passed with no resolve flag or a plain `openat`.
+
+**The fix.** `BENEATH`, `NO_SYMLINKS`, `NO_MAGICLINKS`, `NO_XDEV` and `CACHED` can only make the kernel refuse a lookup. With any of them it reaches the file a plain `openat` of the same path reaches, or fails, so the tracer now checks the path as it does for `openat`. `IN_ROOT` resolves `/` and `..` against the handle, so the path lands somewhere else than it names. It stays refused, as does any bit the code doesn't know. `golang.org/x/sys` v0.42.0 has no `RESOLVE_CACHED`, so the patch defines the kernel's value, 0x20.
+
+The new tests call the real `extractFileArgs` on a call held in the test's own memory. The six restrict-only cases failed against the old check and pass with the fix. The four fail-closed cases pass on both. `go vet` is clean, the `ptrace` unit tests pass, and the integration tag shows the same 8 failures by name.
+
+On that build:
+
+| Check | Result |
+|---|---|
+| The tar loop and its 9 variants: a folder entry, an implicit folder, a folder made first, `-m`, `-U`, `--no-same-owner`, `--no-same-permissions`, `--delay-directory-restore`, a top-level file | all extract |
+| A tree three folders deep | extracts. Its link to `~/github` is refused, which the policy means |
+| The repro with each resolve flag | the five pass, `IN_ROOT`, `IN_ROOT` with `BENEATH`, and an unknown bit are refused |
+| 49 denial probes under each policy | all held, no fake file or mode changed |
+| Tools | exit 0, no file denials |
+| Claude Code | worked, exit 0 in 12 seconds. 97 file denials did it no harm: 27 `/proc/*/environ`, `~/.ssh/config` and `~/.netrc`, and its own background writes into `~/.claude`, a plugin clone and a skill sync, that the policy keeps out |
+| pi | worked, exit 0 in 13 seconds, one harmless denial |
+| Bypass corpus | 24 of 24 held |
+| Network and fronting checks | as before |
+| `npm install` and `bun add` of a local tarball with nested folders | installed, the nested file in place |
+| `pnpm add`, the same | fails. Corepack searches upward for a `package.json`, gets `EACCES` on one above the workspace, and stops |
+
+Whether npm and bun failed on `41960715` wasn't tested. The `pnpm` failure is the same kind as uv's `../uv.toml` lookup: a config search above the workspace that gets `EACCES` and treats it as an error, where a missing file would have been fine.
+
+`agentsh wrap` runs the command in the `--root` folder, not the caller's. A test that starts it elsewhere needs a `cd` inside the wrapped command.
 
 ## What got built
 
@@ -764,6 +794,6 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 1. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 2. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 3. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
-4. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` of a tree with subfolders fails in the scratch folder and `/tmp`, though each open on its own passes, and the denial log has no entry for it: diagnose it in the fork first. Package managers unpack tarballs, so `bun install` or `npm install` likely fails the same way. uv can't make a venv in `~/.cache/uv`, so `uv run --with` and a new dependency fail. The `../uv.toml` lookup above a worktree is denied too. The fix to the policy goes through the guard chain.
+4. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` is fixed by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09), and npm and bun install on it. Left: uv can't make a venv in `~/.cache/uv`, so `uv run --with` and a new dependency fail. Config searches above the workspace get `EACCES` and stop: uv's `../uv.toml`, and Corepack's `package.json`, so `pnpm` fails. The fix to the policy goes through the guard chain.
 5. Rollout step 4, after item 4: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
 6. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.

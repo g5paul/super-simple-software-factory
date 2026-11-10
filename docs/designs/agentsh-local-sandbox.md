@@ -875,6 +875,10 @@ Limits:
 - **Folders that ignore case.** On `/mnt/c` and casefold folders `.SSH` reaches `.ssh`, and a rule that names `.ssh` misses it. Not probed.
 - **openat2 is needed** for the exit stop, Linux 5.6 or later. Without it every symlink fails closed.
 
+**Installed 2026-11-10.** The engineer installed `3a36c68f`. On it, under sssf-sandbox's policy, `mv`, `rename`, a direct `renameat` and `mknod` of a canary outside every allow were refused and nothing moved; `ln -s` to the canary, absolute or relative, was refused. A relative `ln -s` in the workspace, `mv` inside it, `uv venv` and npm's `.bin` link worked. The check set matched the namespace build's: 98 probes held, 32 must-work lines ran, Claude Code exited 0 in 9 seconds with 89 file denials and pi in 13 seconds with one, the corpus held 24 of 24, and the 28 network verdicts were the same. Results are in `~/.local/share/agentsh-harvest/dd7/`.
+
+Run 162cbc4b moved the pin, under the text guard, and merged as 99904da for $1.91. It also brought `config.md` in line with the ninth patch: relative links work, and a link's target is judged at the file it reaches. The bypass review found nothing blocking and the same two old holes in the pin check as run 7047b87c, both Next item 1. The hub went back to `local_guard: agentsh`, and the real `check_machine` passes on the hub and sssf-sandbox, both on skill 99904da. sssf-sandbox's quality run c0ffc393 passed.
+
 ## What got built
 
 - A symlink at `<session>/<agent>/envelope.json` to `/proc/<pid>/fd/<n>` or to a main-checkout file is replaced by SSSF's next envelope write, and the target is unchanged. This holds on a `--worktree` run and a plain one.
@@ -906,7 +910,7 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 5. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` is fixed by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09). Left, from [Tool config and caches](#tool-config-and-caches-2026-11-09):
-   - **[The ninth fork patch](#the-ninth-patch-link-targets-2026-11-09) for relative link targets**, which `uv venv` and npm's and bun's `.bin` links need, with [the three fixes from its review](#the-review-and-three-fixes-2026-11-10). Build `3a36c68f` waits on the engineer's sudo install. Then the check set, with `uv venv`, an npm `.bin` link and an `mv` of a canary into the workspace added, and the pin through the guard chain.
+   - **[The ninth fork patch](#the-ninth-patch-link-targets-2026-11-09) for relative link targets**, which `uv venv` and npm's and bun's `.bin` links need, with [the three fixes from its review](#the-review-and-three-fixes-2026-11-10). Installed and pinned on 2026-11-10, skill 99904da.
    - **The guard chain run** from `specs/tasks/guard-agentsh-tool-config.md`: config lookups above the workspace, which break uv in every repo under `~/github`, and caches of the agents' own.
 6. Rollout step 4, after item 5: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
 7. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.

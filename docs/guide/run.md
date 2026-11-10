@@ -116,7 +116,7 @@ Each run's `max_run_cost` holds for that run alone, so two runs can spend twice 
 
 ## A feature from tickets
 
-`just tickets` builds a feature one ticket at a time, from a folder you write with the engineer's skills ([Matt Pocock's](https://github.com/mattpocock/skills) `/to-spec` and `/to-tickets`) or by hand:
+`just tickets` builds a feature one ticket at a time, from a folder you write with the engineer's skills ([Matt Pocock's](https://github.com/mattpocock/skills) `/to-spec` and `/to-tickets`, tested at commit `a496f55`) or by hand:
 
 ```
 .scratch/case-convert/

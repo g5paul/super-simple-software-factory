@@ -12,19 +12,41 @@ The two subscriptions are cheaper to start with: there's no bill per token, and 
 
 ## Before you start
 
-| Tool | Why | Check |
+The last column is the version on the machine where SSSF is built and tested, a WSL2 Ubuntu 24.04 install, checked on 2026-11-09. Older or newer versions may work; these are the ones known to.
+
+| Tool | Why | Check | Tested |
+|---|---|---|---|
+| [uv](https://docs.astral.sh/uv/) | runs every ADW | `uv --version` | 0.10.3 |
+| git 2.32 or later | branches, worktrees, commits | `git --version` | 2.43.0 |
+| sqlite3 | reading the trace by hand | `sqlite3 --version` | 3.45.1 |
+| python3 | the billing check below, and `container/run.sh` | `python3 --version` | 3.12.3 |
+| rsync | `just sssf-update` | `rsync --version` | 3.2.7 |
+| [just](https://github.com/casey/just) | the recipes in this guide. Without it, run the line each recipe wraps | `just --version` | 1.59.0 |
+| [Claude Code](https://docs.claude.com/en/docs/claude-code) | the [operator session](../concepts.md#the-operator-session), and the agents on a Claude roster | `claude --version`, then `claude auth status` | 2.1.321 |
+| [pi](https://github.com/earendil-works/pi) | the agents on a ChatGPT or API-key roster | `pi --version` | 1.4.0 |
+| Node.js 22 or later | pi | `node --version` | 24.11.1 |
+| [gitleaks](https://github.com/gitleaks/gitleaks) 8.30.1 or later | the secret scan before each push, once you turn it on | `gitleaks version` | 8.30.1 |
+| [bun](https://bun.sh) | the dashboard | `bun --version` | 1.4.4 |
+| [Podman](https://podman.io), rootless, with pasta | only for the container and `--sandbox openshell` | `podman --version` | 4.9.3, passt 2024-02-20 |
+| [Codex CLI](https://github.com/openai/codex) | only for the ChatGPT usage meters on the dashboard ([watch.md](watch.md#chatgpts-windows-through-codex-cli)) | `codex --version` | 0.153.0 |
+| [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | only for `--sandbox openshell` | `openshell --version` | 0.1.7 |
+| [agentsh](https://github.com/canyonroad/agentsh) | only for `local_guard: agentsh` ([concepts.md](../concepts.md#local-guards-text-and-agentsh)) | `agentsh --version` | `0.20.6-dev.fork+3918a619+ns.87c6994d`, a build of the hub's patched fork. SSSF accepts no other, and the fork's patches aren't published yet |
+
+Each kind of run last passed on these dates: Claude Code agents on this machine under both local guards on 2026-11-09, the container on 2026-11-05, Vercel and E2B on 2026-11-05, and OpenShell on 2026-11-08. A run before 2026-11-09 may have used an older version of a tool above.
+
+SSSF pins some of what it pulls in itself:
+
+| What | Version | Where it's set |
 |---|---|---|
-| [uv](https://docs.astral.sh/uv/) | runs every ADW | `uv --version` |
-| git 2.32 or later | branches, worktrees, commits | `git --version` |
-| sqlite3 | reading the trace by hand | `sqlite3 --version` |
-| python3 | the billing check below, and `container/run.sh` | `python3 --version` |
-| rsync | `just sssf-update` | `rsync --version` |
-| [just](https://github.com/casey/just) | the recipes in this guide. Without it, run the line each recipe wraps | `just --version` |
-| [Claude Code](https://docs.claude.com/en/docs/claude-code) | the operator session, and the agents on a Claude roster | `claude auth status` |
-| [pi](https://github.com/earendil-works/pi) | the agents on a ChatGPT or API-key roster | `pi --version` |
-| [gitleaks](https://github.com/gitleaks/gitleaks) 8.30.1 or later | the secret scan before each push, once you turn it on | `gitleaks version` |
-| [bun](https://bun.sh) | the dashboard | `bun --version` |
-| [Podman](https://podman.io) | only for the container | `podman --version` |
+| pi in the container image | 1.4.0 | `PI_VERSION` in `container/Containerfile` |
+| The container's base image | Ubuntu 22.04. uv, just and Claude Code are the latest when the image is built | `container/Containerfile` |
+| The E2B SDK | `e2b==2.62.0` | `sandbox_e2b.py`, `scripts/e2b_template.py` |
+| The Vercel Sandbox SDK | `vercel-sandbox==0.10.0` | `sandbox_vercel.py` |
+| The dashboard's packages | the versions in `bun.lock` | `apps/visualizer/` |
+| [Matt Pocock's skills](https://github.com/mattpocock/skills), for [tickets](run.md#a-feature-from-tickets) | commit `a496f55`, 2026-10-29 | the passages copied into the ticket agents' prompts name it |
+| The agentsh build | sha256 `ee6cd37e…20bce`, commit `241cd393` on the fork | `PINNED_SHA256` in `agentsh_guard.py` |
+
+The ADWs' own Python libraries, pydantic, python-dotenv, pyyaml and rich, aren't pinned: uv takes the latest each time. On 2026-11-09 those were 2.14.3, 1.2.4, 6.0.3 and 15.0.0.
 
 The repo needs at least one commit. Chains that end in a commit phase, and worktree runs, start from it. In a new folder, run `git init && git commit --allow-empty -m init` first. Don't run it in a repo that already has commits.
 
@@ -166,7 +188,7 @@ SSSF_CONFIG=adws/adw_sssf_config/sssf.config.chatgpt.yaml just sdlc "add a /heal
 
 ## Run the operator session in a container
 
-On the host, Claude Code asks you to approve each chain launch. The container runs the operator session with `--dangerously-skip-permissions` instead. Inside it the session can reach only the repo and `~/.config/sssf`, so it can launch chains without asking. It needs rootless Podman with pasta, the default from Podman 5.
+On the host, Claude Code asks you to approve each chain launch. The container runs the operator session with `--dangerously-skip-permissions` instead. Inside it the session can reach only the repo and `~/.config/sssf`, so it can launch chains without asking. It needs rootless Podman with pasta installed. `run.sh` asks for pasta itself, so Podman 4 works, as 4.9.3 does here.
 
 1. Stamp it. At install, add `--container` to your sign-in flag, as in `install.py --coding-agent claude_code --container`. On its own, `--container` stamps the default pi roster. In a repo that's already installed, run it alone:
 

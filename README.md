@@ -27,7 +27,7 @@ SSSF is a Claude Code skill that installs a software factory into a repo. The fa
 
 ## Quickstart
 
-On a Claude subscription, in a repo with a clean tree and at least one commit, with [uv](https://docs.astral.sh/uv/), [just](https://github.com/casey/just) and Claude Code installed:
+On a Claude subscription, in a repo with a clean tree and at least one commit, with [uv](https://docs.astral.sh/uv/), [just](https://github.com/casey/just) and Claude Code installed ([the versions tested](docs/guide/install.md#before-you-start)):
 
 ```bash
 git clone https://github.com/g5paul/super-simple-software-factory ~/github/super-simple-software-factory

@@ -1,6 +1,6 @@
 # Build a feature from tickets
 
-`adw_tickets` builds a feature one ticket at a time, test-first, from a folder that [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) wrote with the engineer. This cookbook is for the Claude session in the project repo. The design and its decisions are in the SSSF repo at `docs/designs/ticket-sdlc.md`.
+`adw_tickets` builds a feature one ticket at a time, test-first, from a folder that [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) wrote with the engineer. SSSF was tested with them at commit `a496f55` (2026-10-29), and the ticket agents' prompts copy passages from that commit. This cookbook is for the Claude session in the project repo. The design and its decisions are in the SSSF repo at `docs/designs/ticket-sdlc.md`.
 
 Use it for a feature that needs a spec and more than one session of work. For a single defined task, `just simple-sdlc` is cheaper. How to choose between them is in [choose_a_flow.md](choose_a_flow.md).
 

@@ -24,24 +24,9 @@ You ask for work in a Claude Code session in the repo, such as `/sssf add a /hea
 
 The agents in a chain are separate processes, each with its own system prompt, tools and session. The operator doesn't see their context, only the trace. So "the operator" always means your session, and "an agent" means one of the chain's.
 
-```mermaid
-flowchart TB
-  E(["Engineer"])
-  subgraph OP["Operator session"]
-    direction LR
-    S["sssf skill"] --> C["cookbook"] --> P["writes the prompt,<br/>launches the chain"]
-  end
-  subgraph CH["Chain: code owns the loop"]
-    direction LR
-    A1["agent phase<br/>own prompt, tools, session"] --> K["code phase<br/>checks, gates"] --> A2["agent phase"]
-  end
-  T[("trace<br/>adws/adw_data/sssf.db")]
-  E -->|"/sssf add a /health endpoint"| S
-  P -->|"uv run adws/adw_*.py"| A1
-  CH -->|"every event"| T
-  T -.->|"the operator reads it"| OP
-  OP -.->|"status, cost, findings, commits"| E
-```
+<p align="center">
+  <img src="../images/08_operator.svg" alt="The engineer's request goes through the operator session's sssf skill and cookbook, which launches a chain of agent and code phases; every event goes to the trace, which the operator reads to report status, cost, findings and commits" width="850">
+</p>
 
 You can be the operator yourself. Every chain is a `just` recipe, or a `uv run` line where there's no recipe, and [run.md](guide/run.md) shows each request both ways.
 
@@ -186,26 +171,9 @@ Most of it wasn't planned as a feature. Two pieces were asked for; the rest each
 - **Secret files** close a gap noted on 2026-11-03: a rule could stop `cat .env`, but not an agent's Read tool or `env`.
 - **The pre-push hook** came with the decision to make this fork public. It scans each push for secrets, and refuses any push from an agent.
 
-```mermaid
-flowchart TB
-  subgraph WRAP["agentsh wrap, when on"]
-    AG["Agent: Claude Code or pi"]
-  end
-  AG -->|"shell command"| CR{"command rules<br/>read the command's text"}
-  AG -->|"Read tool, env"| SF{"secret files"}
-  CR -->|"matches a rule"| NO["refused"]
-  SF -->|"listed file"| NO
-  CR -->|"no match"| RUN["the command runs"]
-  WRAP -.->|"each exec, file open and connection,<br/>checked at the system call"| RUN
-  RUN --> PH["phase ends"]
-  PH --> WG{"writes check<br/>git-directory guard"}
-  WG -->|"a change it wasn't allowed"| BACK["put back"]
-  WG -->|"allowed"| COM["the chain commits"]
-  COM --> PUSH{"pre-push hook"}
-  PUSH -->|"from an agent, or a secret in it"| NO2["push refused"]
-```
-
-The text checks read what the agent asks for. agentsh sees what actually runs.
+<p align="center">
+  <img src="../images/09_guards.svg" alt="Where each guard acts in one agent turn: command rules and secret files before a command or read, the writes check and git-directory guard after each phase, the pre-push hook at push, and agentsh around the agent at the system call" width="850">
+</p>
 
 Because a bug here passes its tests and quietly lets something through, guard code changes only through the hub's own chain, with a review whose one job is to find a bypass ([sssf.md](sssf.md#guard-changes)).
 
@@ -228,29 +196,9 @@ The limits:
 - agentsh wraps agents on this machine only. `repo.yaml` refuses `local_guard: agentsh` beside any `sandbox:` other than `none`. A `--sandbox` flag on such a repo runs in the VM, without agentsh.
 - The operator container's image has no agentsh, so in a repo on `local_guard: agentsh`, a run launched from the container refuses at its start check. Run such a repo's operator on the host.
 
-```mermaid
-flowchart TB
-  L(["one run"]) --> Q1{"sandbox:"}
-  Q1 -->|"none"| HOST
-  Q1 -->|"openshell"| OS
-  Q1 -->|"vercel or e2b"| VM
-  subgraph HOST["This machine"]
-    direction TB
-    G{"local_guard:"} -->|"text, the default"| TX["agents run as your user<br/>text checks"]
-    G -->|"agentsh"| AS["agents run under agentsh wrap<br/>text checks too"]
-  end
-  subgraph OS["OpenShell microVM"]
-    O1["a VM on this machine<br/>agents, checks and git in it<br/>text checks too<br/>code stays on the machine"]
-  end
-  subgraph VM["Vercel or E2B"]
-    V1["a VM in the cloud<br/>agents, checks and git in it<br/>text checks too<br/>code and an inference-only token<br/>are uploaded"]
-  end
-  OS --> WT["its own branch and worktree"]
-  VM --> WT
-  HOST -.-> WT2["the checked-out branch,<br/>or its own with --worktree"]
-```
-
-Where the operator runs is a separate choice. Either place can launch any of these, but a repo on agentsh needs its operator on the host.
+<p align="center">
+  <img src="../images/10_run_modes.svg" alt="Four cards: sandbox none with the text guard, sandbox none with agentsh, an OpenShell microVM, and a Vercel or E2B VM, each showing where agents run, which guards apply, what leaves the machine and which branch the run uses" width="850">
+</p>
 
 ### Local guards: text and agentsh
 

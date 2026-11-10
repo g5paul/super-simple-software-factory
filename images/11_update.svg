@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" width="1200" height="620" font-family="Inter, system-ui, sans-serif">
+<defs><style><![CDATA[ .title{font-weight:700;font-size:30px;fill:#FFFFFF;letter-spacing:-0.5px} .mono{font-family:'JetBrains Mono',ui-monospace,monospace} .nd{font-size:15px;fill:#FFFFFF} .lbl{font-size:12px;fill:#94A3B8} .hd3{font-weight:700;font-size:13px;fill:#FFFFFF} .foot{font-size:14px;fill:#CBD5E1} .warn{font-size:12px;fill:#FCA5A5} ]]></style>
+<marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#E2E8F0"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker></defs>
+<rect x="0" y="0" width="1200" height="620" rx="14" fill="#0B0F14" stroke="#1B2431"/>
+<text class="title" x="600.0" y="50" text-anchor="middle">Updating a repo to a newer skill</text>
+<rect x="40" y="120" width="200" height="90" rx="12" fill="#0F172A" stroke="#38BDF8" stroke-width="2"/>
+<text class="nd" x="140.0" y="150.0" text-anchor="middle">the hub's skill</text>
+<text class="lbl" x="140.0" y="170.0" text-anchor="middle">.claude/skills/sssf</text>
+<text class="lbl" x="140.0" y="190.0" text-anchor="middle">on main</text>
+<rect x="300" y="120" width="200" height="90" rx="12" fill="#0F172A" stroke="#A78BFA" stroke-width="2"/>
+<text class="nd" x="400.0" y="150.0" text-anchor="middle">just sssf-update</text>
+<text class="lbl" x="400.0" y="170.0" text-anchor="middle">on a short branch</text>
+<text class="lbl" x="400.0" y="190.0" text-anchor="middle">copies the skill in</text>
+<path d="M240,165 H296" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<path d="M500,165 H556" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<rect x="560" y="80" width="600" height="300" rx="14" fill="none" stroke="#E2E8F0" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text class="lbl mono" x="576" y="102" fill="#E2E8F0" style="fill:#E2E8F0">each file, by its stamp.json record</text>
+<text class="nd" x="590" y="150">unchanged in the repo</text>
+<rect x="960" y="128" width="180" height="50" rx="12" fill="#0F172A" stroke="#34D399" stroke-width="2"/>
+<text class="nd" x="1050.0" y="158.0" text-anchor="middle">replaced</text>
+<path d="M900,153 H956" fill="none" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#ag)"/>
+<text class="nd" x="590" y="235">changed in the repo,</text>
+<text class="lbl" x="590" y="255" text-anchor="start">nothing new in the skill</text>
+<rect x="960" y="213" width="180" height="50" rx="12" fill="#0F172A" stroke="#E2E8F0" stroke-width="2"/>
+<text class="nd" x="1050.0" y="243.0" text-anchor="middle">kept</text>
+<path d="M900,238 H956" fill="none" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#ag)"/>
+<text class="nd" x="590" y="320">changed in both</text>
+<text class="lbl" x="590" y="340" text-anchor="start">take it, or copy the change in and keep it</text>
+<rect x="960" y="298" width="180" height="50" rx="12" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+<text class="nd" x="1050.0" y="328.0" text-anchor="middle">flagged !</text>
+<path d="M900,323 H956" fill="none" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#ag)"/>
+<path d="M860,380 V405 H185 V436" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<rect x="40" y="440" width="290" height="80" rx="12" fill="#0F172A" stroke="#E2E8F0" stroke-width="2"/>
+<text class="nd" x="185.0" y="465.0" text-anchor="middle">check again</text>
+<text class="lbl" x="185.0" y="485.0" text-anchor="middle">install.py --update, until</text>
+<text class="lbl" x="185.0" y="505.0" text-anchor="middle">nothing is left to review</text>
+<rect x="380" y="440" width="240" height="80" rx="12" fill="#0F172A" stroke="#34D399" stroke-width="2"/>
+<text class="nd" x="500.0" y="475.0" text-anchor="middle">quality check</text>
+<text class="lbl" x="500.0" y="495.0" text-anchor="middle">just quality</text>
+<rect x="670" y="440" width="240" height="80" rx="12" fill="#0F172A" stroke="#E2E8F0" stroke-width="2"/>
+<text class="nd" x="790.0" y="475.0" text-anchor="middle">commit</text>
+<text class="lbl" x="790.0" y="495.0" text-anchor="middle">then fast-forward main</text>
+<rect x="960" y="440" width="200" height="80" rx="12" fill="#0F172A" stroke="#38BDF8" stroke-width="2" stroke-dasharray="6 5"/>
+<text class="nd" x="1060.0" y="465.0" text-anchor="middle">just projects</text>
+<text class="lbl" x="1060.0" y="485.0" text-anchor="middle">in the hub: every repo</text>
+<text class="lbl" x="1060.0" y="505.0" text-anchor="middle">against the hub</text>
+<path d="M330,480 H376" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<path d="M620,480 H666" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<path d="M910,480 H956" fill="none" stroke="#94A3B8" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<text class="foot" x="600.0" y="580" text-anchor="middle">The update never overwrites a file the repo changed. A flagged file waits for your take or keep.</text>
+</svg>

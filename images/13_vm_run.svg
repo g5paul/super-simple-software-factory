@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" width="1200" height="620" font-family="Inter, system-ui, sans-serif">
+<defs><style><![CDATA[ .title{font-weight:700;font-size:30px;fill:#FFFFFF;letter-spacing:-0.5px} .mono{font-family:'JetBrains Mono',ui-monospace,monospace} .nd{font-size:15px;fill:#FFFFFF} .lbl{font-size:12px;fill:#94A3B8} .hd3{font-weight:700;font-size:13px;fill:#FFFFFF} .foot{font-size:14px;fill:#CBD5E1} .warn{font-size:12px;fill:#FCA5A5} ]]></style>
+<marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#E2E8F0"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker></defs>
+<rect x="0" y="0" width="1200" height="620" rx="14" fill="#0B0F14" stroke="#1B2431"/>
+<text class="title" x="600.0" y="50" text-anchor="middle">A run in a VM</text>
+<rect x="40" y="85" width="420" height="440" rx="14" fill="none" stroke="#38BDF8" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text class="lbl mono" x="56" y="107" fill="#38BDF8" style="fill:#38BDF8">this machine</text>
+<rect x="70" y="125" width="360" height="75" rx="12" fill="#0F172A" stroke="#38BDF8" stroke-width="2"/>
+<text class="nd" x="250.0" y="157.5" text-anchor="middle">the chain, adw_*.py</text>
+<text class="lbl" x="250.0" y="177.5" text-anchor="middle">stays here and starts each command in the VM</text>
+<rect x="70" y="225" width="170" height="75" rx="12" fill="#0F172A" stroke="#E2E8F0" stroke-width="2"/>
+<text class="nd" x="155.0" y="257.5" text-anchor="middle">worktree</text>
+<text class="lbl" x="155.0" y="277.5" text-anchor="middle">sssf/&lt;adw_id&gt;</text>
+<rect x="260" y="225" width="170" height="75" rx="12" fill="#0F172A" stroke="#E2E8F0" stroke-width="2"/>
+<text class="nd" x="345.0" y="257.5" text-anchor="middle">trace</text>
+<text class="lbl" x="345.0" y="277.5" text-anchor="middle">sssf.db</text>
+<rect x="70" y="325" width="360" height="75" rx="12" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+<text class="nd" x="250.0" y="347.5" text-anchor="middle">the model credential</text>
+<text class="lbl" x="250.0" y="367.5" text-anchor="middle">Claude's inference-only token,</text>
+<text class="lbl" x="250.0" y="387.5" text-anchor="middle">or pi's ChatGPT token</text>
+<text class="lbl mono" x="250" y="435" text-anchor="middle">OBS_AUTH_TOKEN never leaves the machine</text>
+<text class="lbl mono" x="250" y="455" text-anchor="middle">the patch lands in the run's session folder</text>
+<rect x="740" y="85" width="420" height="440" rx="14" fill="none" stroke="#F59E0B" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text class="lbl mono" x="756" y="107" fill="#F59E0B" style="fill:#F59E0B">the VM: Vercel, E2B, or OpenShell</text>
+<rect x="770" y="125" width="360" height="75" rx="12" fill="#0F172A" stroke="#E2E8F0" stroke-width="2"/>
+<text class="nd" x="950.0" y="157.5" text-anchor="middle">a clone of the run's branch</text>
+<text class="lbl" x="950.0" y="177.5" text-anchor="middle">at the worktree's own path</text>
+<rect x="770" y="225" width="360" height="75" rx="12" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+<text class="nd" x="950.0" y="257.5" text-anchor="middle">agents</text>
+<text class="lbl" x="950.0" y="277.5" text-anchor="middle">get the model credential, nothing else</text>
+<rect x="770" y="325" width="360" height="75" rx="12" fill="#0F172A" stroke="#34D399" stroke-width="2"/>
+<text class="nd" x="950.0" y="357.5" text-anchor="middle">checks and git</text>
+<text class="lbl" x="950.0" y="377.5" text-anchor="middle">get no credential</text>
+<path d="M460,162 H736" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<text class="lbl mono" x="598" y="152" text-anchor="middle">the branch, cloned in</text>
+<path d="M460,345 H736" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<text class="lbl mono" x="598" y="335" text-anchor="middle">the credential, to agents only</text>
+<path d="M740,245 H464" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<text class="lbl mono" x="598" y="235" text-anchor="middle">commits, a git bundle each time</text>
+<path d="M740,285 H434" fill="none" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#ag)"/>
+<text class="lbl mono" x="598" y="305" text-anchor="middle">events, streamed to the trace</text>
+<path d="M740,470 H464" fill="none" stroke="#94A3B8" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<text class="lbl mono" x="598" y="460" text-anchor="middle">at the end: uncommitted work,</text>
+<text class="lbl mono" x="598" y="492" text-anchor="middle">saved as a patch, not applied</text>
+<text class="foot" x="600.0" y="575" text-anchor="middle">The VM is deleted at the end of the run. OpenShell keeps the code on this machine; Vercel and E2B upload it.</text>
+</svg>

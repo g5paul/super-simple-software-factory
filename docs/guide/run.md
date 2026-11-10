@@ -161,6 +161,10 @@ Each run's `max_run_cost` holds for that run alone, so two runs can spend twice 
 
 `just tickets` builds a feature one ticket at a time, from a folder you write with the engineer's skills ([Matt Pocock's](https://github.com/mattpocock/skills) `/to-spec` and `/to-tickets`, tested at commit `a496f55`) or by hand:
 
+<p align="center">
+  <img src="../../images/14_tickets.svg" alt="A committed feature folder is read and ordered, scouted once, then each ticket is built test-first, verified and committed; two reviews and the documenter follow, then just merge" width="850">
+</p>
+
 ```
 .scratch/case-convert/
 ├── spec.md                          # needs a "## Testing Decisions" section naming the test seams
@@ -243,6 +247,10 @@ The first start built the image. The session wrote its own prompt for the chain,
 ## In a VM
 
 `--sandbox vercel` or `--sandbox e2b` runs the agents, checks and git in a VM made for the run. It implies `--worktree`, so you merge as usual. These two ran at once, Vercel on the Claude roster and E2B on ChatGPT:
+
+<p align="center">
+  <img src="../../images/13_vm_run.svg" alt="The chain stays on this machine and sends the branch and the model credential into the VM; commits come back as git bundles, events stream to the trace, and uncommitted work comes back as a patch before the VM is deleted" width="850">
+</p>
 
 ```console
 $ just sdlc "Add textkit.count_lowercase(text), ..." --sandbox vercel

@@ -260,6 +260,10 @@ A run checks the service, the build and the installed policy before it starts, a
 
 When this repo's skill changes, bring an installed repo up to it:
 
+<p align="center">
+  <img src="../../images/11_update.svg" alt="just sssf-update copies the hub's skill in; each file is replaced, kept or flagged by its stamp record; then check again, run the quality check, commit and fast-forward main" width="850">
+</p>
+
 ```bash
 echo "SSSF_SOURCE=$HOME/github/super-simple-software-factory/.claude/skills/sssf" >> .env   # once
 just sssf-update

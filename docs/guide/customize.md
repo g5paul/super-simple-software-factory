@@ -153,6 +153,8 @@ This fork is built to be cut down. The parts that serve only this hub, and are s
 - `local.just`, the hub's recipes for those reports and the guard chain;
 - `docs/projects.md`, `docs/sssf.md` and `docs/open.md`: the repos this hub runs, how it runs SSSF on itself, and its list of open work.
 
+This hub's own `repo.yaml` sets `local_guard: agentsh`, which needs a build of agentsh that isn't published yet. Set it to `text` in your fork, or every run there refuses to start.
+
 Keep the `agent_rules` in this hub's `repo.yaml` unless you want agents to push. They refuse `git push` and the `gh` commands their pattern lists, such as `gh pr create` and `gh api`.
 
 The stamped chains you never run can go too, in an installed repo. `install.py --update` adds back any stamped file that's missing, so a deleted chain returns with each update. Delete it again in the update's commit.

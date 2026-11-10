@@ -76,7 +76,7 @@ This earns its keep when the same workflow runs a hundred times. For a one-off c
 
 The shape matters more than the parts, so take this fork as upstream asked you to take it. The checks, prompts and roster are starters for your repo, and [customize.md](docs/guide/customize.md) says where each lives.
 
-Some parts serve only this hub, and a fork can delete them: the guard chain that reviews changes to SSSF's own enforcement code, the project reports `adws/check_projects.py`, `adws/levers.py` and `adws/features.py` with their tests, the hub's recipes in `local.just`, [docs/projects.md](docs/projects.md), [docs/sssf.md](docs/sssf.md), and [docs/open.md](docs/open.md). [customize.md](docs/guide/customize.md#strip-what-you-dont-need) lists the files.
+Some parts serve only this hub, and a fork can delete them: the guard chain that reviews changes to SSSF's own enforcement code, the project reports `adws/check_projects.py`, `adws/levers.py` and `adws/features.py` with their tests, the hub's recipes in `local.just`, [docs/projects.md](docs/projects.md), [docs/sssf.md](docs/sssf.md), and [docs/open.md](docs/open.md). [customize.md](docs/guide/customize.md#strip-what-you-dont-need) lists the files. The hub's own `adws/adw_sssf_config/repo.yaml` sets `local_guard: agentsh`, which needs an agentsh build that isn't published yet, so set it to `text` in your fork. A repo you install SSSF into starts on `text`.
 
 ## Credit
 

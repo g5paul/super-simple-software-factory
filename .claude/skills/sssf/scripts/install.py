@@ -371,6 +371,8 @@ def skill_change(root: Path, src: Path, base_sha256: str) -> str | None:
     change by hand, this is the diff to read. It looks back through the
     history of whichever git repo holds the template (the skill source, or
     the repo's own copy of the skill) for the version the stamp recorded.
+    HEAD comes first: when HEAD has that version, the diff from HEAD is the same
+    one, and a session reads an older commit's hash as a stale hint.
     """
     def git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, check=False)
@@ -380,7 +382,7 @@ def skill_change(root: Path, src: Path, base_sha256: str) -> str | None:
         return None
     top_dir = Path(top.stdout.decode().strip()).resolve()
     rel = src.resolve().relative_to(top_dir).as_posix()
-    commits = git(top_dir, "log", "--format=%h", "-n", "200", "--", rel).stdout.decode().split()
+    commits = ["HEAD"] + git(top_dir, "log", "--format=%h", "-n", "200", "--", rel).stdout.decode().split()
     for commit in commits:
         blob = git(top_dir, "show", f"{commit}:{rel}")
         if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == base_sha256:

@@ -316,6 +316,9 @@ def test_a_hand_run_without_a_source_keeps_saying_the_recorded_skill(repo, monke
 def test_a_flagged_file_shows_the_skills_own_change(repo):
     # Stamped from quality.py as it was before 253e22e changed the template.
     rel = "templates/adws/adw_modules/quality.py"
+    if subprocess.run(["git", "-C", str(SKILL), "cat-file", "-e", "253e22e"],
+                      capture_output=True).returncode != 0:
+        pytest.skip("the skill's git history isn't here: an installed repo's copy has none of the hub's commits")
     old = subprocess.run(["git", "-C", str(SKILL), "show", f"253e22e~1:./{rel}"],
                          capture_output=True, check=True).stdout
     customize_quality()
@@ -703,3 +706,27 @@ def test_read_stamp_has_one_try():
     for call in (n for n in ast.walk(func) if isinstance(n, ast.Call)):
         name = getattr(call.func, "attr", getattr(call.func, "id", ""))
         assert name != "setrecursionlimit"
+
+
+def test_the_skills_change_diffs_from_head_when_head_has_the_stamped_template(tmp_path):
+    # A project's skill copy: the template arrived two updates ago, an unrelated
+    # commit came after, and the update has just written the new template.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sssf_install", SKILL / "scripts" / "install.py")
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t",
+                               *args], capture_output=True, text=True, check=True).stdout.strip()
+    git("init", "-q")
+    template = tmp_path / "templates" / "quality.py"
+    template.parent.mkdir()
+    template.write_text("old\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "the template arrives")
+    (tmp_path / "other").write_text("x\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "an update that left the template alone")
+    base = hashlib.sha256(b"old\n").hexdigest()
+    template.write_text("new\n")
+    assert installer.skill_change(tmp_path, template, base) == "git diff HEAD -- templates/quality.py"

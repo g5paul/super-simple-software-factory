@@ -100,7 +100,7 @@ A repo installed before `stamp.json` existed has no record. Its first update rep
 
 Run the update the way the repo takes any change: on a short branch cut from `main`, then fast-forward `main` to it and delete the branch. A repo whose own rules say otherwise follows its rules. Never run it while a chain is going: it refuses anyway.
 
-1. Resolve every `!` file with `--take` or `--keep`, and run the update again until `to review` is 0.
+1. Resolve every `!` file with `--take` or `--keep`, then check with `uv run .claude/skills/sssf/scripts/install.py --update` until `to review` is 0. `just sssf-update` refuses here, since the files you resolved leave the tree dirty.
 2. Read `git status` and `git diff`. Expect the files the update listed, `stamp.json`, and the skill copy under `.claude/skills/sssf/`. A file you did not expect is a question for the hub, not something to commit.
 3. If the update listed `repo.yaml`, bring in its new settings. For a `!` `repo.yaml`, copy in the skill's change first, keeping the repo's own values, then `--keep` it. Then decide each setting the repo's copy didn't have before, and give each a one-line comment saying why. These edits go into the update commit.
    - `max_worktree_runs`: how many worktree runs go at once. The default is 2. Is `quality.py` safe to run twice at the same moment? Two runs check in two folders at once, so a check that binds a fixed port, writes a fixed temp path, or uses one shared test database breaks the other run's checks. If it isn't safe, write 1.

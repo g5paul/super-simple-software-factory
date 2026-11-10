@@ -94,9 +94,10 @@ def test_update_adds_the_hook_to_an_older_install(repo):
 
 
 def test_the_hubs_hook_is_the_template():
-    hub = SKILL.parent.parent.parent / ".githooks" / "pre-push"
-    if not hub.exists():
+    # Only the hub links its hook to the template; an installed repo has its own copy.
+    if not (SKILL.parents[2] / "adws" / "adw_guard_change.py").is_file():
         pytest.skip("not the hub checkout")
+    hub = SKILL.parents[2] / ".githooks" / "pre-push"
     assert hub.resolve() == TEMPLATE.resolve()
 
 

@@ -957,7 +957,18 @@ Left from the report:
 - **uv's hardlinks.** uv hardlinks cache files into a venv. In a venv built outside the wrap, an agent that writes a site-packages file in place changes that file in the engineer's `~/.cache/uv`. `config.md` now says agents no longer write `~/.cache/uv`, which isn't so for those venvs. `main` had the same hole.
 - **`${PROJECT_ROOT}`** is expanded by the engine, where SSSF's escaping can't reach. If the fork puts the root into a glob as raw text, the workspace, `.git` and secret-file rules widen or miss for a checkout path with glob characters. Unchecked on the engine.
 
-The policy changes, so the engineer reinstalls it before `check_machine` passes again. Then the check set and the real runs show what the new rules let through.
+**Installed and probed, 2026-11-10.** The engineer installed the new policy, and the real `check_machine` passes on the hub. Under the hub's policy, with the variables `cache_env` sets, from the hub's root:
+
+- These work: `uv run --no-project --with pyyaml`, the hub's own `uv run`, `uv venv` (its `python` links to `/usr/bin/python3`), `uv pip install` into that venv, `bun add`, and a link to `/usr/bin/python3` in the workspace. `uv cache dir` and `npm config get cache` name folders in the agent cache. Claude Code under the policy ran both uv commands and exited 0 in 10 seconds.
+- These are refused: writes to the engineer's `~/.cache/uv`, `~/.local/bin` and `~/.npm`, a read of a sibling repo's README, a link to `/etc/shadow`, and `uv pip install` with `UV_CACHE_DIR` set back to `~/.cache/uv`.
+
+Three things the probes found:
+
+- **The folders above the workspace can be listed.** In ptrace mode agentsh judges opening a folder as `open`, and reading its entries isn't a separate check, so the `open` that `sssf-config-folders` allows lets `ls` list them. `/`, `/home` and the home folder were listable on `main` too. `~/github` wasn't, and now an agent can read the names of the engineer's other repos there, though nothing inside them. The spec's never-item, no `list` on a folder above the workspace that the baseline didn't let an agent list, doesn't hold on the engine.
+- **npm fails under the wrap.** It opens `~/.npmrc`, which doesn't exist here, gets EACCES instead of ENOENT and stops on loading its config. `main` has no rule for that file either. With `npm_config_userconfig` pointed at a file in the agent cache, `npm install` worked.
+- **pnpm fails on this machine with or without the wrap.** Corepack fetches pnpm 12.18.0, which Corepack's shim can't start, and the engineer's own `pnpm` fails the same way. agentsh isn't involved.
+
+The event log also had two `sendto` denials under `default-deny-network` with no address, from processes the probe started; their source isn't known. The check set wasn't rerun: its policies and the binary are the same as for `dd9`.
 
 ## What got built
 
@@ -998,3 +1009,4 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 9. **Signals**, an eleventh fork patch in the same build. Run 8a727544 turned `trace.signal` on, added the rules and pinned the build, in skill 63828cf. Installed and probed on the service on 2026-11-10 ([the probes](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)). The spec's last check, a guard run under `local_guard: agentsh`, passed with run 130ca6e0. The first try, 45742573, stopped on the hub's own tests.
 10. **`config.md`'s example pi pattern** misses pi after a wrapper word (`env pi`, `timeout 60 pi`, `bash -c '...'`), which run 6e904be8's review found. `config.md` should list it as a known limit of the text guard, through the guard chain.
 11. **The three items left by run 130ca6e0** ([the run](#the-tool-config-run-under-agentsh-130ca6e0)): the agent-cache folder as a moved link on a worktree run, uv's hardlinks into the engineer's cache, and whether the engine escapes `${PROJECT_ROOT}`. The last needs a probe on the fork's engine. The other two go in `config.md`'s limits at least, through the guard chain.
+12. **Two fixes from the tool-config probes** ([the probes](#the-tool-config-run-under-agentsh-130ca6e0)), through the guard chain: `cache_env` points `npm_config_userconfig` into the agent cache, and listing `~/github` is either stopped or recorded. Stopping it needs a fork patch that judges a folder opened for reading its entries as `list`, and a check that uv, bun and Corepack still work without listing.

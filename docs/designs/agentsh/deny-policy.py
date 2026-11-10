@@ -33,7 +33,7 @@ CLAUDE_CONFIG = [f"${{HOME}}/.claude/{p}" for p in (
     "settings.json", "settings.local.json", "CLAUDE.md", "AGENTS.md",
     "skills/**", "rules/**", "hooks/**", "agents/**", "commands/**",
 )]
-WRITE_OPS = ["write", "create", "delete", "rename", "link", "symlink", "mkdir", "rmdir", "chmod", "chown"]
+WRITE_OPS = ["write", "create", "delete", "rename", "link", "symlink", "symlink_target", "mkdir", "rmdir", "chmod", "chown"]
 
 SYSTEM_READ = ["/usr", "/usr/**", "/lib", "/lib/**", "/lib64", "/lib64/**", "/bin", "/bin/**",
                "/sbin", "/sbin/**", "/opt", "/opt/**", "/etc", "/etc/**", "/sys", "/sys/**",
@@ -58,15 +58,19 @@ HOME_CONFIG = ["${HOME}/.bunfig.toml"]
 # `read`: uv walks ancestors with is_dir/metadata/canonicalize (stat, access, readlink) and
 # opens the file by path, never reading a folder's entries. bun opens each folder, and on
 # EACCES from listing it treats the folder as empty and goes on. Corepack makes no folder call.
-# In ptrace mode the engine judges opening a folder as `open` and doesn't check reading its
-# entries apart from that, so this rule lets an agent list these folders; see config.md.
+# From build 05b3777f the engine judges reading a folder's entries (getdents64/getdents) as
+# `list`, so these folders can be opened and checked but not listed; see config.md.
 FOLDER_OPS = ["open", "stat", "readlink", "access"]
-# An absolute link into a system folder, for `uv venv`'s bin/python -> /usr/bin/python3.12.
-# Safe because /usr/bin is root:root 755 and flat, and /bin is a root-owned link to it (or a
-# root-owned 755 folder), so no agent can make a link whose own path is inside them: the
-# kernel refuses. /usr/lib, /usr/local, /opt, /mnt and /etc are left out on purpose: users
-# own or can write folders there.
-SYSTEM_LINK = ["/usr/bin/**", "/bin/**"]
+# An absolute link into a system folder, for `uv venv`'s bin/python -> /usr/bin/python3.12,
+# or at a uv-managed interpreter. The rule allows a link's *target* only: the engine (build
+# 05b3777f) judges a link's own path as `symlink` and its target as `symlink_target`, so the
+# rule lets no agent make a link inside these trees. /usr/bin is root-owned anyway. Agents
+# can't write ~/.local/share/uv at all (no rule allows it), and a link at a path there is
+# judged as `symlink`, which no rule allows. The glob covers the interpreter a venv on a
+# uv-managed Python links to; the engine resolves the target through links first, so uv's
+# minor-version folder links reach the patch folder's bin/python3.x. /usr/lib, /usr/local,
+# /opt, /mnt and /etc are left out on purpose: users own or can write folders there.
+SYSTEM_LINK = ["/usr/bin/**", "/bin/**", "${HOME}/.local/share/uv/python/*/bin/python3.*"]
 # A denied mkdir of an existing parent answers EACCES where the kernel says EEXIST.
 MKDIR_PARENTS = ["/", "/home", "/tmp", "/run", "/run/user", "/run/user/*", "${HOME}", "${HOME}/.cache",
                  "${HOME}/.local", "${HOME}/.local/state", "${HOME}/.local/share", "${HOME}/.config"]
@@ -76,8 +80,12 @@ TEMP = ["/tmp", "/tmp/**", "/var/tmp", "/var/tmp/**", "/dev/shm", "/dev/shm/**"]
 FD_LEAVES = ["/proc/*/fd/*", "/proc/*/task/*/fd/*"]
 DEVICES = ["/dev/null", "/dev/zero", "/dev/tty", "/dev/ptmx", "/dev/pts/**", "/dev/urandom",
            "/dev/random", "/dev/fd/**", "/dev/stdin", "/dev/stdout", "/dev/stderr"]
+# The home folder itself can be opened and checked but not listed, because its entries are the
+# engineer's files and repos. Agents read the files and folders under it that HOME_READ names,
+# and those stay listable.
+HOME_FOLDER = ["${HOME}"]
 HOME_READ = [f"${{HOME}}{p}" for p in (
-    "", "/.bashrc", "/.profile", "/.bash_profile", "/.bash_login", "/.editrc", "/.inputrc",
+    "/.bashrc", "/.profile", "/.bash_profile", "/.bash_login", "/.editrc", "/.inputrc",
     "/.gitconfig", "/.config", "/.config/git/**", "/.config/uv/**", "/.cargo", "/.cargo/env",
     "/.cargo/bin/**", "/.local", "/.local/bin/**", "/.nvm/**", "/.rustup/**",
     "/.local/share/uv/python", "/.local/share/uv/python/**",
@@ -168,7 +176,8 @@ def file_rules(git_dir, agent, *, sessions, refuse_script):
         rule("sssf-config-search", search, READ, "allow"),
         rule("sssf-config-folders", folders, FOLDER_OPS, "allow"),
         rule("sssf-system-read", SYSTEM_READ, READ, "allow"),
-        rule("sssf-system-link", SYSTEM_LINK, ["symlink"], "allow"),
+        rule("sssf-system-link", SYSTEM_LINK, ["symlink_target"], "allow"),
+        rule("sssf-home-folder", HOME_FOLDER, FOLDER_OPS, "allow"),
         rule("sssf-home-read", HOME_READ, READ, "allow"),
         rule("sssf-default-deny", ["/", "/**"], ALL, "deny"),
     ]

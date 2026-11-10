@@ -1463,9 +1463,10 @@ class Rules:
         return next((r["decision"] for r in self.rules if r["name"] == name), "deny")
 
     def link(self, link_path: str, target: str) -> str:
-        """The engine checks the link's path and the raw target, and the first deny wins."""
-        for each in (link_path, target):
-            name = self.first_match(each, "symlink")
+        """Build 05b3777f judges the link's own path as `symlink` and the raw target as
+        `symlink_target`; the first deny wins."""
+        for each, op in ((link_path, "symlink"), (target, "symlink_target")):
+            name = self.first_match(each, op)
             if self.decision(name) == "deny":
                 return name
         return "allow"
@@ -1556,8 +1557,16 @@ def test_absolute_links_work_as_on_main(world):
     r = world.rules
     assert r.link(f"{world.R}/.venv/bin/python",
                   f"{world.MAIN}/adws/adw_data/agent-cache/uv-python/cpython/bin/python3.12") == "allow"
-    assert r.decision(r.link(f"{world.R}/.venv/bin/python",
-                             f"{HOME}/.local/share/uv/python/cpython/bin/python3.12")) == "deny"
+    assert r.link(f"{world.R}/.venv/bin/python",
+                  f"{HOME}/.local/share/uv/python/cpython/bin/python3.12") == "allow"
+    for target in (f"{world.G}/config", f"{world.G}/hooks/pre-push",
+                   f"{world.MAIN}/.git/config", f"{world.MAIN}/.git/hooks/pre-push"):
+        assert r.link(f"{world.R}/l", target) == "sssf-git-config", target
+    for target in (f"{HOME}/.claude/settings.json", f"{HOME}/.claude/skills/x/SKILL.md"):
+        if world.claude:
+            assert r.link(f"{world.R}/l", target) == "sssf-agent-config", target
+        else:
+            assert r.decision(r.link(f"{world.R}/l", target)) == "deny", target
     assert r.link(f"{world.R}/l", f"{world.R}/src/a") == "allow"
     assert r.link(f"{world.R}/l", f"{world.R}/package.json") == "allow"
     assert r.link(f"{world.S}/x/l", f"{world.S}/x/plan.md") == "allow"
@@ -1575,20 +1584,22 @@ MAIN_FILE_RULES = [   # b307ef3's agentsh_guard.py
     "sssf-workspace", "sssf-git-data", "sssf-main-config", "sssf-temp", "sssf-devices",
     "sssf-fd-leaves", "sssf-mkdir-parents", "sssf-tool-write", "sssf-agent-write",
     "sssf-config-search", "sssf-system-read", "sssf-home-read",
-    "sssf-default-deny"]
+    "sssf-default-deny"]   # plus sssf-home-folder, added with build 05b3777f
 
 
 def test_the_file_rule_order_matches_main_around_the_new_allows(world):
     order = [x["name"] for x in world.rules.rules]
     assert order.index("sssf-workspace") == order.index("sssf-git-config") + 1
     assert order.index("sssf-sessions") == order.index("sssf-git-data") + 1
-    assert order[-2:] == ["sssf-home-read", "sssf-default-deny"]
+    assert order[-3:] == ["sssf-home-folder", "sssf-home-read", "sssf-default-deny"]
+    assert order.index("sssf-home-folder") == order.index("sssf-system-link") + 1
     assert order.index("sssf-agent-cache") == order.index("sssf-sessions") + 1
     assert order.index("sssf-config-folders") == order.index("sssf-config-search") + 1
     assert order.index("sssf-system-link") == order.index("sssf-system-read") + 1
     assert "sssf-tool-write" not in order
     wanted = (set(MAIN_FILE_RULES) - {"sssf-tool-write"}) | {
-        "sssf-sessions", "sssf-agent-cache", "sssf-config-folders", "sssf-system-link"} | (
+        "sssf-sessions", "sssf-agent-cache", "sssf-config-folders", "sssf-system-link",
+        "sssf-home-folder"} | (
         {"sssf-refuse-script", "sssf-agent-config", "sssf-agent-read"} if world.claude else set())
     assert set(order) == wanted and len(order) == len(wanted)
 
@@ -1707,7 +1718,7 @@ def test_config_lookups_pass_and_the_rest_is_denied(main, harness, worktree):
         assert r.decision(r.first_match(f"{main}/README.md", "write")) == "deny"
     listed = [f"{d.rstrip('/')}/{n}" for d in above for n in CONFIG_FILES] + above
     for path in listed:
-        for op in ("write", "create", "delete", "symlink"):
+        for op in ("write", "create", "delete", "symlink", "symlink_target"):
             assert r.decision(r.first_match(path, op)) == "deny", (path, op)
 
 
@@ -1749,16 +1760,55 @@ def test_links_to_system_pythons(harness):
     for target in ("/usr/lib/x86_64-linux-gnu/libc.so.6", "/usr/local/bin/python3", "/opt/py/bin/python3",
                    "/mnt/c/x", "/etc/passwd", "/proc/self/cwd/x"):
         assert r.decision(r.link(f"{main}/l", target)) == "deny", target
-    assert agentsh_guard.SYSTEM_LINK == ["/usr/bin/**", "/bin/**"]
-    # A link to a managed interpreter stays refused: the engine judges a link's own path and its
-    # target by one rule list, so allowing the target would let an agent plant a link in the
-    # engineer's tree that points at a file it wrote.
+    assert agentsh_guard.SYSTEM_LINK == [
+        "/usr/bin/**", "/bin/**", "${HOME}/.local/share/uv/python/*/bin/python3.*"]
+    assert rule_of(shipped_text(main, harness), "sssf-system-link")["operations"] == ["symlink_target"]
+    # A link to a managed interpreter works: build 05b3777f judges a link's target apart from its
+    # own path, and no rule allows a link's own path in the engineer's uv tree.
     install = f"{HOME}/.local/share/uv/python/cpython-3.13.10-linux-x86_64-gnu"
-    for target in (f"{install}/bin/python3.13", f"{install}/lib/python3.13/os.py"):
+    assert r.link(f"{main}/.v/bin/python", f"{install}/bin/python3.13") == "allow"
+    for target in (f"{install}/lib/python3.13/os.py", f"{install}/bin/pip",
+                   f"{HOME}/.local/share/uv/tools/ruff/bin/ruff", f"{HOME}/.local/share/uv/python/x"):
         assert r.decision(r.link(f"{main}/.v/bin/python", target)) == "deny", target
-    for path in (f"{install}/bin/python3.99", f"{install}/lib/python3.13/site-packages/sitecustomize.py"):
+    for path in (f"{install}/bin/python3.99", f"{install}/lib/python3.13/site-packages/sitecustomize.py",
+                 f"{HOME}/.local/share/uv/python/x", f"{HOME}/.local/share/uv/x"):
         for target in ("/usr/bin/python3.12", f"{main}/evil.sh", "/tmp/evil.sh"):
             assert r.decision(r.link(path, target)) == "deny", (path, target)
+    for glob in agentsh_guard.SYSTEM_LINK:
+        assert r.first_match(glob.replace("${HOME}", HOME), "symlink") != "sssf-system-link", glob
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "pi"])
+def test_links_judge_the_target_apart_from_the_path(harness):
+    text = shipped_text(MAINS[0], harness)
+    assert "symlink_target" in rule_of(text, "sssf-git-config")["operations"]
+    if harness == "claude_code":
+        assert "symlink_target" in rule_of(text, "sssf-agent-config")["operations"]
+    for rule_ in yaml.safe_load(text)["file_rules"]:
+        if rule_["decision"] == "allow" and rule_["operations"] != ["*"] \
+                and "symlink_target" in rule_["operations"]:
+            assert rule_["name"] == "sssf-system-link", rule_["name"]
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "pi"])
+@pytest.mark.parametrize("main", MAINS + ["/srv/repo"])
+def test_the_home_folder_is_opened_not_listed(harness, main):
+    text = shipped_text(main, harness)
+    r = Rules(text, HOME, main)
+    folder = rule_of(text, "sssf-home-folder")
+    assert folder == {"name": "sssf-home-folder", "paths": ["${HOME}"],
+                      "operations": agentsh_guard.FOLDER_OPS, "decision": "allow"}
+    assert "${HOME}" not in rule_of(text, "sssf-home-read")["paths"]
+    assert r.decision(r.first_match(HOME, "list")) == "deny"
+    for op in agentsh_guard.FOLDER_OPS:
+        assert r.decision(r.first_match(HOME, op)) == "allow", op
+    for path in ("/", "/home", f"{HOME}/.config", f"{HOME}/.local/share/uv/python", main):
+        assert r.decision(r.first_match(path, "list")) == "allow", path
+    for path in (f"{HOME}/github", f"{HOME}/github/sibling"):
+        assert r.decision(r.first_match(path, "list")) == "deny", path
+    assert r.decision(r.first_match(f"{HOME}/github/sibling/README.md", "read")) == "deny"
+    if harness == "claude_code":
+        assert r.decision(r.first_match(f"{HOME}/.claude", "list")) == "allow"
 
 
 def test_read_sets_the_agent_cache_in_the_main_checkout(tmp_path, monkeypatch):

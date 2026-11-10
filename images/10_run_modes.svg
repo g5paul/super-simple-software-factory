@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" font-family="Inter, system-ui, sans-serif">
+<defs><style><![CDATA[ .title{font-weight:700;font-size:30px;fill:#FFFFFF;letter-spacing:-0.5px} .mono{font-family:'JetBrains Mono',ui-monospace,monospace} .nd{font-size:15px;fill:#FFFFFF} .lbl{font-size:12px;fill:#94A3B8} .hd3{font-weight:700;font-size:13px;fill:#FFFFFF} .foot{font-size:14px;fill:#CBD5E1} .warn{font-size:12px;fill:#FCA5A5} ]]></style>
+<marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#E2E8F0"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker></defs>
+<rect x="0" y="0" width="1200" height="640" rx="14" fill="#0B0F14" stroke="#1B2431"/>
+<text class="title" x="600.0" y="50" text-anchor="middle">Where a run runs</text>
+<rect x="40" y="90" width="265" height="440" rx="12" fill="#0F172A" stroke="#38BDF8" stroke-width="2"/>
+<text class="nd mono" x="172.5" y="122" text-anchor="middle" style="fill:#38BDF8">sandbox: none</text>
+<text class="lbl mono" x="172.5" y="144" text-anchor="middle">local_guard: text, the default</text>
+<line x1="56" y1="160" x2="289" y2="160" stroke="#475569"/>
+<text class="lbl mono" x="60" y="192" text-anchor="start">where the agents run</text>
+<text class="nd" x="60" y="216">agents run as your user</text>
+<text class="nd" x="60" y="236">on this machine</text>
+<text class="lbl mono" x="60" y="280" text-anchor="start">guards</text>
+<text class="nd" x="60" y="304">text checks</text>
+<text class="lbl mono" x="60" y="368" text-anchor="start">what leaves the machine</text>
+<text class="nd" x="60" y="392">nothing</text>
+<text class="lbl mono" x="60" y="456" text-anchor="start">branch</text>
+<text class="nd" x="60" y="480">checked-out branch,</text>
+<text class="nd" x="60" y="500">or --worktree</text>
+<rect x="325" y="90" width="265" height="440" rx="12" fill="#0F172A" stroke="#F87171" stroke-width="2"/>
+<text class="nd mono" x="457.5" y="122" text-anchor="middle" style="fill:#F87171">sandbox: none</text>
+<text class="lbl mono" x="457.5" y="144" text-anchor="middle">local_guard: agentsh</text>
+<line x1="341" y1="160" x2="574" y2="160" stroke="#475569"/>
+<text class="lbl mono" x="345" y="192" text-anchor="start">where the agents run</text>
+<text class="nd" x="345" y="216">agents run under</text>
+<text class="nd" x="345" y="236">agentsh wrap</text>
+<text class="lbl mono" x="345" y="280" text-anchor="start">guards</text>
+<text class="nd" x="345" y="304">text checks</text>
+<text class="nd" x="345" y="324">and agentsh</text>
+<text class="lbl mono" x="345" y="368" text-anchor="start">what leaves the machine</text>
+<text class="nd" x="345" y="392">nothing</text>
+<text class="lbl mono" x="345" y="456" text-anchor="start">branch</text>
+<text class="nd" x="345" y="480">checked-out branch,</text>
+<text class="nd" x="345" y="500">or --worktree</text>
+<rect x="610" y="90" width="265" height="440" rx="12" fill="#0F172A" stroke="#34D399" stroke-width="2"/>
+<text class="nd mono" x="742.5" y="122" text-anchor="middle" style="fill:#34D399">sandbox: openshell</text>
+<text class="lbl mono" x="742.5" y="144" text-anchor="middle">a microVM on this machine</text>
+<line x1="626" y1="160" x2="859" y2="160" stroke="#475569"/>
+<text class="lbl mono" x="630" y="192" text-anchor="start">where the agents run</text>
+<text class="nd" x="630" y="216">agents, checks and git</text>
+<text class="nd" x="630" y="236">in the VM</text>
+<text class="lbl mono" x="630" y="280" text-anchor="start">guards</text>
+<text class="nd" x="630" y="304">text checks</text>
+<text class="lbl mono" x="630" y="368" text-anchor="start">what leaves the machine</text>
+<text class="nd" x="630" y="392">nothing</text>
+<text class="lbl mono" x="630" y="456" text-anchor="start">branch</text>
+<text class="nd" x="630" y="480">its own branch</text>
+<text class="nd" x="630" y="500">and worktree</text>
+<rect x="895" y="90" width="265" height="440" rx="12" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+<text class="nd mono" x="1027.5" y="122" text-anchor="middle" style="fill:#F59E0B">sandbox: vercel or e2b</text>
+<text class="lbl mono" x="1027.5" y="144" text-anchor="middle">a VM in the cloud</text>
+<line x1="911" y1="160" x2="1144" y2="160" stroke="#475569"/>
+<text class="lbl mono" x="915" y="192" text-anchor="start">where the agents run</text>
+<text class="nd" x="915" y="216">agents, checks and git</text>
+<text class="nd" x="915" y="236">in the VM</text>
+<text class="lbl mono" x="915" y="280" text-anchor="start">guards</text>
+<text class="nd" x="915" y="304">text checks</text>
+<text class="lbl mono" x="915" y="368" text-anchor="start">what leaves the machine</text>
+<text class="nd" x="915" y="392">the code and an</text>
+<text class="nd" x="915" y="412">inference-only token</text>
+<text class="lbl mono" x="915" y="456" text-anchor="start">branch</text>
+<text class="nd" x="915" y="480">its own branch</text>
+<text class="nd" x="915" y="500">and worktree</text>
+<text class="foot" x="600.0" y="575" text-anchor="middle">agentsh needs sandbox: none. Where the operator runs is a separate choice,</text>
+<text class="foot" x="600.0" y="597" text-anchor="middle">and a repo on agentsh needs its operator on the host.</text>
+</svg>

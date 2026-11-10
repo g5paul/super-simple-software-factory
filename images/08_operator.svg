@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" width="1100" height="600" font-family="Inter, system-ui, sans-serif">
+<defs><style><![CDATA[ .title{font-weight:700;font-size:30px;fill:#FFFFFF;letter-spacing:-0.5px} .mono{font-family:'JetBrains Mono',ui-monospace,monospace} .nd{font-size:15px;fill:#FFFFFF} .lbl{font-size:12px;fill:#94A3B8} .hd3{font-weight:700;font-size:13px;fill:#FFFFFF} .foot{font-size:14px;fill:#CBD5E1} .warn{font-size:12px;fill:#FCA5A5} ]]></style>
+<marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#E2E8F0"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker></defs>
+<rect x="0" y="0" width="1100" height="600" rx="14" fill="#0B0F14" stroke="#1B2431"/>
+<text class="title" x="550.0" y="50" text-anchor="middle">The operator session</text>
+<rect x="40" y="110" width="170" height="70" rx="12" fill="#0F172A" stroke="#38BDF8" stroke-width="2"/>
+<text class="nd" x="125.0" y="150.0" text-anchor="middle">Engineer</text>
+<rect x="400" y="82" width="660" height="150" rx="14" fill="none" stroke="#A78BFA" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text class="lbl mono" x="416" y="104" fill="#A78BFA" style="fill:#A78BFA">operator session · Claude Code, on the host or in the container</text>
+<rect x="425" y="120" width="180" height="80" rx="12" fill="#0F172A" stroke="#A78BFA" stroke-width="2"/>
+<text class="nd" x="515.0" y="165.0" text-anchor="middle">sssf skill</text>
+<rect x="640" y="120" width="180" height="80" rx="12" fill="#0F172A" stroke="#A78BFA" stroke-width="2"/>
+<text class="nd" x="730.0" y="165.0" text-anchor="middle">cookbook</text>
+<rect x="855" y="120" width="180" height="80" rx="12" fill="#0F172A" stroke="#A78BFA" stroke-width="2"/>
+<text class="nd" x="945.0" y="155.0" text-anchor="middle">writes the prompt,</text>
+<text class="nd" x="945.0" y="175.0" text-anchor="middle">launches the chain</text>
+<path d="M210,135 H421" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<text class="lbl mono" x="305" y="108" text-anchor="middle">/sssf add a</text>
+<text class="lbl mono" x="305" y="124" text-anchor="middle">/health endpoint</text>
+<path d="M400,170 H214" fill="none" stroke="#94A3B8" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<text class="lbl mono" x="305" y="192" text-anchor="middle">status, cost,</text>
+<text class="lbl mono" x="305" y="208" text-anchor="middle">findings, commits</text>
+<path d="M605,160 H636" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<path d="M820,160 H851" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<rect x="400" y="330" width="660" height="160" rx="14" fill="none" stroke="#F59E0B" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text class="lbl mono" x="416" y="352" fill="#F59E0B" style="fill:#F59E0B">chain · code owns the loop</text>
+<rect x="425" y="375" width="180" height="90" rx="12" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+<text class="nd" x="515.0" y="405.0" text-anchor="middle">agent phase</text>
+<text class="lbl" x="515.0" y="425.0" text-anchor="middle">own prompt, tools,</text>
+<text class="lbl" x="515.0" y="445.0" text-anchor="middle">session</text>
+<rect x="640" y="375" width="180" height="90" rx="12" fill="#0F172A" stroke="#34D399" stroke-width="2"/>
+<text class="nd" x="730.0" y="415.0" text-anchor="middle">code phase</text>
+<text class="lbl" x="730.0" y="435.0" text-anchor="middle">checks, gates</text>
+<rect x="855" y="375" width="180" height="90" rx="12" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+<text class="nd" x="945.0" y="405.0" text-anchor="middle">agent phase</text>
+<text class="lbl" x="945.0" y="425.0" text-anchor="middle">own prompt, tools,</text>
+<text class="lbl" x="945.0" y="445.0" text-anchor="middle">session</text>
+<path d="M605,420 H636" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<path d="M820,420 H851" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<path d="M945,200 V326" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<text class="lbl mono" x="935" y="270" text-anchor="end">uv run adws/adw_*.py</text>
+<ellipse cx="180" cy="380" rx="110" ry="16" fill="#0F172A" stroke="#E2E8F0" stroke-width="1.8"/>
+<path d="M70,380 V450 A110,16 0 0 0 290,450 V380" fill="#0F172A" stroke="#E2E8F0" stroke-width="1.8"/>
+<ellipse cx="180" cy="380" rx="110" ry="16" fill="#0F172A" stroke="#E2E8F0" stroke-width="1.8"/>
+<text class="nd" x="180" y="420" text-anchor="middle">trace</text>
+<text class="lbl mono" x="180" y="442" text-anchor="middle">adws/adw_data/sssf.db</text>
+<path d="M400,420 H294" fill="none" stroke="#E2E8F0" stroke-width="1.8" marker-end="url(#aw)"/>
+<text class="lbl mono" x="347" y="410" text-anchor="middle">every event</text>
+<path d="M180,364 V275 H500 V236" fill="none" stroke="#94A3B8" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+<text class="lbl mono" x="190" y="300" text-anchor="start">the operator reads it</text>
+<text class="foot" x="550.0" y="550" text-anchor="middle">The operator sees the trace, never an agent's context.</text>
+</svg>

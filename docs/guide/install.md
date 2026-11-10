@@ -237,6 +237,24 @@ For a local, free microVM instead, `--sandbox openshell` needs only `just opensh
 
 A Vercel or E2B run uploads the repo's code to that provider; an OpenShell run keeps it on this machine. Keep a private repo on `sandbox: none`, the default, or `sandbox: openshell` in `adws/adw_sssf_config/repo.yaml`, and use a VM only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [run.md](run.md#in-a-vm) has an example run.
 
+## Turn on agentsh, optional
+
+Every repo starts on `local_guard: text`, the checks SSSF runs on each agent's commands. `local_guard: agentsh` adds a second guard for runs on this machine: each agent runs under agentsh, which denies files, commands and hosts at the system call. [concepts.md](../concepts.md#local-guards-text-and-agentsh) says what each guard covers and where agentsh is untested. Leave it off unless the repo fits that case.
+
+It needs the agentsh service, installed as root, with the one build SSSF pins. That build comes from the hub's fork of agentsh, whose patches aren't published yet, so for now it works only where that build is installed. Then, once per repo, and again whenever `secret_files`, `deny_exec` or `network_allow` change:
+
+1. Set `local_guard: agentsh` in `adws/adw_sssf_config/repo.yaml`, and leave `sandbox` at `none`.
+2. From the repo, run the installer from a clean checkout of the SSSF hub at the repo's skill version:
+
+   ```bash
+   uv run --directory ~/github/super-simple-software-factory .claude/skills/sssf/scripts/agentsh_install.py --repo "$PWD"
+   ```
+
+   It writes the repo's policy and shows a diff against what's in `/etc/agentsh/`, then prints `sudo` lines. It never runs `sudo` itself.
+3. Read the diff, stop every agent, and run the printed lines yourself.
+
+A run checks the service, the build and the installed policy before it starts, and refuses with a message naming the fix. [config.md](../../.claude/skills/sssf/references/config.md) has the full list of checks and known limits.
+
 ## Update to a newer skill
 
 When this repo's skill changes, bring an installed repo up to it:

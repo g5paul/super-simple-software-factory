@@ -19,8 +19,8 @@ SSSF is a Claude Code skill that installs a software factory into a repo. The fa
 - agents on a Claude or ChatGPT subscription, with no API key;
 - spend caps per call, run, repo and machine, and a stop before a usage window runs out;
 - a branch and worktree per run, several runs at once, and trials that race two rosters on one request;
-- the operator session in a container, and runs in a Vercel or E2B VM;
-- rules each repo owns, enforced on every shell command an agent runs;
+- the [operator session](docs/concepts.md#the-operator-session), the Claude Code session that launches and watches chains, in a container, and runs in an OpenShell, Vercel or E2B VM;
+- rules each repo owns, enforced on every shell command an agent runs, and agentsh as an opt-in second guard on this machine ([where a run runs](docs/concepts.md#where-a-run-runs));
 - a guard chain that reviews every change to that enforcement before it merges.
 
 [docs/fork.md](docs/fork.md) lists each change and links its design.
@@ -58,7 +58,7 @@ The session picks a chain, launches it, watches the trace, and reports the resul
 | [Watch](docs/guide/watch.md) | the terminal recipes, the dashboard, and the trace in SQL |
 | [Customize](docs/guide/customize.md) | your checks, prompts, roster, caps and rules |
 | [Troubleshooting](docs/guide/troubleshooting.md) | what each stop and refusal means |
-| [Concepts](docs/concepts.md) | how a run is built: phases, agents, envelopes, gates, the trace |
+| [Concepts](docs/concepts.md) | how a run is built: the operator session, phases, agents, guards, where a run runs, gates, the trace |
 
 [docs/README.md](docs/README.md) lists the rest, and keeps them apart from the pages about how this hub runs.
 

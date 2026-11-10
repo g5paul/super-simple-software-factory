@@ -11,7 +11,7 @@ Read these in order the first time.
 | [guide/watch.md](guide/watch.md) | following a run from the terminal, the dashboard or SQL |
 | [guide/customize.md](guide/customize.md) | your checks, prompts, roster, caps and rules, and what a fork can strip |
 | [guide/troubleshooting.md](guide/troubleshooting.md) | what each stop and refusal means, and what to do |
-| [concepts.md](concepts.md) | how a run is built: ADWs, phases, agents, gates, the trace |
+| [concepts.md](concepts.md) | how a run is built: the operator session, ADWs, phases, agents, guards, where a run runs (host, container, VM, text guard or agentsh), gates, the trace |
 | [secret-scan.md](secret-scan.md) | the pre-push hook that scans for secrets |
 | [fork.md](fork.md) | what this fork changed from upstream |
 

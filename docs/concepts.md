@@ -1,6 +1,6 @@
 # How SSSF works
 
-This page explains the parts every run is made of: ADWs, phases, agents, guards, envelopes, gates, the trace, and the caps. You don't need it to run SSSF; the [guide](guide/) is enough for that. Read it when you want to change a chain, add a gate, or understand why a run stopped.
+This page explains the parts every run is made of: the operator session, ADWs, phases, agents, guards, where a run runs, envelopes, gates, the trace, and the caps. You don't need it to run SSSF; the [guide](guide/) is enough for that. Read it when you want to change a chain, add a gate, or understand why a run stopped.
 
 <p align="center">
   <img src="../images/01_factory_spine.svg" alt="A run spine: engineer, agent, and code phases on a deterministic rail, every event dropping into a SQLite trace db that the UI polls" width="850">
@@ -17,6 +17,19 @@ Give one agent a whole task and you can't say which step failed. "Done" means th
 SSSF puts the control in Python instead. An ADW (AI Developer Workflow) is a short script in `adws/` that runs a fixed list of phases. The script decides the order, the retries, and what counts as done. An agent does the work inside one phase and hands back a typed report. Code checks the report before the next phase starts.
 
 A step whose command you already know stays code. Running `pytest` or `bun test` isn't a judgement call, so no agent spends a context window finding the test runner. When the suite fails, the failure goes back to the builder the same way an agent's report would.
+
+## The operator session
+
+You ask for work in a Claude Code session in the repo, such as `/sssf add a /health endpoint, on its own branch`. That session is the operator. The `sssf` skill sends the request to a cookbook. The session then writes the chain's prompt, launches the chain with `uv run adws/adw_<chain>.py`, follows the trace, and reports the adw_id, status, cost and commits. The cookbooks keep it from reading into the app or editing it. That's the planner's and the builder's job, inside the chain.
+
+The agents in a chain are separate processes, each with its own system prompt, tools and session. The operator doesn't see their context, only the trace. So "the operator" always means your session, and "an agent" means one of the chain's.
+
+You can be the operator yourself. Every chain is a `just` recipe, or a `uv run` line where there's no recipe, and [run.md](guide/run.md) shows each request both ways.
+
+The operator session runs in one of two places:
+
+- **On the host**, in your usual Claude Code. Its auto mode blocks the command that launches a chain, so you approve each launch.
+- **In the operator container**, started with `container/run.sh`. Claude Code runs there with `--dangerously-skip-permissions`, and can reach only the repo and `~/.config/sssf`, so it launches chains without asking. Its agents run in the container too. [install.md](guide/install.md#run-the-operator-session-in-a-container) has the setup.
 
 ## ADWs
 
@@ -156,7 +169,41 @@ Most of it wasn't planned as a feature. Two pieces were asked for; the rest each
 
 Because a bug here passes its tests and quietly lets something through, guard code changes only through the hub's own chain, with a review whose one job is to find a bypass ([sssf.md](sssf.md#guard-changes)).
 
-The guards stop an agent's mistakes. They don't stop an agent set on getting past them: a command can write to its own harness's output stream, for one. Against that, the fix is isolation, a VM or a separate user, not another pattern. [open.md](open.md) tracks what's left.
+The guards stop an agent's mistakes. They don't stop an agent set on getting past them: a command can write to its own harness's output stream, for one. Against that, the fix is isolation, not another pattern: a VM, or agentsh on this machine ([Where a run runs](#where-a-run-runs)). [open.md](open.md) tracks what's left.
+
+## Where a run runs
+
+A run makes four choices. They're separate, apart from the limits below the table.
+
+| Choice | Options | Default | Set with |
+|---|---|---|---|
+| Where the [operator session](#the-operator-session) runs | Claude Code on the host, or the operator container | the host | `container/run.sh` |
+| Where the agents, checks and git run | this machine, an OpenShell microVM on it, or a Vercel or E2B VM | this machine | `--sandbox <name>` for one run, `sandbox:` in `repo.yaml` for the repo |
+| Which local guard wraps agents on this machine | `text` or `agentsh` | `text` | `local_guard:` in `repo.yaml` |
+| Which branch the run works on | the checked-out branch, or its own branch and worktree | the checked-out branch | `--worktree`, which every VM run implies ([below](#branches-and-worktrees)) |
+
+The limits:
+
+- A VM run always gets its own branch and worktree.
+- agentsh wraps agents on this machine only. `repo.yaml` refuses `local_guard: agentsh` beside any `sandbox:` other than `none`. A `--sandbox` flag on such a repo runs in the VM, without agentsh.
+- The operator container's image has no agentsh, so in a repo on `local_guard: agentsh`, a run launched from the container refuses at its start check. Run such a repo's operator on the host.
+
+### Local guards: text and agentsh
+
+The **text guard** is the [guards above](#guards), and it's on in every mode, VM or not. The command rules read each shell command's text before it runs. The secret-file checks keep listed files from the Read tool and from `env`. After each phase, the `writes` check and the git-directory guard put back what an agent wasn't allowed to change. Text can be spelled many ways, so a command the patterns don't recognize gets through. Its patterns have been frozen since 2026-11-08, while agentsh replaces them.
+
+**agentsh** runs each agent on this machine as `agentsh wrap`, under a policy SSSF generates from `repo.yaml`'s `secret_files`, `deny_exec` and `network_allow`. It traces the real calls with ptrace rather than reading command text. File access is deny by default: an agent may write its workspace and its tools' folders, read system files, and nothing else, so secret files and other repos stay closed. It refuses commands such as `git push` at exec, and agents reach only the model hosts, package registries and the hosts you list. The text checks stay on beside it. It's opt-in and comes with conditions:
+
+- the engineer installs the agentsh service as root, running the `sudo` lines that `agentsh_install.py` prints;
+- SSSF accepts only one build of the hub's patched fork of agentsh, by its sha256, and the fork's patches aren't published yet ([install.md](guide/install.md#before-you-start) has the version);
+- it's tested only on Python repos with a Claude Code roster, and a pi roster has no policy yet;
+- uv, pnpm and venvs fail under it in some layouts, which [config.md](../.claude/skills/sssf/references/config.md) lists with the other known limits.
+
+[The design](designs/agentsh-local-sandbox.md) has the evidence and the decisions.
+
+### Choosing
+
+For everyday work, run on this machine under the text guard. Pick a VM when a command the rules miss mustn't reach the machine, as [run.md](guide/run.md#which-to-pick) explains. OpenShell keeps the code on the machine, and Vercel and E2B upload it. Pick `local_guard: agentsh` when you want file and network limits on runs on this machine, and the repo fits the tested case above.
 
 ## Envelopes
 

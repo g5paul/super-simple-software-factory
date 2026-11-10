@@ -182,7 +182,7 @@ Each attempt is a full `adw_simple_sdlc` run, so a trial costs one run per roste
 
 ## In the container
 
-With `container/run.sh`, the operator session runs in Podman and launches chains without asking you to approve each one. Here it ran headless, with a request in plain words:
+With `container/run.sh`, the [operator session](../concepts.md#the-operator-session) runs in Podman and launches chains without asking you to approve each one. Here it ran headless, with a request in plain words:
 
 ```console
 $ container/run.sh -p 'Use the sssf skill (/sssf) for this: add textkit.count_uppercase(text), which counts the uppercase letters in a text, so Hello World gives 2. Export it from textkit and test it. Build it with the plan-build-test chain on the main roster, then report the adw_id, status, cost and commit.'
@@ -242,6 +242,8 @@ None of these is the default. A run with no flag runs on this machine, and SSSF'
 - **`vercel` or `e2b`** for a pi agent on ChatGPT, for a machine without KVM, or to run several at once off this machine. Both upload the branch to the provider and use its free allowance.
 
 Whether the rules against harm outside the repo can go in a VM mode is still open, after a few weeks of runs.
+
+On this machine, a repo can also run its agents under agentsh with `local_guard: agentsh`, a second guard beside the text checks. It's opt-in and has its own limits; [concepts.md](../concepts.md#where-a-run-runs) sets out all four choices a run makes, and [install.md](install.md#turn-on-agentsh-optional) has the setup.
 
 `sandbox: vercel`, `sandbox: e2b` or `sandbox: openshell` in `repo.yaml` makes a VM the repo's default, and `--sandbox none` keeps one run local. [install.md](install.md#set-up-remote-vms) has the setup.
 

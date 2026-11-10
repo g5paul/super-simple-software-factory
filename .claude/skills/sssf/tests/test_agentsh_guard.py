@@ -399,7 +399,8 @@ def test_the_agents_caches_are_set_for_both_harnesses_and_beat_the_engineers(mac
     for harness in ("claude_code", "pi"):
         dump = tmp_path / f"dump-{harness}.json"
         env = {"FAKE_DUMP": str(dump), "PATH": "/usr/bin:/bin", "UV_CACHE_DIR": "/x",
-               "NPM_CONFIG_CACHE": "/y", "Cargo_Home": "/z"}
+               "NPM_CONFIG_CACHE": "/y", "Cargo_Home": "/z",
+               "NPM_CONFIG_USERCONFIG": "/home/u/.npmrc"}
         launch(machine, harness, cmd=[sys.executable, "-c", "pass"], env=env).wait()
         seen[harness] = json.loads(dump.read_text())["env"]
     want = agentsh_guard.cache_env(guard.agent_cache)
@@ -407,8 +408,11 @@ def test_the_agents_caches_are_set_for_both_harnesses_and_beat_the_engineers(mac
         assert all(env.get(k) == v and v.startswith(guard.agent_cache + "/") for k, v in want.items())
         assert {k for k in env if k.lower() in {w.lower() for w in want}} == set(want)
         assert "NPM_CONFIG_CACHE" not in env and "Cargo_Home" not in env
+        assert "NPM_CONFIG_USERCONFIG" not in env
     assert {k: seen["pi"][k] for k in want} == {k: seen["claude_code"][k] for k in want}
     assert want["UV_PYTHON_BIN_DIR"] == want["UV_TOOL_BIN_DIR"] == f"{guard.agent_cache}/bin"
+    assert want["npm_config_userconfig"] == f"{guard.agent_cache}/npmrc"
+    assert want["npm_config_init_module"] == f"{guard.agent_cache}/npm-init.js"
     assert (Path(guard.agent_cache).stat().st_mode & 0o777) == 0o700
 
 
@@ -1722,6 +1726,11 @@ def test_agent_caches_are_open_and_the_engineers_are_closed(harness):
         path = path.replace("~", HOME)
         for op in ("write", "create", "mkdir"):
             assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+    install = f"{HOME}/.local/share/uv/python/cpython-3.13.10-linux-x86_64-gnu"
+    for path in (f"{install}/bin/python3.13", f"{install}/lib/python3.13/site-packages/x.pth",
+                 f"{HOME}/.local/share/uv/python/.lock", f"{HOME}/.npmrc"):
+        for op in ("write", "create", "mkdir", "rename", "delete", "link", "chmod"):
+            assert r.decision(r.first_match(path, op)) == "deny", (path, op)
     for path in ("~/.local/share/uv/python/cpython-3.12/bin/python3.12", "~/.local/share/uv/tools/ruff/bin/ruff"):
         assert r.decision(r.first_match(path.replace("~", HOME), "read")) == "allow"
     for path in ("~/.cache/uv/x", "~/.npm/x", "~/.local/share/uv/credentials/credentials.toml"):
@@ -1741,6 +1750,15 @@ def test_links_to_system_pythons(harness):
                    "/mnt/c/x", "/etc/passwd", "/proc/self/cwd/x"):
         assert r.decision(r.link(f"{main}/l", target)) == "deny", target
     assert agentsh_guard.SYSTEM_LINK == ["/usr/bin/**", "/bin/**"]
+    # A link to a managed interpreter stays refused: the engine judges a link's own path and its
+    # target by one rule list, so allowing the target would let an agent plant a link in the
+    # engineer's tree that points at a file it wrote.
+    install = f"{HOME}/.local/share/uv/python/cpython-3.13.10-linux-x86_64-gnu"
+    for target in (f"{install}/bin/python3.13", f"{install}/lib/python3.13/os.py"):
+        assert r.decision(r.link(f"{main}/.v/bin/python", target)) == "deny", target
+    for path in (f"{install}/bin/python3.99", f"{install}/lib/python3.13/site-packages/sitecustomize.py"):
+        for target in ("/usr/bin/python3.12", f"{main}/evil.sh", "/tmp/evil.sh"):
+            assert r.decision(r.link(path, target)) == "deny", (path, target)
 
 
 def test_read_sets_the_agent_cache_in_the_main_checkout(tmp_path, monkeypatch):

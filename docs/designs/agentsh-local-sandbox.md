@@ -945,7 +945,7 @@ The spec took three reviews. The first asked for two things: say that moving `UV
 
 What changed:
 
-- **Config lookups.** A new rule, `sssf-config-folders`, allows `open`, `stat`, `readlink` and `access` on each folder above the workspace, each operation cited from uv's, bun's or Corepack's source, and `sssf-config-search` allows reads of the tools' config file names in those folders. `list` stays denied on the folders.
+- **Config lookups.** A new rule, `sssf-config-folders`, allows `open`, `stat`, `readlink` and `access` on each folder above the workspace, each operation cited from uv's, bun's or Corepack's source, and `sssf-config-search` allows reads of the tools' config file names in those folders. `list` stays denied on the folders, by the rule; on the engine the `open` lists them ([the probes below](#the-tool-config-run-under-agentsh-130ca6e0)).
 - **Agent caches.** Under the wrap, each tool's cache and install folders point at `adws/adw_data/agent-cache` in the main checkout, through the tools' environment variables, set in `start()`. The policy drops the write allow on the engineer's own caches and allows the agent folder instead. Reads of the engineer's managed Pythons and uv tools stay allowed.
 - **System links.** `sssf-system-link` allows a link whose target is under `/usr/bin` or `/bin`, so `uv venv` can link the system Python by an absolute path.
 

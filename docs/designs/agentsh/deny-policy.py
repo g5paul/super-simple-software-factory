@@ -58,6 +58,8 @@ HOME_CONFIG = ["${HOME}/.bunfig.toml"]
 # `read`: uv walks ancestors with is_dir/metadata/canonicalize (stat, access, readlink) and
 # opens the file by path, never reading a folder's entries. bun opens each folder, and on
 # EACCES from listing it treats the folder as empty and goes on. Corepack makes no folder call.
+# In ptrace mode the engine judges opening a folder as `open` and doesn't check reading its
+# entries apart from that, so this rule lets an agent list these folders; see config.md.
 FOLDER_OPS = ["open", "stat", "readlink", "access"]
 # An absolute link into a system folder, for `uv venv`'s bin/python -> /usr/bin/python3.12.
 # Safe because /usr/bin is root:root 755 and flat, and /bin is a root-owned link to it (or a

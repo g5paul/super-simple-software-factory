@@ -76,4 +76,6 @@ agent_rules:
 # Rollout step 3 of docs/designs/agentsh-local-sandbox.md: the hub's own agents run
 # under the agentsh service. The install comes from the separate clone ~/github/sssf-install:
 #   uv run --directory ~/github/sssf-install .claude/skills/sssf/scripts/agentsh_install.py --repo <this checkout>
-local_guard: agentsh
+# Text for one guard run, specs/tasks/guard-test-fixture-commands.md: under agentsh its builder
+# would run the old tests and be stopped. Back to agentsh once that run merges.
+local_guard: text

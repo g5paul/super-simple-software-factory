@@ -1,11 +1,18 @@
 # SSSF starter recipes. Stamped by install.py, then yours to edit.
 #
-# Deliberately small. These are the handful you need on day one: run something,
-# watch it, and open the trace. Add your own as your chains grow.
+# One recipe for each chain and each command you run by hand: run something,
+# watch it, land it, set up the container or a VM. `install.py` itself has none,
+# since it's what writes this file.
+#
+# Put recipes of your own in local.just, beside this file. It's loaded when it
+# exists, and an update never touches it, so this file stays the skill's and
+# `just sssf-update` can replace it.
 
 # `.env` reaches every ADW through this, so keys work without exporting them.
 set dotenv-load
 set positional-arguments
+
+import? 'local.just'
 
 # Every recipe passes this through, so `SSSF_CONFIG=other.yaml just sdlc "..."`
 # swaps the whole roster for one run.
@@ -61,6 +68,33 @@ sdlc *ARGS:
 # the full chain, plus review and docs: just simple-sdlc "add a /health endpoint"
 simple-sdlc *ARGS:
     uv run adws/adw_simple_sdlc.py --config {{config}} "$@"
+
+# The chains below take the same arguments, and most join an earlier run with
+# --adw-id, which is how two runs chain by hand.
+
+# builder only, on a plan that exists: just build "implement the plan" --adw-id <id>
+build *ARGS:
+    uv run adws/adw_build.py --config {{config}} "$@"
+
+# builder, tests, fix loop: just build-test "implement the plan" --adw-id <id>
+build-test *ARGS:
+    uv run adws/adw_build_test.py --config {{config}} "$@"
+
+# builder, reviewer, revise loop: just build-review "add a /health endpoint"
+build-review *ARGS:
+    uv run adws/adw_build_review.py --config {{config}} "$@"
+
+# plan, build, test and every quality.py check, then commit: just sdlc-quality "..."
+sdlc-quality *ARGS:
+    uv run adws/adw_plan_build_test_quality.py --config {{config}} "$@"
+
+# a write-up of what shipped, from the diff: just document "the /health endpoint"
+document *ARGS:
+    uv run adws/adw_document.py --config {{config}} "$@"
+
+# quality.py's checks, no agent: just quality "check after the SSSF update"
+quality *ARGS:
+    uv run adws/adw_quality.py --config {{config}} "$@"
 
 # build an approved feature folder from mattpocock/skills, one ticket at a time:
 # just tickets .scratch/summaries/   (see cookbooks/tickets.md)
@@ -198,6 +232,15 @@ openshell-setup:
     openshell status
     echo "Next: adw_simple_sdlc --worktree --sandbox openshell"
 
+# Once per E2B team, from a repo whose .env has E2B_API_KEY. It uses the key, so
+# it refuses inside a run, like openshell-setup.
+# build SSSF's E2B VM template, which --sandbox e2b makes each VM from
+e2b-template *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -z "${SSSF_ADW_ID:-}" ] || { echo "Refusing: e2b-template is the engineer's to run, outside an SSSF run (SSSF_ADW_ID is set)." >&2; exit 1; }
+    exec uv run .claude/skills/sssf/scripts/e2b_template.py "$@"
+
 # Name other repos' traces to add theirs: just sandbox-usage ../other/adws/adw_data/sssf.db
 # what VM runs used of Vercel's and E2B's free allowances
 sandbox-usage *ARGS:
@@ -214,6 +257,35 @@ kill ADW_ID:
 # while the tree has uncommitted changes, so the update gets its own commit, or
 # while a recorded chain process is still alive. For a file it lists with `!`,
 # run install.py --update --take PATH or --keep PATH yourself.
+
+# The operator session in Podman, with --dangerously-skip-permissions; it needs
+# container/, which install.py --container stamps. Pass -p '<request>' to run one
+# request headless. It refuses inside a run.
+# start the operator session in its container: just container
+container *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -z "${SSSF_ADW_ID:-}" ] || { echo "Refusing: container is the engineer's to run, outside an SSSF run (SSSF_ADW_ID is set)." >&2; exit 1; }
+    [ -x container/run.sh ] || { echo "no container/run.sh here: stamp it with install.py --container (see the install guide)" >&2; exit 1; }
+    exec container/run.sh "$@"
+
+# For `local_guard: agentsh`. It runs agentsh_install.py from the SSSF hub, a clean
+# checkout at this repo's skill version: HUB if given, else the repo that holds
+# SSSF_SOURCE. It prints the sudo lines and never runs them. It refuses inside a run.
+# write this repo's agentsh policy and print the sudo lines: just agentsh-install [HUB]
+agentsh-install HUB="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -z "${SSSF_ADW_ID:-}" ] || { echo "Refusing: agentsh-install is the engineer's to run, outside an SSSF run (SSSF_ADW_ID is set)." >&2; exit 1; }
+    hub="{{HUB}}"
+    if [ -z "$hub" ]; then
+        src="${SSSF_SOURCE:-}"
+        [ -n "$src" ] || { echo "pass the hub's path, or set SSSF_SOURCE in .env to its skill folder" >&2; exit 1; }
+        src="${src/#\~/$HOME}"
+        hub="$(cd "${src%/}/../../.." && pwd)"
+    fi
+    common="$(git rev-parse --path-format=absolute --git-common-dir)"
+    exec uv run --directory "${hub/#\~/$HOME}" .claude/skills/sssf/scripts/agentsh_install.py --repo "$(dirname "$common")"
 
 # check that Claude Code agents can sign in, with the agents' own environment
 login-check:
@@ -279,6 +351,15 @@ sssf-update:
     else
         echo "next: read git status and git diff, then: git add -A && git commit -m \"Update SSSF to skill $rev\""
     fi
+
+# After an update flags a file you changed that the skill changed too.
+# take the skill's version of a flagged file: just take <path>
+take PATH:
+    uv run .claude/skills/sssf/scripts/install.py --update --take "$1"
+
+# keep your version of a flagged file, recorded as reviewed: just keep <path>
+keep PATH:
+    uv run .claude/skills/sssf/scripts/install.py --update --keep "$1"
 
 # ── observability UI ────────────────────────────────────────────────────────
 

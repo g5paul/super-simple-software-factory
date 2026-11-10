@@ -1,8 +1,15 @@
 """All three matchers see through a backslash-newline.
 
 A shell drops a backslash followed by a newline before it reads a command, so
-`ju\\<newline>st test live` runs `just test live`. rules.breach, sssf_refuse.py
-and pi's extension (sssf_rules.ts) also search the command with those removed.
+`no\\<newline>such-sssf-fixture test live` runs `nosuch-sssf-fixture test live`.
+rules.breach, sssf_refuse.py and pi's extension (sssf_rules.ts) also search the
+command with those removed.
+
+The rows run a stub named `nosuch-sssf-fixture` in place of the `just` live-test
+command, because the hub's agentsh policy refuses that command in every process
+and counts each refusal toward the stop, so a builder that ran these tests under
+agentsh would be stopped. No real program has that name, nor either fragment a
+split leaves (`no`, `such-sssf-fixture`).
 
 Run from the skill root:
     uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests
@@ -30,50 +37,51 @@ from test_rules_multiline import _bun_handler, _pi_block
 
 NL = "\n"
 BS = "\\"
-LIVE = rules.AgentRule(rule="no live tests", forbid=[r"\bjust\s+test\s+live\b"], on_match="refuse")
+FIXTURE = "nosuch-sssf-fixture"
+LIVE = rules.AgentRule(rule="no live tests", forbid=[r"\bnosuch-sssf-fixture\s+test\s+live\b"], on_match="refuse")
 PI = rules.AgentRule(rule="no nested pi", forbid=[r"(^|[;&|]\s*)pi\b"], on_match="refuse")
-END = rules.AgentRule(rule="no live tests at the end", forbid=[r"\bjust\s+test\s+live$"], on_match="refuse")
+END = rules.AgentRule(rule="no live tests at the end", forbid=[r"\bnosuch-sssf-fixture\s+test\s+live$"], on_match="refuse")
 RULES = {"LIVE": LIVE, "PI": PI, "END": END}
 
-JUST, PIRUN, NONE = "just test live", "pi -p hi", None
+FIXTURE_RUN, PIRUN, NONE = "nosuch-sssf-fixture test live", "pi -p hi", None
 
 # (rule, command, matches, what real bash runs)
 ROWS = [
-    ("LIVE", f"ju{BS}{NL}st test live", True, JUST),
-    ("LIVE", f"just test {BS}{NL}live", True, JUST),
-    ("LIVE", f"just {BS}{NL}test {BS}{NL}live", True, JUST),
-    ("LIVE", f"{BS}{NL}just test live", True, JUST),
-    ("LIVE", f"ju{BS}{NL}{BS}{NL}st test live", True, JUST),
-    ("LIVE", f"echo hi{NL}ju{BS}{NL}st test live", True, JUST),
-    ("LIVE", f"true; {BS}{NL}ju{BS}{NL}st test live", True, JUST),
-    ("LIVE", f"a=1 {BS}{NL}ju{BS}{NL}st test live", True, JUST),
-    ("LIVE", f"echo $(ju{BS}{NL}st test live)", True, JUST),
-    ("LIVE", f"bash -c 'ju{BS}{NL}st test live'", True, JUST),
-    ("LIVE", f"bash -c 'just test {BS}{NL}live'", True, JUST),
-    ("LIVE", f"cat <<'EOF' | bash{NL}ju{BS}{NL}st test live{NL}EOF", True, JUST),
-    ("LIVE", f"bash <<'EOF'{NL}just test {BS}{NL}live{NL}EOF", True, JUST),
-    ("LIVE", f"eval 'ju{BS}{NL}st test live'", True, JUST),
-    ("LIVE", f'bash -c "ju{BS}{BS}{NL}st test live"', True, JUST),
-    ("LIVE", f"bash <<EOF{NL}ju{BS}{BS}{NL}st test live{NL}EOF", True, JUST),
-    ("LIVE", "just test live", True, JUST),
+    ("LIVE", f"no{BS}{NL}such-sssf-fixture test live", True, FIXTURE_RUN),
+    ("LIVE", f"nosuch-sssf-fixture test {BS}{NL}live", True, FIXTURE_RUN),
+    ("LIVE", f"nosuch-sssf-fixture {BS}{NL}test {BS}{NL}live", True, FIXTURE_RUN),
+    ("LIVE", f"{BS}{NL}nosuch-sssf-fixture test live", True, FIXTURE_RUN),
+    ("LIVE", f"no{BS}{NL}{BS}{NL}such-sssf-fixture test live", True, FIXTURE_RUN),
+    ("LIVE", f"echo hi{NL}no{BS}{NL}such-sssf-fixture test live", True, FIXTURE_RUN),
+    ("LIVE", f"true; {BS}{NL}no{BS}{NL}such-sssf-fixture test live", True, FIXTURE_RUN),
+    ("LIVE", f"a=1 {BS}{NL}no{BS}{NL}such-sssf-fixture test live", True, FIXTURE_RUN),
+    ("LIVE", f"echo $(no{BS}{NL}such-sssf-fixture test live)", True, FIXTURE_RUN),
+    ("LIVE", f"bash -c 'no{BS}{NL}such-sssf-fixture test live'", True, FIXTURE_RUN),
+    ("LIVE", f"bash -c 'nosuch-sssf-fixture test {BS}{NL}live'", True, FIXTURE_RUN),
+    ("LIVE", f"cat <<'EOF' | bash{NL}no{BS}{NL}such-sssf-fixture test live{NL}EOF", True, FIXTURE_RUN),
+    ("LIVE", f"bash <<'EOF'{NL}nosuch-sssf-fixture test {BS}{NL}live{NL}EOF", True, FIXTURE_RUN),
+    ("LIVE", f"eval 'no{BS}{NL}such-sssf-fixture test live'", True, FIXTURE_RUN),
+    ("LIVE", f'bash -c "no{BS}{BS}{NL}such-sssf-fixture test live"', True, FIXTURE_RUN),
+    ("LIVE", f"bash <<EOF{NL}no{BS}{BS}{NL}such-sssf-fixture test live{NL}EOF", True, FIXTURE_RUN),
+    ("LIVE", "nosuch-sssf-fixture test live", True, FIXTURE_RUN),
     ("PI", f"p{BS}{NL}i -p hi", True, PIRUN),
     ("PI", f"echo hi{NL}p{BS}{NL}i -p hi", True, PIRUN),
     ("PI", f"true; p{BS}{NL}i -p hi", True, PIRUN),
     ("PI", f"echo hi {BS}{NL}pi -p hi", True, NONE),
-    ("END", f"just test live{BS}{NL}", True, JUST),
-    ("LIVE", f"just test{BS}{NL}live", False, "just testlive"),
-    ("LIVE", "just test unit", False, "just test unit"),
+    ("END", f"nosuch-sssf-fixture test live{BS}{NL}", True, FIXTURE_RUN),
+    ("LIVE", f"nosuch-sssf-fixture test{BS}{NL}live", False, "nosuch-sssf-fixture testlive"),
+    ("LIVE", "nosuch-sssf-fixture test unit", False, "nosuch-sssf-fixture test unit"),
     ("PI", f"echo pi{BS}{NL}p install x", False, NONE),
-    ("LIVE", f"ju{BS}\r{NL}st test live", False, NONE),
+    ("LIVE", f"no{BS}\r{NL}such-sssf-fixture test live", False, NONE),
     # Known limits: a flip here means a limit was closed. Two are quotes
     # inside a word, five are a line the shell doesn't continue followed by a
     # split command (the removal joins what the shell keeps, so the line before
     # swallows the command's start).
-    ("LIVE", f"j{BS}ust test live", False, JUST),
-    ("LIVE", "j''ust test live", False, JUST),
-    ("LIVE", f"x{BS}{BS}{NL}ju{BS}{NL}st test live", False, JUST),
-    ("LIVE", f"# note{BS}{NL}ju{BS}{NL}st test live", False, JUST),
-    ("LIVE", f"# note{BS}{NL}just test {BS}{NL}live", False, JUST),
+    ("LIVE", f"n{BS}osuch-sssf-fixture test live", False, FIXTURE_RUN),
+    ("LIVE", "n''osuch-sssf-fixture test live", False, FIXTURE_RUN),
+    ("LIVE", f"x{BS}{BS}{NL}no{BS}{NL}such-sssf-fixture test live", False, FIXTURE_RUN),
+    ("LIVE", f"# note{BS}{NL}no{BS}{NL}such-sssf-fixture test live", False, FIXTURE_RUN),
+    ("LIVE", f"# note{BS}{NL}nosuch-sssf-fixture test {BS}{NL}live", False, FIXTURE_RUN),
     ("PI", f"true {BS}{BS}{NL}p{BS}{NL}i -p hi", False, PIRUN),
     ("PI", f"# note {BS}{NL}p{BS}{NL}i -p hi", False, PIRUN),
 ]
@@ -85,7 +93,7 @@ def stubs(tmp_path):
     """A directory of recording `just` and `pi` stubs, and the log they write."""
     bin_dir, log = tmp_path / "stubs", tmp_path / "log"
     bin_dir.mkdir(exist_ok=True)
-    for name in ("just", "pi"):
+    for name in (FIXTURE, "just", "pi"):
         stub = bin_dir / name
         stub.write_text(f'#!/bin/sh\necho "{name} $*" >> "{log}"\n')
         stub.chmod(0o755)
@@ -131,8 +139,8 @@ def test_the_table_is_honest_about_what_bash_runs(tmp_path, name, command, _expe
 
 
 @pytest.mark.parametrize("command, name", [
-    (f"true && eval ju{BS}{NL}st test live < /dev/null && pwd -P", "LIVE"),
-    (f"ju{BS}{NL}st test live", "LIVE"),
+    (f"true && eval no{BS}{NL}such-sssf-fixture test live < /dev/null && pwd -P", "LIVE"),
+    (f"no{BS}{NL}such-sssf-fixture test live", "LIVE"),
     (f"x; eval {BS}{NL}'pi -p hi'", "PI"),
     (f"x; eval 'p{BS}{NL}i -p hi'", "PI"),
 ])
@@ -143,20 +151,20 @@ def test_the_prefix_refuses_lines_of_other_shapes(tmp_path, command, name):
 
 def test_the_prefix_misses_quotes_inside_a_word_across_the_wrapper(tmp_path):
     # A known limit (quotes inside a word); no real wrapper produces this line.
-    line = f"true && eval 'ju{BS}'\"{NL}\"'st test live' < /dev/null && pwd -P"
+    line = f"true && eval 'no{BS}'\"{NL}\"'such-sssf-fixture test live' < /dev/null && pwd -P"
     done = run_prefix(tmp_path, line, [LIVE])
     assert done.returncode != 126 and rules.REFUSED not in done.stderr
 
 
 # ── agreement ────────────────────────────────────────────────────────────────
 
-RULE_A = rules.AgentRule(rule="rule A", forbid=[r"\bjust\s+test\s+live\b"], on_match="refuse")
-RULE_B = rules.AgentRule(rule="rule B", forbid=[r"\bst\s+test\s+live\b"], on_match="refuse")
+RULE_A = rules.AgentRule(rule="rule A", forbid=[r"\bnosuch-sssf-fixture\s+test\s+live\b"], on_match="refuse")
+RULE_B = rules.AgentRule(rule="rule B", forbid=[r"\bsuch-sssf-fixture\s+test\s+live\b"], on_match="refuse")
 
 
 @needs_bun
 def test_all_three_name_the_first_rule_when_only_a_later_one_matches_as_written(tmp_path):
-    command = f"ju{BS}{NL}st test live"
+    command = f"no{BS}{NL}such-sssf-fixture test live"
     assert not re.search(RULE_A.forbid[0], command) and re.search(RULE_B.forbid[0], command)
     found, _ = rules.breach([RULE_A, RULE_B], command)
     assert found is RULE_A
@@ -213,10 +221,10 @@ def test_the_built_in_secret_rule_sees_through_a_backslash_newline(tmp_path):
 
 
 def test_a_stop_rule_stops_the_run_on_a_split_command():
-    stop = rules.AgentRule(rule="no live tests", forbid=[r"\bjust\s+test\s+live\b"], on_match="stop")
+    stop = rules.AgentRule(rule="no live tests", forbid=[r"\bnosuch-sssf-fixture\s+test\s+live\b"], on_match="stop")
     forward, events, _ = forwarder(rule=stop, can_refuse=False)
     with pytest.raises(rules.RuleBreach):
-        forward(announce("c1", f"ju{BS}{NL}st test live"))
+        forward(announce("c1", f"no{BS}{NL}such-sssf-fixture test live"))
 
 
 def test_a_long_run_of_backslashes_is_searched_in_linear_time():

@@ -1,7 +1,9 @@
 """All three matchers see a split command in a tab-indented `<<-` heredoc.
 
 A `<<-` heredoc strips each body line's leading tabs before the inner shell reads
-the body, so `<tab>ju\\<newline><tab>st test live` runs `just test live`.
+the body, so `<tab>no\\<newline><tab>such-sssf-fixture test live` runs
+`nosuch-sssf-fixture test live` (test_rules_continuation.py's docstring says why
+the stub has that name).
 rules.breach, sssf_refuse.py and pi's extension (sssf_rules.ts) also search the
 command with every backslash-newline and the tabs right after it removed. Every
 row's outcome below was run under real bash (test_the_table_is_honest...).
@@ -46,11 +48,11 @@ PUSH = starter_push_rule()
 DEPLOY = starter_deploy_rule()
 SECRET = secret_files.shell_rule(["/r/.env"])
 PROBE = rules.AgentRule(rule="no probe", forbid=["SSSF-REFUSE-PROBE"], on_match="refuse")
-LIVE = rules.AgentRule(rule="no live tests", forbid=[r"\bjust\s+test\s+live\b"], on_match="refuse")
+LIVE = rules.AgentRule(rule="no live tests", forbid=[r"\bnosuch-sssf-fixture\s+test\s+live\b"], on_match="refuse")
 PI = rules.AgentRule(rule="no nested pi", forbid=[r"(^|[;&|]\s*)pi\b"], on_match="refuse")
 RULES = {"PUSH": PUSH, "DEPLOY": DEPLOY, "SECRET": SECRET, "PROBE": PROBE, "LIVE": LIVE, "PI": PI}
 
-JUST, PIRUN, PUSHED = ["just test live"], ["pi -p hi"], ["git push origin main"]
+FIXTURE_RUN, PIRUN, PUSHED = ["nosuch-sssf-fixture test live"], ["pi -p hi"], ["git push origin main"]
 
 
 def heredoc(opener, *lines, indent=True):
@@ -62,7 +64,7 @@ OPENERS = ["bash <<-'EOF'", "sh <<-'EOF'", "cat <<-'EOF' | bash"]
 
 # (rule, command, matches, what real bash does: stub lines plus stdout)
 ROWS = [
-    *[("LIVE", heredoc(o, f"ju{BS}", "st test live"), True, JUST) for o in OPENERS],
+    *[("LIVE", heredoc(o, f"no{BS}", "such-sssf-fixture test live"), True, FIXTURE_RUN) for o in OPENERS],
     *[("DEPLOY", heredoc(o, f"ju{BS}", "st deploy"), True, ["just deploy"]) for o in OPENERS],
     *[("PUSH", heredoc(o, f"gi{BS}", "t push origin main"), True, PUSHED) for o in OPENERS],
     ("PUSH", heredoc("bash <<-'EOF'", f"git pu{BS}", "sh origin main"), True, PUSHED),
@@ -70,25 +72,25 @@ ROWS = [
     ("SECRET", heredoc("bash <<-'EOF'", f"cat .e{BS}", "nv"), True, ["SECRET"]),
     ("PI", f"bash <<-'EOF'{NL}p{BS}{NL}{T}i -p hi{NL}{T}EOF", True, PIRUN),
     ("PI", heredoc("bash <<-'EOF'", f"true; p{BS}", "i -p hi"), True, PIRUN),
-    ("LIVE", f"bash <<-'EOF'{NL}{T}ju{BS}{NL}{T}{T}{T}st test live{NL}{T}EOF", True, JUST),
-    ("LIVE", heredoc("bash <<-'EOF'", f"ju{BS}", BS, "st test live"), True, JUST),
-    ("LIVE", heredoc("bash <<-'EOF'", f"just test {BS}", "live"), True, JUST),
-    ("LIVE", heredoc("bash <<-EOF", f"ju{BS}{BS}", "st test live"), True, JUST),
-    ("LIVE", heredoc("sh <<-EOF", f"ju{BS}{BS}", "st test live"), True, JUST),
+    ("LIVE", f"bash <<-'EOF'{NL}{T}no{BS}{NL}{T}{T}{T}such-sssf-fixture test live{NL}{T}EOF", True, FIXTURE_RUN),
+    ("LIVE", heredoc("bash <<-'EOF'", f"no{BS}", BS, "such-sssf-fixture test live"), True, FIXTURE_RUN),
+    ("LIVE", heredoc("bash <<-'EOF'", f"nosuch-sssf-fixture test {BS}", "live"), True, FIXTURE_RUN),
+    ("LIVE", heredoc("bash <<-EOF", f"no{BS}{BS}", "such-sssf-fixture test live"), True, FIXTURE_RUN),
+    ("LIVE", heredoc("sh <<-EOF", f"no{BS}{BS}", "such-sssf-fixture test live"), True, FIXTURE_RUN),
     # No heredoc, and the pinned ones.
-    ("LIVE", f"just test{BS}{NL}{T}live", True, JUST),
-    ("LIVE", f"just test {BS}{NL}{T}live", True, JUST),
-    ("LIVE", f"ju{BS}{NL}{T}st test live", True, []),                       # accepted over-match
+    ("LIVE", f"nosuch-sssf-fixture test{BS}{NL}{T}live", True, FIXTURE_RUN),
+    ("LIVE", f"nosuch-sssf-fixture test {BS}{NL}{T}live", True, FIXTURE_RUN),
+    ("LIVE", f"no{BS}{NL}{T}such-sssf-fixture test live", True, []),                       # accepted over-match
     ("SECRET", f"cat .e{BS}{NL}{T}nv", True, []),                           # accepted over-match
-    ("LIVE", heredoc("bash <<-EOF", f"ju{BS}", "st test live"), True, []),  # accepted over-match
+    ("LIVE", heredoc("bash <<-EOF", f"no{BS}", "such-sssf-fixture test live"), True, []),  # accepted over-match
     # Known limits: a flip here means a limit was closed.
     ("PI", heredoc("bash <<-'EOF'", "pi -p hi"), False, PIRUN),
     ("PI", heredoc("bash <<-'EOF'", f"p{BS}", "i -p hi"), False, PIRUN),
-    ("LIVE", heredoc("bash <<-'EOF'", f"# note{BS}", f"ju{BS}", "st test live"), False, JUST),
-    ("LIVE", heredoc("bash <<-'EOF'", f"x{BS}{BS}", f"ju{BS}", "st test live"), False, JUST),
+    ("LIVE", heredoc("bash <<-'EOF'", f"# note{BS}", f"no{BS}", "such-sssf-fixture test live"), False, FIXTURE_RUN),
+    ("LIVE", heredoc("bash <<-'EOF'", f"x{BS}{BS}", f"no{BS}", "such-sssf-fixture test live"), False, FIXTURE_RUN),
     # Spaces after a continuation are out of scope: the shell strips only tabs.
-    ("LIVE", f"bash <<-'EOF'{NL}{T}ju{BS}{NL} {T}st test live{NL}{T}EOF", False, []),
-    ("LIVE", f"bash <<-'EOF'{NL}{T}ju{BS}{NL}{T} st test live{NL}{T}EOF", False, []),
+    ("LIVE", f"bash <<-'EOF'{NL}{T}no{BS}{NL} {T}such-sssf-fixture test live{NL}{T}EOF", False, []),
+    ("LIVE", f"bash <<-'EOF'{NL}{T}no{BS}{NL}{T} such-sssf-fixture test live{NL}{T}EOF", False, []),
 ]
 IDS = [f"{i}-{row[0]}" for i, row in enumerate(ROWS)]
 
@@ -142,9 +144,9 @@ def test_the_table_is_honest_about_what_bash_does(tmp_path, name, command, _expe
 
 # ── agreement ────────────────────────────────────────────────────────────────
 
-RULE_A = rules.AgentRule(rule="rule A", forbid=[r"\bjust\s+test\s+live\b"], on_match="refuse")
-RULE_B = rules.AgentRule(rule="rule B", forbid=[r"\bst\s+test\s+live\b"], on_match="refuse")
-EXAMPLE = heredoc("bash <<-'EOF'", f"ju{BS}", "st test live")
+RULE_A = rules.AgentRule(rule="rule A", forbid=[r"\bnosuch-sssf-fixture\s+test\s+live\b"], on_match="refuse")
+RULE_B = rules.AgentRule(rule="rule B", forbid=[r"\bsuch-sssf-fixture\s+test\s+live\b"], on_match="refuse")
+EXAMPLE = heredoc("bash <<-'EOF'", f"no{BS}", "such-sssf-fixture test live")
 
 
 @needs_bun
@@ -204,7 +206,7 @@ def test_the_built_in_secret_rule_names_itself_on_both_harnesses(tmp_path):
 
 
 def test_a_stop_rule_stops_the_run_on_a_split_command_in_a_tab_heredoc():
-    stop = rules.AgentRule(rule="no live tests", forbid=[r"\bjust\s+test\s+live\b"], on_match="stop")
+    stop = rules.AgentRule(rule="no live tests", forbid=[r"\bnosuch-sssf-fixture\s+test\s+live\b"], on_match="stop")
     forward, events, _ = forwarder(rule=stop, can_refuse=False)
     with pytest.raises(rules.RuleBreach):
         forward(announce("c1", EXAMPLE))

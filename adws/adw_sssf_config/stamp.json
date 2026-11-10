@@ -129,7 +129,7 @@
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
-      "sha256": "f33998a1407599c8a91d015f944ed203efe1974ab4b9fee3448b6c74280b6529",
+      "sha256": "abdb67dae218a524cad8c6833ff47f7532344ecaa039b426577d350cee3e0e13",
       "source": "adws/adw_modules/agentsh_guard.py"
     },
     "adws/adw_modules/agentsh_sssf.yaml": {
@@ -337,5 +337,5 @@
       "source": "justfile"
     }
   },
-  "skill": "ff70853"
+  "skill": "7b36e01"
 }

@@ -73,7 +73,7 @@ The engineer settled these on 2026-11-08, after the proof. OpenShell stays the l
 | Who runs the server | A dedicated `agentsh` service user with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`. No root server and no eBPF, and agents can't reach it through ptrace because they run as the engineer |
 | The API escape | Policy denies on the socket, TCP port 18080 and a proxy CONNECT to it, with auth left at `none`. The corpus keeps those checks, so a regression fails loudly. The API stays open to unwrapped local processes |
 | Install | With sudo, root-owned binaries, config and policies. SSSF generates a policy from `repo.yaml` and prints the install command, and a run refuses to start when the installed copy differs, at the cost of one sudo step per rule change |
-| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. The current pin is `3918a619`, from [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09). v0.20.6 final lacks all eight patches |
+| Which build | The fork's `sssf/patched`, pinned, with the build recipe and checksum recorded here. The installed build is `241cd393` on `sssf/confine`, from [the namespace hole](#the-namespace-hole-2026-11-09). The guard's `PINNED_SHA256` still names `41960715`, so every run under `local_guard: agentsh` refuses until `specs/tasks/guard-agentsh-pin.md` lands. v0.20.6 final lacks all nine patches |
 | How a denial counts | Only a denied `ptrace_execve` with a named rule counts toward the three-refusal stop, and it's never a breach. File and network denials go to the trace |
 | Rule format | An argv form, `deny_exec`, which becomes agentsh's `command_rules`, beside `forbid`, which keeps its text uses |
 | Proxy, DLP, FUSE, `BASH_ENV` | The session proxy on, because the network allowlist depends on it. The LLM proxy, DLP, FUSE and `BASH_ENV` off |
@@ -808,14 +808,32 @@ A second gap came from the same reading. When the tracer fails to inject its BPF
 
 `dispatch` refuses the same calls, which covers a tracee without the prefilter, io_uring included. The new test loads each builder into a child process and makes 22 calls there, so the kernel answers. Before the fix every mount call reached the kernel and `clone(CLONE_NEWUSER)` made a child; after it, each gets the refusal. A second test checks `dispatch`'s list against the same table. `go vet` is clean, the `ptrace`, `api` and `policy` tests pass, and the integration tag shows the same 8 failures by name. The fork and clone tracking tests pass under the new filter.
 
-Two builds, neither installed yet:
+Two builds:
 
 | Build | Version | sha256 | Folder |
 |---|---|---|---|
-| The namespace fix alone: `3918a619`'s tree with `87c6994d`'s diff applied, built from a `git archive` copy. No commit holds this tree | `0.20.6-dev.fork+3918a619+ns.87c6994d` | `ee6cd37e03bdd1461cb1c622a15adcf9264c19bc27b5301c2d94355b27120bce` | `~/.local/share/agentsh-builds/confine-only/` |
+| The namespace fix alone, `241cd393` on `sssf/confine`: `3918a619` with `87c6994d`'s diff. Built first from a `git archive` copy; a rebuild from the commit gives the same bytes. **Installed 2026-11-09** | `0.20.6-dev.fork+3918a619+ns.87c6994d` | `ee6cd37e03bdd1461cb1c622a15adcf9264c19bc27b5301c2d94355b27120bce` | `~/.local/share/agentsh-builds/confine-only/` |
 | `sssf/patched` at `87c6994d`, with the ninth patch's two commits under it | `0.20.6-dev.fork+87c6994d` | `7dc7d9615b958157337bbe5787bab344d174a6610cfcbe9db4bfb8b439b29334` | `~/.local/share/agentsh-builds/confine-combined/` |
 
-After the install, `nsbind` should be refused at `unshare`, and the check set should hold. A tool that needs a namespace gets `EPERM` under the wrap: bubblewrap, Chrome's and Electron's sandboxes, rootless podman. Claude Code and pi don't use one in SSSF's runs, but the check set's agent runs should confirm that.
+The engineer installed the fix alone. On it:
+
+| Check | Result |
+|---|---|
+| `cat` of the canary | `Permission denied` |
+| `nsbind` | `unshare` refused with `EPERM`, so the mount fails and `b/secret.txt` doesn't exist |
+| `nsprobe` | `unshare`, `mount` and `chroot` all refused, `/proc/self/root` is `/` |
+| `unshare -Ur true` | `unshare failed: Operation not permitted` |
+| A Python thread and subprocess, Node's `worker_threads` and `execSync` | work |
+| 49 denial probes under each policy, and the must-work lines | all held, all ran |
+| Tools | exit 0, no file denials |
+| Claude Code | exit 0 in 10 seconds, 89 file denials of the kinds seen before |
+| pi | exit 0 in 13 seconds, one denial, `/mnt/wsl/resolv.conf` |
+| Bypass corpus | 24 of 24 held |
+| Network and fronting checks | as before |
+
+Results are in `~/.local/share/agentsh-harvest/dd6/`. A tool that needs a namespace gets `EPERM` under the wrap: bubblewrap, Chrome's and Electron's sandboxes, rootless podman. Claude Code and pi don't use one in SSSF's runs.
+
+The pin in the guard was never moved for the eighth patch: `PINNED_SHA256` is still build `41960715`'s, and the docs said `3918a619`. So `check_machine` has refused every run under `local_guard: agentsh` since the eighth patch went in. The refusal also stops the guard chain, which runs under agentsh on the hub, so the pin task needs the hub on `local_guard: text` for one run.
 
 ### The ninth patch: link targets, 2026-11-09
 
@@ -857,7 +875,7 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 
 ## Next
 
-1. **Install the namespace fix.** The engineer picks [a build](#the-namespace-hole-2026-11-09), the fix alone or with the ninth patch under it, and runs the sudo install. Then `nsbind` under the wrap, which should be refused at `unshare`, and the check set. The pin moves to the installed build.
+1. **Move the guard's pin** to the installed build, [`241cd393`](#the-namespace-hole-2026-11-09), through the guard chain from `specs/tasks/guard-agentsh-pin.md`. Until it lands, every run under `local_guard: agentsh` refuses, and so does the chain itself, so that run goes under `local_guard: text`.
 2. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.

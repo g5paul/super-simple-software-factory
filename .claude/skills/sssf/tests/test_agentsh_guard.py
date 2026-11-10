@@ -428,6 +428,31 @@ def test_a_quote_in_a_value_stays_one_scalar():
     assert "${PROJECT_ROOT}/it's/a.key" in paths and "/m/o'brien/.git" in paths
 
 
+@pytest.mark.parametrize("harness", ["claude_code", "pi"])
+def test_every_policy_lets_an_agent_signal_only_its_own_processes(harness):
+    settings = repo_settings.RepoSettings(
+        secret_files=["*.pem"], deny_exec=[{"name": "no-rm", "command": "rm", "reason": "x"}],
+        network_allow=["a.example.com"])
+    text = agentsh_guard.policy_text(settings, "/m/proj/.git", harness, "sssf-proj-x", **PATHS)
+    rules_ = yaml.safe_load(text)["signal_rules"]
+    every = ["@all"] + [str(n) for n in range(32, 64)]
+    assert [(r["target"]["type"], r["decision"]) for r in rules_] == [
+        ("self", "allow"), ("session", "allow"),
+        ("parent", "deny"), ("external", "deny"), ("system", "deny")]
+    assert all(r["signals"] == every for r in rules_)
+    for r in rules_:
+        assert ("message" in r) == (r["decision"] == "deny")
+        if "message" in r:
+            assert "only its own processes" in r["message"]
+    assert text.index("network_rules:") < text.index("signal_rules:")
+
+
+def test_the_server_config_traces_signals():
+    config = yaml.safe_load(agentsh_guard.render_config(TEMPLATE.read_text(), ["sssf-x-claude"]))
+    assert config["sandbox"]["ptrace"]["trace"] == {
+        "execve": True, "file": True, "network": True, "signal": True}
+
+
 @pytest.mark.skipif(not DENY_POLICY.is_file(), reason="docs/ is not installed in this repo")
 @pytest.mark.parametrize("harness,short", [("claude_code", "claude"), ("pi", "pi")])
 def test_file_rules_equal_the_designs_deny_policy_output(tmp_path, harness, short):

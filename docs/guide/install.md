@@ -30,7 +30,7 @@ The last column is the version on the machine where SSSF is built and tested, a 
 | [Podman](https://podman.io), rootless, with pasta | only for the container and `--sandbox openshell` | `podman --version` | 4.9.3, passt 2024-02-20 |
 | [Codex CLI](https://github.com/openai/codex) | only for the ChatGPT usage meters on the dashboard ([watch.md](watch.md#chatgpts-windows-through-codex-cli)) | `codex --version` | 0.153.0 |
 | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | only for `--sandbox openshell` | `openshell --version` | 0.1.7 |
-| [agentsh](https://github.com/canyonroad/agentsh) | only for `local_guard: agentsh` ([concepts.md](../concepts.md#local-guards-text-and-agentsh)) | `agentsh --version` | `0.20.6-dev.fork+3a36c68f`, a build of the hub's patched fork. SSSF accepts no other, and the fork's patches aren't published yet |
+| [agentsh](https://github.com/canyonroad/agentsh) | only for `local_guard: agentsh` ([concepts.md](../concepts.md#local-guards-text-and-agentsh)) | `agentsh --version` | `0.20.6-dev.fork+472d63cf`, a build of the hub's patched fork. SSSF accepts no other, and the fork's patches aren't published yet |
 
 Each kind of run last passed on these dates: Claude Code agents on this machine under both local guards on 2026-11-09, the container on 2026-11-05, Vercel and E2B on 2026-11-05, and OpenShell on 2026-11-08. A run before 2026-11-09 may have used an older version of a tool above.
 
@@ -44,7 +44,7 @@ SSSF pins some of what it pulls in itself:
 | The Vercel Sandbox SDK | `vercel-sandbox==0.10.0` | `sandbox_vercel.py` |
 | The dashboard's packages | the versions in `bun.lock` | `apps/visualizer/` |
 | [Matt Pocock's skills](https://github.com/mattpocock/skills), for [tickets](run.md#a-feature-from-tickets) | commit `a496f55`, 2026-10-29 | the passages copied into the ticket agents' prompts name it |
-| The agentsh build | sha256 `0e4430b5…40886`, commit `3a36c68f` on the fork | `PINNED_SHA256` in `agentsh_guard.py` |
+| The agentsh build | sha256 `f9da9802…9933e`, commit `472d63cf` on the fork | `PINNED_SHA256` in `agentsh_guard.py` |
 
 The ADWs' own Python libraries, pydantic, python-dotenv, pyyaml and rich, aren't pinned: uv takes the latest each time. On 2026-11-09 those were 2.14.3, 1.2.4, 6.0.3 and 15.0.0.
 

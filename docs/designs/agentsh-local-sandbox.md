@@ -849,7 +849,31 @@ The new tests failed before each fix and pass after: 7 resolution cases, 5 fail-
 
 Limits:
 - **The check happens when the link is made.** A relative link that resolves inside the workspace can be moved later to a shallower folder the agent may write, such as `/tmp/x`, and lead to `~/.ssh/id_rsa`. Swapping a folder on its path for a link does the same for an absolute target. Inside the wrap every read through a link is judged at the file it reaches, so this only matters to a tool that follows such a link outside the wrap. `3918a619` allows the same link in one step.
-- **No independent review yet.** Two `bypass-reviewer` runs were stopped by a safety classifier before they wrote a probe. The hand check found the namespace hole, which split the agent's view from a later reader's, and the namespace fix closes it. It found no error in the prefix loop that becomes an allow. `symlinkat` and `symlink` handle the target the same way. A target that only fails for the reader, such as one past the kernel's 40-link limit while the walk allows 255, leaves that reader with an error, not a different file.
+- **Reviewed on 2026-11-09.** An independent review found the patch's own logic sound, and three holes that were there before it. [The review and three fixes](#the-review-and-three-fixes-2026-11-10) has them.
+
+### The review and three fixes, 2026-11-10
+
+A reviewer subagent with a fresh context read `3918a619..65e2d4fb` and probed it with C programs on decoy files under a temp folder. The full transcript is kept outside the repo. `resolveLinkTarget` and `walkViaProc` held: about 30 target spellings, `//proc`, `/./proc`, `/../proc`, links to `/` and links up to `/proc` among them, each resolved right or failed closed. The holes it found were older than the patch, and one more turned up while their probes became tests:
+
+| Hole | Probe on the installed build, `241cd393` | Fix on `sssf/races` |
+|---|---|---|
+| **A link path with a missing folder was judged as text.** When a path's parent didn't exist, `resolveParentViaProc` returned the raw path. A second thread making and removing `ws/missing` in a loop got `ws/missing/../../out/x` past a rule allowing the workspace, since `**` crosses `..`. `symlinkat`, `mkdirat`, `linkat` and `renameat2` all share that fallback | 17, 33, 12 and 3 entries made in the refused folder, 300 tries each | `8ac79c33`: refuse with `ENOENT`, which is what the kernel says unless the race wins |
+| **`renameat`, `mknod` and `lchown` were never judged.** None was in the tracer's lists or the seccomp prefilter. glibc 2.39's `renameat2` with no flags makes `renameat`, as `mv` does | `renameat` moved a refused decoy into the workspace and a workspace file into the refused folder; `mknod` made a file there; the tracer saw none of them | `dea39254`: all three judged. A unit test holds the three syscall lists to one set of path-writing calls and failed on the parent for exactly these three |
+| **A link target could change after the check.** The kernel copies the target inside the syscall, after the tracer resumes the thread, so a second thread rewriting the buffer gets a link the rules never saw. `redirect_file.go`'s comment said the opposite | 126 of 500 links in the workspace led to the refused decoy | `3a36c68f`: `symlinkat` and `symlink` take an exit stop. The tracer opens the link's folder with `openat2` and `RESOLVE_NO_SYMLINKS`, reads the stored target through it, judges that, and on a refusal removes the link and fails the call |
+| A bind mount in a private namespace, from the review's run on `65e2d4fb` | refused at `unshare` | already closed by the namespace fix |
+
+The `renameat` hole is the serious one. Under the installed build, a plain `mv` of a file outside every allow into the workspace goes through, and the file can then be read there. It reaches every repo on `local_guard: agentsh`, the hub and sssf-sandbox. The other two need a racing thread, and the target race only makes a link, which every read inside the wrap still judges at the file it reaches.
+
+Each fix has a probe that failed before it and passes after, three runs out of three: `symlink_race_integration_test.go` builds its C helpers with gcc and runs them traced. `TestSymlinkExitKeepsAllowedLinks` checks relative, absolute and dangling links still work. The `ptrace`, `api` and `policy` tests show the same failures as `sssf/patched`, 9 in `api` that need cgo, and so does the integration tag, 10 by name. The BPF budget test went from 100 instructions to 128, since the program is now 101. The real limit is the `uint8` jump offset, 255 instructions, and is written beside it.
+
+| Build | Version | sha256 | Folder |
+|---|---|---|---|
+| `sssf/races` at `3a36c68f`: `sssf/patched`, so the ninth patch and the namespace fix, with the three fixes. Built twice with the same bytes | `0.20.6-dev.fork+3a36c68f` | `0e4430b5eb9f77ddb8014bcc6cd1fad3c8eda6a4deeb7b041777f74c46440886` | `~/.local/share/agentsh-builds/races/` |
+
+Limits:
+- **A link moved before the exit stop isn't judged.** A second thread can rename the new link away between the kernel's call and the stop. The call then fails with `EACCES` and the moved link stays. That is the link-time limit above.
+- **Folders that ignore case.** On `/mnt/c` and casefold folders `.SSH` reaches `.ssh`, and a rule that names `.ssh` misses it. Not probed.
+- **openat2 is needed** for the exit stop, Linux 5.6 or later. Without it every symlink fails closed.
 
 ## What got built
 
@@ -882,7 +906,7 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 5. Fix what agentsh denies ordinary work, before any other repo turns it on. `tar -x` is fixed by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09). Left, from [Tool config and caches](#tool-config-and-caches-2026-11-09):
-   - **[The ninth fork patch](#the-ninth-patch-link-targets-2026-11-09) for relative link targets**, which `uv venv` and npm's and bun's `.bin` links need. Built and tested, waiting on an independent review. Then the engineer's sudo install and the check set.
+   - **[The ninth fork patch](#the-ninth-patch-link-targets-2026-11-09) for relative link targets**, which `uv venv` and npm's and bun's `.bin` links need, with [the three fixes from its review](#the-review-and-three-fixes-2026-11-10). Build `3a36c68f` waits on the engineer's sudo install. Then the check set, with `uv venv`, an npm `.bin` link and an `mv` of a canary into the workspace added, and the pin through the guard chain.
    - **The guard chain run** from `specs/tasks/guard-agentsh-tool-config.md`: config lookups above the workspace, which break uv in every repo under `~/github`, and caches of the agents' own.
 6. Rollout step 4, after item 5: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has.
 7. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.

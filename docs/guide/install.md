@@ -30,7 +30,7 @@ The last column is the version on the machine where SSSF is built and tested, a 
 | [Podman](https://podman.io), rootless, with pasta | only for the container and `--sandbox openshell` | `podman --version` | 4.9.3, passt 2024-02-20 |
 | [Codex CLI](https://github.com/openai/codex) | only for the ChatGPT usage meters on the dashboard ([watch.md](watch.md#chatgpts-windows-through-codex-cli)) | `codex --version` | 0.153.0 |
 | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | only for `--sandbox openshell` | `openshell --version` | 0.1.7 |
-| [agentsh](https://github.com/canyonroad/agentsh) | only for `local_guard: agentsh` ([concepts.md](../concepts.md#local-guards-text-and-agentsh)) | `agentsh --version` | `0.20.6-dev.fork+05b3777f`, a build of the hub's patched fork. SSSF accepts no other, and the fork's patches aren't published yet |
+| [agentsh](https://github.com/canyonroad/agentsh) | only for `local_guard: agentsh` ([concepts.md](../concepts.md#agentsh-on-top-of-the-base-guards)) | `agentsh --version` | `0.20.6-dev.fork+05b3777f`, a build of the hub's patched fork. SSSF accepts no other, and the fork's patches aren't published yet |
 
 Each kind of run last passed on these dates: Claude Code agents on this machine under both local guards on 2026-11-09, the container on 2026-11-05, Vercel and E2B on 2026-11-05, and OpenShell on 2026-11-08. A run before 2026-11-09 may have used an older version of a tool above.
 
@@ -239,7 +239,7 @@ A Vercel or E2B run uploads the repo's code to that provider; an OpenShell run k
 
 ## Turn on agentsh, optional
 
-Every repo starts on `local_guard: text`, the checks SSSF runs on each agent's commands. `local_guard: agentsh` adds a second guard for runs on this machine: each agent runs under agentsh, which denies files, commands and hosts at the system call. [concepts.md](../concepts.md#local-guards-text-and-agentsh) says what each guard covers and where agentsh is untested. Leave it off unless the repo fits that case.
+Every repo starts on `local_guard: text`, which means SSSF's base guards alone. `local_guard: agentsh` adds agentsh on top of them for runs on this machine: each agent runs under agentsh, which denies files, commands and hosts at the system call, and the base guards keep running. [concepts.md](../concepts.md#agentsh-on-top-of-the-base-guards) says what the base guards and agentsh each cover and where agentsh is untested. Leave it off unless the repo fits that case.
 
 It needs the agentsh service, installed as root, with the one build SSSF pins. That build comes from the hub's fork of agentsh, whose patches aren't published yet, so for now it works only where that build is installed. Then, once per repo, and again whenever `secret_files`, `deny_exec` or `network_allow` change:
 

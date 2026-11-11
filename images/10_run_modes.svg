@@ -12,7 +12,7 @@
 <text class="nd" x="60" y="216">agents run as your user</text>
 <text class="nd" x="60" y="236">on this machine</text>
 <text class="lbl mono" x="60" y="280" text-anchor="start">guards</text>
-<text class="nd" x="60" y="304">text checks</text>
+<text class="nd" x="60" y="304">base guards</text>
 <text class="lbl mono" x="60" y="368" text-anchor="start">what leaves the machine</text>
 <text class="nd" x="60" y="392">nothing</text>
 <text class="lbl mono" x="60" y="456" text-anchor="start">branch</text>
@@ -26,8 +26,8 @@
 <text class="nd" x="345" y="216">agents run under</text>
 <text class="nd" x="345" y="236">agentsh wrap</text>
 <text class="lbl mono" x="345" y="280" text-anchor="start">guards</text>
-<text class="nd" x="345" y="304">text checks</text>
-<text class="nd" x="345" y="324">and agentsh</text>
+<text class="nd" x="345" y="304">base guards</text>
+<text class="nd" x="345" y="324">+ agentsh</text>
 <text class="lbl mono" x="345" y="368" text-anchor="start">what leaves the machine</text>
 <text class="nd" x="345" y="392">nothing</text>
 <text class="lbl mono" x="345" y="456" text-anchor="start">branch</text>
@@ -41,7 +41,7 @@
 <text class="nd" x="630" y="216">agents, checks and git</text>
 <text class="nd" x="630" y="236">in the VM</text>
 <text class="lbl mono" x="630" y="280" text-anchor="start">guards</text>
-<text class="nd" x="630" y="304">text checks</text>
+<text class="nd" x="630" y="304">base guards</text>
 <text class="lbl mono" x="630" y="368" text-anchor="start">what leaves the machine</text>
 <text class="nd" x="630" y="392">nothing</text>
 <text class="lbl mono" x="630" y="456" text-anchor="start">branch</text>
@@ -55,7 +55,7 @@
 <text class="nd" x="915" y="216">agents, checks and git</text>
 <text class="nd" x="915" y="236">in the VM</text>
 <text class="lbl mono" x="915" y="280" text-anchor="start">guards</text>
-<text class="nd" x="915" y="304">text checks</text>
+<text class="nd" x="915" y="304">base guards</text>
 <text class="lbl mono" x="915" y="368" text-anchor="start">what leaves the machine</text>
 <text class="nd" x="915" y="392">the code and an</text>
 <text class="nd" x="915" y="412">inference-only token</text>

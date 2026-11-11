@@ -159,7 +159,7 @@ Each Claude Code agent runs with `--safe-mode`, so it never loads your `CLAUDE.m
 
 ## Guards
 
-Guard code is the code that limits what an agent can do: the `writes` check, the git-directory guard, the command rules, the secret files and the pre-push hook. The rest of SSSF gets work done. Guard code is there for the run nobody is watching, so that an agent's mistake costs a failed phase instead of lost work, a leaked key or a stray push.
+Guard code is the code that limits what an agent can do. These are the **base guards**, and they're on in every run, on this machine or in a VM: the `writes` check, the git-directory guard, the command rules, the secret files and the pre-push hook. agentsh can add a layer around them on this machine ([below](#agentsh-on-top-of-the-base-guards)). The rest of SSSF gets work done. Guard code is there for the run nobody is watching, so that an agent's mistake costs a failed phase instead of lost work, a leaked key or a stray push.
 
 Most of it wasn't planned as a feature. Two pieces were asked for; the rest each answer something an agent did, or a review showed it could do:
 
@@ -187,7 +187,7 @@ A run makes four choices. They're separate, apart from the limits below the tabl
 |---|---|---|---|
 | Where the [operator session](#the-operator-session) runs | Claude Code on the host, or the operator container | the host | `container/run.sh` |
 | Where the agents, checks and git run | this machine, an OpenShell microVM on it, or a Vercel or E2B VM | this machine | `--sandbox <name>` for one run, `sandbox:` in `repo.yaml` for the repo |
-| Which local guard wraps agents on this machine | `text` or `agentsh` | `text` | `local_guard:` in `repo.yaml` |
+| Whether agentsh also wraps agents on this machine | `text` (base guards only) or `agentsh` (base guards and agentsh) | `text` | `local_guard:` in `repo.yaml` |
 | Which branch the run works on | the checked-out branch, or its own branch and worktree | the checked-out branch | `--worktree`, which every VM run implies ([below](#branches-and-worktrees)) |
 
 The limits:
@@ -197,25 +197,30 @@ The limits:
 - The operator container's image has no agentsh, so in a repo on `local_guard: agentsh`, a run launched from the container refuses at its start check. Run such a repo's operator on the host.
 
 <p align="center">
-  <img src="../images/10_run_modes.svg" alt="Four cards: sandbox none with the text guard, sandbox none with agentsh, an OpenShell microVM, and a Vercel or E2B VM, each showing where agents run, which guards apply, what leaves the machine and which branch the run uses" width="850">
+  <img src="../images/10_run_modes.svg" alt="Four cards: sandbox none with the base guards only, sandbox none with the base guards and agentsh, an OpenShell microVM, and a Vercel or E2B VM, each showing where agents run, which guards apply, what leaves the machine and which branch the run uses" width="850">
 </p>
 
-### Local guards: text and agentsh
+### agentsh, on top of the base guards
 
-The **text guard** is the [guards above](#guards), and it's on in every mode, VM or not. The command rules read each shell command's text before it runs. The secret-file checks keep listed files from the Read tool and from `env`. After each phase, the `writes` check and the git-directory guard put back what an agent wasn't allowed to change. Text can be spelled many ways, so a command the patterns don't recognize gets through. Its patterns have been frozen since 2026-11-08, while agentsh replaces them.
+`local_guard: agentsh` adds agentsh around each agent on this machine. It turns nothing off: the base guards run as before, and agentsh catches what their text checks miss, at the system call. `local_guard: text`, the default, means the base guards alone.
 
-**agentsh** runs each agent on this machine as `agentsh wrap`, under a policy SSSF generates from `repo.yaml`'s `secret_files`, `deny_exec` and `network_allow`. It traces the real calls with ptrace rather than reading command text. File access is deny by default: an agent may write its workspace and its tools' folders, read system files, and nothing else, so secret files and other repos stay closed. It refuses commands such as `git push` at exec, and agents reach only the model hosts, package registries and the hosts you list. The text checks stay on beside it. It's opt-in and comes with conditions:
+The base guards act at two points, and only the first reads text:
+
+- **Before a command or a read**, the command rules read each shell command's text, and the secret-file checks keep listed files from the Read tool and from `env`. A command can be spelled many ways, so one the patterns don't recognize gets through. Their patterns have been frozen since 2026-11-08: a new spelling that gets past them becomes a test case for agentsh, not another pattern.
+- **After each phase**, the `writes` check and the git-directory guard put back what an agent wasn't allowed to change, and at push the pre-push hook refuses an agent's push. These check what happened, not how it was spelled.
+
+**agentsh** runs each agent as `agentsh wrap`, under a policy SSSF generates from `repo.yaml`'s `secret_files`, `deny_exec` and `network_allow`. It traces the real calls with ptrace, so the spelling doesn't matter. File access is deny by default: an agent may write its workspace and its tools' folders, read system files, and nothing else, so secret files, other repos and your own `~/.claude` stay closed. It refuses commands such as `git push` at exec, and agents reach only the model hosts, package registries and the hosts you list. It's opt-in and comes with conditions:
 
 - the engineer installs the agentsh service as root, running the `sudo` lines that `agentsh_install.py` prints;
 - SSSF accepts only one build of the hub's patched fork of agentsh, by its sha256, and the fork's patches aren't published yet ([install.md](guide/install.md#before-you-start) has the version);
 - it's tested only on Python repos with a Claude Code roster, and a pi roster has no policy yet;
-- uv and pnpm fail under it in some layouts, which [config.md](../.claude/skills/sssf/references/config.md) lists with the other known limits.
+- some tools still have known limits under it, which [config.md](../.claude/skills/sssf/references/config.md) lists.
 
 [The design](designs/agentsh-local-sandbox.md) has the evidence and the decisions.
 
 ### Choosing
 
-For everyday work, run on this machine under the text guard. Pick a VM when a command the rules miss mustn't reach the machine, as [run.md](guide/run.md#which-to-pick) explains. OpenShell keeps the code on the machine, and Vercel and E2B upload it. Pick `local_guard: agentsh` when you want file and network limits on runs on this machine, and the repo fits the tested case above.
+For everyday work, run on this machine with the base guards. Pick a VM when a command the rules miss mustn't reach the machine, as [run.md](guide/run.md#which-to-pick) explains. OpenShell keeps the code on the machine, and Vercel and E2B upload it. Add agentsh with `local_guard: agentsh` when you want file and network limits on runs on this machine, and the repo fits the tested case above.
 
 ## Envelopes
 

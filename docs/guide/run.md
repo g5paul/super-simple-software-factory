@@ -294,7 +294,7 @@ None of these is the default. A run with no flag runs on this machine, and SSSF'
 
 Whether the rules against harm outside the repo can go in a VM mode is still open, after a few weeks of runs.
 
-On this machine, a repo can also run its agents under agentsh with `local_guard: agentsh`, a second guard beside the text checks. It's opt-in and has its own limits; [concepts.md](../concepts.md#where-a-run-runs) sets out all four choices a run makes, and [install.md](install.md#turn-on-agentsh-optional) has the setup.
+On this machine, a repo can also run its agents under agentsh with `local_guard: agentsh`, on top of the base guards, which keep running. It's opt-in and has its own limits; [concepts.md](../concepts.md#where-a-run-runs) sets out all four choices a run makes, and [install.md](install.md#turn-on-agentsh-optional) has the setup.
 
 `sandbox: vercel`, `sandbox: e2b` or `sandbox: openshell` in `repo.yaml` makes a VM the repo's default, and `--sandbox none` keeps one run local. [install.md](install.md#set-up-remote-vms) has the setup.
 

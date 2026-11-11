@@ -176,7 +176,21 @@ class Tracer:
             "UPDATE sessions SET status=?, ended_at=? WHERE adw_id=?",
             ("success" if ok else "fail", now_iso(), adw_id),
         )
+        self.phases_close_open(adw_id)
         self.processes_end_all(adw_id)   # nothing of this run is alive any more
+
+    def phases_close_open(self, adw_id: str) -> None:
+        """Close a phase the run left running, as a process killed mid-phase does: a WSL restart,
+        then a rejoin with --adw-id that runs the phase again under a new seq. It fails at its
+        last event, or at its start when it has none, so its time isn't counted to now."""
+        self.conn.execute(
+            "UPDATE phases SET status='fail',"
+            " error=COALESCE(error, 'the run ended with this phase still open'),"
+            " ended_at=COALESCE((SELECT MAX(COALESCE(e.ended_at, e.started_at)) FROM events e"
+            "                    WHERE e.phase_id = phases.phase_id), started_at)"
+            " WHERE adw_id=? AND status='running'",
+            (adw_id,),
+        )
 
     def session_add_usage(self, adw_id: str, tokens: int, cost: float) -> None:
         self.conn.execute(

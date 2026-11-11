@@ -14,9 +14,10 @@ Most of `adws/` is the install, the same files every repo gets. A few parts exis
 | `adws/adw_guard_change.py` | yes | the ADW every change to guard code goes through ([Guard changes](#guard-changes)) |
 | `adws/check_projects.py` | yes | checks each project after an update ([Check the projects' updates](#check-the-projects-updates)) |
 | `adws/levers.py` | yes | the four levers, week by week ([The four levers](#the-four-levers)) |
+| `adws/phase_times.py` | yes | each chain's usual phase times, and the runs well past them ([Phase times](#phase-times)) |
 | `adws/features.py` | yes | what each feature cost ([What each feature cost](#what-each-feature-cost)) |
 | `adws/tests/` | yes | tests for the four hub scripts above |
-| `local.just` | yes | the hub's recipes, which the justfile loads: `guard-change`, `projects`, `levers`, `features` and `hub-update` |
+| `local.just` | yes | the hub's recipes, which the justfile loads: `guard-change`, `projects`, `levers`, `features`, `phase-times` and `hub-update` |
 | `.claude/agents/bypass-reviewer.md` | yes | a bypass review outside a guard-change run ([Guard changes](#guard-changes)) |
 | `.githooks/pre-push` | yes | the secret scan and private-name check on every push ([secret-scan.md](secret-scan.md)) |
 
@@ -174,6 +175,14 @@ The script only reads, and it's hub-only.
 - The script counts runs with no commits apart.
 
 `--repo NAME` picks one repo and can repeat. `--weeks`, `--listed` and `--real` work as in `levers.py`. `levers.py --by-type` gives one row per ADW. Both scripts only read, and both are hub-only.
+
+## Phase times
+
+`just phase-times` (`uv run adws/phase_times.py`) reads every repo's trace and prints, per chain, the median and 90th percentile of each phase, of the whole run and of its cost, from the chain's last 50 successful runs. Numbered phases share a row, so `bypass_review_N` covers every round. Phases under a minute are left out unless you pass `--all`.
+
+It then lists everything in the last 14 days that took more than twice its 90th percentile: a phase, a phase still running, a whole run, or a run's cost. A chain needs 10 successful runs before anything is judged, and nothing under a minute counts as slow. `--days`, `--factor`, `--history` and `--min-runs` change those numbers, and `--listed` works as in `levers.py`.
+
+A slow phase isn't a failure: `SilentStop` already stops an agent that writes nothing for 15 minutes. This finds the ones that kept writing and ran long. It also lists phases still marked running in a run that ended, which a restart left open before the tracer closed them at `session_finish` (2026-11-11).
 
 ## If the hub session goes to the background
 

@@ -21,6 +21,10 @@ levers *ARGS:
 features *ARGS:
     uv run adws/features.py "$@"
 
+# each chain's usual phase times, and the runs past twice them: just phase-times [--repo NAME] [--listed]
+phase-times *ARGS:
+    uv run adws/phase_times.py "$@"
+
 # Run it on a short branch after a skill change merges to main, then commit stamp.json.
 # move the install clone to main and update the hub's own install from it
 hub-update:

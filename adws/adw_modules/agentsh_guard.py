@@ -24,8 +24,10 @@ import signal
 import stat
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
@@ -44,6 +46,9 @@ API = "http://127.0.0.1:18080"
 PINNED_SHA256 = "603dbf1495da87c28be301f607efd00c66fb250633334204a0b04c2f10df1747"   # build 05b3777f on sssf/links-listing
 ATTACH_SECONDS = 30
 PAGE = 5000
+PRUNE_STATUS = "/var/lib/sssf-agentsh-prune/status.json"
+PRUNE_STALE_SECONDS = 3 * 3600
+STORE_WARN_BYTES = 10 * 10**9
 POLL_SECONDS = 5
 TIMEOUT = 10
 RESTART = "sudo systemctl restart agentsh"
@@ -487,10 +492,53 @@ def _service_started() -> int:
     return int(match.group(1))
 
 
-def check_machine(guard: LocalGuard) -> None:
+def _plain(value) -> str:
+    return str(value).replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+
+def store_notes(now: Optional[float] = None) -> list[str]:
+    """Trace notes about agentsh's event store, from the prune's status file. Never raises, never refuses."""
+    try:
+        now = time.time() if now is None else now
+        try:
+            data = json.loads(Path(PRUNE_STATUS).read_text())
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            return [f"agentsh's event store has no prune status at {PRUNE_STATUS}, so its size is unknown; "
+                    "install the prune timer with `just agentsh-install` and the sudo lines it prints"]
+        notes = []
+        last = None
+        try:
+            last = datetime.fromisoformat(str(data.get("last_prune")).replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError, OverflowError, OSError):
+            pass
+        if last is None or now - last > PRUNE_STALE_SECONDS:
+            text = f"agentsh's event store was last pruned {_plain(data.get('last_prune')) if last is not None else 'never'}"
+            if data.get("skipped"):
+                text += f"; last skipped: {_plain(data['skipped'])}"
+            if data.get("error"):
+                text += f"; last error: {_plain(data['error'])}"
+            notes.append(text + ". The prune skips while the service lists a session; with no run going, run "
+                         "`sudo systemctl start sssf-agentsh-prune.service`. If it still skips on an active "
+                         "session, a session may have been left open: with no run going, run "
+                         "`sudo systemctl restart agentsh`")
+        size = data.get("store_bytes")
+        if isinstance(size, (int, float)) and not isinstance(size, bool) and size > STORE_WARN_BYTES:
+            notes.append(f"agentsh's event store is {size / 1e9:.1f} GB, over 10 GB; with no run going, stop the "
+                         "service, move /var/lib/agentsh/events.db and its -wal and -shm files aside, start it, "
+                         "and delete the moved files once a run works (see \"Running local agents under agentsh\" "
+                         "in .claude/skills/sssf/references/config.md)")
+        return notes
+    except Exception:
+        return []
+
+
+def check_machine(guard: LocalGuard) -> list[str]:
     """Refuse unless the service is active, the binary is the pinned build, the config and
     policies are what this checkout renders (the pin line names BINARY, CONFIG, POLICY_DIR, SERVER, API
-    and PINNED_SHA256), BINARY and CONFIG are not links, and the service started after they changed."""
+    and PINNED_SHA256), BINARY and CONFIG are not links, and the service started after they changed.
+    Returns trace notes (never a refusal) about the event store's prune status."""
     if _run(["systemctl", "is-active", "agentsh"]).stdout.strip() != "active":
         raise AgentshRefused(f"the agentsh service is not active; {FIX}")
     for path in (BINARY, CONFIG):
@@ -542,6 +590,7 @@ def check_machine(guard: LocalGuard) -> None:
             raise AgentshRefused(f"{path} changed after the agentsh service started, so the service may still "
                                  f"run an older build or config; run `{RESTART}` (again, if you just did, since "
                                  "the check counts whole seconds), then start the run again")
+    return store_notes()
 
 
 LINK_SAMPLES = 5    # files a refusal names
@@ -549,7 +598,7 @@ LINK_SAMPLES = 5    # files a refusal names
 
 def _too_long(path: str) -> AgentshRefused:
     return AgentshRefused(
-        f"a path in the workspace is too long for the link check ({len(path)} characters, over PATH_MAX), "
+        f"a path in the workspace is too long for the link check ({len(os.fsencode(path))} bytes, at or over PATH_MAX, 4,096 bytes on Linux), "
         "so its files can't be checked for links outside the workspace and no agent is started. "
         f"It starts: {path[:200]}. Remove it (`rm -rf` on its top folder), then start the run again. "
         "See \"Running local agents under agentsh\" in .claude/skills/sssf/references/config.md")
@@ -909,12 +958,18 @@ class AgentshProcess:
                     "rule": str(rule_name or "")})
 
     def _poll(self) -> None:
-        rows = self._pages(self._offset, {"type": "ptrace_execve"})
-        with self._lock:
-            if self._done.is_set():
+        while True:     # each page is taken as it arrives, so a flood of events can't hold back the stop
+            rows = self._get({"session_id": self.session, "order": "asc", "limit": PAGE,
+                              "offset": self._offset})
+            with self._lock:
+                if self._done.is_set():
+                    return
+                self._offset += len(rows)
+                self._take(rows)
+                if self.tripped:
+                    return
+            if len(rows) < PAGE:
                 return
-            self._offset += len(rows)
-            self._take(rows)
 
     def _watch(self) -> None:
         while not self._done.wait(POLL_SECONDS):
@@ -971,7 +1026,7 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
                              "this is a bug in the caller")
     if guard.mode == "text":
         return tree.start(cmd, cwd=cwd, env=env)
-    check_machine(guard)
+    notes = check_machine(guard)
     if not guard.root or Path(cwd).resolve() != Path(guard.root):
         raise AgentshRefused(f"the agent would run in {cwd}, not the guarded root {guard.root or '(none)'}")
     policy = guard.policies.get(harness)
@@ -1010,6 +1065,7 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     except OSError as error:
         raise AgentshRefused(f"can't run {BINARY} ({error}); {FIX}") from None
     process = AgentshProcess(popen, policy.name, tally or rules.RefusalTally())
+    process.trace_notes.extend(notes)
     # Before the attach wait: on_spawn hasn't run, so `just kill` can't see the wrap yet.
     atexit.register(process._at_exit)
     process.wait_attached()

@@ -4,6 +4,7 @@ Run from the hub root:
     uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest adws/tests
 """
 
+import os
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -126,6 +127,40 @@ def test_an_unchanged_spec_commits_nothing(repo):
     (repo / "specs" / "s.md").write_text("# spec\n")
     first = gc.commit_spec("Add spec", ["specs/s.md"])
     assert gc.commit_spec("Add spec again", ["specs/s.md"]) == first
+
+
+def test_tidy_clears_what_the_launch_walk_refuses(tmp_path):
+    review = tmp_path / "bypass_review_1"
+    (review / "work").mkdir(parents=True)
+    (review / "work" / "probe.py").write_text("print(1)\n")
+    (review / "locked" / "inner").mkdir(parents=True)
+    (review / "locked").chmod(0o300)
+    deep = review / "cases"
+    deep.mkdir()
+    cwd = os.getcwd()
+    try:
+        os.chdir(deep)
+        for _ in range(22):                   # relative steps, so no call sees the whole path
+            os.mkdir("d" * 200)
+            os.chdir("d" * 200)
+        Path("f").write_text("x")
+    finally:
+        os.chdir(cwd)
+    outside = tmp_path / "cache-f"
+    outside.write_text("cached\n")
+    os.link(outside, review / "work" / "linked")
+    (tmp_path / "bypass_review_1.md").write_text("# report\n")
+
+    removed = gc.tidy_review_scratch(review)
+
+    assert removed == ["cases", "1 hard-linked files"]
+    assert (review / "work" / "probe.py").is_file() and not (review / "work" / "linked").exists()
+    assert os.access(review / "locked", os.R_OK | os.X_OK)
+    assert outside.read_text() == "cached\n" and (tmp_path / "bypass_review_1.md").is_file()
+
+
+def test_tidy_leaves_a_missing_folder_alone(tmp_path):
+    assert gc.tidy_review_scratch(tmp_path / "bypass_review_9") == []
 
 
 def test_mechanisms_names_state_a_fix_adds_to_a_guard_module(repo):

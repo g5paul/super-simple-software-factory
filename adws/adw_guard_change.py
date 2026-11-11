@@ -36,6 +36,7 @@ import argparse
 import ast
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -303,6 +304,33 @@ def commit_spec(message: str, paths: list[str]) -> str:
     return git("rev-parse", "--short", "HEAD")
 
 
+TOO_LONG = 4000      # bytes; PATH_MAX is 4096, and the agentsh walk refuses a longer path
+
+
+def tidy_review_scratch(folder: Path) -> list[str]:
+    """Clear what a bypass review's test trees leave that the agentsh launch walk refuses: a
+    folder the walk can't read, a path near PATH_MAX, and a file with another hard link. Every
+    folder is made readable, each top-level entry holding an over-long path is removed whole,
+    and each multiply-linked file is unlinked here, which leaves its other links alone. The
+    report files sit beside `folder`, not in it. Returns what was removed, for the log."""
+    if not folder.is_dir():
+        return []
+    def run(*argv: str) -> str:
+        return subprocess.run(list(argv), capture_output=True, text=True,
+                              env={**os.environ, "LC_ALL": "C"}).stdout
+    run("chmod", "-R", "u+rwx", str(folder))
+    removed = []
+    for entry in sorted(folder.iterdir()):
+        if entry.is_dir() and not entry.is_symlink():
+            if any(len(line.encode()) >= TOO_LONG for line in run("find", str(entry)).splitlines()):
+                run("find", str(entry), "-delete")
+                removed.append(entry.name)
+    linked = run("find", str(folder), "-type", "f", "-links", "+1", "-print", "-delete").splitlines()
+    if linked:
+        removed.append(f"{len(linked)} hard-linked files")
+    return removed
+
+
 # ── the report ───────────────────────────────────────────────────────────────
 
 def write_report(path: Path, review: BypassReview | None, outcome: str,
@@ -455,6 +483,8 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml",
                 prompt=review_brief(spec, base, base_sha, head, heads[-2] if i > 1 else None,
                                     i, test.tally()),
                 gates=[gates.artifacts_exist, review_well_formed]))
+            ph.log(tidied=", ".join(tidy_review_scratch(
+                run.context_handoff_dir / f"bypass_review_{i}")) or "nothing")
             stops = blocking(review, allow_false_positives)
             ph.log(bypasses=len(review.bypasses), harms=len(review.harms),
                    false_positives=len(review.false_positives),

@@ -252,7 +252,7 @@ the refusal still stops the run. Update the `REFUSED` comment to match. No code 
   Python `re`, so that takes a change in how Claude Code wraps a Bash command or a Bash call that
   skips `CLAUDE_CODE_SHELL_PREFIX`. Recheck `sssf_refuse.commands()` against each Claude Code
   upgrade's wrapping", linking
-  `[config.md](../.claude/skills/sssf/references/config.md#rules-for-every-agent--agent_rules)`.
+  `[config.md](../.claude/skills/sssf/references/config.md#rules-for-every-agent-agent_rules)`.
 
 ### 7. Tests
 

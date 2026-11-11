@@ -1,18 +1,20 @@
 # Install SSSF in a repo
 
-SSSF installs into the repo it will work on. You copy the skill in, run the installer, and check the result. Pick how the agents sign in first, since the installer stamps a roster for one of them:
+SSSF installs into the repo it will work on. You copy the skill in, run the installer, and check the result. First pick how the agents sign in, since the installer stamps a roster for one of these:
 
 | Agents run on | Install flag | What you need | Keys in `.env` |
 |---|---|---|---|
-| a Claude subscription, through Claude Code | `--coding-agent claude_code` | Claude Code, logged in | none |
+| a Claude subscription, through Claude Code | `--coding-agent claude_code` | Claude Code, signed in | none |
 | a ChatGPT subscription, through pi | `--chatgpt` | pi, signed in to ChatGPT | none |
 | API keys, through pi | none, the default | pi, and a key for each provider the roster names | one per provider |
 
-The two subscriptions are cheaper to start with: there's no bill per token, and no key can bill the API by accident. You can add a second roster later and race the two with a trial.
+The two subscriptions are cheaper to start with. There's no bill per token, and no key can bill the API by accident. You can [add a second roster](#add-another-roster) later and race the two with a trial.
+
+For a guided first install and run on a Claude subscription, follow [Your first run](first-run.md).
 
 ## Before you start
 
-The last column is the version on the machine where SSSF is built and tested, a WSL2 Ubuntu 24.04 install, checked on 2026-11-09. Older or newer versions may work; these are the ones known to.
+The last column is the version on the machine where SSSF is built and tested, a WSL2 Ubuntu 24.04 install, checked on 2026-11-09. Other versions may work, but these are the ones known to.
 
 | Tool | Why | Check | Tested |
 |---|---|---|---|
@@ -27,12 +29,21 @@ The last column is the version on the machine where SSSF is built and tested, a 
 | Node.js 22 or later | pi | `node --version` | 24.11.1 |
 | [gitleaks](https://github.com/gitleaks/gitleaks) 8.30.1 or later | the secret scan before each push, once you turn it on | `gitleaks version` | 8.30.1 |
 | [bun](https://bun.sh) | the dashboard | `bun --version` | 1.4.4 |
-| [Podman](https://podman.io), rootless, with pasta | only for the container and `--sandbox openshell` | `podman --version` | 4.9.3, passt 2024-02-20 |
-| [Codex CLI](https://github.com/openai/codex) | only for the ChatGPT usage meters on the dashboard ([watch.md](watch.md#chatgpts-windows-through-codex-cli)) | `codex --version` | 0.153.0 |
+| [Podman](https://podman.io), rootless, with pasta | only for the operator container and `--sandbox openshell` | `podman --version` | 4.9.3, passt 2024-02-20 |
+| [Codex CLI](https://github.com/openai/codex) | only for the [ChatGPT usage meters](watch.md#chatgpts-windows-through-codex-cli) on the dashboard | `codex --version` | 0.153.0 |
 | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | only for `--sandbox openshell` | `openshell --version` | 0.1.7 |
-| [agentsh](https://github.com/canyonroad/agentsh) | only for `local_guard: agentsh` ([concepts.md](../concepts.md#agentsh-on-top-of-the-base-guards)) | `agentsh --version` | `0.20.6-dev.fork+05b3777f`, a build of the hub's patched fork. SSSF accepts no other, and the fork's patches aren't published yet |
+| [agentsh](https://github.com/canyonroad/agentsh) | only for [`local_guard: agentsh`](../concepts.md#agentsh-on-top-of-the-base-guards) | `agentsh --version` | `0.20.6-dev.fork+05b3777f`, a build of the hub's patched fork. SSSF accepts no other, and the fork's patches aren't published yet |
 
-Each kind of run last passed on these dates: Claude Code agents on this machine under both local guards on 2026-11-09, the container on 2026-11-05, Vercel and E2B on 2026-11-05, and OpenShell on 2026-11-08. A run before 2026-11-09 may have used an older version of a tool above.
+Each kind of run last passed on these dates:
+
+| Kind of run | Last passed |
+|---|---|
+| Claude Code agents on this machine, under `local_guard: text` and `local_guard: agentsh` | 2026-11-09 |
+| the operator container | 2026-11-05 |
+| Vercel and E2B | 2026-11-05 |
+| OpenShell | 2026-11-08 |
+
+A run before 2026-11-09 may have used an older version of a tool above.
 
 SSSF pins some of what it pulls in itself:
 
@@ -46,26 +57,26 @@ SSSF pins some of what it pulls in itself:
 | [Matt Pocock's skills](https://github.com/mattpocock/skills), for [tickets](run.md#a-feature-from-tickets) | commit `a496f55`, 2026-10-29 | the passages copied into the ticket agents' prompts name it |
 | The agentsh build | sha256 `603dbf14…f1747`, commit `05b3777f` on the fork | `PINNED_SHA256` in `agentsh_guard.py` |
 
-The ADWs' own Python libraries, pydantic, python-dotenv, pyyaml and rich, aren't pinned: uv takes the latest each time. On 2026-11-09 those were 2.14.3, 1.2.4, 6.0.3 and 15.0.0.
+The ADWs' own Python libraries, pydantic, python-dotenv, pyyaml and rich, aren't pinned. Each time, uv takes the latest. On 2026-11-09 those were 2.14.3, 1.2.4, 6.0.3 and 15.0.0.
 
-The repo needs at least one commit. Chains that end in a commit phase, and worktree runs, start from it. In a new folder, run `git init && git commit --allow-empty -m init` first. Don't run it in a repo that already has commits.
+The repo needs at least one commit, because worktree runs and ADWs that end in a commit phase start from it. In a new folder, run `git init && git commit --allow-empty -m init` first. Don't run it in a repo that already has commits.
 
 ## 1. Copy the skill in
 
-From the root of the target repo:
+From the root of the target repo, run:
 
 ```bash
 mkdir -p .claude/skills
 cp -r ~/github/super-simple-software-factory/.claude/skills/sssf .claude/skills/
 ```
 
-Use the path of your own clone of this repo. Then set `SSSF_SOURCE` to the same skill folder whenever you run the installer, so it records which commit you installed. Without it, the installer prints `skill: unknown (no git source)` and `stamp.json` has no `skill` key.
+Use the path of your own clone of super-simple-software-factory. Whenever you run the installer, set `SSSF_SOURCE` to the same skill folder, so the installer records which commit you installed. Without it, the installer prints `skill: unknown (no git source)` and `stamp.json` has no `skill` key.
 
 ## 2. Run the installer
 
-Run one of these from the repo root. Everything lands in the current folder.
+Run one of the three blocks below from the repo root. Everything lands in the current folder. The installer prints what it stamped, and the line that turns on the secret scan.
 
-**Claude subscription:**
+### Claude subscription
 
 ```bash
 export SSSF_SOURCE=~/github/super-simple-software-factory/.claude/skills/sssf
@@ -73,9 +84,11 @@ uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code
 cp .env.sample .env
 ```
 
-Leave every key in `.env` empty. Claude Code agents use the account `claude` is logged into, and SSSF keeps `ANTHROPIC_API_KEY` away from them.
+Leave every key in `.env` empty. Claude Code agents use the account `claude` is signed in to, and SSSF keeps `ANTHROPIC_API_KEY` away from them.
 
-**ChatGPT subscription.** Sign pi in once: run `pi`, type `/login`, and pick `openai`. Then:
+### ChatGPT subscription
+
+Sign pi in to ChatGPT once. Run `pi`, type `/login`, and pick `openai`. Then run:
 
 ```bash
 export SSSF_SOURCE=~/github/super-simple-software-factory/.claude/skills/sssf
@@ -86,7 +99,7 @@ echo "SSSF_PI_AUTH=subscription" >> .env
 
 `SSSF_PI_AUTH=subscription` keeps `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` away from pi agents, so a lapsed sign-in fails the run instead of billing a key.
 
-**API keys:**
+### API keys
 
 ```bash
 export SSSF_SOURCE=~/github/super-simple-software-factory/.claude/skills/sssf
@@ -102,13 +115,13 @@ The starter pi roster names three providers, so it needs three keys in `.env`:
 | `fireworks/accounts/fireworks/models/kimi-k3` | planner | `FIREWORKS_API_KEY` |
 | `openai/gpt-5.6-terra`, `openai/gpt-5.6-luna` | reviewers, documenter | `OPENAI_API_KEY` |
 
-For one key instead of three, delete the agents' own `model:` lines in `adws/adw_sssf_config/sssf.config.yaml`, so every agent uses `defaults.model`.
+To use one key instead of three, delete the agents' own `model:` lines in `adws/adw_sssf_config/sssf.config.yaml`. Every agent then uses `defaults.model`.
 
-Each chain checks at launch that every model it uses is in `pi --list-models`, and pi lists a provider's models only once that provider has a key. So a chain whose agent lacks its key stops before any agent runs, with `model pattern ... not found in pi --list-models`. `just demo` uses only the scout, so it can pass while `just sdlc` stops. A key that's set but wrong fails later, when its agent runs.
+At launch, each ADW checks that every model it uses is in `pi --list-models`. pi lists a provider's models only once that provider has a key. So if an agent lacks its key, the run stops before any agent runs, with `model pattern ... not found in pi --list-models`. `just demo` uses only the scout, so it can pass while `just sdlc` stops. A key that's set but wrong fails later, when its agent runs.
 
-The installer prints what it stamped, and the line that turns on the secret scan.
+### A repo with its own justfile
 
-**A repo with its own justfile.** The installer leaves an existing justfile alone. Add `mod sssf 'sssf.just'` to it, then run the installer again: it stamps SSSF's recipes as `sssf.just`, and they run as `just sssf demo`, `just sssf sessions` and so on. If you add the line before the first install, one run is enough. Wherever this guide says `just <recipe>`, read `just sssf <recipe>`.
+The installer leaves an existing justfile alone. Add `mod sssf 'sssf.just'` to it, then run the installer again. The installer stamps SSSF's recipes as `sssf.just`, and they run as `just sssf demo`, `just sssf sessions` and so on. If you add the line before the first install, one run is enough. Wherever the guides say `just <recipe>`, read `just sssf <recipe>`.
 
 ## 3. Restart Claude Code and commit
 
@@ -127,11 +140,11 @@ just demo        # two cheap read-only runs, end to end
 just sessions    # the runs it just made
 ```
 
-Both runs should end `✓ success`. That means the roster loaded, an agent ran and signed in, its report parsed, and the events reached `adws/adw_data/sssf.db`. Every larger chain uses this same path, so fix a failure here first. [troubleshooting.md](troubleshooting.md) covers the usual ones.
+Both runs should end `✓ success`. That means the roster loaded, an agent ran and signed in, its report parsed, and the events reached `adws/adw_data/sssf.db`. Every larger ADW uses the same path, so fix a failure here first. [Install and sign-in](troubleshooting.md#install-and-sign-in) covers the usual ones.
 
 Then check the sign-in for your roster:
 
-- **Claude:** `just login-check` should print `login ok: Claude Code agents can sign in`. To confirm no agent billed the API, every agent's init event must say `apiKeySource` is `none`:
+- **Claude.** `just login-check` should print `login ok: Claude Code agents can sign in`. To confirm no agent billed the API, check that every agent's init event says `apiKeySource` is `none`:
 
   ```bash
   grep -h '"subtype":"init"' adws/adw_data/sessions/*/*/raw_output.jsonl \
@@ -139,14 +152,14 @@ Then check the sign-in for your roster:
   ```
 
   It should print `{'none'}`.
-- **ChatGPT:** `pi auth check --provider openai --json` should report `"authType": "oauth"`.
-- **API keys:** `pi --list-models` should list each model the roster names.
+- **ChatGPT.** `pi auth check --provider openai --json` should report `"authType": "oauth"`.
+- **API keys.** `pi --list-models` should list each model the roster names.
 
 ## 5. Wire in your own checks
 
-The stamped `adws/adw_modules/quality.py` holds placeholder commands that exit 0. Until you replace them, a test phase passes whatever the builder did. Put in the commands your CI runs: tests, lint, format, typecheck, build. [customize.md](customize.md#your-checks) shows how.
+The stamped `adws/adw_modules/quality.py` holds placeholder commands that exit 0. Until you replace them, a test phase passes whatever the builder did. Put in the commands your CI runs, such as tests, lint, format, typecheck and build. [Your checks](customize.md#your-checks) shows how.
 
-Then keep SSSF's files out of your repo's own tools. A repo-wide `ruff check .`, eslint or tsc also reads the files SSSF stamped in `adws/` and `.claude/`, and CI fails on them. Exclude `adws/`, `.claude/`, `specs/` and `app_docs/`, and `container/` if you stamp the container:
+Then keep SSSF's files out of your repo's own tools. A repo-wide `ruff check .`, eslint or tsc also reads the files SSSF stamped in `adws/` and `.claude/`, and CI fails on them. Exclude `adws/`, `.claude/`, `specs/` and `app_docs/`. If you stamped the operator container, exclude `container/` too.
 
 | Tool | Setting |
 |---|---|
@@ -160,17 +173,17 @@ The skill's [post-install checklist](../../.claude/skills/sssf/cookbooks/install
 
 ## 6. Turn on the secret scan
 
-The installer stamps `.githooks/pre-push`, which scans each push for secrets with gitleaks and refuses on a find. It also refuses any push from an SSSF agent. Git runs it only once you turn it on, once per clone:
+The installer stamps `.githooks/pre-push`. The hook scans each push for secrets with gitleaks and refuses the push if it finds one. It also refuses any push from an SSSF agent. Git runs the hook only after you turn it on, once per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-This stops git reading `.git/hooks`, so move any hook you keep there into `.githooks/` first. [secret-scan.md](../secret-scan.md) explains the hook and how to test it without a real push.
+The setting stops git reading `.git/hooks`, so first move any hook you keep there into `.githooks/`. [Secret scan before every push](../secret-scan.md) explains the hook and how to test it without a real push.
 
 ## Add another roster
 
-To race two rosters with a trial, stamp the second beside the first. For the ChatGPT roster on a Claude install:
+To race two rosters with a trial, stamp the second beside the first. For the ChatGPT roster on a Claude install, run:
 
 ```bash
 uv run .claude/skills/sssf/scripts/install.py --add-roster chatgpt
@@ -178,9 +191,9 @@ echo "SSSF_PI_AUTH=subscription" >> .env
 git add adws/adw_sssf_config/sssf.config.chatgpt.yaml && git commit -m "Add the ChatGPT roster"
 ```
 
-Sign pi in to ChatGPT too, if it isn't: run `pi`, type `/login`, and pick `openai`. A trial refuses a ChatGPT roster unless pi reports an OAuth sign-in and `SSSF_PI_AUTH=subscription` is set. Commit the roster, since `just merge` and `just sssf-update` refuse on a dirty tree.
+If pi isn't signed in to ChatGPT, run `pi`, type `/login`, and pick `openai`. A trial refuses a ChatGPT roster unless pi reports an OAuth sign-in and `SSSF_PI_AUTH=subscription` is set. Commit the roster, since `just merge` and `just sssf-update` refuse on a dirty tree.
 
-It lands as `adws/adw_sssf_config/sssf.config.chatgpt.yaml`. `just rosters` lists every roster and the model each agent runs. Any recipe takes a roster for one run with `SSSF_CONFIG`:
+The roster lands as `adws/adw_sssf_config/sssf.config.chatgpt.yaml`. `just rosters` lists every roster and the model each agent runs. To use a roster for one run, set `SSSF_CONFIG` in front of any recipe:
 
 ```bash
 SSSF_CONFIG=adws/adw_sssf_config/sssf.config.chatgpt.yaml just sdlc "add a /health endpoint"
@@ -188,15 +201,17 @@ SSSF_CONFIG=adws/adw_sssf_config/sssf.config.chatgpt.yaml just sdlc "add a /heal
 
 ## Run the operator session in a container
 
-On the host, Claude Code asks you to approve each chain launch. The container runs the operator session with `--dangerously-skip-permissions` instead. Inside it the session can reach only the repo and `~/.config/sssf`, so it can launch chains without asking. It needs rootless Podman with pasta installed. `run.sh` asks for pasta itself, so Podman 4 works, as 4.9.3 does here.
+On the host, Claude Code asks you to approve each launch. The operator container runs the operator session with `--dangerously-skip-permissions` instead. Inside the container, the session can reach only the repo and `~/.config/sssf`, so it can launch ADWs without asking.
 
-1. Stamp it. At install, add `--container` to your sign-in flag, as in `install.py --coding-agent claude_code --container`. On its own, `--container` stamps the default pi roster. In a repo that's already installed, run it alone:
+The container needs rootless Podman with pasta installed. `run.sh` asks for pasta itself, so Podman 4 works. The machine SSSF is tested on runs 4.9.3.
+
+1. Stamp the container. At install, add `--container` to your sign-in flag, for example `install.py --coding-agent claude_code --container`. On its own, `--container` stamps the default pi roster. In a repo that's already installed, run it alone:
 
    ```bash
    uv run .claude/skills/sssf/scripts/install.py --container
    ```
 
-2. Make a token once. Every repo shares it, and it lasts about a year. `claude setup-token` opens a browser sign-in and prints a token that starts `sk-ant-oat`. Save it without echoing it:
+2. Make a token once. Every repo shares it, and it lasts about a year. `claude setup-token` opens a browser sign-in and prints a token that starts `sk-ant-oat`. Save the token without echoing it:
 
    ```bash
    mkdir -p ~/.config/sssf-container && chmod 700 ~/.config/sssf-container
@@ -210,38 +225,40 @@ On the host, Claude Code asks you to approve each chain launch. The container ru
    just container      # runs container/run.sh; add -p '<request>' for one headless request
    ```
 
-   The first start builds the image. A pi roster also needs the host signed in to pi: the host keeps the sign-in, and a broker hands each pi agent a one-hour token.
-4. Check the session's shells get the token. Inside it, `! printenv | grep -c '^CLAUDE_CODE_OAUTH_TOKEN='` must print `1`.
+   The first start builds the image. A pi roster also needs the host signed in to pi. The host keeps the sign-in, and a broker hands each pi agent a one-hour token.
+4. Check that the session's shells get the token. Inside the session, `! printenv | grep -c '^CLAUDE_CODE_OAUTH_TOKEN='` must print `1`.
 
-A container session can't push, since neither `~/.ssh` nor your git config is mounted. Add the tools your checks need, such as bun, to `container/Containerfile`. [run.md](run.md#in-the-container) has an example run.
+A container session can't push, since neither `~/.ssh` nor your git config is mounted. Add the tools your checks need, such as bun, to `container/Containerfile`. [In the container](run.md#in-the-container) shows an example run.
 
 ## Set up remote VMs
 
-For a local, free microVM instead, `--sandbox openshell` needs only `just openshell-setup`; no API key. See [run.md](run.md).
+For a free OpenShell microVM on the host instead, run `just openshell-setup`. It needs no API key. [In a VM](run.md#in-a-vm) covers it.
 
 `--sandbox vercel` and `--sandbox e2b` run a run's agents, checks and git in a VM made for the run. Set up the provider you'll use:
 
-1. **A Claude token** for Claude Code agents in the VM, in `~/.config/sssf-sandbox/token.env`, made the same way as the container's: `CLAUDE_CODE_OAUTH_TOKEN=<token>`. A pi agent on `openai/` models needs only the host's pi sign-in; SSSF hands each call a short-lived token, and the login stays on your machine.
-2. **The provider's keys** in the repo's `.env`:
+1. For Claude Code agents in the VM, save a Claude token in `~/.config/sssf-sandbox/token.env`. Make it the same way as the container's, as `CLAUDE_CODE_OAUTH_TOKEN=<token>`. A pi agent on `openai/` models needs only the host's pi sign-in. SSSF hands each call a short-lived token, and the sign-in stays on the host.
+2. Put the provider's keys in the repo's `.env`:
 
    | Provider | Keys |
    |---|---|
    | Vercel Sandbox | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` |
    | E2B | `E2B_API_KEY` |
 
-3. **E2B only:** build SSSF's VM template once per E2B team, from a repo whose `.env` has the key:
+3. If you use E2B, build SSSF's VM template once per E2B team, from a repo whose `.env` has the key:
 
    ```bash
    just e2b-template
    ```
 
-A Vercel or E2B run uploads the repo's code to that provider; an OpenShell run keeps it on this machine. Keep a private repo on `sandbox: none`, the default, or `sandbox: openshell` in `adws/adw_sssf_config/repo.yaml`, and use a VM only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [run.md](run.md#in-a-vm) has an example run.
+A Vercel or E2B run uploads the repo's code to that provider. An OpenShell run keeps the code on the host. Keep a private repo on `sandbox: none`, the default, or `sandbox: openshell` in `adws/adw_sssf_config/repo.yaml`, and use a remote VM only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [In a VM](run.md#in-a-vm) shows an example run.
 
 ## Turn on agentsh, optional
 
-Every repo starts on `local_guard: text`, which means SSSF's base guards alone. `local_guard: agentsh` adds agentsh on top of them for runs on this machine: each agent runs under agentsh, which denies files, commands and hosts at the system call, and the base guards keep running. [concepts.md](../concepts.md#agentsh-on-top-of-the-base-guards) says what the base guards and agentsh each cover and where agentsh is untested. Leave it off unless the repo fits that case.
+Every repo starts on `local_guard: text`, which means SSSF's base guards alone. `local_guard: agentsh` adds agentsh around them for runs on the host. Each agent runs under agentsh, which refuses files, commands and hosts at the system call, and the base guards keep running. [agentsh, on top of the base guards](../concepts.md#agentsh-on-top-of-the-base-guards) says what the base guards and agentsh each cover, and where agentsh is untested. Leave agentsh off unless the repo fits the case that section describes.
 
-It needs the agentsh service, installed as root, with the one build SSSF pins. That build comes from the hub's fork of agentsh, whose patches aren't published yet, so for now it works only where that build is installed. Then, once per repo, and again whenever `secret_files`, `deny_exec` or `network_allow` change:
+agentsh needs its service, installed as root, with the one build SSSF pins. That build comes from the hub's fork of agentsh, whose patches aren't published yet, so for now agentsh works only where that build is installed.
+
+Once the service is installed, do these steps once per repo. Do them again whenever `secret_files`, `deny_exec` or `network_allow` change.
 
 1. Set `local_guard: agentsh` in `adws/adw_sssf_config/repo.yaml`, and leave `sandbox` at `none`.
 2. From the repo, run the installer from a clean checkout of the SSSF hub at the repo's skill version:
@@ -251,14 +268,16 @@ It needs the agentsh service, installed as root, with the one build SSSF pins. T
    just agentsh-install ~/path/to/hub   # or named
    ```
 
-   It runs the hub's `scripts/agentsh_install.py` for this repo's main checkout. It writes the repo's policy and shows a diff against what's in `/etc/agentsh/`, then prints `sudo` lines. It never runs `sudo` itself.
-3. Read the diff, stop every agent, and run the printed lines yourself.
+   The recipe runs the hub's `scripts/agentsh_install.py` for this repo's main checkout. It writes the repo's policy, shows a diff against what's in `/etc/agentsh/`, and then prints `sudo` lines. It never runs `sudo` itself.
+3. Read the diff.
+4. Stop every agent.
+5. Run the printed lines yourself.
 
-A run checks the service, the build and the installed policy before it starts, and refuses with a message naming the fix. [config.md](../../.claude/skills/sssf/references/config.md) has the full list of checks and known limits.
+Before it starts, a run checks the service, the build and the installed policy. If one is wrong, the run refuses with a message naming the fix. The [config reference](../../.claude/skills/sssf/references/config.md) has the full list of checks and known limits.
 
 ## Update to a newer skill
 
-When this repo's skill changes, bring an installed repo up to it:
+When the hub's skill changes, bring an installed repo up to date:
 
 <p align="center">
   <img src="../../images/11_update.svg" alt="just sssf-update copies the hub's skill in; each file is replaced, kept or flagged by its stamp record; then check again, run the quality check, commit and fast-forward main" width="850">
@@ -269,9 +288,15 @@ echo "SSSF_SOURCE=$HOME/github/super-simple-software-factory/.claude/skills/sssf
 just sssf-update
 ```
 
-It copies the skill in and runs `install.py --update`. A file you never changed is replaced. A file you changed, such as `quality.py`, is kept and listed. A file you changed that the skill also changed is flagged for review with a `diff` command. Settle each one with `just take <path>`, which takes the skill's version, or `just keep <path>`, which keeps yours. Then commit the update on its own and run `just quality "check after the SSSF update"`.
+`just sssf-update` copies the skill in and runs `install.py --update`:
 
-`just sssf-update` refuses while the tree has uncommitted changes or a chain is running, and when the source checkout is on a branch with commits that aren't on its `main`. [The install cookbook](../../.claude/skills/sssf/cookbooks/install.md#update-an-installed-repo) has the details.
+- A file you never changed is replaced.
+- A file you changed, such as `quality.py`, is kept and listed.
+- A file you changed that the skill also changed is flagged for review with a `diff` command. Settle each one with `just take <path>`, which takes the skill's version, or `just keep <path>`, which keeps yours.
+
+Then commit the update on its own, and run `just quality "check after the SSSF update"`.
+
+`just sssf-update` refuses while the tree has uncommitted changes or an ADW is running. It also refuses when the skill source is on a branch with commits that aren't on its `main`. [The install cookbook](../../.claude/skills/sssf/cookbooks/install.md#update-an-installed-repo) has the details.
 
 In a repo that loads SSSF as a module, run `just sssf sssf-update`.
 

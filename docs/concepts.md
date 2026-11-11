@@ -1,9 +1,9 @@
 # How SSSF works
 
-This page explains the parts every run is made of: the operator session, ADWs, phases, agents, guards, where a run runs, envelopes, gates, the trace, and the caps. You don't need it to run SSSF; the [guide](guide/) is enough for that. Read it when you want to change a chain, add a gate, or understand why a run stopped.
+This page explains the parts every run is made of: the operator session, ADWs, phases, agents, guards, where a run runs, reports, gates, the trace, and the caps. You don't need it to run SSSF, because the [guide](guide/) covers that. Read it when you want to change an ADW, add a gate, or understand why a run stopped.
 
 <p align="center">
-  <img src="../images/01_factory_spine.svg" alt="A run spine: engineer, agent, and code phases on a deterministic rail, every event dropping into a SQLite trace db that the UI polls" width="850">
+  <img src="../images/01_factory_spine.svg" alt="A run spine: engineer, agent, and code phases on a deterministic rail, every event dropping into a SQLite trace that the dashboard polls" width="850">
 </p>
 
 ## Code owns the loop
@@ -14,30 +14,30 @@ This page explains the parts every run is made of: the operator session, ADWs, p
 
 Give one agent a whole task and you can't say which step failed. "Done" means the agent stopped talking, a retry starts cold, and the only record is a transcript. Run it twice and you get two different results.
 
-SSSF puts the control in Python instead. An ADW (AI Developer Workflow) is a short script in `adws/` that runs a fixed list of phases. The script decides the order, the retries, and what counts as done. An agent does the work inside one phase and hands back a typed report. Code checks the report before the next phase starts.
+SSSF puts the control in Python instead. An ADW, short for AI developer workflow, is a short script in `adws/` that runs a fixed list of phases. The script decides the order, the retries, and what counts as done. An agent does the work inside one phase and hands back a typed report. Code checks the report before the next phase starts.
 
 A step whose command you already know stays code. Running `pytest` or `bun test` isn't a judgement call, so no agent spends a context window finding the test runner. When the suite fails, the failure goes back to the builder the same way an agent's report would.
 
 ## The operator session
 
-You ask for work in a Claude Code session in the repo, such as `/sssf add a /health endpoint, on its own branch`. That session is the operator. The `sssf` skill sends the request to a cookbook. The session then writes the chain's prompt, launches the chain with `uv run adws/adw_<chain>.py`, follows the trace, and reports the adw_id, status, cost and commits. The cookbooks keep it from reading into the app or editing it. That's the planner's and the builder's job, inside the chain.
+You ask for work in a Claude Code session in the repo, such as `/sssf add a /health endpoint, on its own branch`. That session is the **operator session**. The `sssf` skill sends the request to a cookbook. The session then writes the ADW's prompt, launches the ADW with `uv run adws/adw_<chain>.py`, follows the trace, and reports the `adw_id`, status, cost and commits. The cookbooks forbid it to read into the app or edit it. Researching and changing the app is the planner's and the builder's job, inside the ADW.
 
-The agents in a chain are separate processes, each with its own system prompt, tools and session. The operator doesn't see their context, only the trace. So "the operator" always means your session, and "an agent" means one of the chain's.
+The agents in an ADW are separate processes, each with its own system prompt, tools and session. The operator session sees only the trace, never their context. On these pages, "operator session" always means your session, and "agent" means one of the ADW's agents.
 
 <p align="center">
-  <img src="../images/08_operator.svg" alt="The engineer's request goes through the operator session's sssf skill and cookbook, which launches a chain of agent and code phases; every event goes to the trace, which the operator reads to report status, cost, findings and commits" width="850">
+  <img src="../images/08_operator.svg" alt="The engineer's request goes through the operator session's sssf skill and cookbook, which launches an ADW of agent and code phases; every event goes to the trace, which the operator session reads to report status, cost, findings and commits" width="850">
 </p>
 
-You can be the operator yourself. Every chain is a `just` recipe, or a `uv run` line where there's no recipe, and [run.md](guide/run.md) shows each request both ways.
+You can also start runs yourself, without the operator session. Every ADW is a `just` recipe, or a `uv run` line where there's no recipe, and [run.md](guide/run.md) shows each request both ways.
 
 The operator session runs in one of two places:
 
-- **On the host**, in your usual Claude Code. Its auto mode blocks the command that launches a chain, so you approve each launch.
-- **In the operator container**, started with `container/run.sh`. Claude Code runs there with `--dangerously-skip-permissions`, and can reach only the repo and `~/.config/sssf`, so it launches chains without asking. Its agents run in the container too. [install.md](guide/install.md#run-the-operator-session-in-a-container) has the setup.
+- **On the host**, in your usual Claude Code. Its auto mode stops at the command that launches an ADW, so you approve each launch.
+- **In the operator container**, started with `container/run.sh`. Claude Code runs there with `--dangerously-skip-permissions` and can reach only the repo and `~/.config/sssf`, so it launches ADWs without asking. Its agents run in the container too. [install.md](guide/install.md#run-the-operator-session-in-a-container) has the setup.
 
 ## ADWs
 
-The skill ships these chains, each in `adws/adw_<name>.py`:
+The skill ships these ADWs, each in `adws/adw_<name>.py`:
 
 | ADW | Phases | Use it when |
 |---|---|---|
@@ -49,23 +49,18 @@ The skill ships these chains, each in `adws/adw_<name>.py`:
 | `adw_plan_build` | planner, builder, commit | the work is small and well understood |
 | `adw_build_test` | builder, tests, a bounded fix loop, commit in a worktree run | there's a suite to satisfy |
 | `adw_build_review` | builder, reviewer, a bounded revise loop | "is this what was asked for" matters more than "does it run" |
-| `adw_plan_build_test` | planner, builder, tests, fix loop, commit | the standard chain, `just sdlc` |
+| `adw_plan_build_test` | planner, builder, tests, fix loop, commit | the standard ADW, `just sdlc` |
 | `adw_plan_build_test_quality` | the same, plus every `quality.py` check | the repo has lint and typecheck worth enforcing |
 | `adw_document` | a git diff, then documenter | you want a write-up of what shipped |
 | `adw_simple_sdlc` | plan, build, verify, review, document, with three commits | the work is real and its shape isn't obvious |
 | `adw_tickets` | scout, then for each ticket: build test-first, verify, commit; then two reviews and docs | the feature has a spec and tickets |
 | `adw_trial` | one `adw_simple_sdlc` per roster, then a panel of referees | you want to compare rosters on one request |
 
-Three more scripts manage runs rather than build anything: `adw_kill`, `adw_worktree` (merge, discard and rebase), and `adw_sandbox_usage`.
+Three more scripts manage runs rather than build anything: `adw_kill`, `adw_worktree` for merge, discard and rebase, and `adw_sandbox_usage`.
 
-`adw_guard_change` is the hub's own chain for changes to guard code. It plans, builds, verifies and commits like the others, with a bypass review against the old code. It lives only in this repo, and an install never copies it.
+`adw_guard_change` is the hub's guard-change chain, for changes to guard code. It plans, builds, verifies and commits like the others, and adds a bypass review against the old code. It lives only in this repo, and an install never copies it.
 
-`--adw-id` joins an existing run. The run keeps its folders, and each agent continues its own session instead of starting cold. That's how you chain two ADWs by hand:
-
-```bash
-uv run adws/adw_plan.py "add a /health endpoint"            # prints adw_id a1b2c3d4
-uv run adws/adw_build_test.py "implement the plan" --adw-id a1b2c3d4
-```
+`--adw-id` joins an existing run. The run keeps its folders, and each agent continues its own session instead of starting cold. [run.md](guide/run.md#chain-two-runs-by-hand) shows the commands.
 
 ## Phases
 
@@ -96,15 +91,15 @@ return run.finish(accepted=test.passed, reason="the suite stayed red")
 
 A phase has one of three kinds:
 
-- **engineer** is you: the request that starts the run.
-- **agent** is `ph.call(...)`: a prompt goes in, a typed report comes out, and gates check it.
+- **engineer** is you. Its phase is the request that starts the run.
+- **agent** is a `ph.call(...)`. A prompt goes in, a typed report comes out, and gates check it.
 - **code** is a step that runs without a model, such as the tests, a commit, or a worktree's setup. It always gets its own phase, so the trace shows when code ran and when an agent did.
 
 Each owner gets its own lane in the dashboard, so a plan-build-test run has five: you, git, the planner, the builder, and quality.
 
 The commit phase shows the pattern. The builder proposes a commit message as a field of its report. Code decides whether to use it, falls back when it's empty, and makes the commit. The agent never runs `git commit` itself.
 
-Every phase starts as `fail`. A clean exit makes it `success`, and an agent phase also needs its report to parse and every gate to pass. `run.finish(accepted=...)` asks a second question, since every phase can pass while the run still fails. A test phase that ran a red suite did its job, but the run shouldn't count as a success. One call sets the exit code, the session's status, and the banner, so they can't disagree.
+Every phase starts as `fail`. A clean exit makes it `success`, and an agent phase also needs its report to parse and every gate to pass. `run.finish(accepted=...)` asks a second question, because every phase can pass while the run still fails. A test phase that ran a red suite did its job, but the run shouldn't count as a success. One call sets the exit code, the run's status and the banner, so they can't disagree.
 
 ## Agents
 
@@ -145,39 +140,39 @@ The starter rosters have eight agents:
 | `spec_reviewer` | reviews a ticket feature against its spec |
 | `documenter` | writes up what shipped |
 
-A trial adds referees, one per model family in the trial, from `prompt_engineering/referee/`. There's no tester agent, because a suite is a known command, so code runs it.
+A trial adds referees, one per model family in the trial, from `prompt_engineering/referee/`. There's no tester agent. A suite is a known command, so code runs it.
 
-An ADW names agents, never models. Swap a model in the roster and every chain picks it up.
+An ADW names agents, never models. Swap a model in the roster and every ADW picks it up.
 
-**`tools` says what an agent can do. `writes` says where it may leave changes.** `bash` runs anything and `write` reaches any path, so SSSF can't stop an agent at the tool. Code compares the repo before and after every call instead. A change outside `writes` is rolled back and the phase fails. A read-only agent can still write its own report, which goes outside the repo.
+`tools` says what an agent can do, and `writes` says where it may leave changes. `bash` runs anything and `write` reaches any path, so SSSF can't stop an agent at the tool. Instead, code compares the repo before and after every call. Code rolls back any change outside `writes`, and the phase fails. A read-only agent can still write its own report, which goes outside the repo.
 
-Some commands do harm outside the repo, such as `git push` or a recipe that bills an API key. `agent_rules` in `adws/adw_sssf_config/repo.yaml` holds rules every agent gets in its prompt. A rule with `forbid` patterns is also enforced. SSSF reads each shell command as the agent sends it. A match stops the agent and the run, though the command may have started already. With `on_match: refuse`, the command is refused before it runs, and the run goes on. [customize.md](guide/customize.md#rules-for-every-agent) has examples.
+Some commands do harm outside the repo, such as `git push` or a recipe that bills an API key. `agent_rules` in `adws/adw_sssf_config/repo.yaml` holds rules that every agent gets in its prompt. SSSF also enforces each rule that has `forbid` patterns. It reads each shell command as the agent sends it. A match stops the agent and the run, though the command may have started already. With `on_match: refuse`, SSSF refuses the command before it runs, and the run goes on. [customize.md](guide/customize.md#rules-for-every-agent) has examples.
 
-SSSF keeps the repo's secret files from every agent: `.env` and its kin, plus any path `secret_files` in `repo.yaml` lists. Agents also get none of `.env`'s keys beyond SSSF's own, unless `agent_env` names them. [config.md](../.claude/skills/sssf/references/config.md#secret-files--secret_files-and-agent_env) says how each route refuses the read, and what it leaves open.
+SSSF keeps the repo's secret files from every agent: `.env` and its kin, plus any path that `secret_files` in `repo.yaml` lists. Agents also get none of `.env`'s keys beyond SSSF's own, unless `agent_env` names them. [config.md](../.claude/skills/sssf/references/config.md#secret-files-secret_files-and-agent_env) says how each route refuses the read, and what it leaves open.
 
 Each Claude Code agent runs with `--safe-mode`, so it never loads your `CLAUDE.md`, skills, hooks or MCP servers. It sees its prompt and the repo.
 
 ## Guards
 
-Guard code is the code that limits what an agent can do. These are the **base guards**, and they're on in every run, on this machine or in a VM: the `writes` check, the git-directory guard, the command rules, the secret files and the pre-push hook. agentsh can add a layer around them on this machine ([below](#agentsh-on-top-of-the-base-guards)). The rest of SSSF gets work done. Guard code is there for the run nobody is watching, so that an agent's mistake costs a failed phase instead of lost work, a leaked key or a stray push.
+Guard code is the code that limits what an agent can do. The **base guards** are on in every run, on the host or in a VM: the `writes` check, the git-directory guard, the command rules, the secret-file checks and the pre-push hook. On the host, agentsh can add a layer around them, as [agentsh, on top of the base guards](#agentsh-on-top-of-the-base-guards) explains. The rest of SSSF gets work done. Guard code is there for the run nobody is watching, so that an agent's mistake costs a failed phase instead of lost work, a leaked key or a stray push.
 
-Most of it wasn't planned as a feature. Two pieces were asked for; the rest each answer something an agent did, or a review showed it could do:
+Most of it wasn't planned as a feature. Two pieces were asked for. Each of the rest answers something an agent did, or something a review showed it could do:
 
 - **The `writes` check came from upstream**, after a builder given bash to run the tests ran `git checkout adws/` and threw away uncommitted changes to the quality check it was about to be judged by. Upstream had this check and the gates, and nothing else.
 - **Specs became protected** after a builder ran `ruff format .`, which rewrote a committed spec, and the change rode into the code commit unseen.
-- **An agent's own commits are undone before the check**, because an agent that committed hid its changes from it, and the run then failed with nothing to commit.
-- **The git-directory guard** puts back any agent change under `.git` and stops the run. A review showed that a hook planted in `.git/hooks` runs on the chain's own commit, outside every rule.
-- **Command rules** are the one piece projects asked for. Repos wrote rules such as "never push" and "never run a recipe that bills an API key" into `agent_rules`, and nothing enforced them, so `forbid` patterns came first and `on_match: refuse` followed, since a stopped agent never learned what it did wrong. How the rules match has been fixed again and again since: the starter push rule stopped `git stash push`, and three ways of skipping heredoc bodies each let `cat <<EOF | bash` through.
-- **Secret files** close a gap noted on 2026-11-03: a rule could stop `cat .env`, but not an agent's Read tool or `env`.
+- **An agent's own commits are undone before the check**, because an agent that committed hid its changes from the check, and the run then failed with nothing to commit.
+- **The git-directory guard** puts back any agent change under `.git` and stops the run. A review showed that a hook planted in `.git/hooks` runs on the ADW's own commit, outside every rule.
+- **Command rules** are the one piece projects asked for. Repos wrote rules such as "never push" and "never run a recipe that bills an API key" into `agent_rules`, and nothing enforced them. `forbid` patterns came first. `on_match: refuse` followed, because a stopped agent never learned what it did wrong. How the rules match has been fixed again and again since. For example, the starter push rule stopped `git stash push`, and three ways of skipping heredoc bodies each let `cat <<EOF | bash` through.
+- **Secret-file checks** close a gap noted on 2026-11-03. A rule could stop `cat .env`, but not an agent's Read tool or `env`.
 - **The pre-push hook** came with the decision to make this fork public. It scans each push for secrets, and refuses any push from an agent.
 
 <p align="center">
   <img src="../images/09_guards.svg" alt="Where each guard acts in one agent turn: command rules and secret files before a command or read, the writes check and git-directory guard after each phase, the pre-push hook at push, and agentsh around the agent at the system call" width="850">
 </p>
 
-Because a bug here passes its tests and quietly lets something through, guard code changes only through the hub's own chain, with a review whose one job is to find a bypass ([sssf.md](sssf.md#guard-changes)).
+A bug in guard code can pass its tests and still let something through. So guard code changes only through the hub's guard-change chain, which includes a review whose one job is to find a bypass. [sssf.md](sssf.md#guard-changes) describes the chain.
 
-The guards stop an agent's mistakes. They don't stop an agent set on getting past them: a command can write to its own harness's output stream, for one. Against that, the fix is isolation, not another pattern: a VM, or agentsh on this machine ([Where a run runs](#where-a-run-runs)). [open.md](open.md) tracks what's left.
+The guards stop an agent's mistakes. They don't stop an agent set on getting past them. A command can write to its own coding agent's output stream, for one. The answer to that is isolation, not another pattern. A VM gives it, and so does agentsh on the host, as [Where a run runs](#where-a-run-runs) describes. [open.md](open.md) tracks what's left.
 
 ## Where a run runs
 
@@ -186,49 +181,45 @@ A run makes four choices. They're separate, apart from the limits below the tabl
 | Choice | Options | Default | Set with |
 |---|---|---|---|
 | Where the [operator session](#the-operator-session) runs | Claude Code on the host, or the operator container | the host | `container/run.sh` |
-| Where the agents, checks and git run | this machine, an OpenShell microVM on it, or a Vercel or E2B VM | this machine | `--sandbox <name>` for one run, `sandbox:` in `repo.yaml` for the repo |
-| Whether agentsh also wraps agents on this machine | `text` (base guards only) or `agentsh` (base guards and agentsh) | `text` | `local_guard:` in `repo.yaml` |
-| Which branch the run works on | the checked-out branch, or its own branch and worktree | the checked-out branch | `--worktree`, which every VM run implies ([below](#branches-and-worktrees)) |
+| Where the agents, checks and git run | the host, an OpenShell microVM on it, or a remote VM on Vercel or E2B | the host | `--sandbox <name>` for one run, `sandbox:` in `repo.yaml` for the repo |
+| Whether agentsh also wraps agents on the host | `text` (base guards only) or `agentsh` (base guards and agentsh) | `text` | `local_guard:` in `repo.yaml` |
+| Which branch the run works on | the checked-out branch, or its own branch and worktree | the checked-out branch | `--worktree`, which every [VM run](#branches-and-worktrees) implies |
 
 The limits:
 
 - A VM run always gets its own branch and worktree.
-- agentsh wraps agents on this machine only. `repo.yaml` refuses `local_guard: agentsh` beside any `sandbox:` other than `none`. A `--sandbox` flag on such a repo runs in the VM, without agentsh.
-- The operator container's image has no agentsh, so in a repo on `local_guard: agentsh`, a run launched from the container refuses at its start check. Run such a repo's operator on the host.
+- agentsh wraps agents on the host only. `repo.yaml` refuses `local_guard: agentsh` beside any `sandbox:` other than `none`. A `--sandbox` flag on such a repo runs in the VM, without agentsh.
+- The operator container's image has no agentsh. In a repo on `local_guard: agentsh`, a run launched from the container refuses at its start check, so run that repo's operator session on the host.
 
 <p align="center">
-  <img src="../images/10_run_modes.svg" alt="Four cards: sandbox none with the base guards only, sandbox none with the base guards and agentsh, an OpenShell microVM, and a Vercel or E2B VM, each showing where agents run, which guards apply, what leaves the machine and which branch the run uses" width="850">
+  <img src="../images/10_run_modes.svg" alt="Four cards: sandbox none with the base guards only, sandbox none with the base guards and agentsh, an OpenShell microVM, and a Vercel or E2B VM, each showing where agents run, which guards apply, what leaves the host and which branch the run uses" width="850">
 </p>
 
 ### agentsh, on top of the base guards
 
-`local_guard: agentsh` adds agentsh around each agent on this machine. It turns nothing off: the base guards run as before, and agentsh catches what their text checks miss, at the system call. `local_guard: text`, the default, means the base guards alone.
+`local_guard: agentsh` adds agentsh around each agent on the host. It turns nothing off. The base guards run as before, and agentsh catches what their text checks miss, at the system call. `local_guard: text`, the default, means the base guards alone.
 
 The base guards act at two points, and only the first reads text:
 
-- **Before a command or a read**, the command rules read each shell command's text, and the secret-file checks keep listed files from the Read tool and from `env`. A command can be spelled many ways, so one the patterns don't recognize gets through. Their patterns have been frozen since 2026-11-08: a new spelling that gets past them becomes a test case for agentsh, not another pattern.
-- **After each phase**, the `writes` check and the git-directory guard put back what an agent wasn't allowed to change, and at push the pre-push hook refuses an agent's push. These check what happened, not how it was spelled.
+- **Before a command or a read**, the command rules read each shell command's text, and the secret-file checks keep listed files from the Read tool and from `env`. A command can be spelled many ways, so one the patterns don't recognize gets through. Their patterns have been frozen since 2026-11-08. A new spelling that gets past them becomes a test case for agentsh, not another pattern.
+- **After each phase**, the `writes` check and the git-directory guard put back what an agent wasn't allowed to change. At push, the pre-push hook refuses an agent's push. These guards check what happened, not how it was spelled.
 
-**agentsh** runs each agent as `agentsh wrap`, under a policy SSSF generates from `repo.yaml`'s `secret_files`, `deny_exec` and `network_allow`. It traces the real calls with ptrace, so the spelling doesn't matter. File access is deny by default: an agent may write its workspace and its tools' folders, read system files, and nothing else, so secret files, other repos and your own `~/.claude` stay closed. It refuses commands such as `git push` at exec, and agents reach only the model hosts, package registries and the hosts you list. It's opt-in and comes with conditions:
+**agentsh** runs each agent as `agentsh wrap`, under a policy SSSF generates from `repo.yaml`'s `secret_files`, `deny_exec` and `network_allow`. It traces the real calls with ptrace, so the spelling doesn't matter. File access is deny by default. An agent may write its workspace and its tools' folders and read system files, and nothing else, so secret files, other repos and your own `~/.claude` stay closed. agentsh refuses commands such as `git push` at exec, and agents reach only the model hosts, package registries and the hosts you list. It's opt-in and comes with conditions:
 
-- the engineer installs the agentsh service as root, running the `sudo` lines that `agentsh_install.py` prints;
-- SSSF accepts only one build of the hub's patched fork of agentsh, by its sha256, and the fork's patches aren't published yet ([install.md](guide/install.md#before-you-start) has the version);
-- it's tested only on Python repos with a Claude Code roster, and a pi roster has no policy yet;
-- some tools still have known limits under it, which [config.md](../.claude/skills/sssf/references/config.md) lists.
+- The engineer installs the agentsh service as root, by running the `sudo` lines that `agentsh_install.py` prints.
+- SSSF accepts only one build of the hub's patched fork of agentsh, checked by its sha256. The fork's patches aren't published yet. [install.md](guide/install.md#before-you-start) has the version.
+- It's tested only on Python repos with a Claude Code roster. A pi roster has no policy yet.
+- Some tools still have known limits under it, which [config.md](../.claude/skills/sssf/references/config.md) lists.
 
-[The design](designs/agentsh-local-sandbox.md) has the evidence and the decisions.
-
-### Choosing
-
-For everyday work, run on this machine with the base guards. Pick a VM when a command the rules miss mustn't reach the machine, as [run.md](guide/run.md#which-to-pick) explains. OpenShell keeps the code on the machine, and Vercel and E2B upload it. Add agentsh with `local_guard: agentsh` when you want file and network limits on runs on this machine, and the repo fits the tested case above.
+[The design](designs/agentsh-local-sandbox.md) has the evidence and the decisions. [run.md](guide/run.md#which-to-pick) says which mode to pick.
 
 ## Envelopes
 
 <p align="center">
-  <img src="../images/05_envelope_gates.svg" alt="An agent's final JSON parsed against its output type, checked by gates, with violations looping back into the same session as a correction" width="780">
+  <img src="../images/05_envelope_gates.svg" alt="An agent's final JSON parsed against its output type, checked by gates, with failed checks looping back into the same session as a correction" width="780">
 </p>
 
-An agent can hand work on in two ways: files it writes to the run's `context_handoff/` folder, and its final reply, which must be JSON. Code parses that reply against the output type the call names, saves it as `envelope.json`, and puts it in the next agent's prompt. Context moves between agents in code, never in a shared conversation.
+An agent can hand work on in two ways: files it writes to the run's `context_handoff/` folder, and its final reply, which must be JSON. Code parses that reply against the output type the call names, saves it as `envelope.json`, and puts it in the next agent's prompt. The parsed reply is the agent's report, which the code calls an envelope. Context moves between agents in code, never in a shared conversation.
 
 ```python
 class EnvelopeBase(BaseModel):
@@ -242,7 +233,7 @@ class BuildOutput(EnvelopeBase):
     commit_message: str = ""        # the commit phase uses it
 ```
 
-An output type lives in three places, which must match: the class in `data_types.py`, the JSON example in that agent's `user.md` under `## Report`, and `output_type=` at the call site. Change one and change the other two in the same edit.
+An output type lives in three places, which must match: the class in `data_types.py`, the JSON example in that agent's `user.md` under `## Report`, and `output_type=` at the call site. [customize.md](guide/customize.md#your-prompts) says how to change one.
 
 ## Gates
 
@@ -261,19 +252,19 @@ A gate checks what the report claims, after the agent finishes. Nobody knows ahe
 
 A gate is a function, `gate(envelope, run) -> GateReport`, with one check per item it looked at, so a green gate tells you what it checked.
 
-When the reply doesn't parse, or a gate finds a problem, nothing restarts. SSSF sends the same session a correction that names what was wrong, and the agent keeps everything it had in context. A pi agent continues with the same `--session-id`, and a Claude Code agent with `--resume`. A correction costs one message; a restart would cost the whole context.
+When the reply doesn't parse, or a gate finds a problem, nothing restarts. SSSF sends the same session a correction that names what was wrong, and the agent keeps everything it had in context. A pi agent continues with the same `--session-id`, and a Claude Code agent with `--resume`. A correction costs one message. A restart would cost the whole context.
 
 Gates can't judge plan quality or code taste. That's a reviewer's job, or yours.
 
 ## The trace
 
 <p align="center">
-  <img src="../images/06_trace_path.svg" alt="Running agents to tracer.py to a WAL SQLite db with seven tables, read by a cursor poll query, with no websocket and no ingest endpoint" width="780">
+  <img src="../images/06_trace_path.svg" alt="Running agents feed tracer.py, which writes to a WAL-mode SQLite trace with seven tables, read by a cursor poll query, with no WebSocket and no ingest endpoint" width="780">
 </p>
 
-Every event goes into `adws/adw_data/sssf.db` while the run is still going. `agent_cc.py` and `agent_pi.py` read the agent's output line by line, and the tracer inserts each event as it arrives, so you see tool calls mid-run.
+SSSF writes every event to the trace, `adws/adw_data/sssf.db`, while the run is still going. `agent_cc.py` and `agent_pi.py` read the agent's output line by line, and the tracer inserts each event as it arrives, so you see tool calls mid-run.
 
-The database has seven tables:
+The trace has seven tables:
 
 | Table | Holds |
 |---|---|
@@ -293,35 +284,35 @@ Readers poll one query:
 select * from events where adw_id = ? and rowid > ? order by rowid limit 500;
 ```
 
-The live view and the full history are the same query, run at different rates. That's why there's no ingest endpoint, no WebSocket and no replay path. The database runs in WAL mode, so a reader never blocks a run.
+The live view and the full history are the same query, run at different rates. That's why there's no ingest endpoint, no WebSocket and no replay path. The trace database runs in WAL mode, so a reader never makes a run wait.
 
-The files in `adws/adw_data/sessions/<adw_id>/` stay the raw record: `raw_output.jsonl`, `envelope.json`, `agent_map.json`. You can rebuild the database from them. [watch.md](guide/watch.md) shows how to read both.
+The files in `adws/adw_data/sessions/<adw_id>/` stay the raw record: `raw_output.jsonl`, `envelope.json`, `agent_map.json`. You can rebuild the trace from them. [watch.md](guide/watch.md) shows how to read both.
 
 ## The caps
 
 A run you aren't watching can spend more than you meant it to. These limits stop it:
 
-| Cap | Where | It limits |
+| Setting | Where | It limits |
 |---|---|---|
 | `max_run_cost` | `defaults` in the roster, $5 by default | one run, checked before every agent call |
 | `max_call_cost` | each agent in the roster | one Claude Code call, passed as `--max-budget-usd` |
 | `max_live_cost` | `repo.yaml`, off by default | what all live runs in the repo spend together |
 | `max_daily_cost` | `repo.yaml`, off by default | what the repo spent in the last 24 hours |
-| `max_daily_cost` | `~/.config/sssf/limits.yaml`, off unless the file exists | what every repo on the machine spent in the last 24 hours |
+| `max_daily_cost` | `~/.config/sssf/limits.yaml`, off unless the file exists | what every repo on the host spent in the last 24 hours |
 | `rate_limit_stop` | `defaults` in the roster, 0.8 | how full Claude's 5-hour or 7-day window may be before an agent starts |
-| `max_silence_minutes` | `repo.yaml`, 15 by default | how long an agent may write nothing before it and the run are stopped |
+| `max_silence_minutes` | `repo.yaml`, 15 by default | how long an agent may write nothing before SSSF stops it and the run |
 
-The dollar caps are checked before every agent call and when a run starts. Two runs that start at the same moment can each overshoot by one call. A run also stops when the Claude account moves onto usage credits, and a pi run stops by name when ChatGPT refuses a call at the plan's limit.
+SSSF checks the dollar caps when a run starts and before every agent call. Two runs that start at the same moment can each overshoot by one call. A run also stops when the Claude subscription moves onto usage credits, and a pi run stops by name when ChatGPT refuses a call at the subscription's limit.
 
-On a subscription, every cost SSSF shows is list price, what the tokens would cost on the API. You aren't charged it. The caps still limit how much of the plan's usage one run can take.
+On a subscription, every cost SSSF shows is list price, what the tokens would cost on the API. You aren't charged it. The caps still limit how much of the subscription's usage one run can take.
 
 No cap retries, and none throws work away. If the tree holds uncommitted changes when a run stops, the message says how to look at them, keep them, or drop them.
 
 ## Branches and worktrees
 
-A run works on your checked-out branch unless you pass `--worktree`. Then it gets its own branch, `sssf/<adw_id>`, cut from your branch's tip, in its own folder under `adws/adw_data/worktrees/`. You can keep working while it runs, and nothing reaches your branch until you run `just merge`. [run.md](guide/run.md#on-its-own-branch) has the commands.
+A run works on your checked-out branch unless you pass `--worktree`. With it, the run is a **worktree run**. It gets its own branch, `sssf/<adw_id>`, cut from your branch's tip, in its own folder under `adws/adw_data/worktrees/`. You can keep working while it runs, and nothing reaches your branch until you run `just merge`. [run.md](guide/run.md#on-its-own-branch) has the commands.
 
-`--sandbox vercel` and `--sandbox e2b` go one step further. The chain stays on your machine with the trace and the caps, while its agents, checks and git run in a VM made for the run and deleted at its end. Commits come back to the run's branch. The design is [remote-sandboxes.md](designs/remote-sandboxes.md).
+`--sandbox vercel` and `--sandbox e2b` go one step further. The ADW stays on the host with the trace and the caps, while its agents, checks and git run in a remote VM made for the run and deleted at its end. Commits come back to the run's branch. The design is [remote-sandboxes.md](designs/remote-sandboxes.md).
 
 ## The skill
 
@@ -329,6 +320,6 @@ A run works on your checked-out branch unless you pass `--worktree`. Then it get
   <img src="../images/03_skill_stamp.svg" alt="The sssf skill directory on the left stamping config, adws, and prompt_engineering into three different target repos" width="780">
 </p>
 
-Everything comes from `.claude/skills/sssf/`. `SKILL.md` holds the rules and sends each request to one of 13 cookbooks. `references/` holds the specs, `scripts/` the installer and generators, and `templates/` what gets stamped. The visualizer is in `apps/visualizer/`.
+Everything comes from `.claude/skills/sssf/`. `SKILL.md` holds the rules and sends each request to one of 13 cookbooks. `references/` holds the specs, `scripts/` the installer and generators, and `templates/` what the installer stamps. The dashboard is in `apps/visualizer/`.
 
-The installer copies the templates into your repo. From then on the copies are yours: edit them in your repo, never back inside the skill. `install.py --update` brings in the skill's later changes and keeps your edits. It's all Python, YAML and Markdown, with no framework to learn.
+The installer stamps the templates into your repo. From then on the copies are yours, so edit them in your repo and never back inside the skill. `install.py --update` brings in the skill's later changes and keeps your edits. It's all Python, YAML and Markdown, with no framework to learn.

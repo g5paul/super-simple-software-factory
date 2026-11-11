@@ -1,6 +1,6 @@
 # Watch a run
 
-Every run writes its events to `adws/adw_data/sssf.db` as they happen. You can read them from the terminal, from a dashboard, or with plain SQL. Reading never slows or blocks a run.
+Every run writes its events to the trace, `adws/adw_data/sssf.db`, as they happen. You can read the trace from the terminal, the dashboard, or plain SQL. Reading never slows or blocks a run.
 
 ## From the terminal
 
@@ -40,55 +40,63 @@ just obs        # this repo's runs
 just obs-all    # every repo SSSF is installed in, from one process
 ```
 
-Each builds the dashboard and prints its address. It needs bun. `just obs` takes the first free port from 4600, so several repos can run their own at once; `SSSF_OBS_PORT` in `.env` pins one. `just obs-dev` is only for working on the dashboard itself: it runs this repo's server on port 4600 and Vite's dev server on 4601, which reloads the page on each edit.
+Each recipe builds the dashboard and prints its address. The dashboard needs bun. `just obs` takes the first free port from 4600, so several repos can run their own at once. To pin a port, set `SSSF_OBS_PORT` in `.env`. `just obs-dev` is only for working on the dashboard itself. It runs this repo's server on port 4600 and Vite's dev server on 4601, which reloads the page on each edit.
 
 <p align="center">
-  <img src="../../images/00_swimlane_waterfall.svg" alt="A run as swim lanes: engineer, code, planner, builder, and reviewer phases laid on a time axis, each block labelled with its duration, one phase still running and the next still queued" width="850">
+  <img src="../../images/00_swimlane_waterfall.svg" alt="A run drawn as swim lanes, with engineer, code, planner, builder and reviewer phases laid on a time axis, each block labelled with its duration, one phase still running and the next still queued" width="850">
 </p>
 
-A run opens as swim lanes, one per owner, on a time axis. Each agent's lane shows its model and how full its context window is. Click a phase to see its tool calls, gates and report, its tokens and cost, the agent's config and the prompts it was sent. The dashboard also shows:
+A run opens as swim lanes on a time axis, one lane per owner. Each agent's lane shows its model and how full its context window is. Click a phase to see its tool calls, gates and report, its tokens and cost, the agent's roster entry, and the prompts the agent was sent. The dashboard also shows:
 
 - a worktree run's branch, and whether it was merged or discarded;
 - a ticket run's tickets, each opening its phases, with spend against the run cap;
-- a page per trial, and a leaderboard per roster on the project page;
+- a page per trial, and a leaderboard per roster on each project's page;
 - each VM run's VM, and what runs have used of each provider's allowance;
 - spend for the last 24 hours against `max_daily_cost`, and live spend against `max_live_cost`;
 - an archive button on each run card, which takes the run out of the review list.
 
-`just obs-all` reads `~/.config/sssf/projects.json`, where `install.py` records each repo. It opens on a list of projects, running ones first. It shows the same from any repo, since the registry is machine-wide, but each repo builds the dashboard from its own copy of the skill: run it from the repo with the newest one, such as the repo you update the others from. To drop a repo, delete its entry from the file. For a repo on another machine, run `just obs` there and reach it through a tunnel: `ssh -L 4600:localhost:4600 host`.
+`just obs-all` reads `~/.config/sssf/projects.json`, where `install.py` records each repo. It opens on a list of projects, running ones first. The registry is machine-wide, so `just obs-all` shows the same list from any repo. Each repo builds the dashboard from its own copy of the skill, though, so run it from the repo with the newest copy, such as the repo you update the others from. To drop a repo, delete its entry from the file. For a repo on another machine, run `just obs` there and reach it through a tunnel, for example `ssh -L 4600:localhost:4600 host`.
 
 ### The account panel
 
 Above the projects, `just obs-all` shows the accounts every repo shares:
 
-- **Claude's usage windows:** how full the 5-hour and 7-day windows are, and when each resets. Once a window is 10% used, its meter also says what 100% is worth at list price: the window's spend up to the reading, over the reading's utilization. Below 10%, the reading's rounding swamps the figure. Anthropic doesn't publish the limits in dollars, so treat it as an estimate. Claude Code reports them on every SSSF agent call. Your interactive sessions report them too once you set SSSF's statusline, below. The panel always says how old the reading is and where it came from, a session's statusline or the last SSSF agent call. Past an hour the note turns amber, since use after the reading isn't in the meters; `/usage` in any Claude Code session gives the current figure. Each meter also shows the recent pace twice, in $ per hour and in percent per hour, over the last hour for the 5-hour window and the last 24 hours for the 7-day one. It also shows what 1% cost over that span. The limit is in percent, so that's the rate that counts, and a jump in $ per 1% means the plan isn't weighing your use at list price. The percent rate comes from the readings SSSF keeps over time, in `rate_limits_history.jsonl` beside `rate_limits.json`. It gets a line when a window moves, and one an hour while nothing does. Readings are whole percents, so a span that moved under 2 points shows the rate since the window started instead, which is also what shows until the history covers the span. Below that, the meter says where the window ends up at that rate: how full it gets by its reset, or when it fills.
-- **Week by week:** a table under each card's meters lists the running week and every closed one. Until the first week closes, it shows the running week and when it resets. It shows each week's peak, its list-price spend, and, from 10% used, its $ per 1% and what 100% was worth. When the first reading of a new week arrives, the week that ended goes into `window_archive.jsonl` beside `rate_limits.json` and stays there. The archive keeps each week's start, end and peak. Its spend is worked out from the calls each time the table shows. If $ per 1% falls while your use looks the same, the plan's limit shrank. A week's spend shows only while SSSF can still read its calls: Claude Code's transcripts, which `cleanupPeriodDays` deletes and SSSF reads back 90 days, and pi's traces and sessions, read back 120 days. Claude's limits also count claude.ai and the desktop app, which leave no transcripts here, so use there makes $ per 1% read low.
-- **Where Claude spend went**: SSSF agents against interactive sessions, by project and by model, at list price. A picker sets the span, from 5 hours to 90 days; the browser remembers it. Each table shows up to eight rows. Past that, it shows the top seven and folds the rest into one. It ends with a total that matches the span's. For a span of a day or more, the card also lists the three busiest 5-hour stretches, which is what a plan with a 5-hour limit would have seen. Claude Code deletes transcripts after `cleanupPeriodDays`, 30 by default, so a span longer than that needs the setting raised; the card says when the data starts inside the span.
-- **pi spend**: SSSF's pi agents against your own pi sessions, by project and model, with its own span picker. The traces keep every SSSF pi call, so any span is complete for them. Your own sessions come from the files pi saves in `~/.pi/agent/sessions`, or `$PI_CODING_AGENT_DIR/sessions`; SSSF's agents keep theirs inside each run, so nothing is counted twice. When a run hits the ChatGPT plan's limit, the panel shows it for 5 hours. A span with no pi calls is one line.
-- **The ChatGPT plan's windows**, when you opt in, below: the 5-hour and weekly meters, with the same 100% figure and pace as Claude's. Their readings are kept in `codex_limits_history.jsonl`, only while the dashboard runs. Without the opt-in there are none, since pi's ChatGPT sign-in gets no usage windows back.
-- **Sandboxes**, once a repo has run in a VM: one line per provider, its bar the allowance nearest its limit, and the rest on hover. The bar always measures the allowance's own window, 30 days for Vercel and all time for E2B's credit. The card's picker sets the runs line under it.
-- **The machine's cap**, when `~/.config/sssf/limits.yaml` sets one.
+- **Claude's usage windows.** How full the 5-hour and 7-day windows are, and when each resets. Claude Code reports the windows on every SSSF agent call. Your interactive sessions report them too once you set [SSSF's statusline](#a-fresh-reading-from-your-own-sessions). Each meter shows:
+  - What 100% of the window is worth at list price, once the window is 10% used. The figure is the window's spend up to the reading, divided by the reading's utilization. Below 10%, the reading's rounding swamps the figure. Anthropic doesn't publish the limits in dollars, so treat the figure as an estimate.
+  - How old the reading is, and whether it came from a session's statusline or the last SSSF agent call. Past an hour the note turns amber, since use after the reading isn't in the meters. `/usage` in any Claude Code session gives the current figure.
+  - The recent pace, in $ per hour and in percent per hour, over the last hour for the 5-hour window and the last 24 hours for the 7-day one, and what 1% cost over that span. The limit is in percent, so the percent rate is the one that counts. A jump in $ per 1% means the subscription isn't weighing your use at list price.
+  - Where the window ends up at that pace, either how full it gets by its reset or when it fills.
+
+  The percent rate comes from the readings SSSF keeps in `rate_limits_history.jsonl`, beside `rate_limits.json`. SSSF adds a line when a window moves, and one an hour while nothing does. Readings are whole percents, so if a span moved under 2 points, the meter shows the rate since the window started instead. The meter also shows that rate until the history covers the span.
+- **Week by week.** A table under each card's meters lists the running week and every closed one. Until the first week closes, the table shows the running week and when it resets. For each week it shows the peak, the list-price spend, and, from 10% used, the $ per 1% and what 100% was worth. When the first reading of a new week arrives, SSSF moves the week that ended into `window_archive.jsonl`, beside `rate_limits.json`, and keeps it there. The archive keeps each week's start, end and peak. SSSF works out the week's spend from the calls each time the table shows. If $ per 1% falls while your use looks the same, the subscription's limit shrank.
+
+  A week's spend shows only while SSSF can still read its calls. For Claude Code, those are the transcripts, which SSSF reads back 90 days and `cleanupPeriodDays` deletes. For pi, they're the traces and sessions, which SSSF reads back 120 days. Claude's limits also count claude.ai and the desktop app, which leave no transcripts here, so use there makes $ per 1% read low.
+- **Where Claude spend went.** SSSF agents against interactive sessions, by project and by model, at list price. A picker sets the span, from 5 hours to 90 days, and the browser remembers it. Each table shows up to eight rows. Past eight, it shows the top seven and folds the rest into one row. Each table ends with a total that matches the span's. For a span of a day or more, the card also lists the three busiest 5-hour stretches, which a subscription with a 5-hour limit would have seen. Claude Code deletes transcripts after `cleanupPeriodDays`, 30 by default, so a longer span needs the setting raised. The card says when the data starts inside the span.
+- **pi spend.** SSSF's pi agents against your own pi sessions, by project and model, with its own span picker. The traces keep every SSSF pi call, so any span is complete for them. Your own sessions come from the files pi saves in `~/.pi/agent/sessions`, or `$PI_CODING_AGENT_DIR/sessions`. SSSF's agents keep theirs inside each run, so nothing is counted twice. When a run hits the ChatGPT subscription's limit, the panel shows it for 5 hours. A span with no pi calls is one line.
+- **The ChatGPT subscription's windows.** If you [opt in](#chatgpts-windows-through-codex-cli), the 5-hour and weekly meters, with the same 100% figure and pace as Claude's. SSSF keeps their readings in `codex_limits_history.jsonl`, only while the dashboard runs. Without the opt-in there are no meters, since pi's ChatGPT sign-in gets no usage windows back.
+- **Sandboxes.** Once a repo has had a VM run, one line per provider. Each bar shows the allowance nearest its limit, and the rest show on hover. The bar always measures the allowance's own window, 30 days for Vercel and all time for E2B's credit. The card's picker sets the runs line under the bar.
+- **The machine-wide cap.** It shows when `~/.config/sssf/limits.yaml` sets one.
 
 #### ChatGPT's windows through Codex CLI
 
-pi can't read the ChatGPT plan's windows, but Codex CLI can. Its `/status` asks Codex's app server for `account/rateLimits/read`. Set `SSSF_CODEX_LIMITS=1` in the hub's `.env`, and `just obs-all` makes the same request every 5 minutes while it runs, with or without a browser on the page. It starts `codex -s read-only -a never app-server` and sends `initialize`, the `initialized` notice, `account/read` and `account/rateLimits/read`, nothing else. Codex holds the sign-in, and SSSF never reads the token. It needs Codex CLI installed and signed in to the ChatGPT account pi uses.
+Codex CLI can read the ChatGPT subscription's windows, and pi can't. Codex's `/status` asks Codex's app server for `account/rateLimits/read`. To turn the meters on, set `SSSF_CODEX_LIMITS=1` in the `.env` of the repo you run `just obs-all` from. The dashboard's server reads it when it starts, then makes the same request every 5 minutes while it runs, with or without a browser on the page. It starts `codex -s read-only -a never app-server` and sends `initialize`, the `initialized` notice, `account/read` and `account/rateLimits/read`, nothing else. Codex holds the sign-in, and SSSF never reads the token. The meters need Codex CLI installed and signed in to the ChatGPT account pi uses.
 
-pi's ChatGPT use draws on the same windows. A test run on 2026-11-06 started the 5-hour window and moved it from 0% to 1%, with nothing else using ChatGPT.
+Your pi agents' ChatGPT use draws on the same windows. A test run on 2026-11-06 started the 5-hour window and moved it from 0% to 1%, with nothing else using ChatGPT.
 
 Two caveats:
 
 - OpenAI doesn't document the method, so a Codex release could change it. A failed read keeps the last good meters and says why under them.
-- The windows count Codex's own use too, and the 100% figure counts only pi's `openai/` calls, so using Codex directly makes the figure read low.
+- The windows count Codex's own use too, and the 100% figure counts only pi's `openai/` calls. Using Codex directly makes the figure read low.
 
 #### A fresh reading from your own sessions
 
-Claude Code hands a statusline command the account's 5-hour and 7-day windows after every reply. SSSF's `scripts/statusline.py` records them where agents' readings go, so the meters and `rate_limit_stop` stay current while you work interactively. It prints a short line, such as `Opus · 5h 12% · 7d 3% · $0.42 session`, and runs locally with no tokens spent. Point it at the newest skill in `~/.claude/settings.json`:
+After every reply, Claude Code hands a statusline command the account's 5-hour and 7-day windows. SSSF's `scripts/statusline.py` records them where the agents' readings go, so the meters and `rate_limit_stop` stay current while you work interactively. It prints a short line, such as `Opus · 5h 12% · 7d 3% · $0.42 session`, and runs locally with no tokens spent. Set it in `~/.claude/settings.json`, with `<hub>` replaced by the path to the repo that holds the newest copy of the skill:
 
 ```json
 "statusLine": {"type": "command", "command": "python3 <hub>/.claude/skills/sssf/scripts/statusline.py"}
 ```
 
-A project's `.claude/settings.json` that sets its own `statusLine` replaces this one there. The windows arrive only for a Pro, Max or Ultra login, and only after a session's first reply.
+A repo's `.claude/settings.json` that sets its own `statusLine` replaces this one in that repo. The windows arrive only for a Pro, Max or Ultra subscription, and only after a session's first reply.
 
 ## With SQL
 
@@ -108,7 +116,7 @@ sqlite3 adws/adw_data/sssf.db "select rowid, type, name from events where adw_id
 sqlite3 adws/adw_data/sssf.db "select kind, name, pid, command from processes where adw_id='d36de4d2' and ended_at is null;"
 ```
 
-[concepts.md](../concepts.md#the-trace) lists the tables.
+[The trace](../concepts.md#the-trace) lists the tables.
 
 ## The files
 
@@ -124,8 +132,8 @@ Each run keeps its raw record in `adws/adw_data/sessions/<adw_id>/`:
 | `agent_map.json` | which agent session each name maps to, so `--adw-id` can continue them |
 | `sandbox-uncommitted.patch` | a VM run's uncommitted work, when it stopped early |
 
-The database mirrors these files. Losing it loses nothing you can't rebuild.
+The trace mirrors these files, so losing `sssf.db` loses nothing you can't rebuild.
 
 ## pi's obs extension
 
-If your pi agents load an obs extension that posts to your own obs server, as [pi-agent-observability](../projects.md) does, their events reach that server from the host, from the container, and from a VM. In a VM, the extension posts to a relay on the VM's loopback, and the host forwards each event to your server with its own token, which never enters the VM. That server is yours and separate from `just obs`.
+Your pi agents can load an obs extension that posts to your own obs server, as [pi-agent-observability](../projects.md) does. Their events then reach that server from the host, the operator container and a VM. In a VM, the extension posts to a relay on the VM's loopback. The host forwards each event to your server with its own token, which never enters the VM. That server is yours, and separate from the dashboard.

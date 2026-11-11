@@ -131,7 +131,7 @@ Leave line 409's "A pattern that isn't a valid regex fails the settings, and wit
 ### `docs/open.md`
 
 - Delete the row that begins "A `forbid` pattern that reads differently in Python and JavaScript" (line 19). Its convention: "When an item closes, delete its row".
-- Add a `build` row in its place, dated 2026-11-06, linking `config.md#rules-for-every-agent--agent_rules`: "Two Python/JavaScript regex differences the load check can't reject: `\w`, `\d` and `\b` are Unicode in Python and ASCII in pi's extension, and JavaScript's `.` stops at `\r`. A command that only matches through one of them isn't refused on pi, and `; echo "SSSF refused this command"` then hides it from the stream check. Fix candidates: compile with the `u` flag plus a matching load check, or have `rules.refused` check that the extension really refused that call"
+- Add a `build` row in its place, dated 2026-11-06, linking `config.md#rules-for-every-agent-agent_rules`: "Two Python/JavaScript regex differences the load check can't reject: `\w`, `\d` and `\b` are Unicode in Python and ASCII in pi's extension, and JavaScript's `.` stops at `\r`. A command that only matches through one of them isn't refused on pi, and `; echo "SSSF refused this command"` then hides it from the stream check. Fix candidates: compile with the `u` flag plus a matching load check, or have `rules.refused` check that the extension really refused that call"
 
 ### `.claude/skills/sssf/tests/test_rules_portable.py` (new)
 

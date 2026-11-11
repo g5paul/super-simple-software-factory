@@ -47,6 +47,8 @@ just kill <adw_id>      # stop the chain first, so it can't retry, then its agen
 
 If `procs` shows a pi agent, but its `raw_output.jsonl` is empty and the phase has no tool calls, the agent never started. Check that its model resolves with `pi --list-models`.
 
+Under `local_guard: agentsh`, a run that stops with "the agentsh service stopped answering event polls" can mean agentsh's event store has grown large enough to slow SSSF's poll past its 5-second limit. Check its size with `sudo ls -la /var/lib/agentsh/`. With no run going, run `sudo sqlite3 /var/lib/agentsh/events.db 'ANALYZE;'`, which can take a long time on a large store. If that's not enough, stop the service, move `events.db` and its `-wal` and `-shm` files aside, and start it again. A pruning timer is planned; [open.md](../open.md) tracks it.
+
 ## Worktree runs
 
 **`worktree run ... is still going in this repo, and max_worktree_runs ... allows 2 at once`.** Wait for one run to finish, or stop it with `just kill`. If your checks are safe to run twice at once, you can raise `max_worktree_runs`.

@@ -1088,6 +1088,27 @@ The first attempt stopped in its bypass review: agentsh's ptrace watchdog logged
 
 Round 1's review found nothing that blocks, in 146 checks. It found a broken promise, that the change-time check follows a link at `BINARY` or `CONFIG`, and two old holes new to the limits: a surviving edit to `SERVER`, `CONFIG` or `POLICY_DIR` isn't in the pin line. Both go into the hardlink run's spec, `specs/tasks/guard-agentsh-hardlinks.md`.
 
+### The hardlink runs, 9497dc7f and b684482d
+
+Both took `specs/tasks/guard-agentsh-hardlinks.md`, Next item 14. Each wrapped launch now walks the workspace and the git common dir, and refuses while a regular file there has a link outside them, naming a few files and how to rebuild each tree. SSSF's own setup, checks and dashboard recipes build with copies: `UV_LINK_MODE=copy`, `npm_config_package_import_method=copy`, and bun's `--backend=copyfile`. `check_machine` refuses a link at `BINARY` or `CONFIG`, and the pin line names every path constant.
+
+Run 9497dc7f was cut off by a WSL restart in its build and rejoined. Its round 1 review found no bypass and one blocking false positive: the walk passes full paths to `lstat` and `scandir`, so a folder chain deeper than PATH_MAX refused every launch, and the hub held one, left by an earlier review. The builder's fix kept one open folder descriptor per level. Round 2 flagged that as a new mechanism, and it refused a tree about 1,100 folders deep under the usual open-file limit of 1,024, so the chain stopped. $7.62.
+
+The engineer chose to restart from round 1's code, `0d430ab` (local branch `keep/9497dc7f-round1`), with only what round 1's review asked for: a path longer than PATH_MAX refuses with its own message, a folder swapped for a symlink before it is listed refuses, the walk's cost is stated as it is, and three known limits. Run b684482d did that. Its first try stopped in the plan phase on the slow poll below; rejoined, it passed round 1 with no bypass, harm or false positive in 137 checks, and merged as cc6a0d1. $4.93, the stopped plan included. Its three broken promises are all in the one-time cleanup steps, and go into the event-store spec. Its two new known limits, a parent swapped for a symlink and a folder renamed during the walk, both need a process changing the tree while the walk runs.
+
+Before the hub's update, the hub session removed what the walk would refuse in the hub: 22 scratch folders in seven runs' bypass reviews, holding 10 unreadable folders and about 1,180 over-long paths, a review's venv linked to uv's cache, and two tool-config probe folders from 2026-11-09. Every run report stayed. The hub's walk took 1.9 seconds, and found only the dashboard's `node_modules`, which the engineer rebuilds.
+
+### The event store, 2026-11-11
+
+Run b684482d's first planner was stopped 31 seconds in, with "the agentsh service stopped answering event polls". There was no watchdog line. The cause was the poll's query:
+
+- `/var/lib/agentsh/events.db` was 32,497,913,856 bytes, three days after the 2026-11-08 install. agentsh has no retention setting for it and no way to skip storing allowed events. The audit log rotates at 512 MB and keeps 10 files, which on 2026-11-10 held about two hours of runs.
+- `LiveEvents._poll` asks `/api/v1/events/search` for the session's events with `type=ptrace_execve`. The `events` table indexes `(session_id, ts_unix_ns)` and `(type, ts_unix_ns)`, not both, and with no statistics SQLite took the type index: every `ptrace_execve` event ever stored, filtered to the session. The query took 12.9 seconds cold after the reboot and 1.0 second warm; without `type` it took 0.005 seconds. `_get` gives up after 5 seconds, and three failed polls stop the agent.
+- The engineer ran `ANALYZE` on the store, with no run going. The typed query then took 0.01 seconds.
+- The journal logged 105,197 "sqlite: event channel full, dropping event" warnings between 2026-11-10 and 2026-11-11, in bursts during runs, up to 3,504 a minute. A dropped `ptrace_execve` denial isn't counted toward `MAX_REFUSALS`; agentsh still enforces it. agentsh opens the store with no busy timeout.
+
+This explains b684482d's stall. Run d48bd070's stall had a ptrace watchdog line and no dropped events, so it may be a second cause. The fix is `specs/tasks/guard-agentsh-events.md`, Next item 15: poll by session only, an hourly root timer that keeps 2 days and runs `ANALYZE` weekly and publishes the store's size, and a warning in `check_machine`. The engineer chose all three on 2026-11-11.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1095,7 +1116,7 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 ## Next
 
 1. **Done: the pin check's two old holes**, by [run d48bd070](#the-pin-and-root-run-d48bd070). Left for item 14: links at `BINARY` or `CONFIG`, and the other path constants.
-2. The stall stays open. It came back on 2026-11-10 under Claude Code, in run d48bd070's first bypass review. If it comes back again, turn the trace on with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
+2. The stall stays open. It came back on 2026-11-10 under Claude Code, in run d48bd070's first bypass review, and on 2026-11-11 in run b684482d's planner, where [the event store](#the-event-store-2026-11-11) was the cause. If it comes back with a fast poll query, turn the trace on with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 5. **Done: what agentsh denied ordinary work.** `tar -x` by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09), relative link targets by [the ninth](#the-ninth-patch-link-targets-2026-11-09), and config lookups and the agents' own caches by [run 130ca6e0](#the-tool-config-run-under-agentsh-130ca6e0).
@@ -1107,4 +1128,5 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 11. **Done: run 130ca6e0's three items.** The raw `${PROJECT_ROOT}` and the agent-cache link by run d48bd070; uv's hardlinks go to item 14.
 12. **Done: uv's managed Pythons and folder listing**, by fork build 05b3777f and [run 47b4d0ea](#the-links-and-listing-run-47b4d0ea). Left: pnpm's two `npm_config_*` variables draw a deprecation warning from npm.
 13. **Done: the engineer's own Claude Code files.** Agents run from their own config folder with a token, and `~/.claude`, `~/.claude.json` and Claude Code's program are closed to them ([run cea6fe8d](#the-claude-home-run-cea6fe8d)). `/proc/<pid>/cwd` and `cmdline` stay a limit.
-14. **The hardlink check**, `specs/tasks/guard-agentsh-hardlinks.md`: a wrapped agent doesn't start while a file in its workspace or the git common dir has a link outside them, and the trees SSSF builds outside the wrap use copies. It also refuses a link at `BINARY` or `CONFIG`, and names every path constant in the pin line.
+14. **Done: the hardlink check**, by [runs 9497dc7f and b684482d](#the-hardlink-runs-9497dc7f-and-b684482d). Left for item 15: the one-time steps' three gaps.
+15. **The event store**, `specs/tasks/guard-agentsh-events.md`: poll by session only, prune to 2 days with a root timer that publishes the size, warn in `check_machine`, and fix the hardlink run's one-time steps. After it merges, the engineer moves the 32 GB store aside once.

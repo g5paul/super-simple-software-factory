@@ -313,7 +313,7 @@
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {
-      "sha256": "59602411237417770de878dbd08f681faeb183e2050bcd1c15d039589d178e14",
+      "sha256": "2c70c14682ba6ab4a3b9ceb71ded8d7838d7774f2113dabfef5d78a40862d790",
       "source": "repo.yaml"
     },
     "adws/adw_sssf_config/sssf.config.yaml": {
@@ -337,5 +337,5 @@
       "source": "justfile"
     }
   },
-  "skill": "57bca99"
+  "skill": "318d6b5"
 }

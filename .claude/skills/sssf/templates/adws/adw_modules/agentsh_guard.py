@@ -17,8 +17,10 @@ import atexit
 import hashlib
 import json
 import os
+import pwd
 import re
 import signal
+import stat
 import subprocess
 import threading
 import urllib.error
@@ -42,6 +44,8 @@ ATTACH_SECONDS = 30
 PAGE = 5000
 POLL_SECONDS = 5
 TIMEOUT = 10
+RESTART = "sudo systemctl restart agentsh"
+GLOB_CHARS = "*?[]{}\\$"
 
 INSTALL = "uv run --directory <hub> .claude/skills/sssf/scripts/agentsh_install.py --repo <this checkout>"
 # <hub> is the SSSF source checkout on this machine, at this project's skill version.
@@ -233,11 +237,13 @@ def secret_glob(pattern: str) -> str:
 
 def render_config(template: str, allowed: list[str]) -> str:
     """The server config SSSF installs, for a given policies.allowed. One place for the
-    install script and the check. `default` is derived from the list."""
+    install script and the check. `default` is derived from the list. The last line is a
+    comment naming the pin (BINARY and PINNED_SHA256, read at call time), so check_machine's
+    byte comparison refuses an edit to either constant as "differs". agentsh loads the same YAML."""
     config = yaml.safe_load(template)
     config["policies"]["allowed"] = list(allowed)
     config["policies"]["default"] = allowed[0] if allowed else ""
-    return yaml.safe_dump(config, sort_keys=False)
+    return yaml.safe_dump(config, sort_keys=False) + f"# SSSF pins agentsh: {BINARY} sha256 {PINNED_SHA256}\n"
 
 
 def folders_above(main: str, data_root: str) -> list[str]:
@@ -464,7 +470,19 @@ def _run(command: list[str]) -> subprocess.CompletedProcess:
         raise AgentshRefused(f"`{' '.join(command[:3])}` failed ({type(error).__name__}); {FIX}") from None
 
 
+def _service_started() -> int:
+    """When the agentsh service started, in whole seconds since the epoch."""
+    result = _run(["systemctl", "show", "agentsh", "-p", "ExecMainStartTimestamp", "--timestamp=unix"])
+    match = re.fullmatch(r"ExecMainStartTimestamp=@(\d+)", result.stdout.strip()) if result.returncode == 0 else None
+    if not match:
+        raise AgentshRefused(f"can't read when the agentsh service started; run `{RESTART}`, "
+                             "then start the run again")
+    return int(match.group(1))
+
+
 def check_machine(guard: LocalGuard) -> None:
+    """Refuse unless the service is active, the binary is the pinned build, the config and
+    policies are what this checkout renders, and the service started after the binary and config changed."""
     if _run(["systemctl", "is-active", "agentsh"]).stdout.strip() != "active":
         raise AgentshRefused(f"the agentsh service is not active; {FIX}")
     try:
@@ -496,9 +514,41 @@ def check_machine(guard: LocalGuard) -> None:
             raise AgentshRefused(f"policy {policy.name} is not installed in {POLICY_DIR}; {FIX}") from None
         if on_disk != policy.text.encode():
             raise AgentshRefused(f"installed policy {policy.name} differs from what this checkout renders; {DIFFERS}")
+    started = _service_started()
+    for path in (BINARY, CONFIG):
+        try:
+            changed = int(os.stat(path).st_ctime)
+        except OSError as error:
+            raise AgentshRefused(f"can't read {path} ({error}); {FIX}") from None
+        # Whole seconds with >=: fails closed. A restart in the same second as the install
+        # refuses once by mistake, and a second restart clears it.
+        if changed >= started:
+            raise AgentshRefused(f"{path} changed after the agentsh service started, so the service may still "
+                                 f"run an older build or config; run `{RESTART}` (again, if you just did, since "
+                                 "the check counts whole seconds), then start the run again")
+
+
+def check_paths(root: str, env=None) -> None:
+    """Refuse a root or home folder holding glob syntax: agentsh puts ${PROJECT_ROOT} and
+    ${HOME} into its rules as raw text, so the rules would also match other folders."""
+    home = (os.environ if env is None else env).get("HOME")
+    candidates = [("checkout", root)]
+    if home:
+        candidates.append(("home folder", home))
+    candidates.append(("home folder", pwd.getpwuid(os.getuid()).pw_dir))
+    for kind, path in candidates:
+        found = next((c for c in GLOB_CHARS if c in path), None)
+        if found:
+            raise AgentshRefused(
+                f"the {kind} path {path} holds `{found}`. agentsh puts this path into its rules as raw text, "
+                "where * ? [ ] { } \\ $ are glob syntax, so the rules would also match other folders. Move the "
+                "checkout, or use a home folder, without any of * ? [ ] { } \\ $, or set `local_guard: text` "
+                "in adws/adw_sssf_config/repo.yaml")
 
 
 def check_root(root: str) -> None:
+    """Refuse a root or home folder with glob syntax, then a root that is not the top of a git checkout."""
+    check_paths(root)
     result = _run(["git", "-C", root, "rev-parse", "--show-toplevel"])
     if result.returncode != 0 or Path(result.stdout.strip()).resolve() != Path(root).resolve():
         raise AgentshRefused(f"{root} is not the top of a git checkout, so agentsh can't be rooted there; "
@@ -798,9 +848,22 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     policy = guard.policies.get(harness)
     if policy is None:
         raise AgentshRefused(f"no agentsh policy was generated for {harness}; {FIX}")
+    check_paths(guard.root, env)
     if not guard.agent_cache:
         raise AgentshRefused("no agent cache folder reached the launch; this is a bug in the caller")
-    Path(guard.agent_cache).mkdir(mode=0o700, parents=True, exist_ok=True)   # outside the wrap
+    cache = os.path.abspath(guard.agent_cache)
+    try:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)   # the data root, which already holds sessions/
+        try:
+            os.mkdir(cache, 0o700)      # outside the wrap; mkdir never follows a link at its last component
+        except FileExistsError:
+            pass
+        is_folder = stat.S_ISDIR(os.lstat(cache).st_mode)
+    except OSError as error:
+        raise AgentshRefused(f"can't make the agent cache {cache} ({error}); {FIX}") from None
+    if not is_folder:
+        raise AgentshRefused(f"{cache} is a link or a file, not a folder, so no agent is started; an agent "
+                             "may have put it there. Look at it with `ls -la`, remove it, and start the run again")
     child = dict(os.environ if env is None else env)
     ours = cache_env(guard.agent_cache)
     wanted = {k.lower() for k in ours}

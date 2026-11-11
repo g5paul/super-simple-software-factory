@@ -295,18 +295,19 @@ class SetupFailed(RuntimeError):
     """A worktree_setup command failed, so the run stops before any agent."""
 
 
-def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path, root: Path, box=None) -> str:
+def run_setup(commands: list[str], cwd: Path, timeout: int, log_dir: Path, root: Path, box=None, copy: bool = False) -> str:
     """Run repo.yaml's worktree_setup in a worktree. Returns "" when every
     command passed, or why the first that failed did, with its output's tail.
     Each command's output goes to `log_dir/NN.log`, written under `root`, the
     run's data root, so a link an agent left there is replaced. `box` is the run's sandbox;
-    a rebase, which runs after the run has ended, sets up on this machine."""
+    a rebase, which runs after the run has ended, sets up on this machine.
+    `copy` (under local_guard: agentsh) sets uv and pnpm to install by copy, so the tree shares no file with a cache."""
     from . import sandbox
-    from .utils import operator_env
+    from .utils import copy_installs, operator_env
     box = box or sandbox.LOCAL
     for n, command in enumerate(commands, 1):
         try:
-            done = box.run(["sh", "-c", command], cwd=cwd, env=operator_env(), timeout=timeout)
+            done = box.run(["sh", "-c", command], cwd=cwd, env=copy_installs(operator_env(), "agentsh" if copy else None), timeout=timeout)
             code, out = done.returncode, done.stdout + done.stderr
         except subprocess.TimeoutExpired as error:
             # Its output comes back as bytes even with text=True.
@@ -332,7 +333,8 @@ def set_up(run) -> None:
     with run.phase(PhaseParams(name="setup", kind="code", owner="worktree",
                                description="Run repo.yaml's worktree_setup in the new worktree")) as ph:
         why = run_setup(settings.worktree_setup, Path.cwd(), settings.worktree_setup_timeout,
-                        run.context_handoff_dir / "setup", run.data_root, sandbox.current())
+                        run.context_handoff_dir / "setup", run.data_root, sandbox.current(),
+                        copy=getattr(getattr(run, "local_guard", None), "mode", None) == "agentsh")
         ph.log(commands=len(settings.worktree_setup), passed=not why)
         if why:
             raise SetupFailed(f"worktree_setup failed, so no agent started. {why}\n"
@@ -510,7 +512,7 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
     why = (_with_environment(record, lambda: run_setup(
         settings.worktree_setup, path, settings.worktree_setup_timeout,
         Path(cfg.defaults.data_root) / "sessions" / adw_id / "context_handoff" / "rebase_setup",
-        Path(cfg.defaults.data_root)))
+        Path(cfg.defaults.data_root), copy=settings.local_guard == "agentsh"))
         if settings.worktree_setup else "")
     if why:
         git("reset", "--hard", old, cwd=path)

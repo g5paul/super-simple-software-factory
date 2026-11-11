@@ -503,6 +503,7 @@ class LocalGuard(BaseModel):
     policies: dict[str, Policy] = {}     # by harness: "claude", "pi"
     config_template: str = ""            # agentsh_sssf.yaml, read once, for the machine check
     agent_cache: str = ""                # the agents' own tool caches, under agentsh
+    git_common_dir: str = ""             # the git common dir, walked with root for links outside them
 
 
 class AgentRequest(BaseModel):

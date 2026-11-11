@@ -369,15 +369,16 @@ keep PATH:
 # explicitly because the server runs from the app dir and would otherwise look
 # for a trace db sitting next to itself. Ctrl+C stops it.
 
+# --backend=copyfile: bun hardlinks from ~/.bun/install/cache by default, which agentsh can't see through
 # boot the trace UI; prints its address
 obs:
-    cd .claude/skills/sssf/apps/visualizer && bun install --silent && bunx vite build --logLevel warn && SSSF_DB={{justfile_directory()}}/{{db}} bun run server/index.ts
+    cd .claude/skills/sssf/apps/visualizer && bun install --backend=copyfile --silent && bunx vite build --logLevel warn && SSSF_DB={{justfile_directory()}}/{{db}} bun run server/index.ts
 
 # install.py and --update record each repo in ~/.config/sssf/projects.json.
 # one dashboard for every repo SSSF is installed in; prints its address
 obs-all:
-    cd .claude/skills/sssf/apps/visualizer && bun install --silent && bunx vite build --logLevel warn && bun run server/index.ts --all
+    cd .claude/skills/sssf/apps/visualizer && bun install --backend=copyfile --silent && bunx vite build --logLevel warn && bun run server/index.ts --all
 
 # only for working on the visualizer itself: Vite dev server, fixed ports 4601 (ui) + 4600 (api)
 obs-dev:
-    cd .claude/skills/sssf/apps/visualizer && bun install && (SSSF_DB={{justfile_directory()}}/{{db}} SSSF_OBS_PORT=4600 bun run server/index.ts &) && bunx vite
+    cd .claude/skills/sssf/apps/visualizer && bun install --backend=copyfile && (SSSF_DB={{justfile_directory()}}/{{db}} SSSF_OBS_PORT=4600 bun run server/index.ts &) && bunx vite

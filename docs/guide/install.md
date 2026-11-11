@@ -72,6 +72,8 @@ cp -r ~/github/super-simple-software-factory/.claude/skills/sssf .claude/skills/
 
 Use the path of your own clone of super-simple-software-factory. Whenever you run the installer, set `SSSF_SOURCE` to the same skill folder, so the installer records which commit you installed. Without it, the installer prints `skill: unknown (no git source)` and `stamp.json` has no `skill` key.
 
+If you clone SSSF from a checkout on this machine, use `git clone --no-local`. A plain local clone hardlinks the source's git objects, so a write in one `.git` changes the other, and under agentsh the launch refuses while they share files.
+
 ## 2. Run the installer
 
 Run one of the three blocks below from the repo root. Everything lands in the current folder. The installer prints what it stamped, and the line that turns on the secret scan.

@@ -18,7 +18,7 @@ import time
 
 from . import quality, sandbox, session_files
 from .data_types import EventRecord, PlanOutput, QualityCheckResult, QualityResult
-from .utils import now_iso, operator_env
+from .utils import copy_installs, now_iso, operator_env
 
 TIMEOUT_SECONDS = 600
 
@@ -37,7 +37,8 @@ def _run(run, index: int, command: str) -> QualityCheckResult:
         # A plan writes its checks as shell lines (`bun scripts/x.ts`,
         # `cd web && npm test`), so they run through a shell.
         done = sandbox.current().run(["bash", "-c", command], cwd=run.repo_root,
-                                     env=operator_env(), timeout=TIMEOUT_SECONDS)
+                                     env=copy_installs(operator_env(), getattr(getattr(run, "local_guard", None), "mode", None)),
+                                     timeout=TIMEOUT_SECONDS)
         returncode, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as error:
         returncode = 124

@@ -13,6 +13,7 @@ import re
 import shlex
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import textwrap
@@ -67,13 +68,13 @@ def cfg():
 class Service:
     def __init__(self):
         self.events: list[dict] = []
-        self.hidden_from_typed: list[dict] = []     # shown only to a read with no type filter
+        self.final_only: list[dict] = []     # shown only to the final read
         self.queries: list[dict] = []
         self.deletes: list[str] = []
         self.status = 200
-        self.fail_typed = False      # 500 on the polls, which carry a type
-        self.fail_untyped = False    # 500 on the final read, which carries none
-        self.typed_delay = 0.0       # seconds a poll waits before it answers 500
+        self.fail_polls = False      # 500 on the polls
+        self.fail_final = False    # 500 on the final read
+        self.poll_delay = 0.0       # seconds a poll waits before it answers 500
         self.null_past_end = False   # a page past the last row answers the body `null`, as the real service does
         self.raw_body: bytes | None = None     # answers this for every good request
         outer = self
@@ -85,19 +86,20 @@ class Service:
             def do_GET(self):
                 url = urlparse(self.path)
                 q = {k: v[0] for k, v in parse_qs(url.query).items()}
+                final = q.pop("_final", None) is not None
                 outer.queries.append(q)
-                if "type" in q and outer.typed_delay:
-                    time.sleep(outer.typed_delay)
-                    outer.fail_typed = True
-                if outer.status != 200 or (outer.fail_typed if "type" in q else outer.fail_untyped):
+                if not final and outer.poll_delay:
+                    time.sleep(outer.poll_delay)
+                    outer.fail_polls = True
+                if outer.status != 200 or (outer.fail_final if final else outer.fail_polls):
                     self.send_response(outer.status if outer.status != 200 else 500)
                     self.end_headers()
                     return
                 rows = list(outer.events)
                 if "type" in q:
                     rows = [e for e in rows if e.get("type") == q["type"]]
-                else:
-                    rows += outer.hidden_from_typed
+                if final:
+                    rows += outer.final_only
                 if q.get("order") != "asc":
                     rows.reverse()
                 limit = int(q.get("limit", 200))
@@ -133,6 +135,11 @@ def service(monkeypatch):
     svc = Service()
     monkeypatch.setattr(agentsh_guard, "API", svc.url)
     monkeypatch.setattr(agentsh_guard, "POLL_SECONDS", 0.05)
+    original = agentsh_guard.AgentshProcess._get
+
+    def get(self, query):      # the final read is the one made after _done is set; polls carry no marker
+        return original(self, {**query, "_final": "1"} if self._done.is_set() else query)
+    monkeypatch.setattr(agentsh_guard.AgentshProcess, "_get", get)
     yield svc
     svc.server.shutdown()
 
@@ -168,6 +175,10 @@ if mode == "fork":
     sys.exit(subprocess.Popen(cmd).wait())
 os.execvp(cmd[0], cmd)
 '''
+
+
+def utc(ts):
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @pytest.fixture
@@ -211,6 +222,11 @@ def machine(tmp_path, monkeypatch, cfg, service):
             return subprocess.CompletedProcess(c, state.get("show_rc", 0), state["show"], "")
         return real(c)
     monkeypatch.setattr(agentsh_guard, "_run", fake_run)
+    status = tmp_path / "prune-status.json"
+    status.write_text(json.dumps({"store_bytes": 1000, "last_prune": utc(time.time()), "last_analyze": None,
+                                  "last_run": utc(time.time()), "deleted": 0, "skipped": None, "error": None}))
+    monkeypatch.setattr(agentsh_guard, "PRUNE_STATUS", str(status))
+    machine.status = status
     machine.state = state
     machine.guard, machine.root, machine.pdir, machine.config = guard, root, pdir, config
     return machine
@@ -541,7 +557,7 @@ def test_only_a_named_exec_denial_counts_across_pages(service, monkeypatch):
     process._poll()
     assert process.counted == 2 and process.tally.total == 2 and not process.tripped
     assert all(q["order"] == "asc" and int(q["limit"]) <= 5000 for q in service.queries)
-    assert all(q.get("type") == "ptrace_execve" and "decision" not in q for q in service.queries)
+    assert all("type" not in q and "decision" not in q and q["session_id"] == "sess1" for q in service.queries)
     process._end_session()
     assert service.queries[-1].get("offset") == "0" or "type" not in service.queries[-1]
     assert all("type" not in q for q in service.queries[-2:])
@@ -596,7 +612,7 @@ def test_one_text_refusal_and_two_exec_denials_also_stop(machine, service):
 
 def test_a_third_denial_seen_only_in_the_final_read_still_raises(machine, service):
     service.events = [denial(1), denial(2)]
-    service.hidden_from_typed = [denial(3)]
+    service.final_only = [denial(3)]
     process = launch(machine, "claude_code", cmd=[sys.executable, "-c", "import time; time.sleep(0.4)"])
     process.wait()
     agentsh_guard.close(process)
@@ -673,7 +689,7 @@ def test_live_service_is_active():
 
 def test_a_third_denial_in_the_final_read_counts_even_when_another_thread_is_ending(machine, service):
     service.events = [denial(1), denial(2)]
-    service.hidden_from_typed = [denial(3)]
+    service.final_only = [denial(3)]
     process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
     process.wait()
     threading.Thread(target=process.stop_tree).start()      # e.g. the silence watchdog: kills only
@@ -770,10 +786,13 @@ HUB_SHA = "abc1234" + 33 * "0"
 
 
 @pytest.fixture
-def hub(monkeypatch):
+def hub(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location("agentsh_install", SKILL / "scripts/agentsh_install.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    for name, leaf in (("PRUNE_SCRIPT", "lib/agentsh_prune.py"), ("PRUNE_SERVICE", "unit/p.service"),
+                       ("PRUNE_TIMER", "unit/p.timer")):
+        monkeypatch.setattr(module, name, str(tmp_path / "prune-targets" / leaf))
     monkeypatch.setattr(module, "hub_version", lambda: (HUB_SHA, False))
     return module
 
@@ -807,6 +826,10 @@ def sudo_lines(out: str) -> list[list[str]]:
 
 def apply(out: str) -> None:
     for step in sudo_lines(out):
+        if "-D" in step:
+            os.makedirs(os.path.dirname(step[-1]), exist_ok=True)
+        elif not os.path.isdir(os.path.dirname(step[-1])):
+            os.makedirs(os.path.dirname(step[-1]))
         shutil.copy(step[-2], step[-1])
 
 
@@ -830,9 +853,27 @@ def test_install_agrees_with_the_run(tmp_path, monkeypatch, machine, capsys, hub
         out = capsys.readouterr().out
         assert out.rstrip().endswith("sudo systemctl restart agentsh")
         assert "Every agent must be stopped" in out and sudo_lines(out)
+        lines = out.splitlines()
+        if not other:
+            assert lines.index("sudo systemctl daemon-reload") < lines.index(
+                "sudo systemctl enable --now sssf-agentsh-prune.timer") < len(lines) - 1
+            targets = [hub.PRUNE_SCRIPT, hub.PRUNE_SERVICE, hub.PRUNE_TIMER]
+            steps = sudo_lines(out)
+            for target in targets:
+                assert [x for x in steps if x[-1] == target]
+            assert all(("-D" in x) == (x[-1] == hub.PRUNE_SCRIPT) for x in steps if x[-1] in targets)
         apply(out)
         agentsh_guard.check_machine(run_as_project(monkeypatch, proj))
         os.chdir(tmp_path / "elsewhere")
+        if not other:
+            assert Path(hub.PRUNE_SCRIPT).read_text() == (SKILL / "scripts/agentsh_prune.py").read_text()
+            assert f"ExecStart=/usr/bin/python3 -I -S {hub.PRUNE_SCRIPT}" in Path(hub.PRUNE_SERVICE).read_text()
+            assert "OnCalendar=*:0/10" in Path(hub.PRUNE_TIMER).read_text()
+            assert hub.main(["--repo", str(proj)]) == 0
+            again = capsys.readouterr().out
+            assert all(f"unchanged: {t}" in again for t in targets)
+            assert "sudo systemctl daemon-reload" not in again
+            os.chdir(tmp_path / "elsewhere")
     assert "sssf-other-pi" in yaml.safe_load(machine.config.read_text())["policies"]["allowed"]
     assert status() == before and not marker.exists()
 
@@ -1066,14 +1107,14 @@ def harness_run(request, machine, service, tmp_path, monkeypatch, fake):
 
 def test_three_denials_and_a_failing_final_read_are_a_breach_with_spend(harness_run, service):
     service.events = [denial(1), denial(2), denial(3)]
-    service.fail_untyped = True
+    service.fail_final = True
     with pytest.raises(rules.RuleBreach) as stop:
         harness_run(waiting())
     assert stop.value.refusals == 3 and stop.value.partial is not None
 
 
 def test_a_clean_call_with_a_failing_final_read_is_a_failure_that_keeps_its_cost(harness_run, service):
-    service.fail_untyped = True
+    service.fail_final = True
     with pytest.raises(agentsh_guard.AgentshRefused) as stop:
         harness_run()
     assert not isinstance(stop.value, rules.RuleBreach)
@@ -1083,15 +1124,15 @@ def test_a_clean_call_with_a_failing_final_read_is_a_failure_that_keeps_its_cost
 
 
 def test_three_failed_polls_and_a_final_read_with_three_denials_are_a_breach(harness_run, service):
-    service.fail_typed = True
-    service.hidden_from_typed = [denial(1), denial(2), denial(3)]
+    service.fail_polls = True
+    service.final_only = [denial(1), denial(2), denial(3)]
     with pytest.raises(rules.RuleBreach) as stop:
         harness_run(waiting())
     assert stop.value.refusals == 3 and stop.value.partial is not None
 
 
 def test_a_non_breach_failure_with_three_denials_becomes_the_breach(harness_run, service):
-    service.hidden_from_typed = [denial(1), denial(2), denial(3)]
+    service.final_only = [denial(1), denial(2), denial(3)]
     original = ValueError("the tracer failed")
     with pytest.raises(rules.RuleBreach) as stop:
         harness_run(raising(original))
@@ -1100,7 +1141,7 @@ def test_a_non_breach_failure_with_three_denials_becomes_the_breach(harness_run,
 
 
 def test_a_non_breach_failure_with_two_denials_stands(harness_run, service):
-    service.hidden_from_typed = [denial(1), denial(2)]
+    service.final_only = [denial(1), denial(2)]
     original = ValueError("the tracer failed")
     with pytest.raises(ValueError) as stop:
         harness_run(raising(original))
@@ -1108,7 +1149,7 @@ def test_a_non_breach_failure_with_two_denials_stands(harness_run, service):
 
 
 def test_a_text_breach_with_three_denials_counted_stays_that_breach(harness_run, service):
-    service.hidden_from_typed = [denial(1), denial(2), denial(3)]
+    service.final_only = [denial(1), denial(2), denial(3)]
     mine = rules.RuleBreach("a", rules.AgentRule(rule="text rule"), "p", "cmd")
     with pytest.raises(rules.RuleBreach) as stop:
         harness_run(raising(mine))
@@ -1119,19 +1160,19 @@ def test_the_credits_stop_gives_way_to_three_denials_and_not_to_two(
         machine, service, tmp_path, fake, private_registry):
     fake(_onto_credits(tmp_path))
     req = request(tmp_path, cwd=str(machine.root)).model_copy(update={"local_guard": machine.guard})
-    service.hidden_from_typed = [denial(1), denial(2), denial(3)]
+    service.final_only = [denial(1), denial(2), denial(3)]
     with pytest.raises(rules.RuleBreach) as stop:
         agent_cc.run(req)
     assert stop.value.refusals == 3 and stop.value.partial is not None
     assert isinstance(stop.value.__cause__, account.RateLimitStop)
     service.deletes.clear()
-    service.hidden_from_typed = [denial(1), denial(2)]
+    service.final_only = [denial(1), denial(2)]
     with pytest.raises(account.RateLimitStop):
         agent_cc.run(req)
 
 
 def test_a_late_failed_poll_after_close_does_not_set_failure(machine, service):
-    service.typed_delay = 0.4
+    service.poll_delay = 0.4
     process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
     process._failed_polls = 2          # the next failed poll would trip the watcher
     time.sleep(0.15)                   # a poll is now waiting on the service
@@ -2378,3 +2419,298 @@ def test_an_edited_pin_constant_among_the_four_refuses(machine, tmp_path, monkey
     monkeypatch.setattr(agentsh_guard, name, str(other))
     with pytest.raises(agentsh_guard.AgentshRefused, match="differs from what this checkout renders"):
         agentsh_guard.check_machine(machine.guard)
+
+
+# ── the event-store prune, the poll by session, and the store warnings ───────
+
+def _load_prune():
+    spec = importlib.util.spec_from_file_location("agentsh_prune", SKILL / "scripts/agentsh_prune.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+NOW = 1_800_000_000.0
+DAY = 86400
+
+
+class SessionsApi:
+    def __init__(self):
+        self.body: bytes = b'{"sessions": []}'
+        self.code = 200
+        self.hits = 0
+        self.on_hit = None
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                outer.hits += 1
+                if outer.on_hit:
+                    outer.on_hit(outer.hits)
+                self.send_response(outer.code)
+                self.end_headers()
+                self.wfile.write(outer.body)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+@pytest.fixture
+def prune_env(tmp_path, monkeypatch):
+    module = _load_prune()
+    api = SessionsApi()
+    db = tmp_path / "events.db"
+    conn = sqlite3.connect(db)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript("""
+        CREATE TABLE events (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, ts_unix_ns INTEGER, data TEXT);
+        CREATE INDEX idx_events_session_ts ON events(session_id, ts_unix_ns);
+        CREATE INDEX idx_events_type_ts ON events(type, ts_unix_ns);""")
+    conn.close()
+    monkeypatch.setattr(module, "PAUSE", 0)
+
+    def add(*ages_seconds):
+        c = sqlite3.connect(db)
+        for age in ages_seconds:
+            c.execute("INSERT INTO events (id, session_id, type, ts_unix_ns, data) VALUES (?,?,?,?,?)",
+                      (f"id-{c.execute('SELECT count(*) FROM events').fetchone()[0]}-{age}", "SECRET-SESSION",
+                       "file_open", int((NOW - age) * 1e9), "SECRET-DATA"))
+        c.commit()
+        c.close()
+
+    def ages():
+        c = sqlite3.connect(db)
+        out = [round(NOW - r[0] / 1e9) for r in c.execute("SELECT ts_unix_ns FROM events ORDER BY rowid")]
+        c.close()
+        return out
+
+    def run(**kw):
+        return module.prune(db=str(db), api=api.url, status=str(tmp_path / "st" / "status.json"), now=NOW, **kw)
+
+    yield types.SimpleNamespace(m=module, api=api, db=db, add=add, ages=ages, run=run,
+                                status=tmp_path / "st" / "status.json")
+    api.server.shutdown()
+
+
+def test_the_prune_keeps_the_last_two_days_in_several_batches(prune_env, monkeypatch):
+    monkeypatch.setattr(prune_env.m, "BATCH", 3)
+    prune_env.add(*([3 * DAY] * 7), 2 * DAY + 1, 2 * DAY - 1, 0)
+    statements = []
+    real = sqlite3.connect
+    monkeypatch.setattr(prune_env.m.sqlite3, "connect", lambda *a, **k: (
+        c := real(*a, **k), c.set_trace_callback(lambda s: statements.append(s) if s.startswith("DELETE") else None))[0])
+    result = prune_env.run()
+    assert prune_env.ages() == [2 * DAY - 1, 0]
+    assert result["deleted"] == 8 and result["error"] is None and result["skipped"] is None
+    assert len(statements) == 3 and result["last_prune"]
+
+
+def test_the_prune_walks_by_rowid_and_never_deletes_a_recent_row(prune_env, monkeypatch):
+    monkeypatch.setattr(prune_env.m, "BATCH", 1)     # the old row sits past the first batch, behind a recent one
+    prune_env.add(0, 3 * DAY)
+    prune_env.run()
+    assert prune_env.ages() == [0, 3 * DAY]
+
+
+@pytest.mark.parametrize("how", ["listed", "dict", "down", "500", "junk", "items", "null_sessions", "empty_object"])
+def test_the_prune_deletes_nothing_without_a_clear_empty_session_list(prune_env, how):
+    prune_env.add(3 * DAY, 3 * DAY)
+    if how == "listed":
+        prune_env.api.body = b'[{"id": "s"}]'
+    elif how == "dict":
+        prune_env.api.body = b'{"sessions": [{"id": "s"}]}'
+    elif how == "500":
+        prune_env.api.code = 500
+    elif how == "junk":
+        prune_env.api.body = b'"nope"'
+    elif how == "items":
+        prune_env.api.body = b'{"items": [{"id": "s1"}]}'
+    elif how == "null_sessions":
+        prune_env.api.body = b'{"sessions": null}'
+    elif how == "empty_object":
+        prune_env.api.body = b'{}'
+    else:
+        prune_env.api.server.shutdown()
+        prune_env.api.server.server_close()
+    result = prune_env.run()
+    assert len(prune_env.ages()) == 2 and result["skipped"] and result["last_prune"] is None
+    if how in ("listed", "dict"):
+        assert "1 active session" in result["skipped"]
+
+
+def test_a_null_or_empty_session_list_lets_the_prune_run(prune_env):
+    prune_env.add(3 * DAY)
+    prune_env.api.body = b"null"
+    assert prune_env.run()["skipped"] is None and prune_env.ages() == []
+
+
+def test_a_session_that_appears_between_batches_stops_the_loop(prune_env, monkeypatch):
+    monkeypatch.setattr(prune_env.m, "BATCH", 2)
+    prune_env.add(*([3 * DAY] * 6))
+    prune_env.api.on_hit = lambda n: setattr(prune_env.api, "body", b'[{"id": "s"}]') if n == 3 else None
+    result = prune_env.run()
+    assert len(prune_env.ages()) == 4 and "active session" in result["skipped"] and result["last_prune"] is None
+
+
+def test_the_prune_runs_at_most_hourly(prune_env):
+    prune_env.add(3 * DAY)
+    prune_env.run()
+    prune_env.add(3 * DAY)
+    hits = prune_env.api.hits
+    data = json.loads(prune_env.status.read_text())
+    data["last_prune"] = utc(NOW - 1800)
+    prune_env.status.write_text(json.dumps(data))
+    result = prune_env.run()
+    assert prune_env.api.hits == hits and len(prune_env.ages()) == 1
+    assert result["last_run"] == utc(NOW) and result["store_bytes"] > 0
+    data["last_prune"] = utc(NOW - 3661)
+    prune_env.status.write_text(json.dumps(data))
+    prune_env.run()
+    assert prune_env.api.hits > hits and prune_env.ages() == []
+
+
+def test_the_status_file_is_public_and_holds_no_event_content(prune_env):
+    prune_env.add(3 * DAY, 0)
+    prune_env.run()
+    text = prune_env.status.read_text()
+    assert set(json.loads(text)) == {"store_bytes", "last_prune", "last_analyze", "last_run", "deleted",
+                                     "skipped", "error"}
+    assert prune_env.status.stat().st_mode & 0o777 == 0o644
+    assert "SECRET" not in text and "id-" not in text
+
+
+def test_analyze_runs_weekly_and_not_sooner(prune_env):
+    prune_env.add(0)
+    result = prune_env.run()
+    c = sqlite3.connect(prune_env.db)
+    assert c.execute("SELECT count(*) FROM sqlite_master WHERE name='sqlite_stat1'").fetchone()[0] == 1
+    c.close()
+    assert result["last_analyze"] == utc(NOW)
+    data = dict(result, last_prune=utc(NOW - 7200), last_analyze=utc(NOW - DAY))
+    prune_env.status.write_text(json.dumps(data))
+    assert prune_env.run()["last_analyze"] == utc(NOW - DAY)
+
+
+def test_fix_owner_only_touches_regular_files_of_another_owner(prune_env, tmp_path, monkeypatch):
+    db = tmp_path / "x.db"
+    db.write_text("")
+    wal = Path(str(db) + "-wal")
+    wal.write_text("")
+    (tmp_path / "other").write_text("")
+    os.symlink(tmp_path / "other", str(db) + "-shm")
+    calls = []
+    monkeypatch.setattr(prune_env.m.os, "chown", lambda *a, **k: calls.append((a, k)))
+    prune_env.m.fix_owner(str(db))
+    assert calls == []                           # same owner
+    real = os.lstat
+    fake_uid = os.getuid() + 1
+
+    def lstat(path, *a, **k):
+        info = real(path, *a, **k)
+        if str(path).endswith("-wal") or str(path).endswith("-shm"):
+            return types.SimpleNamespace(st_mode=info.st_mode, st_uid=fake_uid, st_gid=info.st_gid)
+        return info
+    monkeypatch.setattr(prune_env.m.os, "lstat", lstat)
+    prune_env.m.fix_owner(str(db))
+    assert len(calls) == 1 and calls[0][0][0] == str(wal) and calls[0][1] == {"follow_symlinks": False}
+
+
+def test_prune_constants_agree_with_the_guard_and_stay_out_of_every_agent_write(world, tmp_path):
+    m = _load_prune()
+    assert m.STATUS == agentsh_guard.PRUNE_STATUS
+    assert m.API == agentsh_guard.API
+    template = yaml.safe_load(TEMPLATE.read_text())
+    assert m.DB == template["audit"]["storage"]["sqlite_path"]
+    hub = importlib.util.spec_from_file_location("agentsh_install", SKILL / "scripts/agentsh_install.py")
+    mod = importlib.util.module_from_spec(hub)
+    hub.loader.exec_module(mod)
+    for path in (m.STATUS, mod.PRUNE_SCRIPT, mod.PRUNE_SERVICE, mod.PRUNE_TIMER):
+        assert not path.startswith("/var/lib/agentsh/")
+        for op in ("write", "create"):
+            assert world.rules.decision(world.rules.first_match(path, op)) == "deny", (path, op)
+
+
+def test_a_poll_asks_by_session_with_no_type_and_counts_only_named_exec_denials(service):
+    service.events = [denial(1), denial(2, "ptrace_file", rule="sssf-default-deny"),
+                      denial(3, decision="allow"), denial(4, rule=None),
+                      denial(5, "net_connect", rule="sssf-net"), denial(6)]
+    process = bare(service)
+    process._poll()
+    assert [q for q in service.queries if "type" in q] == []
+    assert service.queries[0]["session_id"] == "sess1"
+    assert process.counted == 2
+    assert {d["type"] for d in process.other_denials} == {"ptrace_file", "ptrace_execve", "net_connect"}
+    process._end_session()
+    assert process.counted == 2
+
+
+def _write_status(machine, **over):
+    data = {"store_bytes": 1000, "last_prune": utc(time.time()), "last_analyze": None, "last_run": utc(time.time()),
+            "deleted": 0, "skipped": None, "error": None, **over}
+    machine.status.write_text(json.dumps(data))
+
+
+def test_check_machine_notes_a_fresh_small_store_as_nothing(machine):
+    assert agentsh_guard.check_machine(machine.guard) == []
+
+
+def test_check_machine_notes_a_missing_status(machine):
+    machine.status.unlink()
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1 and "just agentsh-install" in notes[0]
+    machine.status.write_text("[1]")
+    assert len(agentsh_guard.check_machine(machine.guard)) == 1
+
+
+def test_check_machine_notes_a_stale_prune_and_escapes_the_reason(machine):
+    _write_status(machine, last_prune=utc(time.time() - 4 * 3600), skipped="the service reports 1\nactive")
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1 and "sudo systemctl start sssf-agentsh-prune.service" in notes[0]
+    assert "\n" not in notes[0] and "1\\nactive" in notes[0]
+    _write_status(machine, last_prune=None)
+    assert "never" in agentsh_guard.check_machine(machine.guard)[0]
+
+
+def test_check_machine_notes_a_big_store(machine):
+    _write_status(machine, store_bytes=11e9)
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1 and "move" in notes[0] and "events.db" in notes[0]
+
+
+def test_a_launch_with_a_stale_status_carries_the_note_into_the_trace(machine, service):
+    _write_status(machine, last_prune=utc(time.time() - 4 * 3600))
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
+    process.wait()
+    events = []
+    agentsh_guard.close(process, events.append)
+    assert any("last pruned" in n for n in process.trace_notes)
+    assert any("last pruned" in n for e in events if e["type"] == "agentsh_denials" for n in e["notes"])
+
+
+def test_a_path_over_path_max_is_counted_in_bytes():
+    path = "/" + "/".join(["é" * 100] * 30)
+    message = str(agentsh_guard._too_long(path))
+    assert f"{len(path.encode())} bytes" in message and len(path.encode()) != len(path)
+
+
+def test_text_mode_reads_no_status_and_makes_no_note(monkeypatch):
+    monkeypatch.setattr(agentsh_guard, "PRUNE_STATUS", "/nonexistent/status.json")
+    monkeypatch.setattr(agentsh_guard, "store_notes", lambda *a: pytest.fail("read the status"))
+    monkeypatch.setattr(sandbox.LOCAL, "start", lambda cmd, cwd=None, env=None: "p")
+    assert agentsh_guard.start(sandbox.LOCAL, "pi", ["x"], cwd="/w", env={}, guard=LocalGuard(mode="text")) == "p"
+
+
+def test_a_flood_of_events_cannot_hold_back_the_stop_after_three_denials(service, monkeypatch):
+    monkeypatch.setattr(agentsh_guard, "PAGE", 5)
+    page = [denial(1), denial(2), denial(3)] + [denial(i, "ptrace_file", rule="x", decision="allow") for i in (4, 5)]
+    service.raw_body = json.dumps({"events": page}).encode()     # every page is full, forever
+    process = bare(service)
+    worker = threading.Thread(target=process._poll, daemon=True)
+    worker.start()
+    worker.join(10)
+    assert not worker.is_alive() and process.tripped and process.counted == 3
+    process._done.set()

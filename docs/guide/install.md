@@ -273,7 +273,9 @@ Once the service is installed, do these steps once per repo. Do them again whene
    The recipe runs the hub's `scripts/agentsh_install.py` for this repo's main checkout. It writes the repo's policy, shows a diff against what's in `/etc/agentsh/`, and then prints `sudo` lines. It never runs `sudo` itself.
 3. Read the diff.
 4. Stop every agent.
-5. Run the printed lines yourself. They end with `sudo systemctl restart agentsh`. Run it after every install, "Nothing to install" included. A run refuses while the service started before its binary or config last changed. If the first run after a restart still refuses for that reason, restart once more: the check counts whole seconds.
+5. Run the printed lines yourself. They also install the event-store prune timer, with `sudo systemctl daemon-reload` and `sudo systemctl enable --now sssf-agentsh-prune.timer` before the restart, and they end with `sudo systemctl restart agentsh`. Run it after every install, "Nothing to install" included. A run refuses while the service started before its binary or config last changed. If the first run after a restart still refuses for that reason, restart once more: the check counts whole seconds.
+
+Check the timer with `systemctl list-timers sssf-agentsh-prune.timer`, and the prune's status with `cat /var/lib/sssf-agentsh-prune/status.json`.
 
 Before it starts, a run checks the service, the build and the installed policy, and that the service was restarted since. If one is wrong, the run refuses with a message naming the fix. The [config reference](../../.claude/skills/sssf/references/config.md) has the full list of checks and known limits.
 

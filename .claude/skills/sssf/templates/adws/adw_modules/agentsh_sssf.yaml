@@ -17,6 +17,11 @@ audit:
   output: "/var/lib/agentsh/audit.jsonl"
   storage:
     sqlite_path: "/var/lib/agentsh/events.db"
+    # agentsh drops an event when this queue is full (default 4096, batches of 64 every
+    # 50 ms); a burst at an agent's start filled it on 2026-11-11. An estimated 2 KB an
+    # event, so a full queue holds about 32 MB. See config.md, "The event store".
+    channel_size: 16384
+    batch_size: 256
 sessions:
   base_dir: "/var/lib/agentsh/sessions"
 sandbox:

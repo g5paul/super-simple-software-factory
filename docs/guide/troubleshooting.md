@@ -47,7 +47,17 @@ just kill <adw_id>      # stop the chain first, so it can't retry, then its agen
 
 If `procs` shows a pi agent, but its `raw_output.jsonl` is empty and the phase has no tool calls, the agent never started. Check that its model resolves with `pi --list-models`.
 
-Under `local_guard: agentsh`, a run that stops with "the agentsh service stopped answering event polls" can mean agentsh's event store has grown large enough to slow SSSF's poll past its 5-second limit. Read `/var/lib/sssf-agentsh-prune/status.json` for the store's size and last prune, and see "The event store" in [config.md](../../.claude/skills/sssf/references/config.md). With no run going, stop the service, move `events.db` and its `-wal` and `-shm` files aside, and start it again.
+Under `local_guard: agentsh`, a run that stops with "the agentsh service stopped answering event polls" means three polls in a row took over 5 seconds or failed. On 2026-11-11 the cause was a 32 GB event store, where one poll took 12.9 seconds. To check:
+
+```bash
+cat /var/lib/sssf-agentsh-prune/status.json                         # the store's size, last prune, last skip or error
+systemctl list-timers sssf-agentsh-prune.timer                      # the prune timer's last and next check
+journalctl -u agentsh --since today | grep -c 'event channel full'  # events agentsh dropped today
+```
+
+A store that keeps growing, or a last prune hours old, means the prune keeps skipping or failing; the status file says which. See "The event store" in [config.md](../../.claude/skills/sssf/references/config.md). To reclaim the space, with no run going: stop the service, move `events.db` and its `-wal` and `-shm` files aside, and start it again. If the store is small and polls still stop, see the stall in [open.md](../open.md).
+
+`check_machine`'s warnings about the store go into the trace only, in each agent's `agentsh_denials` event. Look there when a run under agentsh seems slow.
 
 ## Worktree runs
 

@@ -1122,6 +1122,34 @@ Spec review 1 blocked twice. The `find` tested only the owner's bits, so it miss
 
 Round 1's bypass review found one bypass. The untyped poll paged until it got a short page before it counted anything, so an agent keeping 5,000 allowed file events waiting at every page could make denied execs past the three-refusal stop. agentsh still denied each one, and the final read still marked the call a breach. The baseline's typed poll never saw file events. The fix, counting each page as it arrives, also closed an old hole: a flood of allowed exec events stalled the poll the same way on both versions. Round 1 also found two broken promises. A sessions reply without a `sessions` list read as zero sessions, and `troubleshooting.md` still suggested `ANALYZE`. Round 2 found nothing in 49 candidates and 69 checks.
 
+### The event-store rollout, 2026-11-11
+
+The engineer reinstalled both policies, which added the prune script, its service and its timer, then stopped the service, moved the 32,497,913,856-byte store aside and started it again. A clean stop had already folded the WAL back into `events.db`, so there were no `-wal` or `-shm` files to move. The timer's first check, at 08:10:17, pruned and ran `ANALYZE` with no skip and no error. The status file showed 135,968 bytes, mode 0644 and root-owned, and `check_machine` passed in both repos with no notes. The engineer then deleted the old store.
+
+Run 05f96f0f in sssf-sandbox, one read-only `adw_prompt` call, started its agent and succeeded for $0.02. Its session already held more than 5,000 events, mostly allowed file events, so even a short call's poll takes more than one page.
+
+The drops didn't stop with the small store. agentsh's journal logged 34 "event channel full" warnings in run 05f96f0f's first two seconds, 08:15:30 to 08:15:32, all `ptrace_file`, while Claude Code started. So the drops come from a burst of events at an agent's start, faster than agentsh's writer drains its channel, and not from the store's size. Earlier on 2026-11-11, on the large store, 410 of 33,723 drops were `ptrace_execve`, the type a refusal count needs. agentsh still enforced each of those; SSSF's count never saw them.
+
+**Performance.** The poll's query, timed through the API on the same machine:
+
+| Store | Query | Time |
+|---|---|---|
+| 32.5 GB, no statistics | session and `type=ptrace_execve` | 12.9 s cold after a reboot, 1.0 s warm |
+| 32.5 GB, no statistics | session only | 0.005 s |
+| 32.5 GB, after `ANALYZE` | session and type | 0.01 s |
+| 136 KB, after the rollout | session only, a full page of 5,000 rows | 0.04 s |
+
+`_get` gives up after 5 seconds, so the typed query on the large store was within 4 seconds of stopping every cold launch. The other costs per launch: the hardlink walk takes about 2 seconds in the hub and under 0.1 second in sssf-sandbox. The skill suite takes about 6 minutes, so each verify pass in a guard run does too.
+
+**What watches the store now.** Each launch reads the status file, and `check_machine` adds a note when it is missing, when the last prune is over 3 hours old, or when the store is over 10 GB. A poll that fails three times stops the agent, closed, with a message naming the service. What nothing watches yet:
+
+- the notes reach only the trace's `agentsh_denials` event, written when the agent call ends. Nothing prints them, so a warning is easy to miss;
+- how long each poll takes, and how many pages it reads. A slowdown shows up only when it stops a run;
+- the "event channel full" drops. The engineer's user can read agentsh's journal through the `adm` group, but SSSF doesn't count them;
+- the prune script exits 0 when it records an error, so `systemctl --failed` doesn't show it. The stale-prune note shows it 3 hours later.
+
+Next item 16 covers these.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1129,7 +1157,7 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 ## Next
 
 1. **Done: the pin check's two old holes**, by [run d48bd070](#the-pin-and-root-run-d48bd070). Left for item 14: links at `BINARY` or `CONFIG`, and the other path constants.
-2. The stall stays open. It came back on 2026-11-10 under Claude Code, in run d48bd070's first bypass review, and on 2026-11-11 in run b684482d's planner, where [the event store](#the-event-store-2026-11-11) was the cause. If it comes back with a fast poll query, turn the trace on with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
+2. The stall stays open. It came back on 2026-11-10 under Claude Code, in run d48bd070's first bypass review, and on 2026-11-11 in run b684482d's planner, where [the event store](#the-event-store-2026-11-11) was the cause. Run 149e2bda removed that cause, and d48bd070's had a ptrace watchdog line, so it may be a second one. If it comes back with a fast poll query, turn the trace on with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 5. **Done: what agentsh denied ordinary work.** `tar -x` by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09), relative link targets by [the ninth](#the-ninth-patch-link-targets-2026-11-09), and config lookups and the agents' own caches by [run 130ca6e0](#the-tool-config-run-under-agentsh-130ca6e0).
@@ -1142,4 +1170,5 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 12. **Done: uv's managed Pythons and folder listing**, by fork build 05b3777f and [run 47b4d0ea](#the-links-and-listing-run-47b4d0ea). Left: pnpm's two `npm_config_*` variables draw a deprecation warning from npm.
 13. **Done: the engineer's own Claude Code files.** Agents run from their own config folder with a token, and `~/.claude`, `~/.claude.json` and Claude Code's program are closed to them ([run cea6fe8d](#the-claude-home-run-cea6fe8d)). `/proc/<pid>/cwd` and `cmdline` stay a limit.
 14. **Done: the hardlink check**, by [runs 9497dc7f and b684482d](#the-hardlink-runs-9497dc7f-and-b684482d). Left for item 15: the one-time steps' three gaps.
-15. **Done: the event store**, by [run 149e2bda](#the-event-store-run-149e2bda). After the reinstall, the engineer moves the 32 GB store aside once, and the hub session checks that the timer ran.
+15. **Done: the event store**, by [run 149e2bda](#the-event-store-run-149e2bda), rolled out on [2026-11-11](#the-event-store-rollout-2026-11-11).
+16. **Warnings an engineer sees.** Print `check_machine`'s notes when the agent starts, not only in the trace. Record each call's slowest poll and its page count in `agentsh_denials`, and note a poll over 1 second. Count the journal's "event channel full" lines since the service started, and note any. Have the prune exit non-zero when it records an error. All four are guard code, so they go through the chain.

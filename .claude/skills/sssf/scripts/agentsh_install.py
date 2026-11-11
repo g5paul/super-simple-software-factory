@@ -16,7 +16,10 @@ It imports nothing from the project and runs no git there.
 
 It never runs sudo. It prints a diff of each new file against /etc/agentsh/
 (the whole file when nothing is installed), then the `sudo install` lines and
-`sudo systemctl restart agentsh`. Read the diff. Stop every agent before the
+`sudo systemctl restart agentsh`. It also installs the event-store prune: a script
+(/usr/local/lib/sssf-agentsh/agentsh_prune.py), a service and a timer in /etc/systemd/system/,
+with `sudo systemctl daemon-reload` and `sudo systemctl enable --now sssf-agentsh-prune.timer`
+before the restart. Read the diff. Stop every agent before the
 sudo lines, because sudo install follows a link.
 """
 
@@ -39,6 +42,9 @@ from pydantic import ValidationError  # noqa: E402
 from adw_modules import agents, agentsh_guard, repo_settings  # noqa: E402
 
 STAMP = "adws/adw_sssf_config/stamp.json"
+PRUNE_SCRIPT = "/usr/local/lib/sssf-agentsh/agentsh_prune.py"
+PRUNE_SERVICE = "/etc/systemd/system/sssf-agentsh-prune.service"
+PRUNE_TIMER = "/etc/systemd/system/sssf-agentsh-prune.timer"
 _noted = False
 
 
@@ -136,7 +142,39 @@ def main(argv: list[str]) -> int:
     for policy in guard.policies.values():
         items.append((policy.text, f"{agentsh_guard.POLICY_DIR}/{policy.name}.yaml", out / f"{policy.name}.yaml"))
 
+    items.append(((SKILL / "scripts/agentsh_prune.py").read_text(), PRUNE_SCRIPT, out / "agentsh_prune.py"))
+    items.append((f"""[Unit]
+Description=SSSF: prune agentsh's event store to 2 days
+After=agentsh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I -S {PRUNE_SCRIPT}
+StateDirectory=sssf-agentsh-prune
+StateDirectoryMode=0755
+UMask=0022
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/agentsh /var/lib/sssf-agentsh-prune
+""", PRUNE_SERVICE, out / "sssf-agentsh-prune.service"))
+    items.append(("""[Unit]
+Description=SSSF: look every 10 minutes for an hourly prune of agentsh's event store
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+""", PRUNE_TIMER, out / "sssf-agentsh-prune.timer"))
+    prune_targets = {PRUNE_SCRIPT, PRUNE_SERVICE, PRUNE_TIMER}
+
     steps = []
+    prune_step = False
     for new_text, target, temp in items:
         temp.write_text(new_text, encoding="utf-8", newline="")
         try:
@@ -161,7 +199,10 @@ def main(argv: list[str]) -> int:
                                          f"{target} (installed)", f"{temp} (new)", lineterm="")
         for line in lines:
             print(shown(line))
-        steps.append(shlex.join(["sudo", "install", "-o", "root", "-g", "root", "-m", "0644", str(temp), target]))
+        flags = ["-D"] if target == PRUNE_SCRIPT else []
+        steps.append(shlex.join(["sudo", "install", *flags, "-o", "root", "-g", "root", "-m", "0644",
+                                 str(temp), target]))
+        prune_step = prune_step or target in prune_targets
 
     print(f"Rendered from hub skill {hub_sha[:12]}, {root / repo_settings.PATH} and {config_path}.")
     if steps:
@@ -170,6 +211,9 @@ def main(argv: list[str]) -> int:
               f"to {agentsh_guard.CONFIG} at mode 0644.\n")
         print("Run these, then start the chain again:\n")
         print("\n".join(steps))
+        if prune_step:
+            print("sudo systemctl daemon-reload")
+            print("sudo systemctl enable --now sssf-agentsh-prune.timer")
     else:
         print("Nothing to install: /etc/agentsh matches what this project renders. "
               "If the service hasn't been restarted since the last install, run:")

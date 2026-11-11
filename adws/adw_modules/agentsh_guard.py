@@ -136,13 +136,19 @@ HOME_READ = [f"${{HOME}}{p}" for p in (
 )]
 # The Windows path is where Claude Code looks for managed settings on WSL. Denied, it warns
 # that those policies are NOT in effect, even when the folder doesn't exist.
+# ~/.local/share/claude holds Claude Code's program (versions/), which the engineer's own `claude`
+# runs, so agents read it and never change it; DISABLE_AUTOUPDATER=1 keeps their Claude Code from
+# trying to update it. ~/.claude and ~/.claude.json are in no list: the agents' config folder is
+# their own, and default-deny closes the engineer's. ~/CLAUDE.md, ~/AGENTS.md, ~/github/skills and
+# ~/github/plugins went unread in the 2026-11-10 probe under --safe-mode; ~/.config/anthropic was read.
 CLAUDE_READ = [f"${{HOME}}/{p}" for p in (
-    "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".config/anthropic", ".config/anthropic/**",
-    "github/skills/**", "github/plugins/**",
+    "CLAUDE.local.md", ".config/anthropic", ".config/anthropic/**", ".local/share/claude/**",
 )] + ["/mnt/c/Program Files/ClaudeCode", "/mnt/c/Program Files/ClaudeCode/**"]
+# ~/.local/state/claude holds lock files (the 2026-11-10 probe's only writes outside the config
+# folder were to locks/) and ~/.cache/claude-cli-nodejs holds Claude Code's logs. Claude Code loads
+# no code from either, so both stay writable.
 CLAUDE_WRITE = [f"${{HOME}}/{p}" for p in (
-    ".claude", ".claude/**", ".claude.json", ".claude.json.*", ".cache/claude-cli-nodejs/**",
-    ".local/state/claude/**", ".local/share/claude/**",
+    ".cache/claude-cli-nodejs/**", ".local/state/claude/**",
 )] + ["/run/user/*/cc-socks", "/run/user/*/cc-socks/**"]
 PI_WRITE = ["${HOME}/.pi", "${HOME}/.pi/**"]
 
@@ -270,6 +276,42 @@ def cache_env(folder: str) -> dict[str, str]:
         "npm_config_cache_dir": f"{folder}/pnpm-cache",
         "CARGO_HOME": f"{folder}/cargo",
     }
+
+
+TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"   # the file --sandbox reads
+CLAUDE_HOME = "claude-config"   # the run's Claude Code config folder, in its session folder
+NO_TOKEN = ("Claude Code agents under local_guard: agentsh sign in with a token, and none was found. "
+            "Run `claude setup-token` in a terminal and save CLAUDE_CODE_OAUTH_TOKEN=<token> in "
+            "~/.config/sssf-sandbox/token.env, mode 600 (or export CLAUDE_CODE_OAUTH_TOKEN where the ADW "
+            "is launched). The token can only run inference, for about a year; agents never get your "
+            "login's refresh token.")
+
+
+def claude_token(environ=None) -> str:
+    """CLAUDE_CODE_OAUTH_TOKEN from the launching shell, else from TOKEN_FILE; "" when neither has one."""
+    environ = os.environ if environ is None else environ
+    token = (environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip()
+    if token:
+        return token
+    try:
+        lines = TOKEN_FILE.read_text().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    for line in lines:
+        key, _, value = line.strip().partition("=")
+        if key == "CLAUDE_CODE_OAUTH_TOKEN" and value.strip():
+            return value.strip().strip('"').strip("'")
+    return ""
+
+
+def claude_env(guard, token: str, config_dir: str) -> dict[str, str]:
+    """What a Claude Code agent under agentsh needs: its own config folder, the token, no auto-update.
+    {} unless guard is an agentsh guard."""
+    if guard is None or guard.mode != "agentsh":
+        return {}
+    if not token:
+        raise AgentshRefused(NO_TOKEN)
+    return {"CLAUDE_CONFIG_DIR": config_dir, "CLAUDE_CODE_OAUTH_TOKEN": token, "DISABLE_AUTOUPDATER": "1"}
 
 
 def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,

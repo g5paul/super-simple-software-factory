@@ -285,6 +285,24 @@ def snapshot(message: str, cwd: str | None = None) -> str:
         return git("commit-tree", git("write-tree"), "-p", "HEAD", "-m", message)
 
 
+def commit_spec(message: str, paths: list[str]) -> str:
+    """Commit the spec files and nothing else. A run joined with --adw-id after a
+    failed build still holds that build's code in the tree, and commit_all
+    would put it under the spec's message. An unchanged spec commits nothing."""
+    box = sandbox.current()
+
+    def git(*args: str) -> str:
+        result = box.run(["git", "-c", "core.fsmonitor=", *args])
+        if result.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+        return result.stdout.strip()
+
+    git("add", "--", *paths)
+    if git("diff", "--cached", "--name-only", "--", *paths):
+        git("commit", "-q", "-m", message, "--", *paths)
+    return git("rev-parse", "--short", "HEAD")
+
+
 # ── the report ───────────────────────────────────────────────────────────────
 
 def write_report(path: Path, review: BypassReview | None, outcome: str,
@@ -376,8 +394,12 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml",
     with run.phase(PhaseParams(name="commit_plan", kind="code", owner="git",
                                description="Put the spec and its bar on record before any "
                                            "code")) as ph:
-        commit(ph, plan)
-    spec = next(a for a in plan.artifacts if Path(a).parts[:1] == ("specs",))
+        specs = [a for a in plan.artifacts if Path(a).parts[:1] == ("specs",)]
+        if not specs:
+            raise RuntimeError("the plan names no spec under specs/")
+        message = plan.commit_message or f"sssf({run.adw_id}): {plan.summary}"
+        ph.log(sha=commit_spec(message, specs), message=message)
+    spec = specs[0]
 
     def build_until_green(name: str, previous) -> tuple[BuildOutput, object]:
         with run.phase(PhaseParams(name=name, kind="agent", owner="builder", retries=1,

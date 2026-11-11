@@ -107,6 +107,27 @@ def test_a_snapshot_holds_untracked_files_and_leaves_the_tree_alone(repo):
     assert git(repo, "status", "--porcelain") == status
 
 
+def test_the_spec_commit_leaves_an_earlier_build_in_the_tree(repo):
+    git(repo, "config", "user.name", "t")
+    git(repo, "config", "user.email", "t@t")
+    guard = repo / gc.GUARD_DIR / "permissions.py"
+    guard.write_text("LIMIT = 4\n")                   # a failed attempt's uncommitted build
+    (repo / "specs").mkdir()
+    (repo / "specs" / "a1b2c3d4_guard_v2.md").write_text("# spec\n")
+    gc.commit_spec("Add spec v2", ["specs/a1b2c3d4_guard_v2.md"])
+    assert git(repo, "show", "--name-only", "--format=", "HEAD") == "specs/a1b2c3d4_guard_v2.md"
+    assert git(repo, "status", "--porcelain") == f"M {gc.GUARD_DIR}/permissions.py"
+
+
+def test_an_unchanged_spec_commits_nothing(repo):
+    git(repo, "config", "user.name", "t")
+    git(repo, "config", "user.email", "t@t")
+    (repo / "specs").mkdir()
+    (repo / "specs" / "s.md").write_text("# spec\n")
+    first = gc.commit_spec("Add spec", ["specs/s.md"])
+    assert gc.commit_spec("Add spec again", ["specs/s.md"]) == first
+
+
 def test_mechanisms_names_state_a_fix_adds_to_a_guard_module(repo):
     first = gc.snapshot("round 1", cwd=str(repo))
     path = repo / gc.GUARD_DIR / "permissions.py"
@@ -274,6 +295,7 @@ def chain(tmp_path, monkeypatch, reviews, spec_reviews=(APPROVED,), state=None, 
     monkeypatch.setattr(gc.git_helper, "current_branch", lambda: branch)
     monkeypatch.setattr(gc.git_helper, "rev", lambda ref: "f" * 40)
     monkeypatch.setattr(gc.git_helper, "commit_all", lambda message: "abc1234")
+    monkeypatch.setattr(gc, "commit_spec", lambda message, paths: "abc1234")
     monkeypatch.setattr(gc.plan_checks, "verify", lambda run, plan: QualityResult(passed=True))
     monkeypatch.setattr(gc, "snapshot", lambda message, cwd=None: next(shas))
     monkeypatch.setattr(gc, "mechanisms", lambda old, new: (state or {}).get(next(rounds), []))

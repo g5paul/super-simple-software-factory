@@ -2481,6 +2481,15 @@ def prune_env(tmp_path, monkeypatch):
         CREATE INDEX idx_events_type_ts ON events(type, ts_unix_ns);""")
     conn.close()
     monkeypatch.setattr(module, "PAUSE", 0)
+    audit_dir = tmp_path / "agentsh"
+    audit_dir.mkdir()
+    audit = audit_dir / "audit.jsonl"
+
+    def touch(name, age, size=10):
+        path = audit_dir / name
+        path.write_bytes(b"x" * size)
+        os.utime(path, (NOW - age, NOW - age))
+        return path
 
     def add(*ages_seconds):
         c = sqlite3.connect(db)
@@ -2498,22 +2507,23 @@ def prune_env(tmp_path, monkeypatch):
         return out
 
     def run(**kw):
+        kw.setdefault("audit", str(audit))
         return module.prune(db=str(db), api=api.url, status=str(tmp_path / "st" / "status.json"), now=NOW, **kw)
 
-    yield types.SimpleNamespace(m=module, api=api, db=db, add=add, ages=ages, run=run,
+    yield types.SimpleNamespace(m=module, api=api, db=db, add=add, ages=ages, run=run, audit=audit, touch=touch,
                                 status=tmp_path / "st" / "status.json")
     api.server.shutdown()
 
 
-def test_the_prune_keeps_the_last_two_days_in_several_batches(prune_env, monkeypatch):
+def test_the_prune_keeps_the_last_six_hours_in_several_batches(prune_env, monkeypatch):
     monkeypatch.setattr(prune_env.m, "BATCH", 3)
-    prune_env.add(*([3 * DAY] * 7), 2 * DAY + 1, 2 * DAY - 1, 0)
+    prune_env.add(*([3 * DAY] * 7), 6 * 3600 + 1, 6 * 3600 - 1, 0)
     statements = []
     real = sqlite3.connect
     monkeypatch.setattr(prune_env.m.sqlite3, "connect", lambda *a, **k: (
         c := real(*a, **k), c.set_trace_callback(lambda s: statements.append(s) if s.startswith("DELETE") else None))[0])
     result = prune_env.run()
-    assert prune_env.ages() == [2 * DAY - 1, 0]
+    assert prune_env.ages() == [6 * 3600 - 1, 0]
     assert result["deleted"] == 8 and result["error"] is None and result["skipped"] is None
     assert len(statements) == 3 and result["last_prune"]
 
@@ -2565,7 +2575,7 @@ def test_a_session_that_appears_between_batches_stops_the_loop(prune_env, monkey
     assert len(prune_env.ages()) == 4 and "active session" in result["skipped"] and result["last_prune"] is None
 
 
-def test_the_prune_runs_at_most_hourly(prune_env):
+def test_a_prune_is_due_fifty_minutes_after_the_last(prune_env):
     prune_env.add(3 * DAY)
     prune_env.run()
     prune_env.add(3 * DAY)
@@ -2576,7 +2586,11 @@ def test_the_prune_runs_at_most_hourly(prune_env):
     result = prune_env.run()
     assert prune_env.api.hits == hits and len(prune_env.ages()) == 1
     assert result["last_run"] == utc(NOW) and result["store_bytes"] > 0
-    data["last_prune"] = utc(NOW - 3661)
+    data["last_prune"] = utc(NOW - 2999)
+    prune_env.status.write_text(json.dumps(data))
+    prune_env.run()
+    assert prune_env.api.hits == hits and len(prune_env.ages()) == 1
+    data["last_prune"] = utc(NOW - 3599)
     prune_env.status.write_text(json.dumps(data))
     prune_env.run()
     assert prune_env.api.hits > hits and prune_env.ages() == []
@@ -2586,10 +2600,112 @@ def test_the_status_file_is_public_and_holds_no_event_content(prune_env):
     prune_env.add(3 * DAY, 0)
     prune_env.run()
     text = prune_env.status.read_text()
-    assert set(json.loads(text)) == {"store_bytes", "last_prune", "last_analyze", "last_run", "deleted",
+    assert set(json.loads(text)) == {"store_bytes", "audit_bytes", "last_prune", "last_analyze", "last_run", "deleted",
                                      "skipped", "error"}
     assert prune_env.status.stat().st_mode & 0o777 == 0o644
     assert "SECRET" not in text and "id-" not in text
+
+
+def _old_audit_files(prune_env, tmp_path):
+    t = prune_env.touch
+    t("audit.jsonl", 3 * DAY)
+    t("audit.jsonl.1", 3600)
+    t("audit.jsonl.2", 6 * 3600 + 1)
+    t("audit.jsonl.10", 3 * DAY)
+    t("audit.jsonl.bak", 3 * DAY)
+    t("audit.jsonl.\u0661", 3 * DAY)
+    folder = prune_env.audit.parent
+    (folder / "audit.jsonl.4").mkdir()
+    os.utime(folder / "audit.jsonl.4", (NOW - 3 * DAY, NOW - 3 * DAY))
+    outside = tmp_path / "outside"
+    outside.write_text("keep")
+    os.utime(outside, (NOW - 3 * DAY, NOW - 3 * DAY))
+    link = folder / "audit.jsonl.3"
+    os.symlink(outside, link)
+    os.utime(link, (NOW - 3 * DAY, NOW - 3 * DAY), follow_symlinks=False)
+    return folder, outside
+
+
+def test_the_rendered_config_caps_the_audit_log():
+    config = yaml.safe_load(agentsh_guard.render_config(TEMPLATE.read_text(), ["p"]))
+    assert config["audit"]["rotation"] == {"max_size_mb": 200, "max_backups": 5}
+
+
+def test_a_due_prune_deletes_only_old_rotated_audit_files(prune_env, tmp_path):
+    folder, outside = _old_audit_files(prune_env, tmp_path)
+    result = prune_env.run()
+    assert result["error"] is None
+    assert sorted(p.name for p in folder.iterdir()) == sorted(
+        ["audit.jsonl", "audit.jsonl.1", "audit.jsonl.3", "audit.jsonl.4", "audit.jsonl.bak", "audit.jsonl.\u0661"])
+    assert outside.read_text() == "keep"
+
+
+def test_a_listed_session_keeps_every_audit_file(prune_env, tmp_path):
+    folder, _ = _old_audit_files(prune_env, tmp_path)
+    before = sorted(p.name for p in folder.iterdir())
+    prune_env.api.body = b'[{"id": "s"}]'
+    result = prune_env.run()
+    assert sorted(p.name for p in folder.iterdir()) == before and result["skipped"]
+
+
+def test_a_session_at_the_audit_step_keeps_the_audit_files(prune_env, tmp_path):
+    folder, _ = _old_audit_files(prune_env, tmp_path)
+    before = sorted(p.name for p in folder.iterdir())
+    prune_env.add(3 * DAY)
+    # hits: the first check, the batch check, ANALYZE's check, then the audit check
+    prune_env.api.on_hit = lambda n: setattr(prune_env.api, "body", b'[{"id": "s"}]') if n >= 4 else None
+    result = prune_env.run()
+    assert prune_env.ages() == [] and result["last_prune"] is None and "active session" in result["skipped"]
+    assert sorted(p.name for p in folder.iterdir()) == before
+
+
+def test_audit_bytes_counts_the_live_log_and_rotated_files(prune_env, tmp_path):
+    assert prune_env.run()["audit_bytes"] == 0           # the folder exists, with no log
+    t = prune_env.touch
+    t("audit.jsonl", 0, 100)
+    t("audit.jsonl.1", 0, 20)
+    t("audit.jsonl.bak", 0, 7)
+    outside = tmp_path / "outside"
+    outside.write_text("y" * 50)
+    os.symlink(outside, prune_env.audit.parent / "audit.jsonl.3")
+    data = prune_env.run()
+    assert data["audit_bytes"] == 120 and json.loads(prune_env.status.read_text())["audit_bytes"] == 120
+    data["last_prune"] = utc(NOW - 1800)
+    prune_env.status.write_text(json.dumps(data))
+    assert prune_env.run()["audit_bytes"] == 120         # the not-due path writes it too
+    assert prune_env.run(audit=str(tmp_path / "missing" / "audit.jsonl"))["audit_bytes"] is None
+
+
+def test_an_audit_unlink_error_is_recorded_and_exits_1(prune_env, monkeypatch):
+    old = prune_env.touch("audit.jsonl.2", 3 * DAY)
+    real = os.unlink
+
+    def unlink(path, *a, **k):
+        if str(path) == str(old):
+            raise PermissionError("nope")
+        return real(path, *a, **k)
+    monkeypatch.setattr(prune_env.m.os, "unlink", unlink)
+    keys = _old_status(prune_env)
+    monkeypatch.setattr(prune_env.m.time, "time", lambda: NOW)
+    assert _main(prune_env, monkeypatch) == 1
+    status = json.loads(prune_env.status.read_text())
+    assert status["error"].startswith("PermissionError") and set(status) == keys | {"audit_bytes"}
+
+
+def test_check_machine_notes_the_store_and_audit_log_together(machine):
+    for store, audit, count in [(6e9, 5e9, 1), (6e9, 3e9, 0), (None, 11e9, 1), (9e9, True, 0)]:
+        _write_status(machine, store_bytes=store, audit_bytes=audit)
+        notes = agentsh_guard.check_machine(machine.guard)
+        assert len(notes) == count, (store, audit)
+        if count:
+            assert "events.db" in notes[0]
+
+
+def test_check_machine_reads_an_old_status_as_the_store_alone(machine):
+    _write_status(machine, store_bytes=11e9)
+    assert len(agentsh_guard.check_machine(machine.guard)) == 1
+    _write_status(machine, store_bytes=9e9)
+    assert agentsh_guard.check_machine(machine.guard) == []
 
 
 def test_analyze_runs_weekly_and_not_sooner(prune_env):
@@ -2634,6 +2750,7 @@ def test_prune_constants_agree_with_the_guard_and_stay_out_of_every_agent_write(
     assert m.API == agentsh_guard.API
     template = yaml.safe_load(TEMPLATE.read_text())
     assert m.DB == template["audit"]["storage"]["sqlite_path"]
+    assert m.AUDIT == template["audit"]["output"]
     hub = importlib.util.spec_from_file_location("agentsh_install", SKILL / "scripts/agentsh_install.py")
     mod = importlib.util.module_from_spec(hub)
     hub.loader.exec_module(mod)
@@ -3024,13 +3141,14 @@ def test_the_rendered_config_raises_the_store_buffer():
     assert storage["channel_size"] == 16384 and storage["batch_size"] == 256
     del storage["channel_size"], storage["batch_size"]
     assert config["audit"]["storage"] == {"sqlite_path": "/var/lib/agentsh/events.db"}
-    assert set(config["audit"]) == {"enabled", "output", "storage"}
+    assert set(config["audit"]) == {"enabled", "output", "storage", "rotation"}
 
 
 def _main(prune_env, monkeypatch):
     monkeypatch.setattr(prune_env.m, "DB", str(prune_env.db))
     monkeypatch.setattr(prune_env.m, "API", prune_env.api.url)
     monkeypatch.setattr(prune_env.m, "STATUS", str(prune_env.status))
+    monkeypatch.setattr(prune_env.m, "AUDIT", str(prune_env.audit))
     return prune_env.m.main()
 
 
@@ -3045,7 +3163,7 @@ def _old_status(prune_env, **over):
 def test_a_clean_prune_and_a_not_due_prune_exit_0(prune_env, monkeypatch):
     assert _main(prune_env, monkeypatch) == 0
     assert json.loads(prune_env.status.read_text())["error"] is None
-    assert _main(prune_env, monkeypatch) == 0      # an hour has not passed
+    assert _main(prune_env, monkeypatch) == 0      # 50 minutes have not passed
 
 
 def test_a_skipped_prune_exits_0_even_with_an_old_error(prune_env, monkeypatch):
@@ -3064,7 +3182,7 @@ def test_a_recorded_prune_error_exits_1_and_keeps_the_status_fields(prune_env, m
     monkeypatch.setattr(prune_env.m.sqlite3, "connect", boom)
     assert _main(prune_env, monkeypatch) == 1
     status = json.loads(prune_env.status.read_text())
-    assert set(status) == keys and "OperationalError" in status["error"]
+    assert set(status) == keys | {"audit_bytes"} and "OperationalError" in status["error"]
 
 
 # --- pi's read loop: a bad line or an error in the loop must not leave pi running unwatched ---
@@ -3146,10 +3264,10 @@ def _child_gone_and_quiet(loop_run):
 
 
 @pytest.mark.parametrize("bad", [
-    None, "null", "[1]", "5", '"x"',
+    None, "null", "[1]", "5", '"x"', "9" * 5000, "[" * 100000 + "]" * 100000,
     '{"type":"message_end","message":5}',
     '{"type":"message_end","message":{"role":"assistant","usage":5}}'],
-    ids=["control", "null", "list", "number", "string", "message-int", "usage-int"])
+    ids=["control", "null", "list", "number", "string", "long-int", "deep-array", "message-int", "usage-int"])
 def test_a_line_that_is_not_an_object_leaves_pi_watched(loop_run, bad):
     forward, _, _ = _real_forwarder(agent_pi)
     lines = ([bad] if bad else []) + [json.dumps(PI_PUSH)]
@@ -3158,6 +3276,68 @@ def test_a_line_that_is_not_an_object_leaves_pi_watched(loop_run, bad):
     assert stop.value.partial.cost == pytest.approx(0.004)
     assert len(loop_run.closes) == 1 and len(loop_run.exits) == 1
     _child_gone_and_quiet(loop_run)
+
+
+def _pi_call_lines(command, pad):
+    args = '{"command":' + json.dumps(command) + ',"pad":' + pad + '}'
+    message_end = ('{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","content":'
+                   '[{"type":"toolCall","id":"c1","name":"bash","arguments":' + args + '}],'
+                   '"usage":{"input":100,"output":20,"cost":{"total":0.004}}}}')
+    start = '{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":' + args + '}'
+    return message_end, start
+
+
+@pytest.mark.parametrize("which", ["message_end", "tool_execution_start"])
+@pytest.mark.parametrize("pad", ["[" * 12000 + "]" * 12000, '{"a":' * 12000 + "1" + "}" * 12000],
+                         ids=["array-12000", "object-12000"])
+def test_a_real_pi_line_too_deep_to_read_stops_pi(loop_run, monkeypatch, which, pad):
+    monkeypatch.setenv("FAKE_PI_EXIT", "1")
+    forward, _, _ = _real_forwarder(agent_pi)
+    line = dict(zip(["message_end", "tool_execution_start"], _pi_call_lines("git " + "push", pad)))[which]
+    with pytest.raises((RecursionError, rules.RuleBreach)):
+        loop_run([line], on_event=forward)
+    assert len(loop_run.closes) == 1 and len(loop_run.exits) == 1
+    _child_gone_and_quiet(loop_run)
+
+
+def test_a_long_integer_in_a_real_pi_line_stops_pi(loop_run, monkeypatch):
+    monkeypatch.setenv("FAKE_PI_EXIT", "1")
+    forward, _, _ = _real_forwarder(agent_pi)
+    text = json.dumps(PI_PUSH)
+    assert '"input": 100' in text
+    line = text.replace('"input": 100', '"input": ' + "9" * 5000)
+    with pytest.raises(ValueError) as stop:
+        loop_run([line], on_event=forward)
+    assert not isinstance(stop.value, json.JSONDecodeError)
+    assert len(loop_run.closes) == 1 and len(loop_run.exits) == 1
+    _child_gone_and_quiet(loop_run)
+
+
+def test_invalid_utf8_on_pis_stdout_stops_pi_under_text(tmp_path, monkeypatch):
+    import locale
+    if "utf" not in locale.getpreferredencoding(False).lower():
+        pytest.skip("text=True decodes with the locale's encoding")
+    req = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi"))
+    (tmp_path / "utf8_lines").write_bytes(b"\xff\xfe\n" + json.dumps(PI_PUSH).encode() + b"\n")
+    script = Path(agent_pi.PI_PATH)
+    script.write_text(f"""#!{sys.executable}
+import subprocess, sys, time
+sys.stdout.buffer.write(open({str(tmp_path / "utf8_lines")!r}, "rb").read())
+sys.stdout.buffer.flush()
+child = subprocess.Popen(["sleep", "60"])
+open({str(tmp_path / "utf8_child.pid")!r}, "w").write(str(child.pid))
+time.sleep(2)
+open({str(tmp_path / "utf8_marker")!r}, "w").write("ran")
+time.sleep(60)
+""")
+    script.chmod(0o755)
+    with pytest.raises(UnicodeDecodeError):
+        agent_pi.run(req)
+    pid_file = tmp_path / "utf8_child.pid"
+    if pid_file.exists():
+        assert gone(int(pid_file.read_text()))
+    time.sleep(3)
+    assert not (tmp_path / "utf8_marker").exists()
 
 
 def test_an_error_in_the_loop_stops_pi_before_run_raises(loop_run):

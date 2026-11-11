@@ -501,7 +501,7 @@ def _plain(value) -> str:
 
 
 def store_notes(now: Optional[float] = None) -> list[str]:
-    """Notes about agentsh's event store, from the prune's status file. They are printed at the agent's
+    """Notes about agentsh's event store and audit log (counted together), from the prune's status file. They are printed at the agent's
     start and kept in the end-of-call event. Never raises, never refuses."""
     try:
         now = time.time() if now is None else now
@@ -528,12 +528,14 @@ def store_notes(now: Optional[float] = None) -> list[str]:
                          "`sudo systemctl start sssf-agentsh-prune.service`. If it still skips on an active "
                          "session, a session may have been left open: with no run going, run "
                          "`sudo systemctl restart agentsh`")
-        size = data.get("store_bytes")
-        if isinstance(size, (int, float)) and not isinstance(size, bool) and size > STORE_WARN_BYTES:
-            notes.append(f"agentsh's event store is {size / 1e9:.1f} GB, over 10 GB; with no run going, stop the "
-                         "service, move /var/lib/agentsh/events.db and its -wal and -shm files aside, start it, "
-                         "and delete the moved files once a run works (see \"Running local agents under agentsh\" "
-                         "in .claude/skills/sssf/references/config.md)")
+        counted = [data.get(key) for key in ("store_bytes", "audit_bytes")]
+        counted = [v for v in counted if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        total = sum(counted)
+        if counted and total > STORE_WARN_BYTES:
+            notes.append(f"agentsh's event store and audit log are {total / 1e9:.1f} GB together, over 10 GB; with no "
+                         "run going, stop the service, move /var/lib/agentsh/events.db and its -wal and -shm files "
+                         "aside, start it, and delete the moved files once a run works (see \"Running local agents "
+                         "under agentsh\" in .claude/skills/sssf/references/config.md)")
         return notes
     except Exception:
         return []

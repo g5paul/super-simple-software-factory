@@ -144,7 +144,7 @@ def main(argv: list[str]) -> int:
 
     items.append(((SKILL / "scripts/agentsh_prune.py").read_text(), PRUNE_SCRIPT, out / "agentsh_prune.py"))
     items.append((f"""[Unit]
-Description=SSSF: prune agentsh's event store to 2 days
+Description=SSSF: prune agentsh's event store and rotated audit log to 6 hours
 After=agentsh.service
 
 [Service]

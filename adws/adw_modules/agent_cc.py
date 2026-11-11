@@ -427,7 +427,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                     elif etype == "result":
                         final = event
                         dog.finished(waiting=background > 0)
-                    if on_event:
+                    # agentsh_ events come only from the guard (start/close); a stream copy is a command's forgery.
+                    if on_event and not agentsh_guard.guard_event(event):
                         try:
                             on_event(event)
                         except Exception as error:

@@ -28,7 +28,8 @@ JSON_FIX_ATTEMPTS = 2      # continue-with-correction attempts for malformed JSO
 
 # The event types each harness writes that the stream check reads for rules.
 # An event of another type, which only a command writing to the harness's
-# stdout can add, counts for nothing.
+# stdout can add, counts for nothing; one whose type starts `agentsh_` doesn't reach
+# the forwarder at all.
 RULE_EVENT_TYPES = {
     "pi": frozenset({"message_end", "tool_execution_start", "tool_execution_end"}),
     "claude_code": frozenset({"assistant", "user", "system"}),
@@ -581,12 +582,15 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
     def forward(event: dict) -> None:
         etype = event.get("type")
         if etype == "agentsh_note":
-            # A store note from check_machine, shown before the agent starts. Never a refusal.
+            # A store note from check_machine, sent by agentsh_guard.start before the agent starts;
+            # the read loops drop any agentsh_ event from the agent's stream (agentsh_guard.guard_event).
+            # Never a refusal.
             run.console.advise(f"agentsh: {event.get('note', '')}")
             return
         if etype == "agentsh_denials":
             # Denials the policy made outside the exec count: traced with their paths,
-            # never counted.
+            # never counted. Sent by agentsh_guard.close; the read loops drop any agentsh_ event
+            # from the agent's stream (agentsh_guard.guard_event).
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="log", name="agentsh_denials",
                                          payload={"agent": agent_name,

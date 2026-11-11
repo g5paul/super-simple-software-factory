@@ -25,6 +25,8 @@ This fork changed or added:
 - agentsh, an opt-in second guard for runs on the host, described in [where a run runs](docs/concepts.md#where-a-run-runs);
 - the guard-change chain, which reviews every change to the guard code before it merges.
 
+Every run behind these docs started on one engineer's machine, under WSL2 on Windows, in this hub and a few project repos. [projects.md](docs/projects.md) lists the public ones. agentsh is tested only on Python repos with a Claude Code roster, and SSSF pins a build of a patched agentsh fork whose patches aren't published yet. [open.md](docs/open.md) lists what's still open.
+
 [The fork's changelog](docs/fork.md) lists each change and links its design.
 
 ## Quickstart

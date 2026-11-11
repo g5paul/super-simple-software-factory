@@ -1,6 +1,6 @@
 # What this fork adds
 
-This fork branched from [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory) at de31374, from 2026-08-02. Upstream's `main` hasn't moved since, as of a fetch on 2026-11-10. Its `example` branch adds one commit, b2dcb8e from 2026-08-04, an example app that the fork doesn't take. By 2026-11-05 the fork was 401 commits ahead, across 347 files, with about 54,900 lines added and 700 removed. About 13,400 of those lines are tests, now 1,064 for the skill, 35 for the hub and 70 in the dashboard.
+This fork branched from [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory) at de31374, from 2026-08-02. Upstream's `main` hasn't moved since, as of a fetch on 2026-11-10. Its `example` branch adds one commit, b2dcb8e from 2026-08-04, an example app that the fork doesn't take. By 2026-11-10 the fork was 771 commits ahead, across 556 files, with about 95,200 lines added and 1,100 removed. About 21,100 of those lines are tests: 1,913 for the skill, 57 for the hub and 110 in the dashboard.
 
 This page is the changelog. It says what changed from upstream, and where each change was designed. Many changes weren't asked for as features. They fixed something a run or a review turned up, and each of those says what happened, in a sentence starting "Added after". The [docs index](README.md) leads to pages on SSSF as it is now.
 

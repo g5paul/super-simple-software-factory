@@ -14,6 +14,7 @@ repo.yaml, so a later read could return what the agent chose.
 from __future__ import annotations
 
 import atexit
+import errno
 import hashlib
 import json
 import os
@@ -33,6 +34,7 @@ from pydantic import ValidationError
 
 from . import repo_settings, rules, sandbox
 from .data_types import LocalGuard, Policy
+from .utils import COPY_MODES
 
 BINARY = "/usr/bin/agentsh"
 CONFIG = "/etc/agentsh/sssf.yaml"
@@ -238,12 +240,14 @@ def secret_glob(pattern: str) -> str:
 def render_config(template: str, allowed: list[str]) -> str:
     """The server config SSSF installs, for a given policies.allowed. One place for the
     install script and the check. `default` is derived from the list. The last line is a
-    comment naming the pin (BINARY and PINNED_SHA256, read at call time), so check_machine's
-    byte comparison refuses an edit to either constant as "differs". agentsh loads the same YAML."""
+    comment naming the pin (BINARY, CONFIG, POLICY_DIR, SERVER, API and PINNED_SHA256, read at
+    call time), so check_machine's byte comparison refuses an edit to any of them as "differs". agentsh loads the same YAML."""
     config = yaml.safe_load(template)
     config["policies"]["allowed"] = list(allowed)
     config["policies"]["default"] = allowed[0] if allowed else ""
-    return yaml.safe_dump(config, sort_keys=False) + f"# SSSF pins agentsh: {BINARY} sha256 {PINNED_SHA256}\n"
+    pin = (f"# SSSF pins agentsh: {BINARY} sha256 {PINNED_SHA256} "
+           f"config {CONFIG} policies {POLICY_DIR} server {SERVER} api {API}\n")
+    return yaml.safe_dump(config, sort_keys=False) + pin
 
 
 def folders_above(main: str, data_root: str) -> list[str]:
@@ -265,7 +269,9 @@ def config_search(main: str, data_root: str, quote: Callable[[str], str] = str) 
 
 def cache_env(folder: str) -> dict[str, str]:
     """The variables that move every tool's cache and install folders, and npm's user config
-    and init module, into `folder`, the agents' own. Set on the wrapped agent only, so the engineer's tools never look there."""
+    and init module, into `folder`, the agents' own. Set on the wrapped agent only, so the engineer's tools never look there.
+    Also COPY_MODES: in a worktree run `folder` sits outside the worktree, so an agent's install that
+    hardlinked from it would make the next launch refuse."""
     return {
         "UV_CACHE_DIR": f"{folder}/uv",
         "UV_PYTHON_INSTALL_DIR": f"{folder}/uv-python",
@@ -281,6 +287,7 @@ def cache_env(folder: str) -> dict[str, str]:
         "npm_config_store_dir": f"{folder}/pnpm-store",
         "npm_config_cache_dir": f"{folder}/pnpm-cache",
         "CARGO_HOME": f"{folder}/cargo",
+        **COPY_MODES,
     }
 
 
@@ -433,7 +440,7 @@ def guard_for(settings, cfg, root: Path, common: str, refuse_script: str, templa
     policies = {h: Policy(name=(n := policy_name(root, h)), text=policy_text(
         settings, common, h, n, sessions=sessions, refuse_script=refuse_script)) for h in harnesses}
     return LocalGuard(mode="agentsh", policies=policies, config_template=template,
-                      agent_cache=str(Path(sessions).parent / "agent-cache"))
+                      agent_cache=str(Path(sessions).parent / "agent-cache"), git_common_dir=common)
 
 
 def read(cfg) -> LocalGuard:
@@ -482,9 +489,18 @@ def _service_started() -> int:
 
 def check_machine(guard: LocalGuard) -> None:
     """Refuse unless the service is active, the binary is the pinned build, the config and
-    policies are what this checkout renders, and the service started after the binary and config changed."""
+    policies are what this checkout renders (the pin line names BINARY, CONFIG, POLICY_DIR, SERVER, API
+    and PINNED_SHA256), BINARY and CONFIG are not links, and the service started after they changed."""
     if _run(["systemctl", "is-active", "agentsh"]).stdout.strip() != "active":
         raise AgentshRefused(f"the agentsh service is not active; {FIX}")
+    for path in (BINARY, CONFIG):
+        try:
+            mode = os.lstat(path).st_mode
+        except OSError as error:
+            raise AgentshRefused(f"can't read {path} ({error}); {FIX}") from None
+        if stat.S_ISLNK(mode):
+            raise AgentshRefused(f"{path} is a link; the install writes a root-owned file there, never a link. "
+                                 f"Look at it with `ls -l {path}`, then {FIX}")
     try:
         digest = hashlib.sha256(Path(BINARY).read_bytes()).hexdigest()
     except OSError as error:
@@ -517,7 +533,7 @@ def check_machine(guard: LocalGuard) -> None:
     started = _service_started()
     for path in (BINARY, CONFIG):
         try:
-            changed = int(os.stat(path).st_ctime)
+            changed = int(os.lstat(path).st_ctime)
         except OSError as error:
             raise AgentshRefused(f"can't read {path} ({error}); {FIX}") from None
         # Whole seconds with >=: fails closed. A restart in the same second as the install
@@ -526,6 +542,119 @@ def check_machine(guard: LocalGuard) -> None:
             raise AgentshRefused(f"{path} changed after the agentsh service started, so the service may still "
                                  f"run an older build or config; run `{RESTART}` (again, if you just did, since "
                                  "the check counts whole seconds), then start the run again")
+
+
+LINK_SAMPLES = 5    # files a refusal names
+
+
+def _too_long(path: str) -> AgentshRefused:
+    return AgentshRefused(
+        f"a path in the workspace is too long for the link check ({len(path)} characters, over PATH_MAX), "
+        "so its files can't be checked for links outside the workspace and no agent is started. "
+        f"It starts: {path[:200]}. Remove it (`rm -rf` on its top folder), then start the run again. "
+        "See \"Running local agents under agentsh\" in .claude/skills/sssf/references/config.md")
+
+
+def outside_links(trees: list[str]) -> list[tuple[str, str]]:
+    """(tree, path) for each regular file under `trees` with a hard link outside them, sorted by path.
+    Follows no symlink and skips nothing. Each folder is read once, by (st_dev, st_ino), so a
+    git dir inside the workspace isn't counted twice. A folder that is no longer a folder when the walk
+    reaches it refuses. A path of PATH_MAX or more refuses with its own message.
+    Reads only: lstat and scandir."""
+    seen_dirs: set[tuple[int, int]] = set()
+    found: dict[tuple[int, int], list] = {}     # (dev, ino) -> [links seen, st_nlink, tree, path]
+    for tree in trees:
+        try:
+            top = os.lstat(tree)
+        except OSError as error:
+            raise AgentshRefused(f"can't read {tree} ({error}), so no agent is started; {FIX}") from None
+        if not stat.S_ISDIR(top.st_mode):
+            raise AgentshRefused(f"{tree} is a link or a file, not a folder, so no agent is started")
+        stack = [tree]
+        while stack:
+            folder = stack.pop()
+            try:
+                info = os.lstat(folder)
+                if not stat.S_ISDIR(info.st_mode):
+                    raise AgentshRefused(
+                        f"{folder} was a folder when its parent was read and isn't one now, so it can't be "
+                        "checked for links outside the workspace and no agent is started. Something changed "
+                        "the workspace during the check: look at it with `ls -la`, then start the run again")
+                if (info.st_dev, info.st_ino) in seen_dirs:
+                    continue
+                seen_dirs.add((info.st_dev, info.st_ino))
+                entries = list(os.scandir(folder))
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                if error.errno == errno.ENAMETOOLONG:
+                    raise _too_long(folder) from None
+                raise AgentshRefused(
+                    f"can't read {folder} ({error}), so its files can't be checked for links outside the "
+                    "workspace; no agent is started. Make it readable or remove it, or set local_guard: text "
+                    "in adws/adw_sssf_config/repo.yaml") from None
+            for entry in entries:
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                except OSError as error:
+                    if error.errno == errno.ENAMETOOLONG:
+                        raise _too_long(entry.path) from None
+                    raise AgentshRefused(f"can't read {entry.path} ({error}), so no agent is started; "
+                                         "make it readable or remove it") from None
+                if stat.S_ISDIR(st.st_mode):
+                    stack.append(entry.path)
+                elif stat.S_ISREG(st.st_mode) and st.st_nlink > 1:
+                    key = (st.st_dev, st.st_ino)
+                    slot = found.setdefault(key, [0, st.st_nlink, tree, entry.path])
+                    slot[0] += 1
+                    slot[1] = st.st_nlink
+    return sorted(((t, p) for n, nlink, t, p in found.values() if n < nlink), key=lambda f: f[1])
+
+
+def _link_hint(tree_path: str, git_common_dir: str) -> tuple[str, str]:
+    parts = Path(tree_path).parts
+    if tree_path == git_common_dir or tree_path.startswith(git_common_dir.rstrip("/") + "/"):
+        return "git", "a git clone made with hardlinks: re-clone the other clone with `git clone --no-local`"
+    if "node_modules" in parts:
+        return "bun", "`node_modules` installed with links: `rm -rf node_modules && bun install --backend=copyfile`"
+    if ".venv" in parts or "site-packages" in parts:
+        return "uv", "a uv venv: `UV_LINK_MODE=copy uv sync --reinstall`"
+    return "other", ("find its other links with `find / -xdev -samefile <path>` and replace this one with a copy")
+
+
+def check_links(guard: LocalGuard) -> None:
+    """Refuse while a regular file under guard.root or guard.git_common_dir has a hard link outside
+    them. agentsh judges by path, so an agent's write to the workspace link would change the other
+    copy, which it can't see. Runs at every launch. Cost: one lstat per entry; a pure-Python walk of
+    101,000 entries took 1.2 s cold and about 0.5 s warm. The cost is linear in entries, old session
+    folders included: the hub's 725,510 entries on 2026-11-11 cost several seconds per launch."""
+    if not guard.git_common_dir:
+        raise AgentshRefused("no git common dir reached the launch; this is a bug in the caller")
+    root = guard.root
+    common = guard.git_common_dir
+    found = outside_links([root, common])
+    if not found:
+        return
+    # A file under the git dir inside the workspace is still a git file, so classify by the common dir.
+    hints: dict[str, str] = {}
+    named = []
+    for tree, path in found[:LINK_SAMPLES]:
+        kind, hint = _link_hint(path, common)
+        named.append(f"{path} (in {tree})")
+        hints.setdefault(kind, hint)
+    for tree, path in found[LINK_SAMPLES:]:
+        kind, hint = _link_hint(path, common)
+        hints.setdefault(kind, hint)
+    more = f" and {len(found) - LINK_SAMPLES} more" if len(found) > LINK_SAMPLES else ""
+    raise AgentshRefused(
+        f"{len(found)} file(s) in the workspace or the git common dir have a hard link outside them, so no "
+        "agent is started: an agent's write to its link changes the other copy, outside the workspace, which "
+        f"agentsh judges by path and can't see. Files: {'; '.join(named)}{more}. Rebuild: "
+        + "; ".join(hints.values())
+        + ". See \"Running local agents under agentsh\" in .claude/skills/sssf/references/config.md, "
+        "or set local_guard: text in adws/adw_sssf_config/repo.yaml")
 
 
 def check_paths(root: str, env=None) -> None:
@@ -864,6 +993,7 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     if not is_folder:
         raise AgentshRefused(f"{cache} is a link or a file, not a folder, so no agent is started; an agent "
                              "may have put it there. Look at it with `ls -la`, remove it, and start the run again")
+    check_links(guard)      # after check_machine, before any process starts
     child = dict(os.environ if env is None else env)
     ours = cache_env(guard.agent_cache)
     wanted = {k.lower() for k in ours}

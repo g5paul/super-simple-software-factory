@@ -1109,6 +1109,19 @@ Run b684482d's first planner was stopped 31 seconds in, with "the agentsh servic
 
 This explains b684482d's stall. Run d48bd070's stall had a ptrace watchdog line and no dropped events, so it may be a second cause. The fix is `specs/tasks/guard-agentsh-events.md`, Next item 15: poll by session only, an hourly root timer that keeps 2 days and runs `ANALYZE` weekly and publishes the store's size, and a warning in `check_machine`. The engineer chose all three on 2026-11-11.
 
+### The event-store run, 149e2bda
+
+Run 149e2bda took `specs/tasks/guard-agentsh-events.md`, Next item 15, and merged as 4cf7ab3. $6.33.
+
+- **The poll** asks for the session's events with no `type`, which the `(session_id, ts_unix_ns)` index answers whatever the store's size. It counts each page as it arrives.
+- **The prune** is `scripts/agentsh_prune.py`, standard-library Python that `agentsh_install.py` installs root-owned at `/usr/local/lib/sssf-agentsh/`, with `sssf-agentsh-prune.service` and `.timer`. The timer looks every 10 minutes. A prune is due an hour after the last one. It skips while the service lists a session, or when the sessions reply isn't a list it can read. It deletes rows older than 2 days in batches of 5,000, runs `ANALYZE` weekly, and writes a status file anyone can read, holding the store's size and no event content.
+- **`check_machine`** adds a trace note, and doesn't refuse, when the status file is missing, the last prune is over 3 hours old, or the store is over 10 GB.
+- **The one-time steps** use `-readable` and `-executable`, which check access as the walk does, and count bytes with `LC_ALL=C`.
+
+Spec review 1 blocked twice. The `find` tested only the owner's bits, so it missed a folder another user owns or an ACL blocks. An hourly timer that skips during sessions would skip most hours on a busy hub. The second spec fixed both.
+
+Round 1's bypass review found one bypass. The untyped poll paged until it got a short page before it counted anything, so an agent keeping 5,000 allowed file events waiting at every page could make denied execs past the three-refusal stop. agentsh still denied each one, and the final read still marked the call a breach. The baseline's typed poll never saw file events. The fix, counting each page as it arrives, also closed an old hole: a flood of allowed exec events stalled the poll the same way on both versions. Round 1 also found two broken promises. A sessions reply without a `sessions` list read as zero sessions, and `troubleshooting.md` still suggested `ANALYZE`. Round 2 found nothing in 49 candidates and 69 checks.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1129,4 +1142,4 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 12. **Done: uv's managed Pythons and folder listing**, by fork build 05b3777f and [run 47b4d0ea](#the-links-and-listing-run-47b4d0ea). Left: pnpm's two `npm_config_*` variables draw a deprecation warning from npm.
 13. **Done: the engineer's own Claude Code files.** Agents run from their own config folder with a token, and `~/.claude`, `~/.claude.json` and Claude Code's program are closed to them ([run cea6fe8d](#the-claude-home-run-cea6fe8d)). `/proc/<pid>/cwd` and `cmdline` stay a limit.
 14. **Done: the hardlink check**, by [runs 9497dc7f and b684482d](#the-hardlink-runs-9497dc7f-and-b684482d). Left for item 15: the one-time steps' three gaps.
-15. **The event store**, `specs/tasks/guard-agentsh-events.md`: poll by session only, prune to 2 days with a root timer that publishes the size, warn in `check_machine`, and fix the hardlink run's one-time steps. After it merges, the engineer moves the 32 GB store aside once.
+15. **Done: the event store**, by [run 149e2bda](#the-event-store-run-149e2bda). After the reinstall, the engineer moves the 32 GB store aside once, and the hub session checks that the timer ran.

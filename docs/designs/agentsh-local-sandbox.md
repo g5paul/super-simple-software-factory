@@ -1150,6 +1150,18 @@ The drops didn't stop with the small store. agentsh's journal logged 34 "event c
 
 Next item 16 covers these.
 
+### The warnings run, 0463a6c3
+
+Run 0463a6c3 took `specs/tasks/guard-agentsh-warnings.md`, Next item 16, and merged as db8d6eb. $5.96.
+
+- `check_machine`'s store notes print to the console and the trace before each agent starts.
+- Each call's end-of-call event carries its polls, pages and slowest poll, with a note when a poll took over 1 second.
+- Each call reads agentsh's journal for its window and counts the "event channel full" lines by type, as a floor, with a note of its own for a dropped `ptrace_execve`.
+- The rendered config sets `audit.storage.channel_size: 16384` and `batch_size: 256`, from the defaults of 4,096 and 64. Each queued `eventPayload` is 13 strings and 2 integers, about 224 bytes, and Go allocates the channel's buffer when the service starts, so about 3.7 MB. Real events' JSON ran 407 bytes median and 486 at most, so a full channel holds roughly 10 to 13 MB.
+- The prune exits 1 on a recorded error, so `systemctl --failed` lists it.
+
+Spec review 1 blocked twice: journald rate-limits each service to 10,000 lines per 30 seconds by default, so the count is a floor, and the design carried a lock, a flag and a renamed constant it didn't need. Round 1 of the bypass review found no bypass, harm or false positive. Its broken promise: an agent could write an `agentsh_note` into its own output stream and have it printed on the engineer's console, in every mode. It also found three holes `config.md` didn't list. Run E takes all four, from `specs/tasks/guard-agentsh-note-forgery.md`.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1171,4 +1183,5 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 13. **Done: the engineer's own Claude Code files.** Agents run from their own config folder with a token, and `~/.claude`, `~/.claude.json` and Claude Code's program are closed to them ([run cea6fe8d](#the-claude-home-run-cea6fe8d)). `/proc/<pid>/cwd` and `cmdline` stay a limit.
 14. **Done: the hardlink check**, by [runs 9497dc7f and b684482d](#the-hardlink-runs-9497dc7f-and-b684482d). Left for item 15: the one-time steps' three gaps.
 15. **Done: the event store**, by [run 149e2bda](#the-event-store-run-149e2bda), rolled out on [2026-11-11](#the-event-store-rollout-2026-11-11).
-16. **Warnings an engineer sees.** Print `check_machine`'s notes when the agent starts, not only in the trace. Record each call's slowest poll and its page count in `agentsh_denials`, and note a poll over 1 second. Count the journal's "event channel full" lines since the service started, and note any. Have the prune exit non-zero when it records an error. All four are guard code, so they go through the chain.
+16. **Done: warnings an engineer sees**, by [run 0463a6c3](#the-warnings-run-0463a6c3). After the reinstall, check the journal's drop count against run 05f96f0f's 34.
+17. **An agent forging the guard's notes**, `specs/tasks/guard-agentsh-note-forgery.md`: drop stream events whose type starts with `agentsh_`, a word boundary in the drop parser, and two limits in `config.md`.

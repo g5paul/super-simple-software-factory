@@ -159,6 +159,21 @@ def test_tidy_clears_what_the_launch_walk_refuses(tmp_path):
     assert outside.read_text() == "cached\n" and (tmp_path / "bypass_review_1.md").is_file()
 
 
+def test_tidy_takes_names_that_are_not_utf8_or_hold_a_newline(tmp_path):
+    review = tmp_path / "bypass_review_1"
+    names = review / "prune" / "names"
+    names.mkdir(parents=True)
+    for raw in (b"audit.jsonl.\xff", b"audit.jsonl.1\n", "audit.jsonl.\u0661".encode()):
+        with open(os.path.join(os.fsencode(names), raw), "wb") as f:
+            f.write(b"x")
+    outside = tmp_path / "cache-f"
+    outside.write_text("cached\n")
+    os.link(outside, os.path.join(os.fsencode(names), b"linked\n\xfe"))
+
+    assert gc.tidy_review_scratch(review) == ["1 hard-linked files"]
+    assert len(os.listdir(os.fsencode(names))) == 3 and outside.read_text() == "cached\n"
+
+
 def test_tidy_leaves_a_missing_folder_alone(tmp_path):
     assert gc.tidy_review_scratch(tmp_path / "bypass_review_9") == []
 

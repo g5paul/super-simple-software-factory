@@ -315,17 +315,20 @@ def tidy_review_scratch(folder: Path) -> list[str]:
     report files sit beside `folder`, not in it. Returns what was removed, for the log."""
     if not folder.is_dir():
         return []
-    def run(*argv: str) -> str:
-        return subprocess.run(list(argv), capture_output=True, text=True,
-                              env={**os.environ, "LC_ALL": "C"}).stdout
+    def run(*argv: str) -> list[bytes]:
+        # Bytes split on NUL: a reviewer's probe can name a file with a newline or bytes that
+        # aren't UTF-8 (run c535b28d made both), and decoding find's output as text crashed.
+        out = subprocess.run(list(argv), capture_output=True,
+                             env={**os.environ, "LC_ALL": "C"}).stdout
+        return [name for name in out.split(b"\0") if name]
     run("chmod", "-R", "u+rwx", str(folder))
     removed = []
     for entry in sorted(folder.iterdir()):
         if entry.is_dir() and not entry.is_symlink():
-            if any(len(line.encode()) >= TOO_LONG for line in run("find", str(entry)).splitlines()):
+            if any(len(name) >= TOO_LONG for name in run("find", str(entry), "-print0")):
                 run("find", str(entry), "-delete")
                 removed.append(entry.name)
-    linked = run("find", str(folder), "-type", "f", "-links", "+1", "-print", "-delete").splitlines()
+    linked = run("find", str(folder), "-type", "f", "-links", "+1", "-print0", "-delete")
     if linked:
         removed.append(f"{len(linked)} hard-linked files")
     return removed

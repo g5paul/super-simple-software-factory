@@ -1073,14 +1073,29 @@ The scripts are in [agentsh/](agentsh/). `proof-workspace.sh` builds the workspa
 
 The corpus and the agent runs leave `j`, `e`, `hl` or `agent-*.log` in the worktree if they get that far. To see the copied `just` run, set `JUST_NO_DOTENV=true` first.
 
+### The pin and root run, d48bd070
+
+Run d48bd070, from `specs/tasks/guard-agentsh-pin-and-root.md`, took Next items 1, 10 and 11, and merged as 7ab1149. The hub session's probes on 2026-11-10, on build 05b3777f:
+
+- **The engine's `${PROJECT_ROOT}`.** `ExpandVariables` in the fork's `internal/policy/vars.go` puts the value into a rule as raw text, and gobwas/glob then reads `*?[]{}\` in it as syntax. A test on the engine with a root of `/h/github/repo[old]` allowed writes to `/h/github/repoo` and denied them in the root itself; `re*po`, `a{b,c}`, `q?x` and a backslash did the same to their siblings. SSSF's own escaped paths matched only themselves. `${HOME}` expands the same way.
+- **The agent cache.** On this build a link from the cache to `~/.local`, absolute or relative, is refused, so run 130ca6e0's swap is closed. A plain run's agent can still move the cache away and put a link to a workspace folder in its place.
+- **The pin.** The service's running binary can't be seen by a user (`/proc/<pid>/exe` is denied), but systemd's `ExecMainStartTimestamp` and the files' change times can.
+- **Hardlinks.** A file in the workspace with another link outside it can be written through the workspace link: an append to a decoy hardlinked from `~/.cache/uv` changed the cache copy while a direct write was refused. sssf-sandbox's `.venv` shared 492 files with `~/.cache/uv`, both repos' dashboard `node_modules` 5,176 files with bun's cache, and the hub's `.git` 1,565 object files with the install clone, made by a plain local `git clone`. The engineer re-cloned it with `--no-local` the same day, and the hub's count went to 0. The check is the next run.
+
+What changed: the rendered config ends with a comment naming `BINARY` and `PINNED_SHA256`, so an edit to either refuses as "differs"; `check_machine` refuses when the binary or config changed after the service started; a root or `$HOME` holding any of `*?[]{}\$` refuses; and `start()` makes the agent cache with `os.mkdir` and refuses a link or a file there. `config.md` records the hardlink limit and the pi pattern's miss after a wrapper word.
+
+The first attempt stopped in its bypass review: agentsh's ptrace watchdog logged a tracee stuck in `openat` for 4 seconds with the run loop "not advancing it", and the service stopped answering event polls until it recovered on its own. It's the stall of Next item 2, the first time under Claude Code. The rerun joined the run, and its `commit_plan` committed the first attempt's uncommitted build with the spec, so 2787893 holds the code under a spec message and `commit_build` failed with nothing to commit. 5575ac5 makes `commit_plan` commit only the spec. The two attempts cost $5.85.
+
+Round 1's review found nothing that blocks, in 146 checks. It found a broken promise, that the change-time check follows a link at `BINARY` or `CONFIG`, and two old holes new to the limits: a surviving edit to `SERVER`, `CONFIG` or `POLICY_DIR` isn't in the pin line. Both go into the hardlink run's spec, `specs/tasks/guard-agentsh-hardlinks.md`.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
 
 ## Next
 
-1. **Close or record the pin check's two old holes** that run 7047b87c's review found ([the namespace hole](#the-namespace-hole-2026-11-09)): an agent's edit to the project's `agentsh_guard.py` can repoint the pin, and a service left on an older binary passes. At least `config.md` lists both as known limits, through the guard chain.
-2. pi's stall stays open: if it comes back, turn the trace on again with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
+1. **Done: the pin check's two old holes**, by [run d48bd070](#the-pin-and-root-run-d48bd070). Left for item 14: links at `BINARY` or `CONFIG`, and the other path constants.
+2. The stall stays open. It came back on 2026-11-10 under Claude Code, in run d48bd070's first bypass review. If it comes back again, turn the trace on with the drop-in `Environment=AGENTSH_PTRACE_TRACE=1`.
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 5. **Done: what agentsh denied ordinary work.** `tar -x` by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09), relative link targets by [the ninth](#the-ninth-patch-link-targets-2026-11-09), and config lookups and the agents' own caches by [run 130ca6e0](#the-tool-config-run-under-agentsh-130ca6e0).
@@ -1088,7 +1103,8 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 7. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.
 8. **Done: the DNS proxy's forward**, the tenth fork patch, in build 472d63cf, pinned by run 8a727544 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)).
 9. **Done: signals**, the eleventh fork patch in the same build, with `trace.signal` and its rules from run 8a727544. Its last check, a guard run under agentsh, passed as run 130ca6e0 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)).
-10. **`config.md`'s example pi pattern** misses pi after a wrapper word (`env pi`, `timeout 60 pi`, `bash -c '...'`), which run 6e904be8's review found. `config.md` should list it as a known limit of the text guard, through the guard chain.
-11. **The three items left by run 130ca6e0** ([the run](#the-tool-config-run-under-agentsh-130ca6e0)): the agent-cache folder as a moved link on a worktree run, uv's hardlinks into the engineer's cache, and whether the engine escapes `${PROJECT_ROOT}`. The last needs a probe on the fork's engine. The other two go in `config.md`'s limits at least, through the guard chain.
+10. **Done: the example pi pattern's miss** is a known limit in `config.md`, by run d48bd070.
+11. **Done: run 130ca6e0's three items.** The raw `${PROJECT_ROOT}` and the agent-cache link by run d48bd070; uv's hardlinks go to item 14.
 12. **Done: uv's managed Pythons and folder listing**, by fork build 05b3777f and [run 47b4d0ea](#the-links-and-listing-run-47b4d0ea). Left: pnpm's two `npm_config_*` variables draw a deprecation warning from npm.
 13. **Done: the engineer's own Claude Code files.** Agents run from their own config folder with a token, and `~/.claude`, `~/.claude.json` and Claude Code's program are closed to them ([run cea6fe8d](#the-claude-home-run-cea6fe8d)). `/proc/<pid>/cwd` and `cmdline` stay a limit.
+14. **The hardlink check**, `specs/tasks/guard-agentsh-hardlinks.md`: a wrapped agent doesn't start while a file in its workspace or the git common dir has a link outside them, and the trees SSSF builds outside the wrap use copies. It also refuses a link at `BINARY` or `CONFIG`, and names every path constant in the pin line.

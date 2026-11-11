@@ -722,6 +722,10 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                             event = json.loads(line)
                         except json.JSONDecodeError:
                             continue
+                        except (ValueError, RecursionError):
+                            if line.startswith("{"):
+                                raise                    # pi's events are objects: one too deep or long to read stops pi
+                            continue                     # an integer past Python's digit limit, or nested too deep
                         if not isinstance(event, dict):
                             continue                     # null, a list, a number or a string: no event, as in agent_cc
                         if event.get("type") == "agent_end":

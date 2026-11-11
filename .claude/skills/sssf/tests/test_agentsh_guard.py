@@ -33,7 +33,7 @@ SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 from adw_modules import utils, worktree
-from adw_modules import account, agent_cc, agent_pi, agents, agentsh_guard, kill, repo_settings, rules, sandbox, session
+from adw_modules import account, agent_cc, agent_pi, agents, agentsh_guard, kill, repo_settings, rules, sandbox, session, silence
 from adw_modules.data_types import LocalGuard, Policy
 
 sys.path.insert(0, str(SKILL / "tests"))
@@ -3065,3 +3065,162 @@ def test_a_recorded_prune_error_exits_1_and_keeps_the_status_fields(prune_env, m
     assert _main(prune_env, monkeypatch) == 1
     status = json.loads(prune_env.status.read_text())
     assert set(status) == keys and "OperationalError" in status["error"]
+
+
+# --- pi's read loop: a bad line or an error in the loop must not leave pi running unwatched ---
+
+PI_PUSH = {"type": "message_end", "message": {
+    "role": "assistant", "stopReason": "toolUse",
+    "content": [{"type": "toolCall", "id": "c1", "name": "bash", "arguments": {"command": "git push"}}],
+    "usage": {"input": 100, "output": 20, "cost": {"total": 0.004}}}}
+
+LOOP_PI = """#!{python}
+import os, subprocess, sys, time
+for line in open(os.environ["FAKE_PI_LINES"]):
+    sys.stdout.write(line)
+    sys.stdout.flush()
+if os.environ.get("FAKE_PI_EXIT") == "1":
+    sys.exit(0)
+child = subprocess.Popen(["sleep", "60"])
+open({pid!r}, "w").write(str(child.pid))
+time.sleep(2)
+open({marker!r}, "w").write("ran")
+time.sleep(60)
+"""
+
+
+def gone(pid: int) -> bool:
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        try:
+            if Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z":
+                return True
+        except OSError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.fixture(params=["text", "agentsh"])
+def loop_run(request, machine, service, tmp_path, monkeypatch):
+    """run(lines, on_event=None): a fake pi that prints `lines`, then exits or lingers with a child."""
+    mode = request.param
+    base = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi"))
+    if mode == "agentsh":
+        base = base.model_copy(update={"cwd": str(machine.root)})
+        _write_status(machine, last_prune=utc(time.time() - 4 * 3600))
+    req = base.model_copy(update={"local_guard": machine.guard}) if mode == "agentsh" else base
+    script = Path(agent_pi.PI_PATH)
+    script.write_text(LOOP_PI.format(python=sys.executable, pid=str(tmp_path / "child.pid"),
+                                     marker=str(tmp_path / "marker")))
+    script.chmod(0o755)
+    silence._recent.dog = None
+    closes, exits = [], []
+    real_close = agentsh_guard.close
+
+    def close(process, on_event):
+        dog = getattr(silence._recent, "dog", None)
+        closes.append(dog._done.is_set() if dog is not None else None)
+        return real_close(process, on_event)
+    monkeypatch.setattr(agentsh_guard, "close", close)
+    lines_file = tmp_path / "loop_lines.jsonl"
+    monkeypatch.setenv("FAKE_PI_LINES", str(lines_file))
+
+    def run(lines, on_event=None):
+        lines_file.write_text("".join(line + "\n" for line in lines))
+        return agent_pi.run(req, on_event=on_event, on_exit=exits.append)
+    run.closes, run.exits, run.mode, run.tmp = closes, exits, mode, tmp_path
+    return run
+
+
+def _child_gone_and_quiet(loop_run):
+    pid_file = loop_run.tmp / "child.pid"
+    if pid_file.exists():          # absent when pi was stopped before it started its child
+        assert gone(int(pid_file.read_text()))
+    time.sleep(3)
+    assert not (loop_run.tmp / "marker").exists()
+
+
+@pytest.mark.parametrize("bad", [
+    None, "null", "[1]", "5", '"x"',
+    '{"type":"message_end","message":5}',
+    '{"type":"message_end","message":{"role":"assistant","usage":5}}'],
+    ids=["control", "null", "list", "number", "string", "message-int", "usage-int"])
+def test_a_line_that_is_not_an_object_leaves_pi_watched(loop_run, bad):
+    forward, _, _ = _real_forwarder(agent_pi)
+    lines = ([bad] if bad else []) + [json.dumps(PI_PUSH)]
+    with pytest.raises(rules.RuleBreach, match="may have run") as stop:
+        loop_run(lines, on_event=forward)
+    assert stop.value.partial.cost == pytest.approx(0.004)
+    assert len(loop_run.closes) == 1 and len(loop_run.exits) == 1
+    _child_gone_and_quiet(loop_run)
+
+
+def test_an_error_in_the_loop_stops_pi_before_run_raises(loop_run):
+    line = json.dumps({"type": "message_end", "message": {"role": "assistant", "content": 5}})
+    with pytest.raises(TypeError):
+        loop_run([line])
+    assert len(loop_run.closes) == 1 and len(loop_run.exits) == 1
+    _child_gone_and_quiet(loop_run)
+
+
+@pytest.mark.parametrize("where", ["on_event", "touch"])
+def test_a_keyboard_interrupt_in_the_loop_stops_the_tree(loop_run, monkeypatch, where):
+    on_event = None
+    if where == "on_event":
+        def on_event(event):
+            if not str(event.get("type")).startswith("agentsh_"):
+                raise KeyboardInterrupt
+    else:
+        def touch(self):
+            raise KeyboardInterrupt
+        monkeypatch.setattr(silence.Watchdog, "touch", touch)
+    with pytest.raises(KeyboardInterrupt):
+        loop_run(['{"type":"turn_start"}'], on_event=on_event)
+    assert len(loop_run.closes) == 1 and len(loop_run.exits) == 1
+    _child_gone_and_quiet(loop_run)
+
+
+def test_an_error_in_the_watch_setup_stops_the_tree(loop_run, monkeypatch):
+    def boom(self, *args, **kwargs):
+        raise RuntimeError("watch setup")
+    monkeypatch.setattr(silence.Watchdog, "__init__", boom)
+    with pytest.raises(RuntimeError, match="watch setup"):
+        loop_run(['{"type":"turn_start"}'])
+    assert loop_run.closes == [None] and len(loop_run.exits) == 1
+    _child_gone_and_quiet(loop_run)
+
+
+def test_close_and_on_exit_run_once_after_the_watch_on_a_clean_end(loop_run, monkeypatch):
+    monkeypatch.setenv("FAKE_PI_EXIT", "1")
+    result = loop_run([json.dumps({"type": "message_end", "message": _turn("stop", "hi")})])
+    assert result.text == "hi"
+    assert loop_run.closes == [True] and len(loop_run.exits) == 1
+
+
+def test_close_and_on_exit_run_once_on_a_three_denial_stop(loop_run, service, monkeypatch):
+    if loop_run.mode == "text":
+        pytest.skip("three denials come from the agentsh service")
+    service.final_only = [denial(1), denial(2), denial(3)]
+    fail = raising(ValueError("the tracer failed"))
+
+    def on_event(event):       # the guard's own agentsh_ events come before the loop; only the loop's count
+        if not str(event.get("type")).startswith("agentsh_"):
+            fail(event)
+    with pytest.raises(rules.RuleBreach) as stop:
+        loop_run(['{"type":"turn_start"}'], on_event=on_event)
+    assert stop.value.refusals == 3 and stop.value.partial is not None
+    assert isinstance(stop.value.__cause__, ValueError)
+    assert len(loop_run.closes) == 1 and len(loop_run.exits) == 1
+    # the same denials on a clean end: check_stopped raises the breach
+    loop_run.closes.clear()
+    loop_run.exits.clear()
+    monkeypatch.setenv("FAKE_PI_EXIT", "1")
+    with pytest.raises(rules.RuleBreach) as stop:
+        loop_run([json.dumps({"type": "message_end", "message": _turn("stop", "hi")})])
+    assert stop.value.partial is not None
+    assert loop_run.closes == [True] and len(loop_run.exits) == 1

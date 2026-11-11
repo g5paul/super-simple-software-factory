@@ -704,66 +704,84 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                                   guard=request.local_guard, tally=request.refusal_tally, on_event=on_event)
     if on_spawn:
         on_spawn(process.pid)
-    with silence.watch(process, request.max_silence_seconds) as dog:
-        with session_files.open_append(raw_path, request.data_root) as raw:
-            assert process.stdout is not None
-            for line in process.stdout:
-                dog.touch()
-                raw.write(line)
-                raw.flush()                      # events land on disk as they happen
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if event.get("type") == "agent_end":
-                    dog.finished()
-                if event.get("type") == "message_end":
-                    message = event.get("message", {})
-                    if message.get("role") == "assistant":
-                        text = _text_of(message)
-                        if text:
-                            result.text = text   # last assistant message wins
-                        last_stop = message.get("stopReason")
-                        last_error = message.get("errorMessage") or ""
-                        usage = message.get("usage", {}) or {}
-                        turn = _context_tokens(usage)
-                        result.tokens += turn
-                        result.usage.add_turn(usage, turn)
-                        # Occupancy is read off the last VALID assistant turn, the
-                        # way pi does it — an aborted or errored turn reports usage
-                        # you can't trust, so it must not overwrite a good reading.
-                        if turn and message.get("stopReason") not in ("aborted", "error"):
-                            result.context_tokens = turn
-                        result.cost += (usage.get("cost", {}) or {}).get("total", 0.0) or 0.0
-                # agentsh_ events come only from the guard (start/close); a stream copy is a command's forgery.
-                if on_event and not agentsh_guard.guard_event(event):
-                    try:
-                        on_event(event)
-                    except Exception as error:
-                        # A forbidden command (rules.RuleBreach), or a tracer
-                        # failure: either way the agent must not run on unwatched.
-                        process.stop_tree()
-                        if isinstance(error, rules.RuleBreach):
-                            error.partial = result       # pi priced every turn so far
-                        process.wait()
-                        agentsh_guard.close(process, on_event)
-                        if on_exit:
-                            on_exit(process.pid)
-                        if not isinstance(error, rules.RuleBreach):
-                            stop = agentsh_guard.breach(process, request.agent_name)
-                            if stop:
-                                stop.partial = result
-                                raise stop from error
-                        raise
-
-    stderr = process.stderr.read() if process.stderr else ""
-    result.returncode = process.wait()
-    agentsh_guard.close(process, on_event)
-    if on_exit:
-        on_exit(process.pid)
+    stderr = ""
+    left_by = None
+    try:
+        with silence.watch(process, request.max_silence_seconds) as dog:
+            try:
+                with session_files.open_append(raw_path, request.data_root) as raw:
+                    assert process.stdout is not None
+                    for line in process.stdout:
+                        dog.touch()
+                        raw.write(line)
+                        raw.flush()                      # events land on disk as they happen
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(event, dict):
+                            continue                     # null, a list, a number or a string: no event, as in agent_cc
+                        if event.get("type") == "agent_end":
+                            dog.finished()
+                        if event.get("type") == "message_end":
+                            message = event.get("message", {})
+                            if not isinstance(message, dict):
+                                continue                 # announces nothing; the forwarder can't read it either
+                            if message.get("role") == "assistant":
+                                text = _text_of(message)
+                                if text:
+                                    result.text = text   # last assistant message wins
+                                last_stop = message.get("stopReason")
+                                last_error = message.get("errorMessage") or ""
+                                usage = message.get("usage", {}) or {}
+                                if not isinstance(usage, dict):
+                                    usage = {}
+                                turn = _context_tokens(usage)
+                                result.tokens += turn
+                                result.usage.add_turn(usage, turn)
+                                # Occupancy is read off the last VALID assistant turn, the
+                                # way pi does it — an aborted or errored turn reports usage
+                                # you can't trust, so it must not overwrite a good reading.
+                                if turn and message.get("stopReason") not in ("aborted", "error"):
+                                    result.context_tokens = turn
+                                result.cost += (usage.get("cost", {}) or {}).get("total", 0.0) or 0.0
+                        # agentsh_ events come only from the guard (start/close); a stream copy is a command's forgery.
+                        if on_event and not agentsh_guard.guard_event(event):
+                            try:
+                                on_event(event)
+                            except rules.RuleBreach as error:
+                                error.partial = result   # pi priced every turn so far
+                                raise
+            except BaseException as error:
+                # Leaving mid-call, by a stop, a forbidden command, a tracer failure, an error in this loop
+                # or `just kill`: the agent must not run on unwatched. Stopped here, inside the watch, as soon
+                # as the loop is left. On the host the kill reaches it too, but in a sandbox VM nothing else
+                # does, and the wait below would last until it finished.
+                left_by = error
+                process.stop_tree()
+                raise
+        # A clean end: the watch has closed, so pi's stderr is read, and pi waited for, after it, as before.
+        stderr = process.stderr.read() if process.stderr else ""
+    except BaseException as error:
+        if left_by is None:
+            # The watch's own setup or teardown, or the stderr read, failed or was interrupted.
+            left_by = error
+            process.stop_tree()
+        raise
+    finally:
+        result.returncode = process.wait()
+        agentsh_guard.close(process, on_event)
+        if on_exit:
+            on_exit(process.pid)
+        if isinstance(left_by, Exception) and not isinstance(left_by, rules.RuleBreach):
+            # Three denials replace whatever other stop the call was leaving by.
+            stop = agentsh_guard.breach(process, request.agent_name)
+            if stop:
+                stop.partial = result           # pi priced every turn so far
+                raise stop from left_by
     try:
         agentsh_guard.check_stopped(process, request.agent_name)
     except (rules.RuleBreach, agentsh_guard.AgentshRefused) as stop:

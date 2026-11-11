@@ -1189,6 +1189,19 @@ During this run the store went from 5.7 to 8.7 GB, the planner's slowest poll to
 
 Two smaller things the runs turned up: builders writing guard tests through a heredoc lose one refusal to the push rule each time (runs 955ca723 and 361de0f2), and run 361de0f2's bypass reviewer tried `cat .env` on the real file in its probe, refused before it ran. Probes should use decoys.
 
+### The retention run, 87b8ab19
+
+Run 87b8ab19 took `specs/tasks/guard-agentsh-retention.md`, Next item 19, and merged as a182d1f. $4.76, after a first try, c535b28d, at $6.17.
+
+- The prune keeps 6 hours of events and is due 50 minutes after the last.
+- `sssf.yaml` caps the audit log at 200 MB × 6 files, and a due prune deletes rotated audit files older than 6 hours. The status file adds `audit_bytes`, and the 10 GB note counts store and audit together.
+- pi's loop skips a line that raises `ValueError` or `RecursionError` only when it doesn't start with `{`.
+- `config.md` lists the `stop_tree` fork race and the partial-line hole.
+
+The first try skipped every such line. Its review found that a real pi `bash` call padded with an argument too deep to parse went unchecked under a `stop` rule, since pi's schema allows the extra key and prints it in both lines that carry the call. The chain then died in its review tidy on a file name that wasn't UTF-8 (fixed in 684e59c), so that run left no report. The second run's review found no bypass. Its broken promise: a symlinked `/var/lib/agentsh` would be followed, which no agent can set up. Run H takes it.
+
+Measured after the 13:26 reset: about 3.3 GB an hour with chains back to back, so 6 hours levels off near 20 to 23 GB. Run H, `specs/tasks/guard-agentsh-retention-2h.md`, cuts it to 2 hours and moves the note to 15 GB. On the fresh store the slowest polls were 0.33 to 0.55 s with no drops, against 3.9 s and 1,015 drops on the 5.7 GB store before it.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1213,5 +1226,5 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 16. **Done: warnings an engineer sees**, by [run 0463a6c3](#the-warnings-run-0463a6c3). After the reinstall, check the journal's drop count against run 05f96f0f's 34.
 17. **Done: an agent forging the guard's notes**, by [run 955ca723](#the-note-forgery-run-955ca723).
 18. **Done: pi's read loop**, by [run 361de0f2](#the-pi-read-loop-run-361de0f2).
-19. **Retention for the store and the audit log**, `specs/tasks/guard-agentsh-retention.md`, run F: 6 hours of both, a size cap on the audit log, a due check that doesn't miss by a second, run 361de0f2's two uncaught parse errors, and its two stream-check limits in `config.md`.
-20. **Builder and reviewer prompts**: write test files with the Write tool, not a heredoc, so test data doesn't trip the rules; and have the bypass reviewer probe secret files with decoys only. Both are prompt lines on what an agent may do, so they go through the chain.
+19. **Done: retention for the store and the audit log**, by [run 87b8ab19](#the-retention-run-87b8ab19). Run H, `specs/tasks/guard-agentsh-retention-2h.md`: 2 hours, a 15 GB note, and no linked audit folder.
+20. **Builder and reviewer prompts**: write test files with the Write tool, not a heredoc, so test data doesn't trip the rules (four runs in a row on 2026-11-11, builders and a reviewer); and probe secret files with decoys only (run 361de0f2's reviewer and run 87b8ab19's builder each tried the real `.env`, refused before it ran). Both are prompt lines on what an agent may do, so they go through the chain.

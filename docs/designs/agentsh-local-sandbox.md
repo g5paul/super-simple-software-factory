@@ -1174,6 +1174,21 @@ Spec review 1 blocked on one claim: an agent can't call `on_event` directly. Und
 
 Two hours after the event-store rollout the store was 2.78 GB, about 1.4 GB an hour while chains run, so 2 days of events would level off at 30 to 67 GB. The audit log, `/var/lib/agentsh/audit.jsonl`, rotates by size only, at agentsh's defaults of 500 MB and 10 backups, and `max_age_days` does nothing in this build. Run F, `specs/tasks/guard-agentsh-retention.md`, keeps 6 hours of both.
 
+### The pi read-loop run, 361de0f2
+
+Run 361de0f2 took `specs/tasks/guard-pi-read-loop.md`, Next item 18, and merged as 8f12f41. $6.04.
+
+- pi's read loop skips a line that isn't a JSON object, and reads `message` and `usage` only when they are dicts.
+- Any exception leaving the loop, an interrupt or a watchdog error included, stops pi's tree first. The wait, the guard's close, `on_exit` and the three-denial check run once on every way out.
+
+Spec review 1 blocked twice: the first design moved the clean end's `stderr` read inside the watchdog, and Out of scope left out forged results, usage-limit errors and `agent_end`. The build's first suite run failed one of its own new tests, fixed in one round. The bypass review took 31 minutes, almost three times its usual, testing each way out of pi's loop on both versions.
+
+It found no bypass. Its broken promise: an integer past 4,300 digits, a deep array and, in text mode, invalid UTF-8 still end the loop, with pi stopped first. Run F catches the first two. Its two old holes are both in the stream check, under every harness: a child forked between `stop_tree`'s listing and the kill survives the stop, and a partial line on the harness's stdout hides the next real event. Both matter most under `local_guard: text`, which is one more reason for Next item 7. Run F lists them in `config.md`.
+
+During this run the store went from 5.7 to 8.7 GB, the planner's slowest poll took 3.9 s, and agentsh dropped 1,015 `ptrace_file` events in one 14-second burst, where run 955ca723's planner dropped none on a 2.8 GB store. That points at the store's size slowing agentsh's writes, against run 0463a6c3's reading that drops come from bursts alone. It is one comparison, so it isn't settled.
+
+Two smaller things the runs turned up: builders writing guard tests through a heredoc lose one refusal to the push rule each time (runs 955ca723 and 361de0f2), and run 361de0f2's bypass reviewer tried `cat .env` on the real file in its probe, refused before it ran. Probes should use decoys.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1197,5 +1212,6 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 15. **Done: the event store**, by [run 149e2bda](#the-event-store-run-149e2bda), rolled out on [2026-11-11](#the-event-store-rollout-2026-11-11).
 16. **Done: warnings an engineer sees**, by [run 0463a6c3](#the-warnings-run-0463a6c3). After the reinstall, check the journal's drop count against run 05f96f0f's 34.
 17. **Done: an agent forging the guard's notes**, by [run 955ca723](#the-note-forgery-run-955ca723).
-18. **pi's read loop**, `specs/tasks/guard-pi-read-loop.md`, run G: skip a line that isn't a JSON object, and stop pi on any exception that leaves the loop, as Claude Code's loop does.
-19. **Retention for the store and the audit log**, `specs/tasks/guard-agentsh-retention.md`, run F, after run G: 6 hours of both, a size cap on the audit log, and a due check that doesn't miss by a second.
+18. **Done: pi's read loop**, by [run 361de0f2](#the-pi-read-loop-run-361de0f2).
+19. **Retention for the store and the audit log**, `specs/tasks/guard-agentsh-retention.md`, run F: 6 hours of both, a size cap on the audit log, a due check that doesn't miss by a second, run 361de0f2's two uncaught parse errors, and its two stream-check limits in `config.md`.
+20. **Builder and reviewer prompts**: write test files with the Write tool, not a heredoc, so test data doesn't trip the rules; and have the bypass reviewer probe secret files with decoys only. Both are prompt lines on what an agent may do, so they go through the chain.

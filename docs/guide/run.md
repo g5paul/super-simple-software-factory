@@ -306,7 +306,7 @@ vercel, last 30 days: 22 runs, 0.81 VM hours
 None of the VMs is the default. A run with no flag runs on the host. SSSF's guard rules apply in every mode, VM or not. They forbid a push, `gh` writes and billing recipes, and keep secret files and `.env` out. A VM adds a wall the rules can't. A command the rules miss still has no route out of the VM.
 
 - **No sandbox.** The default, for everyday runs. It's the fastest, because there's no VM to make.
-- **`openshell`.** Use it when you want that wall at no cost and the code shouldn't leave the host. For example, a private repo, an unattended run, or a request you don't fully trust. It needs `/dev/kvm`. It's new. The one proof run so far was 700a50bb, on 2026-11-08, on OpenShell 0.1.7, which marks WSL2 experimental.
+- **`openshell`.** Use it when you want that wall at no cost and the code shouldn't leave the host. For example, a private repo, an unattended run, or a request you don't fully trust. It needs `/dev/kvm`. It's new. Its proof runs so far are three in sssf-sandbox on 2026-11-08, on OpenShell 0.1.7, which marks WSL2 experimental: 700a50bb and 57ed2b49 with Claude Code, and d1c04d1f with pi.
 - **`vercel` or `e2b`.** Use one for a pi agent on ChatGPT, on a machine without KVM, or to run several at once off the host. Both upload the branch to the provider and use its free allowance.
 
 Whether VM runs can drop the rules against harm outside the repo is still open, after a few weeks of runs.

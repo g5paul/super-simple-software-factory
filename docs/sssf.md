@@ -49,7 +49,7 @@ Check the billing as in [install.md](guide/install.md#4-check-that-it-works).
 | test | `uv run --directory .claude/skills/sssf --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest tests -q -p no:cacheprovider` |
 | chain_test | `uv run --with pytest --with pydantic --with pyyaml --with python-dotenv --with rich pytest adws/tests -q -p no:cacheprovider` |
 
-The skill's suite takes about 75 seconds, and `chain_test` about one. The hub has no CI, so these two blocks are the whole check.
+The skill's suite takes about five and a half minutes, and `chain_test` a few seconds. Run cea6fe8d's verify, on 2026-11-10, took 320 and 2.4 seconds. The hub has no CI, so these two blocks are the whole check.
 
 ## Run and watch
 

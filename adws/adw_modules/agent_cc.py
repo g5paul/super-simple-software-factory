@@ -349,7 +349,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         env=_with_refusals(child_env(request.agent_name, request.adw_id, request.agent_env,
                                      guard=guard, config_dir=config_dir),
                            request.refuse_rules, tree),
-        guard=request.local_guard, tally=request.refusal_tally)
+        guard=request.local_guard, tally=request.refusal_tally, on_event=on_event)
     if on_spawn:
         on_spawn(process.pid)
     left_by = None

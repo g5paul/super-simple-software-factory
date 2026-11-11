@@ -580,6 +580,10 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
 
     def forward(event: dict) -> None:
         etype = event.get("type")
+        if etype == "agentsh_note":
+            # A store note from check_machine, shown before the agent starts. Never a refusal.
+            run.console.advise(f"agentsh: {event.get('note', '')}")
+            return
         if etype == "agentsh_denials":
             # Denials the policy made outside the exec count: traced with their paths,
             # never counted.
@@ -587,7 +591,10 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
                                          type="log", name="agentsh_denials",
                                          payload={"agent": agent_name,
                                                   "denials": event.get("denials", []),
-                                                  "notes": event.get("notes", [])}))
+                                                  "notes": event.get("notes", []),
+                                                  "polls": event.get("polls"),
+                                                  "pages": event.get("pages"),
+                                                  "slowest_poll_seconds": event.get("slowest_poll_seconds")}))
             return
         if harness is None or (isinstance(etype, str) and etype in RULE_EVENT_TYPES[harness]):
             check(event)

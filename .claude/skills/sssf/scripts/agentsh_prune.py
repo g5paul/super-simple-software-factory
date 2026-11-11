@@ -2,6 +2,9 @@
 
 Standard library only. It deletes nothing and runs no ANALYZE while the service lists a session or
 doesn't answer. It writes a status file that anyone can read: counts and times, never event content.
+
+Exit codes: 0 after a prune, a skip or "not due"; 1 when this attempt recorded an error (so
+`systemctl --failed` lists the service). A skip exits 0 even if the status file still holds an old error.
 """
 import json
 import os
@@ -113,7 +116,9 @@ def skip_reason(api):
     return None
 
 
-def prune(db=DB, api=API, status=STATUS, now=None):
+def _prune(db, api, status, now):
+    """One prune attempt. Returns (status data, whether this attempt recorded an error)."""
+    errored = False
     now = time.time() if now is None else now
     try:
         with open(status) as handle:
@@ -133,7 +138,7 @@ def prune(db=DB, api=API, status=STATUS, now=None):
     if last is not None and now - last < PRUNE_EVERY:
         data["store_bytes"] = store_bytes(db)
         write_status(status, data)
-        return data
+        return data, False
     reason = skip_reason(api)
     conn = None
     deleted = 0
@@ -177,6 +182,7 @@ def prune(db=DB, api=API, status=STATUS, now=None):
             data["skipped"] = reason
     except (sqlite3.OperationalError, sqlite3.DatabaseError) as error:
         data["error"] = f"{type(error).__name__}: {error}"
+        errored = True
     finally:
         if conn is not None:
             conn.close()
@@ -184,14 +190,19 @@ def prune(db=DB, api=API, status=STATUS, now=None):
         fix_owner(db)
     except OSError as error:
         data["error"] = f"{type(error).__name__}: {error}"
+        errored = True
     data["store_bytes"] = store_bytes(db)
     write_status(status, data)
-    return data
+    return data, errored
+
+
+def prune(db=DB, api=API, status=STATUS, now=None):
+    return _prune(db, api, status, time.time() if now is None else now)[0]
 
 
 def main():
-    prune()
-    return 0
+    _, errored = _prune(DB, API, STATUS, time.time())
+    return 1 if errored else 0
 
 
 if __name__ == "__main__":

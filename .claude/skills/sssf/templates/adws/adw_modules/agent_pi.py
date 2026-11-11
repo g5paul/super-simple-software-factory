@@ -701,7 +701,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     env = _in_vm(env, tree, request.refuse_rules, request.extensions)
     env = _in_container(env, tree)
     process = agentsh_guard.start(tree, HARNESS, cmd, cwd=request.cwd, env=env,
-                                  guard=request.local_guard, tally=request.refusal_tally)
+                                  guard=request.local_guard, tally=request.refusal_tally, on_event=on_event)
     if on_spawn:
         on_spawn(process.pid)
     with silence.watch(process, request.max_silence_seconds) as dog:

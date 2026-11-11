@@ -17,6 +17,7 @@ import atexit
 import errno
 import hashlib
 import json
+import math
 import os
 import pwd
 import re
@@ -50,6 +51,9 @@ PRUNE_STATUS = "/var/lib/sssf-agentsh-prune/status.json"
 PRUNE_STALE_SECONDS = 3 * 3600
 STORE_WARN_BYTES = 10 * 10**9
 POLL_SECONDS = 5
+SLOW_POLL_SECONDS = 1.0      # a poll request slower than this gets a note
+JOURNAL_SECONDS = 10         # the journal read's timeout
+DROP_TEXT = "event channel full"
 TIMEOUT = 10
 RESTART = "sudo systemctl restart agentsh"
 GLOB_CHARS = "*?[]{}\\$"
@@ -497,7 +501,8 @@ def _plain(value) -> str:
 
 
 def store_notes(now: Optional[float] = None) -> list[str]:
-    """Trace notes about agentsh's event store, from the prune's status file. Never raises, never refuses."""
+    """Notes about agentsh's event store, from the prune's status file. They are printed at the agent's
+    start and kept in the end-of-call event. Never raises, never refuses."""
     try:
         now = time.time() if now is None else now
         try:
@@ -538,7 +543,8 @@ def check_machine(guard: LocalGuard) -> list[str]:
     """Refuse unless the service is active, the binary is the pinned build, the config and
     policies are what this checkout renders (the pin line names BINARY, CONFIG, POLICY_DIR, SERVER, API
     and PINNED_SHA256), BINARY and CONFIG are not links, and the service started after they changed.
-    Returns trace notes (never a refusal) about the event store's prune status."""
+    Returns notes (never a refusal) about the event store's prune status; `start` prints them at the
+    agent's start and keeps them in the end-of-call event."""
     if _run(["systemctl", "is-active", "agentsh"]).stdout.strip() != "active":
         raise AgentshRefused(f"the agentsh service is not active; {FIX}")
     for path in (BINARY, CONFIG):
@@ -832,6 +838,10 @@ class AgentshProcess:
         self._seen: set[str] = set()
         self._failed_polls = 0
         self.trace_notes: list[str] = []
+        self.started_at: Optional[float] = None
+        self.polls = 0
+        self.pages = 0
+        self.slowest = 0.0
         self._drain = threading.Thread(target=self._read_stderr, daemon=True)
         self._drain.start()
         self._watcher: Optional[threading.Thread] = None
@@ -923,10 +933,25 @@ class AgentshProcess:
             raise ValueError("unexpected events body")
         return [r for r in rows if isinstance(r, dict)]
 
+    def _timed_get(self, query: dict) -> list[dict]:
+        """`_get`, with the request timed. A failed request counts toward the slowest, not the pages."""
+        began = time.monotonic()
+        answered = False
+        try:
+            rows = self._get(query)
+            answered = True
+            return rows
+        finally:
+            elapsed = time.monotonic() - began
+            with self._lock:
+                self.slowest = max(self.slowest, elapsed)
+                if answered:
+                    self.pages += 1
+
     def _pages(self, start: int, extra: dict) -> list[dict]:
         out, offset = [], start
         while True:
-            rows = self._get({"session_id": self.session, **extra, "order": "asc",
+            rows = self._timed_get({"session_id": self.session, **extra, "order": "asc",
                               "limit": PAGE, "offset": offset})
             out += rows
             offset += len(rows)
@@ -959,7 +984,7 @@ class AgentshProcess:
 
     def _poll(self) -> None:
         while True:     # each page is taken as it arrives, so a flood of events can't hold back the stop
-            rows = self._get({"session_id": self.session, "order": "asc", "limit": PAGE,
+            rows = self._timed_get({"session_id": self.session, "order": "asc", "limit": PAGE,
                               "offset": self._offset})
             with self._lock:
                 if self._done.is_set():
@@ -973,6 +998,8 @@ class AgentshProcess:
 
     def _watch(self) -> None:
         while not self._done.wait(POLL_SECONDS):
+            with self._lock:
+                self.polls += 1
             try:
                 self._poll()
                 self._failed_polls = 0
@@ -995,6 +1022,7 @@ class AgentshProcess:
             first = not self._ended and self.session is not None
             if first:
                 self._ended = True
+                self.polls += 1
                 self._done.set()
         if not first:
             return
@@ -1018,7 +1046,7 @@ class AgentshProcess:
 
 
 def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[LocalGuard],
-          tally: Optional[rules.RefusalTally] = None):
+          tally: Optional[rules.RefusalTally] = None, on_event: Optional[Callable[[dict], None]] = None):
     if tree is not sandbox.LOCAL:
         return tree.start(cmd, cwd=cwd, env=env)
     if guard is None:
@@ -1027,6 +1055,12 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     if guard.mode == "text":
         return tree.start(cmd, cwd=cwd, env=env)
     notes = check_machine(guard)
+    if on_event:
+        for note in notes:
+            try:
+                on_event({"type": "agentsh_note", "note": note})
+            except Exception:
+                pass
     if not guard.root or Path(cwd).resolve() != Path(guard.root):
         raise AgentshRefused(f"the agent would run in {cwd}, not the guarded root {guard.root or '(none)'}")
     policy = guard.policies.get(harness)
@@ -1057,6 +1091,7 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     child.update(ours)
     child.update({"AGENTSH_CONFIG": CONFIG, "AGENTSH_SERVER": SERVER, "AGENTSH_NO_AUTO": "1",
                   "NODE_USE_ENV_PROXY": "1", "SSSF_AGENTSH": "1", "JUST_NO_DOTENV": "true"})
+    started_at = time.time()
     try:
         popen = subprocess.Popen(
             [BINARY, "wrap", "--policy", policy.name, "--root", guard.root, "--report=false", "--", *cmd],
@@ -1065,6 +1100,7 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     except OSError as error:
         raise AgentshRefused(f"can't run {BINARY} ({error}); {FIX}") from None
     process = AgentshProcess(popen, policy.name, tally or rules.RefusalTally())
+    process.started_at = started_at
     process.trace_notes.extend(notes)
     # Before the attach wait: on_spawn hasn't run, so `just kill` can't see the wrap yet.
     atexit.register(process._at_exit)
@@ -1072,25 +1108,90 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     return process
 
 
+_DROP_TYPE = re.compile(r'"?(?:event_)?type"?\s*[=:]\s*"?([^"\s,}]+)')
+_TYPE_NAME = re.compile(r"[a-z0-9_]{1,64}")
+
+
+def journal_drops(since: float, until: float,
+                  run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> tuple[dict[str, int], Optional[str]]:
+    """agentsh's "event channel full" lines between `since` and `until`, counted by event type,
+    as the runner's own user. Returns (counts, problem); `problem` is set, and the counts empty,
+    when the journal can't be read. journald's rate limit can suppress lines, so the counts are
+    a floor. Never raises."""
+    try:
+        command = ["journalctl", "-u", "agentsh", "--since", f"@{int(since)}",
+                   "--until", f"@{math.ceil(until)}", "-o", "cat", "--no-pager"]
+        try:
+            done = run(command, capture_output=True, text=True, errors="replace", timeout=JOURNAL_SECONDS,
+                       env={**os.environ, "LC_ALL": "C"})
+        except subprocess.TimeoutExpired:
+            return {}, f"timed out after {JOURNAL_SECONDS} s"
+        except OSError as error:
+            return {}, f"could not run ({type(error).__name__})"
+        if done.returncode != 0:
+            return {}, f"exited {done.returncode}"
+        err = (done.stderr or "").lower()
+        if any(text in err for text in ("insufficient permissions", "not seeing messages", "permission denied")):
+            return {}, "no permission to read the agentsh unit's lines"
+        counts: dict[str, int] = {}
+        for line in (done.stdout or "").splitlines():
+            if DROP_TEXT not in line:
+                continue
+            m = _DROP_TYPE.search(line)
+            kind = m.group(1) if m and _TYPE_NAME.fullmatch(m.group(1)) else "unknown"
+            counts[kind] = counts.get(kind, 0) + 1
+        return counts, None
+    except Exception as error:
+        return {}, f"failed ({type(error).__name__})"
+
+
 def close(process, on_event: Optional[Callable[[dict], None]] = None) -> None:
-    """After the agent exits: end the session, and trace the denials that didn't count.
-    Never raises, and does nothing for another process type."""
+    """After the agent exits: end the session, count the events agentsh dropped (from its journal, as a
+    floor), and trace the denials that didn't count, with the poll figures. Never raises, and does
+    nothing for another process type."""
     if not isinstance(process, AgentshProcess):
         return
     try:
         process._end_session()
         atexit.unregister(process._at_exit)
+        try:
+            if process.started_at is not None:
+                counts, problem = journal_drops(process.started_at, time.time())
+                if problem:
+                    process.trace_notes.append(
+                        f"agentsh's journal couldn't be read for this call ({problem}), so events agentsh dropped "
+                        "are not counted; check with `journalctl -u agentsh --since <start> | grep -c 'event channel full'`")
+                elif counts:
+                    total = sum(counts.values())
+                    detail = ", ".join(f"{t} {n}" for t, n in sorted(counts.items()))
+                    process.trace_notes.append(
+                        f"agentsh dropped at least {total} event(s) during this call, when its store's channel was "
+                        f"full: {detail}. journald's rate limit can hide more. The trace's denials may be short by "
+                        "these. Drops are counted for the agentsh service as a whole, so a concurrent run's drops "
+                        "show here too")
+                    if counts.get("ptrace_execve"):
+                        process.trace_notes.append(
+                            f"at least {counts['ptrace_execve']} dropped event(s) were ptrace_execve: a denied exec "
+                            "may have gone uncounted toward the three-refusal stop. agentsh still enforced it")
+            if process.slowest > SLOW_POLL_SECONDS:
+                process.trace_notes.append(
+                    f"the slowest agentsh event poll took {process.slowest:.1f} s; a poll request gives up at 5 s "
+                    "and three failed polls in a row stop the agent. A slow poll usually means a big event store: "
+                    "see \"The event store\" in .claude/skills/sssf/references/config.md")
+        except Exception:
+            pass
         if on_event:
             counts: dict[tuple, int] = {}
             for d in process.other_denials:
                 key = (d["type"], d["path"], d["rule"])
                 counts[key] = counts.get(key, 0) + 1
             denials = [{"type": t, "path": p, "rule": r, "count": n} for (t, p, r), n in sorted(counts.items())]
-            if denials or process.trace_notes:
-                try:
-                    on_event({"type": "agentsh_denials", "denials": denials, "notes": process.trace_notes})
-                except Exception:
-                    pass
+            try:
+                on_event({"type": "agentsh_denials", "denials": denials, "notes": process.trace_notes,
+                          "polls": process.polls, "pages": process.pages,
+                          "slowest_poll_seconds": round(process.slowest, 2)})
+            except Exception:
+                pass
     except Exception:
         pass
 

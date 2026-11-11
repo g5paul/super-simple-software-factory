@@ -53,11 +53,12 @@ Under `local_guard: agentsh`, a run that stops with "the agentsh service stopped
 cat /var/lib/sssf-agentsh-prune/status.json                         # the store's size, last prune, last skip or error
 systemctl list-timers sssf-agentsh-prune.timer                      # the prune timer's last and next check
 journalctl -u agentsh --since today | grep -c 'event channel full'  # events agentsh dropped today
+systemctl --failed                                                  # a prune that recorded an error
 ```
 
 A store that keeps growing, or a last prune hours old, means the prune keeps skipping or failing; the status file says which. See "The event store" in [config.md](../../.claude/skills/sssf/references/config.md). To reclaim the space, with no run going: stop the service, move `events.db` and its `-wal` and `-shm` files aside, and start it again. If the store is small and polls still stop, see the stall in [open.md](../open.md).
 
-`check_machine`'s warnings about the store go into the trace only, in each agent's `agentsh_denials` event. Look there when a run under agentsh seems slow.
+`check_machine`'s warnings about the store print to the console when each agent starts. The end-of-call `agentsh_denials` event in the trace adds the slowest poll and at least the events agentsh dropped during the call. Look there when a run under agentsh seems slow.
 
 ## Worktree runs
 

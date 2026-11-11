@@ -235,9 +235,18 @@ def machine(tmp_path, monkeypatch, cfg, service):
 SLEEP = [sys.executable, "-c", "import time; print('hello', flush=True); time.sleep(30)"]
 
 
-def launch(machine, harness="pi", cmd=None, tally=None, env=None, **over):
+def launch(machine, harness="pi", cmd=None, tally=None, env=None, on_event=None, **over):
     return agentsh_guard.start(sandbox.LOCAL, harness, cmd or SLEEP, cwd=machine.root,
-                               env=env, guard=over.get("guard", machine.guard), tally=tally)
+                               env=env, guard=over.get("guard", machine.guard), tally=tally, on_event=on_event)
+
+
+REAL_JOURNAL_DROPS = agentsh_guard.journal_drops
+
+
+@pytest.fixture(autouse=True)
+def no_real_journal(monkeypatch):
+    """No test reaches the real journalctl: the journal read finds nothing unless a test says otherwise."""
+    monkeypatch.setattr(agentsh_guard, "journal_drops", lambda since, until, run=None: ({}, None))
 
 
 @pytest.fixture(autouse=True)
@@ -2714,3 +2723,211 @@ def test_a_flood_of_events_cannot_hold_back_the_stop_after_three_denials(service
     worker.join(10)
     assert not worker.is_alive() and process.tripped and process.counted == 3
     process._done.set()
+
+
+# ── warnings, poll figures and dropped events ────────────────────────────────
+
+def test_store_notes_are_announced_before_the_wrap_starts(machine, service, monkeypatch):
+    _write_status(machine, last_prune=utc(time.time() - 4 * 3600))
+    events, order = [], []
+    real = subprocess.Popen
+
+    def popen(*a, **k):
+        order.append(("popen", len(events)))
+        return real(*a, **k)
+    monkeypatch.setattr(agentsh_guard.subprocess, "Popen", popen)
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"], on_event=events.append)
+    process.wait()
+    assert order == [("popen", 1)]
+    assert events[0]["type"] == "agentsh_note" and "last pruned" in events[0]["note"]
+    agentsh_guard.close(process, events.append)
+    ended = [e for e in events if e["type"] == "agentsh_denials"]
+    assert any("last pruned" in n for n in ended[0]["notes"])
+
+
+def test_a_failing_note_callback_does_not_refuse(machine, service):
+    _write_status(machine, last_prune=utc(time.time() - 4 * 3600))
+
+    def boom(event):
+        raise RuntimeError("no")
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"], on_event=boom)
+    process.wait()
+    agentsh_guard.close(process, boom)
+    agentsh_guard.check_stopped(process, "b")
+
+
+def test_the_forwarder_prints_and_traces_an_agentsh_note():
+    forward, events, said = forwarder()
+    forward({"type": "agentsh_note", "note": "the store is big"})
+    assert said == ["agentsh: the store is big"] and events == []     # advise traces it; no rule check ran
+    forward({"type": "agentsh_denials", "denials": [], "notes": [], "polls": 2, "pages": 3,
+             "slowest_poll_seconds": 0.4})
+    payload = events[-1].payload
+    assert (payload["polls"], payload["pages"], payload["slowest_poll_seconds"]) == (2, 3, 0.4)
+
+
+def test_the_end_of_call_event_has_poll_counts_pages_and_slowest(machine, service):
+    service.events = [denial(1, "ptrace_file", rule="x", decision="allow")]
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
+    process.wait()
+    events = []
+    agentsh_guard.close(process, events.append)
+    event = events[-1]
+    assert event["type"] == "agentsh_denials"
+    assert event["polls"] >= 1 and event["pages"] >= 1 and isinstance(event["slowest_poll_seconds"], float)
+
+
+@pytest.mark.parametrize("seconds, noted", [(1.5, True), (0.5, False)])
+def test_a_poll_over_one_second_adds_a_note(service, monkeypatch, seconds, noted):
+    clock = [100.0]
+    monkeypatch.setattr(agentsh_guard, "time", types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time))
+    process = bare(service)
+
+    def slow_get(query):
+        clock[0] += seconds
+        return []
+    process._get = slow_get
+    events = []
+    agentsh_guard.close(process, events.append)
+    slow = [n for n in events[-1]["notes"] if "slowest agentsh event poll" in n]
+    assert bool(slow) is noted
+    if noted:
+        assert "1.5 s" in slow[0] and "5 s" in slow[0]
+    assert events[-1]["slowest_poll_seconds"] == seconds
+    assert agentsh_guard.breach(process, "b") is None
+    agentsh_guard.check_stopped(process, "b")
+
+
+def _journal(stdout="", stderr="", returncode=0, calls=None):
+    def run(command, **kwargs):
+        if calls is not None:
+            calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+    return run
+
+
+def test_journal_drops_counts_by_type():
+    calls = []
+    out = "\n".join([
+        'time=2026 level=WARN msg="sqlite: event channel full, dropping event" id=e1 type=ptrace_file',
+        '{"msg":"sqlite: event channel full, dropping event","id":"e2","type":"ptrace_execve"}',
+        'sqlite: event channel full, dropping event id: e3 type: ptrace_file',
+        'event channel full event_type="ptrace_file"',
+        "agentsh: session sess1 created", "something else with type=ptrace_file"])
+    counts, problem = REAL_JOURNAL_DROPS(1000.4, 1005.2, run=_journal(out, calls=calls))
+    assert problem is None and counts == {"ptrace_file": 3, "ptrace_execve": 1}
+    command, kwargs = calls[0]
+    assert command == ["journalctl", "-u", "agentsh", "--since", "@1000", "--until", "@1006", "-o", "cat", "--no-pager"]
+    assert kwargs["timeout"] == agentsh_guard.JOURNAL_SECONDS and "sudo" not in command
+
+
+def test_a_type_that_is_not_a_plain_name_counts_as_unknown(machine, service, monkeypatch):
+    out = "\n".join(['event channel full id=SECRET-ID type="/home/x/.env"',
+                     "event channel full id=SECRET-ID type=" + "a" * 200, "event channel full no kind here"])
+    counts, problem = REAL_JOURNAL_DROPS(1, 2, run=_journal(out))
+    assert counts == {"unknown": 3} and problem is None
+    monkeypatch.setattr(agentsh_guard, "journal_drops", lambda s, u, run=None: (counts, None))
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
+    process.wait()
+    agentsh_guard.close(process, lambda e: None)
+    text = " ".join(process.trace_notes)
+    assert "unknown 3" in text and "SECRET-ID" not in text and "/home/x" not in text and "aaaa" not in text
+
+
+def test_close_notes_at_least_the_drops_and_the_execve_drop(machine, service, monkeypatch):
+    monkeypatch.setattr(agentsh_guard, "journal_drops",
+                        lambda s, u, run=None: ({"ptrace_file": 34, "ptrace_execve": 2}, None))
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
+    process.wait()
+    events = []
+    agentsh_guard.close(process, events.append)
+    notes = events[-1]["notes"]
+    total = [n for n in notes if "at least 36" in n]
+    assert len(total) == 1 and "ptrace_file 34" in total[0] and "ptrace_execve 2" in total[0]
+    execve = [n for n in notes if "ptrace_execve: a denied exec" in n]
+    assert len(execve) == 1 and "agentsh still enforced it" in execve[0] and "at least 2" in execve[0]
+    assert not any(re.search(r"\be\d+\b", n) for n in notes)
+    agentsh_guard.check_stopped(process, "b")
+    assert process.failure == ""
+
+
+def _raise(error):
+    def run(command, **kwargs):
+        raise error
+    return run
+
+
+@pytest.mark.parametrize("run, reason", [
+    (_journal(stderr="No journal files were opened due to insufficient permissions."), "no permission"),
+    (_raise(subprocess.TimeoutExpired("journalctl", 10)), "timed out after 10 s"),
+    (_journal(stderr="SECRET-STDERR", returncode=1), "exited 1"),
+    (_raise(FileNotFoundError("journalctl")), "could not run (FileNotFoundError)"),
+])
+def test_an_unreadable_journal_a_timeout_and_a_failed_journalctl_each_note_it(machine, service, monkeypatch, run, reason):
+    monkeypatch.setattr(agentsh_guard, "journal_drops", lambda s, u: REAL_JOURNAL_DROPS(s, u, run=run))
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
+    process.wait()
+    events = []
+    agentsh_guard.close(process, events.append)
+    notes = [n for n in events[-1]["notes"] if "couldn't be read" in n]
+    assert len(notes) == 1 and reason in notes[0] and "SECRET-STDERR" not in notes[0] and "insufficient" not in notes[0]
+    agentsh_guard.check_stopped(process, "b")
+    assert process.failure == ""
+
+
+def test_text_mode_reads_no_journal(monkeypatch):
+    monkeypatch.setattr(agentsh_guard, "journal_drops", lambda *a, **k: pytest.fail("read the journal"))
+    monkeypatch.setattr(sandbox.LOCAL, "start", lambda cmd, cwd=None, env=None: "p")
+    assert agentsh_guard.start(sandbox.LOCAL, "pi", ["x"], cwd="/w", env={}, guard=LocalGuard(mode="text"),
+                               on_event=lambda e: pytest.fail("announced")) == "p"
+    agentsh_guard.close("p", lambda e: pytest.fail("traced"))
+
+
+def test_the_rendered_config_raises_the_store_buffer():
+    template = TEMPLATE.read_text()
+    config = yaml.safe_load(agentsh_guard.render_config(template, ["p"]))
+    storage = config["audit"]["storage"]
+    assert storage["channel_size"] == 16384 and storage["batch_size"] == 256
+    del storage["channel_size"], storage["batch_size"]
+    assert config["audit"]["storage"] == {"sqlite_path": "/var/lib/agentsh/events.db"}
+    assert set(config["audit"]) == {"enabled", "output", "storage"}
+
+
+def _main(prune_env, monkeypatch):
+    monkeypatch.setattr(prune_env.m, "DB", str(prune_env.db))
+    monkeypatch.setattr(prune_env.m, "API", prune_env.api.url)
+    monkeypatch.setattr(prune_env.m, "STATUS", str(prune_env.status))
+    return prune_env.m.main()
+
+
+def _old_status(prune_env, **over):
+    prune_env.status.parent.mkdir(exist_ok=True)
+    data = {"store_bytes": 1, "last_prune": utc(time.time() - 2 * DAY), "last_analyze": None,
+            "last_run": utc(time.time()), "deleted": 0, "skipped": None, "error": None, **over}
+    prune_env.status.write_text(json.dumps(data))
+    return set(data)
+
+
+def test_a_clean_prune_and_a_not_due_prune_exit_0(prune_env, monkeypatch):
+    assert _main(prune_env, monkeypatch) == 0
+    assert json.loads(prune_env.status.read_text())["error"] is None
+    assert _main(prune_env, monkeypatch) == 0      # an hour has not passed
+
+
+def test_a_skipped_prune_exits_0_even_with_an_old_error(prune_env, monkeypatch):
+    _old_status(prune_env, error="OperationalError: old")
+    prune_env.api.body = b'[{"id": "s"}]'
+    assert _main(prune_env, monkeypatch) == 0
+    status = json.loads(prune_env.status.read_text())
+    assert status["error"] == "OperationalError: old" and "active session" in status["skipped"]
+
+
+def test_a_recorded_prune_error_exits_1_and_keeps_the_status_fields(prune_env, monkeypatch):
+    keys = _old_status(prune_env)
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(prune_env.m.sqlite3, "connect", boom)
+    assert _main(prune_env, monkeypatch) == 1
+    status = json.loads(prune_env.status.read_text())
+    assert set(status) == keys and "OperationalError" in status["error"]

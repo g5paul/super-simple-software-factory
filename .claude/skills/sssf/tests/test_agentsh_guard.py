@@ -184,24 +184,30 @@ def machine(tmp_path, monkeypatch, cfg):
     guard = LocalGuard(mode="agentsh", root=str(root.resolve()), policies=policies, config_template=template,
                        agent_cache=str(tmp_path / "agent-cache"))
     config = tmp_path / "sssf.yaml"
+    monkeypatch.setattr(agentsh_guard, "BINARY", str(binary))     # before the config: it names the pin
+    monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", hashlib.sha256(binary.read_bytes()).hexdigest())
     config.write_text(agentsh_guard.render_config(template, [p.name for p in policies.values()]))
     pdir = tmp_path / "policies"
     pdir.mkdir()
     for p in policies.values():
         (pdir / f"{p.name}.yaml").write_text(p.text)
-    monkeypatch.setattr(agentsh_guard, "BINARY", str(binary))
     monkeypatch.setattr(agentsh_guard, "CONFIG", str(config))
     monkeypatch.setattr(agentsh_guard, "POLICY_DIR", str(pdir))
     login = tmp_path / "login.env"   # a Claude Code agent under agentsh signs in with a token
     login.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok-from-file\n")
     monkeypatch.setattr(agentsh_guard, "TOKEN_FILE", login)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", hashlib.sha256(binary.read_bytes()).hexdigest())
     monkeypatch.setattr(agentsh_guard, "ATTACH_SECONDS", 3)
     real = agentsh_guard._run
-    state = {"active": "active"}
-    monkeypatch.setattr(agentsh_guard, "_run", lambda c: subprocess.CompletedProcess(
-        c, 0, state["active"] + "\n", "") if c[0] == "systemctl" else real(c))
+    state = {"active": "active", "show": f"ExecMainStartTimestamp=@{int(time.time()) + 3600}\n"}
+
+    def fake_run(c):
+        if c[:2] == ["systemctl", "is-active"]:
+            return subprocess.CompletedProcess(c, 0, state["active"] + "\n", "")
+        if c[:2] == ["systemctl", "show"]:
+            return subprocess.CompletedProcess(c, state.get("show_rc", 0), state["show"], "")
+        return real(c)
+    monkeypatch.setattr(agentsh_guard, "_run", fake_run)
     machine.state = state
     machine.guard, machine.root, machine.pdir, machine.config = guard, root, pdir, config
     return machine
@@ -1983,3 +1989,138 @@ def test_a_claude_agent_gets_the_runs_config_folder_and_refuses_without_a_token(
     with pytest.raises(agentsh_guard.AgentshRefused, match="claude setup-token"):
         agent_cc.run(req)
     assert not dump.exists()
+
+
+# ── the pin, the service start, glob syntax and the agent cache ──────────────
+
+def test_render_config_ends_with_the_pin_line(monkeypatch):
+    monkeypatch.setattr(agentsh_guard, "BINARY", "/x/agentsh")
+    monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", "ab" * 32)
+    template = TEMPLATE.read_text()
+    text = agentsh_guard.render_config(template, ["a"])
+    last = text.rstrip("\n").splitlines()[-1]
+    assert last == f"# SSSF pins agentsh: /x/agentsh sha256 {'ab' * 32}"
+    assert yaml.safe_load(text) == yaml.safe_load(text.removesuffix(last + "\n"))
+    monkeypatch.setattr(agentsh_guard, "BINARY", "/y/agentsh")
+    assert agentsh_guard.render_config(template, ["a"]) != text
+    monkeypatch.setattr(agentsh_guard, "BINARY", "/x/agentsh")
+    monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", "cd" * 32)
+    assert agentsh_guard.render_config(template, ["a"]) != text
+
+
+def test_an_edited_pin_constant_refuses(machine, tmp_path, monkeypatch):
+    original = Path(agentsh_guard.BINARY)
+    other = tmp_path / "other"
+    other.write_bytes(original.read_bytes() + b"\n")
+    monkeypatch.setattr(agentsh_guard, "BINARY", str(other))
+    monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", hashlib.sha256(other.read_bytes()).hexdigest())
+    with pytest.raises(agentsh_guard.AgentshRefused, match="differs from what this checkout renders"):
+        agentsh_guard.check_machine(machine.guard)
+    same = tmp_path / "same"
+    same.write_bytes(original.read_bytes())
+    monkeypatch.setattr(agentsh_guard, "BINARY", str(same))
+    monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", hashlib.sha256(original.read_bytes()).hexdigest())
+    with pytest.raises(agentsh_guard.AgentshRefused, match="differs from what this checkout renders"):
+        agentsh_guard.check_machine(machine.guard)
+    monkeypatch.setattr(agentsh_guard, "BINARY", str(original))
+    monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", "0" * 64)
+    with pytest.raises(agentsh_guard.AgentshRefused, match="pinned"):
+        agentsh_guard.check_machine(machine.guard)
+
+
+def test_a_binary_or_config_changed_after_the_service_started_refuses(machine, tmp_path):
+    marker = tmp_path / "started"
+    cmd = [sys.executable, "-c", f"open({str(marker)!r}, 'w')"]
+
+    def refused(why):
+        with pytest.raises(agentsh_guard.AgentshRefused, match=why):
+            launch(machine, "pi", cmd=cmd)
+        assert not marker.exists()
+
+    machine.state["show"] = f"ExecMainStartTimestamp=@{int(time.time()) - 3600}\n"
+    refused("restart agentsh")
+    machine.state["show"] = f"ExecMainStartTimestamp=@{int(os.stat(machine.config).st_ctime)}\n"
+    refused("restart agentsh")
+    newest = int(max(os.stat(agentsh_guard.BINARY).st_ctime, os.stat(machine.config).st_ctime))
+    machine.state["show"] = f"ExecMainStartTimestamp=@{newest + 1}\n"
+    agentsh_guard.check_machine(machine.guard)
+    for shown in ("ExecMainStartTimestamp=\n", "ExecMainStartTimestamp=n/a\n", "garbage"):
+        machine.state["show"] = shown
+        refused("can't read when the agentsh service started")
+    machine.state["show"] = f"ExecMainStartTimestamp=@{newest + 1}\n"
+    machine.state["show_rc"] = 1
+    refused("can't read when the agentsh service started")
+
+
+@pytest.mark.parametrize("char", list(agentsh_guard.GLOB_CHARS))
+def test_a_root_with_glob_syntax_refuses(tmp_path, monkeypatch, char):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    bad = git_repo(tmp_path / f"re{char}po")
+    with pytest.raises(agentsh_guard.AgentshRefused, match=re.escape(char)):
+        agentsh_guard.check_root(str(bad))
+    plain = git_repo(tmp_path / "plain")
+    git = ["git", "-C", str(plain), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "one"], check=True)
+    tree = tmp_path / f"w{char}t" / "wt"
+    tree.parent.mkdir()
+    subprocess.run([*git, "worktree", "add", "-q", str(tree)], check=True)
+    with pytest.raises(agentsh_guard.AgentshRefused, match=re.escape(char)):
+        agentsh_guard.check_root(str(tree))
+    agentsh_guard.check_root(str(plain))
+
+
+def test_a_home_with_glob_syntax_refuses(machine, tmp_path, monkeypatch):
+    dump = tmp_path / "dump.json"
+    bad_home = str(tmp_path / "h{me")
+    monkeypatch.setenv("HOME", bad_home)
+    with pytest.raises(agentsh_guard.AgentshRefused, match="home folder"):
+        agentsh_guard.check_root(str(machine.root))
+    with pytest.raises(agentsh_guard.AgentshRefused, match="home folder"):
+        launch(machine, "pi", cmd=[sys.executable, "-c", "pass"], env={"HOME": bad_home, "FAKE_DUMP": str(dump)})
+    assert not dump.exists()
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    monkeypatch.setenv("HOME", str(clean))
+    monkeypatch.setattr(agentsh_guard.pwd, "getpwuid", lambda uid: type("P", (), {"pw_dir": "/home/a*b"})())
+    with pytest.raises(agentsh_guard.AgentshRefused, match="home folder"):
+        agentsh_guard.check_root(str(machine.root))
+    with pytest.raises(agentsh_guard.AgentshRefused, match="home folder"):
+        launch(machine, "pi", cmd=[sys.executable, "-c", "pass"], env={"HOME": str(clean), "FAKE_DUMP": str(dump)})
+    assert not dump.exists()
+
+
+def test_start_refuses_a_root_with_glob_syntax_before_the_wrap(machine, tmp_path):
+    dump = tmp_path / "dump.json"
+    odd = git_repo(tmp_path / "a[b]")
+    guard = machine.guard.model_copy(update={"root": str(odd.resolve())})
+    with pytest.raises(agentsh_guard.AgentshRefused, match="glob"):
+        agentsh_guard.start(sandbox.LOCAL, "pi", SLEEP, cwd=odd, env={"FAKE_DUMP": str(dump)}, guard=guard)
+    assert not dump.exists()
+
+
+@pytest.mark.parametrize("kind", ["absolute", "relative", "dangling", "file"])
+def test_start_refuses_a_link_or_file_at_the_agent_cache(machine, tmp_path, kind):
+    dump = tmp_path / "dump.json"
+    cache = Path(machine.guard.agent_cache)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    if kind == "absolute":
+        cache.symlink_to(elsewhere)
+    elif kind == "relative":
+        cache.symlink_to(os.path.relpath(elsewhere, cache.parent))
+    elif kind == "dangling":
+        cache.symlink_to(tmp_path / "nowhere" / "x")
+    else:
+        cache.write_text("x")
+    target = os.readlink(cache) if cache.is_symlink() else None
+    with pytest.raises(agentsh_guard.AgentshRefused, match="link or a file"):
+        launch(machine, "pi", cmd=[sys.executable, "-c", "pass"], env={"FAKE_DUMP": str(dump)})
+    assert not dump.exists()
+    if target is None:
+        assert cache.read_text() == "x" and not cache.is_symlink()
+    else:
+        assert os.readlink(cache) == target
+    assert list(elsewhere.iterdir()) == []
+    assert not (tmp_path / "nowhere").exists()

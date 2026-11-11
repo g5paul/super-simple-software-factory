@@ -192,6 +192,10 @@ def machine(tmp_path, monkeypatch, cfg):
     monkeypatch.setattr(agentsh_guard, "BINARY", str(binary))
     monkeypatch.setattr(agentsh_guard, "CONFIG", str(config))
     monkeypatch.setattr(agentsh_guard, "POLICY_DIR", str(pdir))
+    login = tmp_path / "login.env"   # a Claude Code agent under agentsh signs in with a token
+    login.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok-from-file\n")
+    monkeypatch.setattr(agentsh_guard, "TOKEN_FILE", login)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", hashlib.sha256(binary.read_bytes()).hexdigest())
     monkeypatch.setattr(agentsh_guard, "ATTACH_SECONDS", 3)
     real = agentsh_guard._run
@@ -1808,7 +1812,7 @@ def test_the_home_folder_is_opened_not_listed(harness, main):
         assert r.decision(r.first_match(path, "list")) == "deny", path
     assert r.decision(r.first_match(f"{HOME}/github/sibling/README.md", "read")) == "deny"
     if harness == "claude_code":
-        assert r.decision(r.first_match(f"{HOME}/.claude", "list")) == "allow"
+        assert r.decision(r.first_match(f"{HOME}/.claude", "list")) == "deny"
 
 
 def test_read_sets_the_agent_cache_in_the_main_checkout(tmp_path, monkeypatch):
@@ -1844,3 +1848,138 @@ def test_glob_characters_in_the_checkout_path_match_themselves():
     assert r.first_match(f"{main}/adws/adw_data/agent-cache/uv/x", "write") == "sssf-agent-cache"
     assert r.first_match(f"{main}/adws/pyproject.toml", "read") == "sssf-config-search"
     assert agentsh_guard.glob_escape("/a[b]{c}*?\\d") == "/a\\[b\\]\\{c\\}\\*\\?\\\\d"
+
+
+# ── Claude Code agents keep out of the engineer's ~/.claude ─────────────────
+
+def test_claude_policy_closes_the_engineers_claude_code_files():
+    rules_ = yaml.safe_load(agentsh_guard.policy_text(repo_settings.RepoSettings(), "/m/proj/.git",
+                                                      "claude_code", "n", **PATHS))["file_rules"]
+    by_name = {r["name"]: r for r in rules_}
+    home = "${HOME}"
+    for r in rules_:
+        if r["decision"] != "allow":
+            continue
+        for p in r["paths"]:
+            assert p != f"{home}/.claude" and not p.startswith(f"{home}/.claude/"), (r["name"], p)
+            assert not p.startswith(f"{home}/.claude.json"), (r["name"], p)
+    for p in by_name["sssf-agent-write"]["paths"]:
+        assert not p.startswith((f"{home}/.claude", f"{home}/.local/share/claude")), p
+    named = [r["name"] for r in rules_ if r["decision"] == "allow"
+             and any(p.startswith(f"{home}/.local/share/claude") for p in r["paths"])]
+    assert named == ["sssf-agent-read"]
+    assert by_name["sssf-agent-read"]["operations"] == agentsh_guard.READ
+    for gone in ("github/skills/**", "github/plugins/**", "CLAUDE.md", "AGENTS.md"):
+        assert f"{home}/{gone}" not in by_name["sssf-agent-read"]["paths"], gone
+    creds = by_name["sssf-credentials"]
+    assert f"{home}/.config/sssf-sandbox/**" in creds["paths"]
+    assert creds["decision"] == "deny" and creds["operations"] == ["*"]
+    names = [r["name"] for r in rules_]
+    for r in rules_[:names.index("sssf-credentials")]:
+        assert not any(p.startswith(f"{home}/.config") for p in r["paths"]), r["name"]
+    assert names.index("sssf-credentials") < min(names.index("sssf-agent-read"), names.index("sssf-agent-write"))
+
+
+def test_claude_policy_denies_listing_and_reading_the_engineers_claude_folder():
+    text = shipped_text(MAINS[0], "claude_code")
+    r = Rules(text, HOME, MAINS[0])
+    for path in (f"{HOME}/.claude", f"{HOME}/.claude/.credentials.json", f"{HOME}/.claude/projects/x/a.jsonl",
+                 f"{HOME}/.claude.json", f"{HOME}/.config/sssf-sandbox/token.env"):
+        for op in ("list", "read", "open"):
+            assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+    for path in (f"{HOME}/.claude/settings.json", f"{HOME}/.claude.json.tmp",
+                 f"{HOME}/.local/share/claude/versions/2.1.322"):
+        for op in ("write", "create", "delete", "rename"):
+            assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+    assert r.decision(r.first_match(f"{HOME}/.local/share/claude/versions/2.1.322", "read")) == "allow"
+
+
+def test_pi_policy_keeps_its_shape():
+    rules_ = yaml.safe_load(agentsh_guard.policy_text(repo_settings.RepoSettings(), "/m/proj/.git",
+                                                      "pi", "n", **PATHS))["file_rules"]
+    by_name = {r["name"]: r for r in rules_}
+    assert by_name["sssf-agent-write"]["paths"] == agentsh_guard.PI_WRITE
+    assert "sssf-agent-read" not in by_name
+    assert by_name["sssf-other-sign-in"]["paths"] == agentsh_guard.CLAUDE_SIGN_IN
+
+
+def test_claude_token_from_the_environment_then_the_file(tmp_path, monkeypatch):
+    token_file = tmp_path / "token.env"
+    monkeypatch.setattr(agentsh_guard, "TOKEN_FILE", token_file)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    assert agentsh_guard.claude_token() == ""                       # no file
+    token_file.write_text("OTHER=1\n")
+    assert agentsh_guard.claude_token() == ""                       # no line
+    token_file.write_text('CLAUDE_CODE_OAUTH_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN="tok"\n')
+    assert agentsh_guard.claude_token() == "tok"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", " env-tok ")
+    assert agentsh_guard.claude_token() == "env-tok"
+    assert agentsh_guard.claude_token({}) == "tok"
+
+
+CLAUDE_ROSTER = SKILL / "templates" / "sssf.config.claude_code.yaml"   # the shipped roster with Claude Code agents
+
+
+def test_ensure_refuses_without_a_token_before_a_worktree_or_run_row(tmp_path):
+    root = git_repo(tmp_path / "r")
+    (root / "adws/adw_sssf_config").mkdir(parents=True)
+    (root / "adws/adw_sssf_config/repo.yaml").write_text("local_guard: agentsh\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    code = ("import sys; sys.path.insert(0, %r)\n"
+            "from adw_modules import agentsh_guard, agents, session\n"
+            "agentsh_guard.check_machine = lambda guard: None\n"
+            "session.ensure(agents.load_config(%r))\n" % (str(SKILL / "templates/adws"), str(CLAUDE_ROSTER)))
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_OAUTH_TOKEN"} | {"HOME": str(home)}
+    done = subprocess.run([sys.executable, "-I", "-c", code], cwd=root, env=env, capture_output=True, text=True)
+    assert done.returncode != 0 and "Traceback" not in done.stderr
+    assert "claude setup-token" in done.stderr and "token.env" in done.stderr
+    assert not (root / "adws/adw_data").exists()
+    assert subprocess.run(["git", "worktree", "list"], cwd=root, capture_output=True,
+                          text=True).stdout.count("\n") == 1
+
+
+def test_claude_code_child_env_under_agentsh(machine, tmp_path, monkeypatch):
+    token_file = tmp_path / "token.env"
+    token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok-file\n")
+    monkeypatch.setattr(agentsh_guard, "TOKEN_FILE", token_file)
+    config_dir = str(tmp_path / "data" / "sessions" / "abc" / "claude-config")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/home/u/.claude")
+    env = agent_cc.child_env(guard=machine.guard, config_dir=config_dir)
+    assert env["CLAUDE_CONFIG_DIR"] == config_dir
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-file" and env["DISABLE_AUTOUPDATER"] == "1"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-env")
+    assert agent_cc.child_env(guard=machine.guard, config_dir=config_dir)["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-env"
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN")
+    for guard in (None, LocalGuard(mode="text")):
+        env = agent_cc.child_env(guard=guard, config_dir=config_dir)
+        assert env.get("CLAUDE_CONFIG_DIR") == "/home/u/.claude" and "DISABLE_AUTOUPDATER" not in env
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    assert "CLAUDE_CONFIG_DIR" not in agent_cc.child_env(guard=None, config_dir=config_dir)
+    token_file.write_text("")
+    with pytest.raises(agentsh_guard.AgentshRefused, match="claude setup-token"):
+        agent_cc.child_env(guard=machine.guard, config_dir=config_dir)
+
+
+def test_a_claude_agent_gets_the_runs_config_folder_and_refuses_without_a_token(
+        machine, service, tmp_path, fake, monkeypatch):
+    fake(FIXTURES / "cc_turn1.jsonl")
+    dump = tmp_path / "dump.json"
+    monkeypatch.setenv("FAKE_DUMP", str(dump))
+    data = tmp_path / "data"
+    data.mkdir()
+    req = request(tmp_path, cwd=str(machine.root), data_root=str(data), adw_id="abc",
+                  raw_output_path=str(data / "raw_output.jsonl"), session_dir=str(data / "cc_sessions")) \
+        .model_copy(update={"local_guard": machine.guard})
+    monkeypatch.setattr(sandbox, "current", lambda: sandbox.LOCAL)
+    agent_cc.run(req)
+    folder = data / "sessions" / "abc" / "claude-config"
+    env = json.loads(dump.read_text())["env"]
+    assert env["CLAUDE_CONFIG_DIR"] == str(folder)
+    assert folder.is_dir() and not folder.is_symlink()
+    assert env["DISABLE_AUTOUPDATER"] == "1" and env["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-from-file"
+    dump.unlink()
+    agentsh_guard.TOKEN_FILE.write_text("")
+    with pytest.raises(agentsh_guard.AgentshRefused, match="claude setup-token"):
+        agent_cc.run(req)
+    assert not dump.exists()

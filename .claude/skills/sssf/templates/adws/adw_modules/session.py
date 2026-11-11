@@ -133,6 +133,8 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
             agentsh_guard.check_machine(guard)   # before a worktree or a run row exists
         except agentsh_guard.AgentshRefused as error:
             raise SystemExit(str(error)) from None
+        if "claude_code" in guard.policies and not agentsh_guard.claude_token():
+            raise SystemExit(agentsh_guard.NO_TOKEN)
     try:
         # Held until this run's process and worktree rows are written, so two
         # launches at once can't both count the other runs before either counts.

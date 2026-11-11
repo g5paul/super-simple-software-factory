@@ -27,7 +27,9 @@ included, so it may deny `cat .env` before sssf_refuse.py runs. Each denial
 arrives as a `permission_denied` system event, whose `message` is a string. The
 forwarder (agents._event_forwarder, via rules.denied) counts that call as
 refused, on a Claude Code stream only, by its `tool_use_id`, and the trace records it from its `tool_result`.
-Keys .env names don't reach the agent (utils.agent_env). Auth stays on the operator's
+Keys .env names don't reach the agent (utils.agent_env). Under local_guard: agentsh,
+Claude Code agents run from the run's own CLAUDE_CONFIG_DIR, sessions/<adw_id>/claude-config,
+and sign in with CLAUDE_CODE_OAUTH_TOKEN. Under the text guard, auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """
 
@@ -36,6 +38,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -95,24 +98,48 @@ class NotLoggedIn(RuntimeError):
 _logged_in = False
 
 
-def check_login() -> None:
+def check_login(guard=None) -> None:
     """Stop before the first agent when claude has no login it can use.
 
     In the operator container, the session signed in from its token but the
     shell that launched the ADW did not have it, and the planner ended "Not
     logged in" (sssf-sandbox a03e7b00). The check runs with the agents' own
-    environment, once per process.
+    environment, once per process. Under an agentsh guard the agents sign in
+    with a token, so the check does too, from a private config folder: the
+    run's own folder is agent-writable, and this runs outside the wrap.
     """
     global _logged_in
     if _logged_in:
         return
-    result = subprocess.run([CLAUDE_PATH, "auth", "status"], capture_output=True,
-                            text=True, check=False, env=child_env())
+    under_agentsh = guard is not None and guard.mode == "agentsh"
+    folder = None
+    if under_agentsh:
+        # Not under /tmp or $TMPDIR: every agent policy allows those in full, and an agent could plant a
+        # settings.json here before this runs outside the wrap. sssf-credentials denies this folder to agents.
+        home = agentsh_guard.TOKEN_FILE.parent
+        home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        folder = tempfile.TemporaryDirectory(prefix="sssf-claude-login-", dir=home)
+    try:
+        try:
+            env = child_env(guard=guard, config_dir=folder.name) if folder else child_env()
+        except agentsh_guard.AgentshRefused as error:
+            raise NotLoggedIn(str(error)) from None
+        result = subprocess.run([CLAUDE_PATH, "auth", "status"], capture_output=True,
+                                text=True, check=False, env=env)
+    finally:
+        if folder:
+            folder.cleanup()
     try:
         status = json.loads(result.stdout)
     except json.JSONDecodeError:
         status = {}
     if not status.get("loggedIn"):
+        if under_agentsh:
+            raise NotLoggedIn(
+                "the Claude Code token did not sign in (claude auth status: "
+                f"{status.get('authMethod', 'no answer')}). Run `claude setup-token` in a terminal "
+                "and save CLAUDE_CODE_OAUTH_TOKEN=<token> in ~/.config/sssf-sandbox/token.env, "
+                "mode 600, or export it where the ADW is launched.")
         raise NotLoggedIn(
             "claude has no login the agents can use (claude auth status: "
             f"{status.get('authMethod', 'no answer')}). Log in with `claude`, or, "
@@ -122,14 +149,20 @@ def check_login() -> None:
     _logged_in = True
 
 
-def child_env(agent_name: str = "", adw_id: str = "", allowed=()) -> dict[str, str]:
+def child_env(agent_name: str = "", adw_id: str = "", allowed=(), *, guard=None,
+              config_dir: str = "") -> dict[str, str]:
     """The operator's environment less the keys .env set (utils.agent_env),
     except SSSF_*, OBS_*, CLAUDE_CODE_OAUTH_TOKEN and `allowed` (repo.yaml
-    agent_env). Claude Code gets no provider keys beyond those."""
+    agent_env). Claude Code gets no provider keys beyond those. Under an agentsh
+    `guard` it also gets `config_dir` as CLAUDE_CONFIG_DIR, the token (from the
+    operator's environment, else the token file) and DISABLE_AUTOUPDATER=1, and
+    raises AgentshRefused when there is no token."""
     env = mark_agent(agent_env(operator_env(), allowed), agent_name, adw_id)
     if AUTH == "subscription":
         for var in API_KEY_VARS:
             env.pop(var, None)
+    agentsh = guard is not None and guard.mode == "agentsh"
+    env.update(agentsh_guard.claude_env(guard, agentsh_guard.claude_token(env) if agentsh else "", config_dir))
     return env
 
 
@@ -303,9 +336,18 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     background = 0                  # Claude Code's background tasks still running
     # sandbox.start gives the child a DEVNULL stdin, for the reason agent_pi gives.
     tree = sandbox.current()
+    guard, config_dir = None, ""
+    if tree is sandbox.LOCAL and request.local_guard is not None and request.local_guard.mode == "agentsh":
+        # The run's own Claude Code folder, the same for every call and rejoin of the run. The link-safe
+        # walk makes it a real folder, replacing an agent's link, file or FIFO in its place.
+        guard = request.local_guard
+        config_dir = os.path.abspath(Path(request.data_root) / "sessions" / request.adw_id
+                                     / agentsh_guard.CLAUDE_HOME)
+        session_files.write(Path(config_dir) / ".sssf", "", request.data_root)
     process = agentsh_guard.start(
         tree, HARNESS, cmd, cwd=request.cwd,
-        env=_with_refusals(child_env(request.agent_name, request.adw_id, request.agent_env),
+        env=_with_refusals(child_env(request.agent_name, request.adw_id, request.agent_env,
+                                     guard=guard, config_dir=config_dir),
                            request.refuse_rules, tree),
         guard=request.local_guard, tally=request.refusal_tally)
     if on_spawn:

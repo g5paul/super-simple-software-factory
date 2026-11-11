@@ -386,6 +386,46 @@ def test_a_login_is_checked_once(auth, monkeypatch, tmp_path):
     agent_cc.check_login()
 
 
+FAKE_AUTH_ENV = """#!/usr/bin/env python3
+import json, os
+keys = ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "DISABLE_AUTOUPDATER")
+seen = {k: os.environ.get(k) for k in keys}
+seen["config_existed"] = os.path.isdir(seen["CLAUDE_CONFIG_DIR"] or "/nonexistent")
+open(os.environ["FAKE_AUTH_DUMP"], "w").write(json.dumps(seen))
+print(json.dumps({"loggedIn": bool(seen["CLAUDE_CODE_OAUTH_TOKEN"]), "authMethod": "oauth_token"}))
+"""
+
+
+def test_check_login_under_agentsh_uses_the_token_and_a_private_folder(tmp_path, monkeypatch):
+    from adw_modules import agentsh_guard
+    binary = tmp_path / "claude"
+    binary.write_text(FAKE_AUTH_ENV)
+    binary.chmod(0o755)
+    dump = tmp_path / "seen.json"
+    token_file = tmp_path / "token.env"
+    monkeypatch.setattr(agent_cc, "CLAUDE_PATH", str(binary))
+    monkeypatch.setattr(agent_cc, "_logged_in", False)
+    monkeypatch.setattr(agentsh_guard, "TOKEN_FILE", token_file)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("FAKE_AUTH_DUMP", str(dump))
+    guard = LocalGuard(mode="agentsh")
+    with pytest.raises(agent_cc.NotLoggedIn, match="claude setup-token"):
+        agent_cc.check_login(guard)
+    assert not dump.exists()
+    token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok\n")
+    agent_cc.check_login(guard)
+    seen = json.loads(dump.read_text())
+    assert seen["CLAUDE_CODE_OAUTH_TOKEN"] == "tok" and seen["DISABLE_AUTOUPDATER"] == "1"
+    assert seen["config_existed"] and "sessions" not in Path(seen["CLAUDE_CONFIG_DIR"]).parts
+    assert not Path(seen["CLAUDE_CONFIG_DIR"]).exists()
+    # The folder is beside the token file, which sssf-credentials denies to every agent, never in /tmp.
+    assert Path(seen["CLAUDE_CONFIG_DIR"]).parent == token_file.parent
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "elsewhere"))
+    assert agentsh_guard.TOKEN_FILE.parent == token_file.parent
+    monkeypatch.undo()
+    assert agentsh_guard.TOKEN_FILE.parent == Path.home() / ".config" / "sssf-sandbox"
+
+
 def test_not_logged_in_is_a_stop():
     from adw_modules import session
     assert agent_cc.NotLoggedIn in session.STOPS

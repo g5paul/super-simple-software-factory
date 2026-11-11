@@ -93,13 +93,19 @@ HOME_READ = [f"${{HOME}}{p}" for p in (
 )]
 # The Windows path is where Claude Code looks for managed settings on WSL. Denied, it warns
 # that those policies are NOT in effect, even when the folder doesn't exist.
+# ~/.local/share/claude holds Claude Code's program (versions/), which the engineer's own `claude`
+# runs, so agents read it and never change it; DISABLE_AUTOUPDATER=1 keeps their Claude Code from
+# trying to update it. ~/.claude and ~/.claude.json are in no list: the agents' config folder is
+# their own, and default-deny closes the engineer's. ~/CLAUDE.md, ~/AGENTS.md, ~/github/skills and
+# ~/github/plugins went unread in the 2026-11-10 probe under --safe-mode; ~/.config/anthropic was read.
 CLAUDE_READ = [f"${{HOME}}/{p}" for p in (
-    "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".config/anthropic", ".config/anthropic/**",
-    "github/skills/**", "github/plugins/**",
+    "CLAUDE.local.md", ".config/anthropic", ".config/anthropic/**", ".local/share/claude/**",
 )] + ["/mnt/c/Program Files/ClaudeCode", "/mnt/c/Program Files/ClaudeCode/**"]
+# ~/.local/state/claude holds lock files (the 2026-11-10 probe's only writes outside the config
+# folder were to locks/) and ~/.cache/claude-cli-nodejs holds Claude Code's logs. Claude Code loads
+# no code from either, so both stay writable.
 CLAUDE_WRITE = [f"${{HOME}}/{p}" for p in (
-    ".claude", ".claude/**", ".claude.json", ".claude.json.*", ".cache/claude-cli-nodejs/**",
-    ".local/state/claude/**", ".local/share/claude/**",
+    ".cache/claude-cli-nodejs/**", ".local/state/claude/**",
 )] + ["/run/user/*/cc-socks", "/run/user/*/cc-socks/**"]
 PI_WRITE = ["${HOME}/.pi", "${HOME}/.pi/**"]
 

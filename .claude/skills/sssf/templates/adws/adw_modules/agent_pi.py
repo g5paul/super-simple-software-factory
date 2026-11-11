@@ -738,7 +738,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
                         if turn and message.get("stopReason") not in ("aborted", "error"):
                             result.context_tokens = turn
                         result.cost += (usage.get("cost", {}) or {}).get("total", 0.0) or 0.0
-                if on_event:
+                # agentsh_ events come only from the guard (start/close); a stream copy is a command's forgery.
+                if on_event and not agentsh_guard.guard_event(event):
                     try:
                         on_event(event)
                     except Exception as error:

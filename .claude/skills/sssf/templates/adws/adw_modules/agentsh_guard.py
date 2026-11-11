@@ -1045,6 +1045,18 @@ class AgentshProcess:
                 self.trace_notes.append(f"session delete failed: {type(error).__name__}")
 
 
+GUARD_EVENT_PREFIX = "agentsh_"
+
+
+def guard_event(event) -> bool:
+    """True for an event whose type only this guard may send (agentsh_note, agentsh_denials, and any
+    later agentsh_ type). The harness read loops drop such an event from the agent's stream before
+    on_event, because a command can write lines to the harness's stdout; start() and close() call
+    on_event directly. Never raises."""
+    return isinstance(event, dict) and isinstance(event.get("type"), str) \
+        and event["type"].startswith(GUARD_EVENT_PREFIX)
+
+
 def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[LocalGuard],
           tally: Optional[rules.RefusalTally] = None, on_event: Optional[Callable[[dict], None]] = None):
     if tree is not sandbox.LOCAL:
@@ -1108,7 +1120,8 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     return process
 
 
-_DROP_TYPE = re.compile(r'"?(?:event_)?type"?\s*[=:]\s*"?([^"\s,}]+)')
+# The lookbehind keeps `subtype=` and `event_subtype=` from being read as the type.
+_DROP_TYPE = re.compile(r'(?<![A-Za-z0-9_])"?(?:event_)?type"?\s*[=:]\s*"?([^"\s,}]+)')
 _TYPE_NAME = re.compile(r"[a-z0-9_]{1,64}")
 
 
@@ -1117,7 +1130,9 @@ def journal_drops(since: float, until: float,
     """agentsh's "event channel full" lines between `since` and `until`, counted by event type,
     as the runner's own user. Returns (counts, problem); `problem` is set, and the counts empty,
     when the journal can't be read. journald's rate limit can suppress lines, so the counts are
-    a floor. Never raises."""
+    a floor. The window is in whole seconds and ends when the read runs, so a line journald delivers
+    late isn't counted, and a line under the unit can carry agent-chosen text, so the counts are
+    advice. Never raises."""
     try:
         command = ["journalctl", "-u", "agentsh", "--since", f"@{int(since)}",
                    "--until", f"@{math.ceil(until)}", "-o", "cat", "--no-pager"]

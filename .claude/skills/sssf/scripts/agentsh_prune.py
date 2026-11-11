@@ -1,7 +1,8 @@
-"""Prune agentsh's event store to the last 2 days. Runs as root from sssf-agentsh-prune.service.
+"""Prune agentsh's event store and its rotated audit log to the last 6 hours. Runs as root from
+sssf-agentsh-prune.service.
 
 Standard library only. It deletes nothing and runs no ANALYZE while the service lists a session or
-doesn't answer. It writes a status file that anyone can read: counts and times, never event content.
+doesn't answer; the audit step skips the same way. It writes a status file that anyone can read: counts and times, never event content.
 
 Exit codes: 0 after a prune, a skip or "not due"; 1 when this attempt recorded an error (so
 `systemctl --failed` lists the service). A skip exits 0 even if the status file still holds an old error.
@@ -19,8 +20,14 @@ from datetime import datetime, timezone
 DB = "/var/lib/agentsh/events.db"            # agentsh_sssf.yaml audit.storage.sqlite_path
 API = "http://127.0.0.1:18080"               # agentsh_guard.API
 STATUS = "/var/lib/sssf-agentsh-prune/status.json"   # agentsh_guard.PRUNE_STATUS
-KEEP_SECONDS = 2 * 24 * 3600
-PRUNE_EVERY = 3600         # the timer looks every 10 minutes; a prune is due an hour after the last
+AUDIT = "/var/lib/agentsh/audit.jsonl"      # agentsh_sssf.yaml audit.output
+KEEP_SECONDS = 6 * 3600
+# The timer looks every 10 minutes. A prune is due once the last is at least PRUNE_EVERY - PRUNE_SLACK
+# old, so a check that lands a second short of the hour still prunes. Because of that bound, prunes
+# never come less than 50 minutes apart; they land at the 50- or 60-minute check, by the timer's jitter.
+# last_prune is stored in whole seconds, rounded down, so the bound is 3,000 s give or take under a second.
+PRUNE_EVERY = 3600
+PRUNE_SLACK = 600          # one timer period (OnCalendar=*:0/10)
 ANALYZE_SECONDS = 7 * 24 * 3600
 BATCH = 5000
 LOCK_WAIT = 5.0            # sqlite3.connect(timeout=...)
@@ -70,6 +77,53 @@ def store_bytes(db):
     return size
 
 
+def rotated(audit):
+    """(path, lstat) of each regular file named audit.<N>, N one or more ASCII digits, beside the live log."""
+    folder = os.path.dirname(audit)
+    prefix = os.path.basename(audit) + "."
+    found = []
+    for name in os.listdir(folder):
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(prefix):]
+        if not (suffix.isascii() and suffix.isdigit()):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            found.append((path, info))
+    return found
+
+
+def audit_bytes(audit):
+    """Size of the live audit log and its rotated files, or None when the folder can't be listed."""
+    try:
+        files = rotated(audit)
+        total = sum(info.st_size for _, info in files)
+        try:
+            live = os.lstat(audit)
+            if stat.S_ISREG(live.st_mode):
+                total += live.st_size
+        except FileNotFoundError:
+            pass
+    except OSError:
+        return None
+    return total
+
+
+def prune_audit(audit, now):
+    """Delete rotated audit files last modified more than KEEP_SECONDS ago. Never the live log."""
+    for path, info in rotated(audit):
+        if now - info.st_mtime > KEEP_SECONDS:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+
+
 def write_status(path, data):
     folder = os.path.dirname(path)
     os.makedirs(folder, mode=0o755, exist_ok=True)
@@ -116,7 +170,7 @@ def skip_reason(api):
     return None
 
 
-def _prune(db, api, status, now):
+def _prune(db, api, status, now, audit):
     """One prune attempt. Returns (status data, whether this attempt recorded an error)."""
     errored = False
     now = time.time() if now is None else now
@@ -128,6 +182,7 @@ def _prune(db, api, status, now):
     except (OSError, ValueError):
         old = {}
     data = {"store_bytes": None,
+            "audit_bytes": None,
             "last_prune": old.get("last_prune"),
             "last_analyze": old.get("last_analyze"),
             "last_run": iso(now),
@@ -135,8 +190,9 @@ def _prune(db, api, status, now):
             "skipped": old.get("skipped"),
             "error": old.get("error")}
     last = parse(data["last_prune"])
-    if last is not None and now - last < PRUNE_EVERY:
+    if last is not None and now - last < PRUNE_EVERY - PRUNE_SLACK:
         data["store_bytes"] = store_bytes(db)
+        data["audit_bytes"] = audit_bytes(audit)
         write_status(status, data)
         return data, False
     reason = skip_reason(api)
@@ -173,6 +229,10 @@ def _prune(db, api, status, now):
                         conn.execute("PRAGMA analysis_limit=1000")
                         conn.execute("ANALYZE")
                         data["last_analyze"] = iso(now)
+            if reason is None:
+                reason = skip_reason(api)
+                if reason is None:
+                    prune_audit(audit, now)
         if reason is None:
             data["last_prune"] = iso(now)
             data["deleted"] = deleted
@@ -180,7 +240,7 @@ def _prune(db, api, status, now):
             data["error"] = None
         else:
             data["skipped"] = reason
-    except (sqlite3.OperationalError, sqlite3.DatabaseError) as error:
+    except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError) as error:
         data["error"] = f"{type(error).__name__}: {error}"
         errored = True
     finally:
@@ -192,16 +252,17 @@ def _prune(db, api, status, now):
         data["error"] = f"{type(error).__name__}: {error}"
         errored = True
     data["store_bytes"] = store_bytes(db)
+    data["audit_bytes"] = audit_bytes(audit)
     write_status(status, data)
     return data, errored
 
 
-def prune(db=DB, api=API, status=STATUS, now=None):
-    return _prune(db, api, status, time.time() if now is None else now)[0]
+def prune(db=DB, api=API, status=STATUS, now=None, audit=AUDIT):
+    return _prune(db, api, status, time.time() if now is None else now, audit)[0]
 
 
 def main():
-    _, errored = _prune(DB, API, STATUS, time.time())
+    _, errored = _prune(DB, API, STATUS, time.time(), AUDIT)
     return 1 if errored else 0
 
 

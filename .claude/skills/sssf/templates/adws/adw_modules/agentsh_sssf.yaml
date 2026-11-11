@@ -15,6 +15,16 @@ auth:
 audit:
   enabled: true
   output: "/var/lib/agentsh/audit.jsonl"
+  # agentsh rotates this log by size only: at max_size_mb it renames it to .1, shifts
+  # .1 to .2 and so on, and overwrites the last of max_backups. max_age_days and
+  # compress parse but do nothing in this build. At most 6 files of about 200 MB,
+  # 1.2 GB; the prune deletes rotated files older than 6 hours. The store levels off
+  # at about 8.4 to 9.8 GB at the measured 1.4 GB an hour, so together they can pass
+  # the 10 GB note at a sustained peak; the log's own rate is an estimate. See
+  # config.md, "The event store".
+  rotation:
+    max_size_mb: 200
+    max_backups: 5
   storage:
     sqlite_path: "/var/lib/agentsh/events.db"
     # agentsh drops an event when this queue is full (default 4096, batches of 64 every

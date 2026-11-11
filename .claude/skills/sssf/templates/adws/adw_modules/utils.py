@@ -73,6 +73,30 @@ def operator_env() -> dict[str, str]:
     return env
 
 
+# Install from a cache by copying, never by hardlink, so a tree SSSF builds shares no file with a cache.
+#   UV_LINK_MODE=copy: uv, docs.astral.sh/uv/reference/environment/#uv_link_mode
+#     (values clone, copy, hardlink, symlink; hardlink is the default on Linux).
+#   npm_config_package_import_method=copy: pnpm's package-import-method,
+#     pnpm.io/settings#packageimportmethod (auto, hardlink, copy, clone, clone-or-copy); pnpm reads
+#     settings from npm_config_* env vars, as cache_env's npm_config_store_dir relies on.
+#   bun has no environment setting: `bun install --help` (1.4.4) and bun's docs
+#     (bun.com/docs/pm/cli/install, --backend) give only the `--backend=copyfile` flag, and
+#     bun's environment variables (bun.com/docs/runtime/env) name none. A repo's own `bun install`
+#     must say `--backend=copyfile`; the launch walk refuses what it links.
+COPY_MODES = {"UV_LINK_MODE": "copy", "npm_config_package_import_method": "copy"}
+
+
+def copy_installs(env: dict[str, str], mode: str | None) -> dict[str, str]:
+    """env with COPY_MODES set when `mode` is "agentsh"; env unchanged otherwise.
+    A case-variant of a key already in env is replaced. The cache folders are left alone."""
+    if mode != "agentsh":
+        return env
+    wanted = {k.lower() for k in COPY_MODES}
+    out = {k: v for k, v in env.items() if k.lower() not in wanted}
+    out.update(COPY_MODES)
+    return out
+
+
 # The same test as install.py's loads_module.
 MOD_LINE = re.compile(r"^\s*mod\s+sssf(\s+['\"]sssf\.just['\"])?\s*$", re.MULTILINE)
 

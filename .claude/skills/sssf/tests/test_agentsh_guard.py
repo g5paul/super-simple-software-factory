@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import textwrap
+import types
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ from pydantic import ValidationError
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
+from adw_modules import utils, worktree
 from adw_modules import account, agent_cc, agent_pi, agents, agentsh_guard, kill, repo_settings, rules, sandbox, session
 from adw_modules.data_types import LocalGuard, Policy
 
@@ -169,8 +171,9 @@ os.execvp(cmd[0], cmd)
 
 
 @pytest.fixture
-def machine(tmp_path, monkeypatch, cfg):
-    """Fake wrap binary, root-owned config and installed policies for one guard."""
+def machine(tmp_path, monkeypatch, cfg, service):
+    """Fake wrap binary, root-owned config and installed policies for one guard.
+    `service` comes first because the pin line names API."""
     binary = tmp_path / "agentsh"
     binary.write_text(WRAP.replace("PYTHON", sys.executable, 1))
     binary.chmod(0o755)
@@ -182,17 +185,17 @@ def machine(tmp_path, monkeypatch, cfg):
                 for h in ("claude_code", "pi")}
     template = TEMPLATE.read_text()
     guard = LocalGuard(mode="agentsh", root=str(root.resolve()), policies=policies, config_template=template,
-                       agent_cache=str(tmp_path / "agent-cache"))
+                       agent_cache=str(tmp_path / "agent-cache"), git_common_dir=common)
     config = tmp_path / "sssf.yaml"
+    pdir = tmp_path / "policies"
+    monkeypatch.setattr(agentsh_guard, "CONFIG", str(config))     # before the config: the pin line names them
+    monkeypatch.setattr(agentsh_guard, "POLICY_DIR", str(pdir))
     monkeypatch.setattr(agentsh_guard, "BINARY", str(binary))     # before the config: it names the pin
     monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", hashlib.sha256(binary.read_bytes()).hexdigest())
     config.write_text(agentsh_guard.render_config(template, [p.name for p in policies.values()]))
-    pdir = tmp_path / "policies"
     pdir.mkdir()
     for p in policies.values():
         (pdir / f"{p.name}.yaml").write_text(p.text)
-    monkeypatch.setattr(agentsh_guard, "CONFIG", str(config))
-    monkeypatch.setattr(agentsh_guard, "POLICY_DIR", str(pdir))
     login = tmp_path / "login.env"   # a Claude Code agent under agentsh signs in with a token
     login.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok-from-file\n")
     monkeypatch.setattr(agentsh_guard, "TOKEN_FILE", login)
@@ -410,12 +413,13 @@ def test_the_agents_caches_are_set_for_both_harnesses_and_beat_the_engineers(mac
         dump = tmp_path / f"dump-{harness}.json"
         env = {"FAKE_DUMP": str(dump), "PATH": "/usr/bin:/bin", "UV_CACHE_DIR": "/x",
                "NPM_CONFIG_CACHE": "/y", "Cargo_Home": "/z",
-               "NPM_CONFIG_USERCONFIG": "/home/u/.npmrc"}
+               "NPM_CONFIG_USERCONFIG": "/home/u/.npmrc", "UV_LINK_MODE": "hardlink"}
         launch(machine, harness, cmd=[sys.executable, "-c", "pass"], env=env).wait()
         seen[harness] = json.loads(dump.read_text())["env"]
     want = agentsh_guard.cache_env(guard.agent_cache)
     for env in seen.values():
-        assert all(env.get(k) == v and v.startswith(guard.agent_cache + "/") for k, v in want.items())
+        assert all(env.get(k) == v for k, v in want.items())
+        assert all(v.startswith(guard.agent_cache + "/") for k, v in want.items() if k not in utils.COPY_MODES)
         assert {k for k in env if k.lower() in {w.lower() for w in want}} == set(want)
         assert "NPM_CONFIG_CACHE" not in env and "Cargo_Home" not in env
         assert "NPM_CONFIG_USERCONFIG" not in env
@@ -424,6 +428,8 @@ def test_the_agents_caches_are_set_for_both_harnesses_and_beat_the_engineers(mac
     assert want["npm_config_userconfig"] == f"{guard.agent_cache}/npmrc"
     assert want["npm_config_init_module"] == f"{guard.agent_cache}/npm-init.js"
     assert (Path(guard.agent_cache).stat().st_mode & 0o777) == 0o700
+    for env in seen.values():
+        assert env["UV_LINK_MODE"] == "copy" and env["npm_config_package_import_method"] == "copy"
 
 
 def test_an_empty_agent_cache_refuses_and_starts_nothing(machine, tmp_path):
@@ -1996,10 +2002,15 @@ def test_a_claude_agent_gets_the_runs_config_folder_and_refuses_without_a_token(
 def test_render_config_ends_with_the_pin_line(monkeypatch):
     monkeypatch.setattr(agentsh_guard, "BINARY", "/x/agentsh")
     monkeypatch.setattr(agentsh_guard, "PINNED_SHA256", "ab" * 32)
+    monkeypatch.setattr(agentsh_guard, "CONFIG", "/x/c.yaml")
+    monkeypatch.setattr(agentsh_guard, "POLICY_DIR", "/x/pol")
+    monkeypatch.setattr(agentsh_guard, "SERVER", "unix:///x/s.sock")
+    monkeypatch.setattr(agentsh_guard, "API", "http://127.0.0.1:1")
     template = TEMPLATE.read_text()
     text = agentsh_guard.render_config(template, ["a"])
     last = text.rstrip("\n").splitlines()[-1]
-    assert last == f"# SSSF pins agentsh: /x/agentsh sha256 {'ab' * 32}"
+    assert last == ("# SSSF pins agentsh: /x/agentsh sha256 " + "ab" * 32 + " config /x/c.yaml policies /x/pol "
+                    "server unix:///x/s.sock api http://127.0.0.1:1")
     assert yaml.safe_load(text) == yaml.safe_load(text.removesuffix(last + "\n"))
     monkeypatch.setattr(agentsh_guard, "BINARY", "/y/agentsh")
     assert agentsh_guard.render_config(template, ["a"]) != text
@@ -2124,3 +2135,246 @@ def test_start_refuses_a_link_or_file_at_the_agent_cache(machine, tmp_path, kind
         assert os.readlink(cache) == target
     assert list(elsewhere.iterdir()) == []
     assert not (tmp_path / "nowhere").exists()
+
+
+# ── links outside the workspace ──────────────────────────────────────────────
+
+def test_outside_links_reports_only_files_with_a_link_outside_the_trees(tmp_path):
+    tree, cache, second = tmp_path / "tree", tmp_path / "cache", tmp_path / "second"
+    for d in (tree, cache, second):
+        d.mkdir()
+    (cache / "f").write_text("x")
+    os.link(cache / "f", tree / "f")
+    (tree / "a").write_text("x")
+    os.link(tree / "a", tree / "b")                  # both ends inside
+    (second / "s").write_text("x")
+    os.link(second / "s", tree / "s")                # the other end is in the second tree
+    found = agentsh_guard.outside_links([str(tree), str(second)])
+    assert found == [(str(tree), str(tree / "f"))]
+    assert agentsh_guard.outside_links([str(tree), str(second), str(cache)]) == []
+
+
+def test_outside_links_follows_no_symlink(tmp_path):
+    tree, out = tmp_path / "tree", tmp_path / "out"
+    tree.mkdir()
+    out.mkdir()
+    (out / "one").write_text("x")
+    os.link(out / "one", tmp_path / "two")
+    (tree / "dir").symlink_to(out)
+    (tree / "file").symlink_to(out / "one")
+    assert agentsh_guard.outside_links([str(tree)]) == []
+
+
+def test_a_git_dir_inside_the_workspace_is_walked_once(tmp_path):
+    root = tmp_path / "proj"
+    (root / ".git").mkdir(parents=True)
+    (root / ".git" / "a").write_text("x")
+    os.link(root / ".git" / "a", root / ".git" / "b")
+    assert agentsh_guard.outside_links([str(root), str(root / ".git")]) == []
+
+
+def test_an_unreadable_folder_refuses(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root reads everything")
+    tree = tmp_path / "tree"
+    (tree / "locked").mkdir(parents=True)
+    (tree / "locked").chmod(0)
+    try:
+        with pytest.raises(agentsh_guard.AgentshRefused, match="can't read"):
+            agentsh_guard.outside_links([str(tree)])
+    finally:
+        (tree / "locked").chmod(0o700)
+
+
+def test_a_path_longer_than_path_max_refuses_with_the_length_message(tmp_path):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    fd = os.open(tree, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for level in range(22):
+            name = f"{level:02d}" + "d" * 198
+            os.mkdir(name, dir_fd=fd)
+            nxt = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        os.close(os.open("f", os.O_CREAT | os.O_WRONLY, dir_fd=fd))
+    finally:
+        os.close(fd)
+    try:
+        with pytest.raises(agentsh_guard.AgentshRefused, match="too long for the link check") as raised:
+            agentsh_guard.outside_links([str(tree)])
+        message = str(raised.value)
+        assert str(tree) in message
+        assert len(message) < 4096
+    finally:
+        shutil.rmtree(tree)
+
+
+def test_a_folder_replaced_by_a_symlink_after_its_parent_is_listed_refuses(tmp_path, monkeypatch):
+    tree = tmp_path / "tree"
+    (tree / "sub").mkdir(parents=True)
+    (tree / "sub" / "x").write_text("x")
+    (tree / "g").write_text("g")
+    out = tmp_path / "out"
+    out.mkdir()
+    os.link(tree / "g", out / "f")
+    real = os.scandir
+    swapped = []
+
+    def fake(path):
+        entries = list(real(path))
+        if str(path) == str(tree) and not swapped:
+            swapped.append(True)
+            for entry in entries:
+                entry.stat(follow_symlinks=False)
+            (tree / "sub" / "x").unlink()    # shutil.rmtree would call the patched scandir
+            (tree / "sub").rmdir()
+            os.symlink(out, tree / "sub")
+        return entries
+
+    monkeypatch.setattr(agentsh_guard.os, "scandir", fake)
+    with pytest.raises(agentsh_guard.AgentshRefused, match="isn't one now"):
+        agentsh_guard.outside_links([str(tree)])
+
+
+def test_a_symlinked_tree_refuses(tmp_path):
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    with pytest.raises(agentsh_guard.AgentshRefused, match="not a folder"):
+        agentsh_guard.outside_links([str(tmp_path / "link")])
+
+
+def test_a_worktree_run_walks_the_main_git_dir(tmp_path):
+    main = git_repo(tmp_path / "proj")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "-C", str(main), "commit", "-q", "--allow-empty", "-m", "i"], check=True, env=env)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", str(wt)], check=True)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "f").write_text("x")
+    os.link(cache / "f", main / ".git" / "linked")
+    guard = LocalGuard(mode="agentsh", root=str(wt.resolve()), git_common_dir=str(main / ".git"))
+    with pytest.raises(agentsh_guard.AgentshRefused, match="git clone --no-local"):
+        agentsh_guard.check_links(guard)
+    os.unlink(cache / "f")
+    agentsh_guard.check_links(guard)
+
+
+def test_a_launch_refuses_a_workspace_file_linked_outside_and_starts_once_it_is_not(machine, tmp_path):
+    marker = tmp_path / "started"
+    cmd = [sys.executable, "-c", f"open({str(marker)!r}, 'w')"]
+    outside = tmp_path / "cache" / "f"
+    outside.parent.mkdir()
+    outside.write_text("x")
+    os.link(outside, machine.root / "shared.txt")
+    with pytest.raises(agentsh_guard.AgentshRefused, match="shared.txt"):
+        launch(machine, "pi", cmd=cmd)
+    assert not marker.exists()
+    os.unlink(outside)
+    launch(machine, "pi", cmd=cmd).wait()
+    assert marker.exists()
+
+
+def test_no_git_common_dir_at_launch_refuses_as_a_caller_bug(machine):
+    guard = machine.guard.model_copy(update={"git_common_dir": ""})
+    with pytest.raises(agentsh_guard.AgentshRefused, match="bug in the caller"):
+        launch(machine, "pi", guard=guard)
+
+
+def test_the_link_refusal_names_a_rebuild_per_kind_and_at_most_five_files(tmp_path):
+    root = tmp_path / "proj"
+    common = tmp_path / "proj" / ".git"
+    cache = tmp_path / "cache"
+    for d in (root / ".venv" / "lib", root / "web" / "node_modules" / "x", common, cache):
+        d.mkdir(parents=True)
+    names = [root / ".venv" / "lib" / "a.py", root / "web" / "node_modules" / "x" / "b.js", common / "obj"]
+    names += [root / f"plain{n}" for n in range(6)]
+    for n, path in enumerate(names):
+        (cache / str(n)).write_text("x")
+        os.link(cache / str(n), path)
+    guard = LocalGuard(mode="agentsh", root=str(root), git_common_dir=str(common))
+    with pytest.raises(agentsh_guard.AgentshRefused) as raised:
+        agentsh_guard.check_links(guard)
+    text = str(raised.value)
+    assert "UV_LINK_MODE=copy uv sync --reinstall" in text
+    assert "bun install --backend=copyfile" in text
+    assert "git clone --no-local" in text
+    assert "find / -xdev -samefile" in text
+    assert text.count(" (in ") == agentsh_guard.LINK_SAMPLES
+
+
+def test_copy_installs_sets_both_and_overrides_a_case_variant():
+    out = utils.copy_installs({"uv_link_mode": "hardlink", "A": "1"}, "agentsh")
+    assert out == {"A": "1", "UV_LINK_MODE": "copy", "npm_config_package_import_method": "copy"}
+    env = {"UV_LINK_MODE": "hardlink"}
+    assert utils.copy_installs(env, "text") is env and utils.copy_installs(env, None) is env
+
+
+def test_cache_env_holds_the_copy_settings():
+    env = agentsh_guard.cache_env("x")
+    assert env["UV_LINK_MODE"] == "copy" and env["npm_config_package_import_method"] == "copy"
+
+
+class _Box:
+    def __init__(self):
+        self.envs = []
+
+    def run(self, cmd, cwd=None, env=None, timeout=None):
+        self.envs.append(env)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+
+def test_run_setup_copies_only_when_asked(tmp_path, monkeypatch):
+    monkeypatch.setenv("UV_LINK_MODE", "hardlink")
+    for copy, want in ((True, "copy"), (False, "hardlink")):
+        box = _Box()
+        worktree.run_setup(["true"], tmp_path, 5, tmp_path / "logs", tmp_path, box, copy=copy)
+        assert box.envs[0]["UV_LINK_MODE"] == want
+
+
+@pytest.mark.parametrize("mode,want", [("agentsh", "copy"), ("text", "hardlink")])
+def test_quality_and_plan_checks_copy_only_under_agentsh(tmp_path, monkeypatch, mode, want):
+    from adw_modules import plan_checks, quality
+    from adw_modules.data_types import QualityCheckSpec
+    monkeypatch.setenv("UV_LINK_MODE", "hardlink")
+    box = _Box()
+    monkeypatch.setattr(sandbox, "current", lambda: box)
+    run = types.SimpleNamespace(
+        local_guard=LocalGuard(mode=mode), repo_root=tmp_path, adw_id="a", context_handoff_dir=tmp_path / "h",
+        data_root=tmp_path, phases=[types.SimpleNamespace(seq=1, phase_id="p")],
+        tracer=types.SimpleNamespace(event=lambda e: None), console=types.SimpleNamespace(note=lambda m: None))
+    quality._run(QualityCheckSpec(name="t", area="backend", operation="check", argv=["true"]), run)
+    plan_checks._run(run, 1, "true")
+    assert len(box.envs) == 2 and all(e["UV_LINK_MODE"] == want for e in box.envs)
+
+
+def test_a_symlink_at_binary_or_config_refuses(machine, tmp_path, monkeypatch):
+    marker = tmp_path / "started"
+    cmd = [sys.executable, "-c", f"open({str(marker)!r}, 'w')"]
+    for name in ("BINARY", "CONFIG"):
+        real = Path(getattr(agentsh_guard, name))
+        link = tmp_path / f"link-{name}"
+        link.symlink_to(real)
+        monkeypatch.setattr(agentsh_guard, name, str(link))
+        with pytest.raises(agentsh_guard.AgentshRefused, match="is a link"):
+            launch(machine, "pi", cmd=cmd)
+        monkeypatch.setattr(agentsh_guard, name, str(real))
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("name", ["CONFIG", "POLICY_DIR", "SERVER", "API"])
+def test_an_edited_pin_constant_among_the_four_refuses(machine, tmp_path, monkeypatch, name):
+    current = getattr(agentsh_guard, name)
+    if name == "CONFIG":
+        other = tmp_path / "copy.yaml"
+        other.write_bytes(Path(current).read_bytes())
+    elif name == "POLICY_DIR":
+        other = tmp_path / "policies-copy"
+        shutil.copytree(current, other)
+    else:
+        other = current + "x"
+    monkeypatch.setattr(agentsh_guard, name, str(other))
+    with pytest.raises(agentsh_guard.AgentshRefused, match="differs from what this checkout renders"):
+        agentsh_guard.check_machine(machine.guard)

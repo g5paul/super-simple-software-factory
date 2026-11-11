@@ -101,7 +101,7 @@ Then run `just take` or `just keep` on each flagged file, as in the install cook
 
 ## The install clone
 
-`~/github/sssf-install` is a plain `git clone` of this repo, with its own `.git`. No run uses it, so no agent can edit it, under the base guards alone or under agentsh. Every agentsh install, the hub's own included, runs from it:
+`~/github/sssf-install` is a `git clone --no-local` of this repo, with its own `.git`. A plain local clone would share object files with the hub, which agents may write, and git doesn't check an object's hash when it reads it, so an agent's object would run as `agentsh_install.py` from the clone. No run uses it, so no agent can edit it, under the base guards alone or under agentsh. Every agentsh install, the hub's own included, runs from it:
 
 ```bash
 just agentsh-install ~/github/sssf-install      # from the project, for its policy

@@ -39,7 +39,7 @@ from typing import Callable
 from . import sandbox, session_files
 from .data_types import (EventRecord, QualityCheckResult, QualityCheckSpec, QualityResult,
                          VerifyOutput)
-from .utils import now_iso, operator_env
+from .utils import copy_installs, now_iso, operator_env
 
 # How much of a failing command's output rides back inside the envelope. Enough
 # for a builder to act on without opening the artifact; bounded so a runaway
@@ -65,7 +65,7 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
     output_dir = _check_dir(run, spec.name)
     output_artifact = output_dir / "command.log"
     command = shlex.join(spec.argv)
-    env = operator_env()             # the engineer's own shell environment
+    env = copy_installs(operator_env(), getattr(getattr(run, "local_guard", None), "mode", None))   # the engineer's own shell environment
 
     run.console.note(f"quality {spec.name}: {command}")
     started_at = now_iso()

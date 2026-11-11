@@ -1162,6 +1162,18 @@ Run 0463a6c3 took `specs/tasks/guard-agentsh-warnings.md`, Next item 16, and mer
 
 Spec review 1 blocked twice: journald rate-limits each service to 10,000 lines per 30 seconds by default, so the count is a floor, and the design carried a lock, a flag and a renamed constant it didn't need. Round 1 of the bypass review found no bypass, harm or false positive. Its broken promise: an agent could write an `agentsh_note` into its own output stream and have it printed on the engineer's console, in every mode. It also found three holes `config.md` didn't list. Run E takes all four, from `specs/tasks/guard-agentsh-note-forgery.md`.
 
+### The note-forgery run, 955ca723
+
+Run 955ca723 took `specs/tasks/guard-agentsh-note-forgery.md`, Next item 17, and merged as c7ac4e7. $4.30.
+
+- Both harness read loops drop a stream event whose type starts with `agentsh_`, so only the guard's own start and close send `agentsh_note` and `agentsh_denials`.
+- `_DROP_TYPE` matches `type` only as a whole key.
+- `config.md` lists the whole-second journal window and agent-chosen journal lines.
+
+Spec review 1 blocked on one claim: an agent can't call `on_event` directly. Under `local_guard: text` with `kernel.yama.ptrace_scope` at 0, it can attach to the runner. Round 1 of the bypass review found no bypass, harm, false positive or broken promise. Of its two old holes, one is serious: a line on pi's stdout that isn't a JSON object raises in pi's read loop outside its handler, so pi runs on with no rule checked. Run G takes it, from `specs/tasks/guard-pi-read-loop.md`.
+
+Two hours after the event-store rollout the store was 2.78 GB, about 1.4 GB an hour while chains run, so 2 days of events would level off at 30 to 67 GB. The audit log, `/var/lib/agentsh/audit.jsonl`, rotates by size only, at agentsh's defaults of 500 MB and 10 backups, and `max_age_days` does nothing in this build. Run F, `specs/tasks/guard-agentsh-retention.md`, keeps 6 hours of both.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1184,4 +1196,6 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 14. **Done: the hardlink check**, by [runs 9497dc7f and b684482d](#the-hardlink-runs-9497dc7f-and-b684482d). Left for item 15: the one-time steps' three gaps.
 15. **Done: the event store**, by [run 149e2bda](#the-event-store-run-149e2bda), rolled out on [2026-11-11](#the-event-store-rollout-2026-11-11).
 16. **Done: warnings an engineer sees**, by [run 0463a6c3](#the-warnings-run-0463a6c3). After the reinstall, check the journal's drop count against run 05f96f0f's 34.
-17. **An agent forging the guard's notes**, `specs/tasks/guard-agentsh-note-forgery.md`: drop stream events whose type starts with `agentsh_`, a word boundary in the drop parser, and two limits in `config.md`.
+17. **Done: an agent forging the guard's notes**, by [run 955ca723](#the-note-forgery-run-955ca723).
+18. **pi's read loop**, `specs/tasks/guard-pi-read-loop.md`, run G: skip a line that isn't a JSON object, and stop pi on any exception that leaves the loop, as Claude Code's loop does.
+19. **Retention for the store and the audit log**, `specs/tasks/guard-agentsh-retention.md`, run F, after run G: 6 hours of both, a size cap on the audit log, and a due check that doesn't miss by a second.

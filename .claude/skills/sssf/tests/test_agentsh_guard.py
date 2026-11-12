@@ -1140,13 +1140,51 @@ def test_three_failed_polls_and_a_final_read_with_three_denials_are_a_breach(har
     assert stop.value.refusals == 3 and stop.value.partial is not None
 
 
-def test_a_non_breach_failure_with_three_denials_becomes_the_breach(harness_run, service):
+def _final_read_evidence(monkeypatch, service):
+    """What each call's final read got, for a failure message. This test failed in about 1 in 10
+    chain test steps (2026-11-09 to 11-11) and never outside one, so its failure carries the
+    state that tells a final read that raised from one that came back without the denials."""
+    reads, closed = [], []
+    real_pages, real_close = agentsh_guard.AgentshProcess._pages, agentsh_guard.close
+
+    def pages(self, start, extra):
+        began = time.monotonic()
+        try:
+            rows = real_pages(self, start, extra)
+        except Exception as error:
+            reads.append(f"raised {error!r} after {time.monotonic() - began:.3f} s")
+            raise
+        reads.append(f"{len(rows)} row(s) in {time.monotonic() - began:.3f} s")
+        return rows
+
+    def close(process, on_event=None):
+        real_close(process, on_event)
+        closed.append(process)
+    monkeypatch.setattr(agentsh_guard.AgentshProcess, "_pages", pages)
+    monkeypatch.setattr(agentsh_guard, "close", close)
+
+    def report() -> str:
+        state = [{"session": p.session, "counted": p.counted, "tally": p.tally.total, "tripped": p.tripped,
+                  "failure": p.failure, "notes": p.trace_notes, "polls": p.polls, "pages": p.pages,
+                  "slowest": round(p.slowest, 3)} for p in closed if isinstance(p, agentsh_guard.AgentshProcess)]
+        return (f"final reads: {reads}; closed: {state or [type(p).__name__ for p in closed]}; "
+                f"service queries: {len(service.queries)}")
+    return report
+
+
+def test_a_non_breach_failure_with_three_denials_becomes_the_breach(harness_run, service, monkeypatch):
     service.final_only = [denial(1), denial(2), denial(3)]
     original = ValueError("the tracer failed")
-    with pytest.raises(rules.RuleBreach) as stop:
+    evidence = _final_read_evidence(monkeypatch, service)
+    try:
         harness_run(raising(original))
-    assert stop.value.refusals == 3 and stop.value.partial is not None
-    assert stop.value.__cause__ is original
+    except rules.RuleBreach as stop:
+        assert stop.refusals == 3 and stop.partial is not None, evidence()
+        assert stop.__cause__ is original, evidence()
+    except Exception as error:
+        pytest.fail(f"{error!r} stood instead of the breach; {evidence()}")
+    else:
+        pytest.fail(f"the call returned instead of the breach; {evidence()}")
 
 
 def test_a_non_breach_failure_with_two_denials_stands(harness_run, service):

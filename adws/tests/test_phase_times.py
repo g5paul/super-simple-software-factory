@@ -112,3 +112,26 @@ def test_main_reads_the_registry_and_names_a_missing_repo(tmp_path, capsys):
     assert pt.main(["--registry", str(registry), "--now", iso(NOW)]) == 0
     assert "adw_x" in capsys.readouterr().out
     assert pt.main(["--registry", str(registry), "--repo", "nope"]) == 1
+
+
+def test_json_gives_each_slow_item_with_its_ratio_and_every_row(tmp_path, capsys):
+    root = tmp_path / "repo"
+    runs = usual(12, NOW - timedelta(days=5)) + [
+        ("slow", "adw_x", "success", NOW - timedelta(hours=3), 9.0,
+         [("plan", "success", 60.0), ("build", "success", 1000.0)]),
+        ("live", "adw_x", "running", NOW - timedelta(minutes=30), 0.0, [("build", "running", None)])]
+    trace(root, runs)
+    registry = tmp_path / "projects.json"
+    registry.write_text(json.dumps({"projects": {"repo": {"root": str(root)}}}))
+    assert pt.main(["--registry", str(registry), "--now", iso(NOW), "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    (repo,) = out["repos"]
+    assert out["factor"] == 2.0 and out["days"] == 14 and repo["repo"] == "repo"
+    (chain,) = repo["chains"]
+    rows = {row["phase"]: row for row in chain["rows"]}
+    assert chain["judged"] and rows["build"]["p90_s"] == 300.0 and "commit" in rows    # under a minute, still there
+    kinds = {(item["kind"], item["adw_id"]) for item in repo["slow"]}
+    assert ("phase", "slow") in kinds and ("cost", "slow") in kinds and ("phase", "live") in kinds
+    build = next(i for i in repo["slow"] if i["adw_id"] == "slow" and i["kind"] == "phase")
+    assert round(build["ratio"], 2) == 3.33 and build["seconds"] == 1000.0
+    assert next(i for i in repo["slow"] if i["adw_id"] == "live")["running"] is True

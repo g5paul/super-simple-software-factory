@@ -164,3 +164,51 @@ def test_repo_cannot_reach_a_repo_listed_hides(world, tmp_path, capsys):
     assert cp.main(["--hub", str(hub), "--registry", str(registry), "--listed",
                     "--repo", "proj"]) == 1
     assert "proj (" not in capsys.readouterr().out
+
+
+def run_json(capsys, *args):
+    code = cp.main(list(args) + ["--json"])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_json_marks_a_current_repo_ok_and_matching_its_stamp(world, capsys):
+    hub, proj, skill, registry = world
+    quality_run(proj, "success", "2026-01-01T00:05:00+00:00")
+    code, out = run_json(capsys, "--hub", str(hub), "--registry", str(registry))
+    assert code == 0 and out["skill"] == skill and out["hidden"] == 0
+    (only,) = out["repos"]
+    assert only["repo"] == "proj" and only["ok"] and only["branch"] == "main"
+    assert only["stamped"] == skill and only["behind"] is False and only["at_stamp"] is True
+    assert {c["name"] for c in only["checks"]} == {"stamp", "commit", "clean", "skill", "quality"}
+
+
+def test_json_tells_a_repo_behind_the_hub_from_one_whose_skill_was_changed(world, capsys):
+    hub, proj, skill, registry = world
+    commit(hub, {".claude/skills/sssf/SKILL.md": "v2\n"}, "skill v2")
+    _, out = run_json(capsys, "--hub", str(hub), "--registry", str(registry))
+    (behind,) = out["repos"]
+    assert behind["behind"] is True and behind["at_stamp"] is True and not behind["ok"]
+
+    commit(proj, {".claude/skills/sssf/tests/t.py": "edited\n"}, "edit the skill copy")
+    _, out = run_json(capsys, "--hub", str(hub), "--registry", str(registry))
+    (changed,) = out["repos"]
+    assert changed["behind"] is True and changed["at_stamp"] is False
+
+
+def test_json_gives_null_at_stamp_for_a_commit_the_hub_lacks(world, capsys):
+    hub, proj, skill, registry = world
+    commit(proj, {cp.STAMP: json.dumps({"skill": "0123456789abcdef"})}, "Update SSSF to skill 0123456")
+    _, out = run_json(capsys, "--hub", str(hub), "--registry", str(registry))
+    assert out["repos"][0]["at_stamp"] is None
+
+
+def test_json_listed_never_names_a_private_repo(world, tmp_path, capsys):
+    hub, proj, skill, registry = world
+    secret = repo(tmp_path / "secret-app")
+    data = json.loads(registry.read_text())
+    data["projects"]["secret-app"] = {"root": str(secret)}
+    registry.write_text(json.dumps(data))
+    (hub / ".git" / "sssf-private-names").write_text("SECRET-APP\n")
+    raw_code = cp.main(["--hub", str(hub), "--registry", str(registry), "--listed", "--json"])
+    raw = capsys.readouterr().out
+    assert "secret" not in raw.lower() and json.loads(raw)["hidden"] == 1 and raw_code == 1

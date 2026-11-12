@@ -48,8 +48,8 @@ The server runs the hub's scripts with a new `--json` flag and caches each resul
 
 Each piece merges before the next.
 
-1. The dashboard binds `127.0.0.1`. On 2026-11-11 `Bun.serve` had no `hostname` (`server/index.ts`), so every repo's `just obs` and `obs-all` listened on every interface. By hand, with a test, shipped to every repo.
-2. `--json` for `check_projects.py` and `phase_times.py`, by hand. Hub-only.
+1. **Done in 502e91d.** The dashboard binds `127.0.0.1`. On 2026-11-11 `Bun.serve` had no `hostname` (`server/index.ts`), so every repo's `just obs` and `obs-all` listened on every interface. By hand, with a test, shipped to every repo.
+2. **Done.** `--json` for `check_projects.py` and `phase_times.py`, by hand. Hub-only. `check_projects.py --json` adds `stamped`, `behind` and `at_stamp` per repo, which the Projects row's amber and red need: the text checks compare only against the hub's latest skill.
 3. A guard run that adds `drops: {type: count}` to the `agentsh_denials` event. Today the counts are only sentences in its notes, whose wording changed twice in one week.
 4. The page itself, by an SSSF chain run on a hub branch (`adw_plan_build_test`) from a brief that points here. It is the hub's first non-guard feature run under agentsh, so it also tests Bun and Vite under the policy. The hub session steps in by hand only if the chain gets stuck.
 5. This doc and the open items, updated as each piece lands.

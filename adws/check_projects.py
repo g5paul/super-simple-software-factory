@@ -23,6 +23,7 @@ Usage, from the hub root:
     uv run adws/check_projects.py --skill 33a1ed2
     uv run adws/check_projects.py --repo fusion-harness
     uv run adws/check_projects.py --listed        # output safe to paste anywhere
+    uv run adws/check_projects.py --json          # for the factory page
 
 --listed leaves out every repo the hub's .git/sssf-private-names lists, and
 says only how many it left out. That file is the one the pre-push hook reads,
@@ -30,7 +31,15 @@ one name per line, case ignored; a repo is unlisted when its registry name or
 path contains one. Without the file, --listed refuses rather than print
 everything.
 
-Exit 0 when every check passes, 1 otherwise.
+--json prints one object instead: the expected skill, how many unlisted
+repos were left out, and per repo its checks plus three fields the text
+leaves out. stamped is the skill commit its stamp.json names; behind is
+true when that isn't the expected one; at_stamp says whether its committed
+skill matches the hub's at stamped, or null when the hub doesn't know that
+commit. A repo that is behind but matches its own stamp is out of date; one
+whose skill doesn't match its stamp has been changed.
+
+Exit 0 when every check passes, 1 otherwise, with or without --json.
 """
 
 from __future__ import annotations
@@ -41,7 +50,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -62,6 +71,10 @@ class Report:
     repo: str
     branch: str = ""
     checks: list[Check] = field(default_factory=list)
+    root: str = ""
+    stamped: str = ""            # the skill commit the repo's stamp.json names
+    behind: bool = False         # stamped isn't the skill expected
+    at_stamp: bool | None = None  # the committed skill matches the hub's at stamped; None if unknown
 
     @property
     def ok(self) -> bool:
@@ -129,7 +142,7 @@ def _when(text: str) -> datetime:
 
 def check(name: str, entry: dict, hub: Path, skill: str) -> Report:
     root = Path(entry["root"])
-    report = Report(name)
+    report = Report(name, root=str(root))
     if not (root / ".git").exists():
         report.add("repo", False, f"{root} is not a git repo")
         return report
@@ -138,6 +151,7 @@ def check(name: str, entry: dict, hub: Path, skill: str) -> Report:
     stamp_file = root / STAMP
     stamped = json.loads(stamp_file.read_text()).get("skill", "") if stamp_file.is_file() else ""
     report.add("stamp", _same(stamped, skill), f"skill {stamped or 'none'}")
+    report.stamped, report.behind = stamped, not _same(stamped, skill)
 
     line = git(root, "log", "-1", "--format=%h%x09%cI%x09%s", "--", STAMP).strip()
     sha, committed, subject = (line.split("\t", 2) + ["", "", ""])[:3]
@@ -154,6 +168,13 @@ def check(name: str, entry: dict, hub: Path, skill: str) -> Report:
     changed = sorted(p for p in set(want) & set(have) if want[p] != have[p])
     problems = ([f"extra {p}" for p in extra] + [f"missing {p}" for p in missing]
                 + [f"changed {p}" for p in changed])
+    if not report.behind:
+        report.at_stamp = not problems
+    elif stamped:
+        try:
+            report.at_stamp = skill_tree(hub, stamped) == have
+        except RuntimeError:
+            report.at_stamp = None      # the hub doesn't know that commit
     report.add("skill", not problems,
                f"{len(have)} files match" if not problems else "; ".join(problems[:3])
                + (f" and {len(problems) - 3} more" if len(problems) > 3 else ""))
@@ -180,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", action="append", help="check only this repo; repeatable")
     parser.add_argument("--listed", action="store_true",
                         help="leave out the repos in the hub's .git/sssf-private-names")
+    parser.add_argument("--json", action="store_true",
+                        help="print one JSON object instead of text; the exit code is the same")
     parser.add_argument("--hub", type=Path, default=HUB, help=argparse.SUPPRESS)
     parser.add_argument("--registry", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -203,13 +226,17 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         repos = {n: e for n, e in repos.items() if n in args.repo}
 
-    print(f"expecting skill {skill}\n")
     reports = [check(name, entry, args.hub, skill) for name, entry in repos.items()]
+    bad = [r.repo for r in reports if not r.ok]
+    if args.json:
+        print(json.dumps({"skill": skill, "hidden": hidden,
+                          "repos": [asdict(r) | {"ok": r.ok} for r in reports]}, indent=1))
+        return 1 if bad else 0
+    print(f"expecting skill {skill}\n")
     for report in reports:
         print(f"{'ok  ' if report.ok else 'FAIL'} {report.repo} ({report.branch})")
         for c in report.checks:
             print(f"     {'ok  ' if c.ok else 'FAIL'} {c.name:8} {c.note}")
-    bad = [r.repo for r in reports if not r.ok]
     print(f"\n{len(reports) - len(bad)} of {len(reports)} repos pass"
           + (f"; failing: {', '.join(bad)}" if bad else ""))
     if hidden:

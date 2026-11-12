@@ -145,6 +145,7 @@ A stray or leftover skill file shows as `extra`. The script only reads git and e
 - `--skill <h>` expects an older commit.
 - `--repo <name>` checks one repo.
 - `--listed` leaves out the repos `.git/sssf-private-names` lists and says only how many. Its output is safe to paste into this public repo.
+- `--json` prints one object for the factory page, with the same exit code. Each repo adds `stamped`, `behind` and `at_stamp`, so a repo that is only behind the hub can be told from one whose skill copy was changed.
 
 The script and its tests are hub-only, like the guard-change chain.
 
@@ -180,7 +181,7 @@ The script only reads, and it's hub-only.
 
 `just phase-times` (`uv run adws/phase_times.py`) reads every repo's trace and prints, per chain, the median and 90th percentile of each phase, of the whole run and of its cost, from the chain's last 50 successful runs. Numbered phases share a row, so `bypass_review_N` covers every round. Phases under a minute are left out unless you pass `--all`.
 
-It then lists everything in the last 14 days that took more than twice its 90th percentile: a phase, a phase still running, a whole run, or a run's cost. A chain needs 10 successful runs before anything is judged, and nothing under a minute counts as slow. `--days`, `--factor`, `--history` and `--min-runs` change those numbers, and `--listed` works as in `levers.py`.
+It then lists everything in the last 14 days that took more than twice its 90th percentile: a phase, a phase still running, a whole run, or a run's cost. A chain needs 10 successful runs before anything is judged, and nothing under a minute counts as slow. `--days`, `--factor`, `--history` and `--min-runs` change those numbers, and `--listed` works as in `levers.py`. `--json` prints the rows in seconds and each slow item with its ratio to the p90, for the factory page.
 
 A slow phase isn't a failure: `SilentStop` already stops an agent that writes nothing for 15 minutes. This finds the ones that kept writing and ran long. It also lists phases still marked running in a run that ended, which a restart left open before the tracer closed them at `session_finish` (2026-11-11).
 

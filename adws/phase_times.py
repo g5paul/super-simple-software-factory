@@ -26,6 +26,12 @@ Usage, from the hub root:
     uv run adws/phase_times.py --repo sssf-sandbox
     uv run adws/phase_times.py --days 30 --factor 1.5
     uv run adws/phase_times.py --listed           # output safe to paste anywhere
+    uv run adws/phase_times.py --json             # for the factory page
+
+--json prints one object: per repo, each chain's rows (median and p90 in
+seconds), its cost norms, and every phase, run or cost past --factor times
+its p90 in the window, with its ratio, so a reader can apply its own,
+higher bar. Rows whose p90 is under a minute are always included there.
 """
 
 from __future__ import annotations
@@ -139,56 +145,86 @@ def minutes(seconds: float) -> str:
     return f"{seconds / 60:.1f}"
 
 
-def report(name: str, phases: list[Phase], runs: list[RunTime], *, history: int, min_runs: int,
-           days: int, factor: float, now: datetime, every: bool = False) -> list[str]:
+def analyse(phases: list[Phase], runs: list[RunTime], *, history: int, min_runs: int,
+            days: int, factor: float, now: datetime) -> dict:
+    """The norms per chain, and what in the last `days` days went past `factor` times its p90."""
     seen = norms(phases, runs, history)
-    lines = [name]
-    chains = sorted({chain for chain, _ in seen})
-    for chain in chains:
+    chains = []
+    for chain in sorted({chain for chain, _ in seen}):
         rows = sorted(((fam, v) for (c, fam), v in seen.items() if c == chain and not fam.startswith("<")),
                       key=lambda kv: -statistics.median(kv[1]))
-        judged = len(seen.get((chain, "<run>"), [])) >= min_runs
-        lines.append(f"  {chain}" + ("" if judged else f"  (fewer than {min_runs} successful runs, so nothing is judged)"))
-        lines.append(f"    {'phase':28} {'n':>4} {'median':>7} {'p90':>7}   minutes")
-        for fam, values in [(f"(whole run)", seen.get((chain, '<run>'), []))] + rows:
-            if values and (every or fam == "(whole run)" or p90(values) >= FLOOR):
-                lines.append(f"    {fam:28} {len(values):>4} {minutes(statistics.median(values)):>7} "
-                             f"{minutes(p90(values)):>7}")
         costs = seen.get((chain, "<cost>"), [])
-        if costs:
-            lines.append(f"    {'(cost, $)':28} {len(costs):>4} {statistics.median(costs):>7.2f} {p90(costs):>7.2f}")
+        chains.append({
+            "chain": chain,
+            "judged": len(seen.get((chain, "<run>"), [])) >= min_runs,
+            "rows": [{"phase": fam, "n": len(values), "median_s": statistics.median(values),
+                      "p90_s": p90(values)}
+                     for fam, values in [("(whole run)", seen.get((chain, "<run>"), []))] + rows if values],
+            "cost": ({"n": len(costs), "median": statistics.median(costs), "p90": p90(costs)}
+                     if costs else None)})
 
     since = now - timedelta(days=days)
     slow = []
-    left = [p for p in phases if p.status == "left running" and p.start >= since]
     for phase in phases:
         if phase.status == "left running":
             continue
         values = seen.get((phase.chain, family(phase.name)), [])
         if phase.start < since or len(values) < min_runs:
             continue
-        limit = max(FLOOR, factor * p90(values))
-        if phase.seconds > limit:
-            slow.append((phase.start, f"    {phase.adw_id}  {phase.chain}  {phase.name}: {minutes(phase.seconds)} min"
-                                      f"{' so far' if phase.status == 'running' else ''}, "
-                                      f"{phase.seconds / p90(values):.1f}x its p90 of {minutes(p90(values))} "
-                                      f"({phase.status})"))
+        if phase.seconds > max(FLOOR, factor * p90(values)):
+            slow.append({"kind": "phase", "adw_id": phase.adw_id, "chain": phase.chain, "name": phase.name,
+                         "status": phase.status, "running": phase.status == "running", "start": phase.start,
+                         "seconds": phase.seconds, "p90_s": p90(values), "ratio": phase.seconds / p90(values)})
     for run in runs:
         if run.start < since:
             continue
         values = seen.get((run.chain, "<run>"), [])
         if len(values) >= min_runs and run.seconds > max(FLOOR, factor * p90(values)):
-            slow.append((run.start, f"    {run.adw_id}  {run.chain}  whole run: {minutes(run.seconds)} min, "
-                                    f"{run.seconds / p90(values):.1f}x its p90 of {minutes(p90(values))} ({run.status})"))
+            slow.append({"kind": "run", "adw_id": run.adw_id, "chain": run.chain, "status": run.status,
+                         "start": run.start, "seconds": run.seconds, "p90_s": p90(values),
+                         "ratio": run.seconds / p90(values)})
         costs = seen.get((run.chain, "<cost>"), [])
         if len(costs) >= min_runs and p90(costs) > 0 and run.cost > factor * p90(costs):
-            slow.append((run.start, f"    {run.adw_id}  {run.chain}  cost: ${run.cost:.2f}, "
-                                    f"{run.cost / p90(costs):.1f}x its p90 of ${p90(costs):.2f} ({run.status})"))
-    lines.append(f"  past {factor:g}x the p90, last {days} days: {len(slow)}")
-    lines += [text for _, text in sorted(slow)]
-    if left:
-        lines.append(f"  phases still marked running in a run that ended: {len(left)}")
-        lines += [f"    {p.adw_id}  {p.chain}  {p.name}, started {p.start:%Y-%m-%d %H:%M}Z" for p in left]
+            slow.append({"kind": "cost", "adw_id": run.adw_id, "chain": run.chain, "status": run.status,
+                         "start": run.start, "cost": run.cost, "p90": p90(costs), "ratio": run.cost / p90(costs)})
+    slow.sort(key=lambda item: item["start"])
+    left = [{"adw_id": p.adw_id, "chain": p.chain, "name": p.name, "start": p.start}
+            for p in phases if p.status == "left running" and p.start >= since]
+    return {"chains": chains, "slow": slow, "left_running": left}
+
+
+def report(name: str, phases: list[Phase], runs: list[RunTime], *, history: int, min_runs: int,
+           days: int, factor: float, now: datetime, every: bool = False) -> list[str]:
+    found = analyse(phases, runs, history=history, min_runs=min_runs, days=days, factor=factor, now=now)
+    lines = [name]
+    for chain in found["chains"]:
+        lines.append(f"  {chain['chain']}" + ("" if chain["judged"] else
+                                              f"  (fewer than {min_runs} successful runs, so nothing is judged)"))
+        lines.append(f"    {'phase':28} {'n':>4} {'median':>7} {'p90':>7}   minutes")
+        for row in chain["rows"]:
+            if every or row["phase"] == "(whole run)" or row["p90_s"] >= FLOOR:
+                lines.append(f"    {row['phase']:28} {row['n']:>4} {minutes(row['median_s']):>7} "
+                             f"{minutes(row['p90_s']):>7}")
+        if chain["cost"]:
+            cost = chain["cost"]
+            lines.append(f"    {'(cost, $)':28} {cost['n']:>4} {cost['median']:>7.2f} {cost['p90']:>7.2f}")
+
+    lines.append(f"  past {factor:g}x the p90, last {days} days: {len(found['slow'])}")
+    for item in found["slow"]:
+        if item["kind"] == "phase":
+            lines.append(f"    {item['adw_id']}  {item['chain']}  {item['name']}: {minutes(item['seconds'])} min"
+                         f"{' so far' if item['running'] else ''}, "
+                         f"{item['ratio']:.1f}x its p90 of {minutes(item['p90_s'])} ({item['status']})")
+        elif item["kind"] == "run":
+            lines.append(f"    {item['adw_id']}  {item['chain']}  whole run: {minutes(item['seconds'])} min, "
+                         f"{item['ratio']:.1f}x its p90 of {minutes(item['p90_s'])} ({item['status']})")
+        else:
+            lines.append(f"    {item['adw_id']}  {item['chain']}  cost: ${item['cost']:.2f}, "
+                         f"{item['ratio']:.1f}x its p90 of ${item['p90']:.2f} ({item['status']})")
+    if found["left_running"]:
+        lines.append(f"  phases still marked running in a run that ended: {len(found['left_running'])}")
+        lines += [f"    {p['adw_id']}  {p['chain']}  {p['name']}, started {p['start']:%Y-%m-%d %H:%M}Z"
+                  for p in found["left_running"]]
     return lines
 
 
@@ -200,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-runs", type=int, default=10, help="samples a row needs before it judges (default 10)")
     parser.add_argument("--factor", type=float, default=2.0, help="how far past the p90 is slow (default 2)")
     parser.add_argument("--all", action="store_true", help="also list phases whose p90 is under a minute")
+    parser.add_argument("--json", action="store_true", help="print one JSON object instead of text")
     parser.add_argument("--listed", action="store_true",
                         help="leave out the repos in the hub's .git/sssf-private-names")
     parser.add_argument("--hub", type=Path, default=cp.HUB, help=argparse.SUPPRESS)
@@ -224,6 +261,17 @@ def main(argv: list[str] | None = None) -> int:
         entries = {args.repo: entries[args.repo]}
 
     now = _when(args.now) if args.now else datetime.now(timezone.utc)
+    if args.json:
+        out = []
+        for name, entry in sorted(entries.items()):
+            db = Path(entry["root"]) / entry.get("db", "adws/adw_data/sssf.db")
+            if db.is_file():
+                phases, runs = read(db, now)
+                out.append({"repo": name} | analyse(phases, runs, history=args.history, min_runs=args.min_runs,
+                                                    days=args.days, factor=args.factor, now=now))
+        print(json.dumps({"now": now, "days": args.days, "factor": args.factor, "hidden": hidden, "repos": out},
+                         indent=1, default=lambda v: v.isoformat()))
+        return 0
     blocks = []
     for name, entry in sorted(entries.items()):
         db = Path(entry["root"]) / entry.get("db", "adws/adw_data/sssf.db")

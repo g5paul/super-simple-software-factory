@@ -4,6 +4,7 @@ export type {
   FactoryBoard,
   FactoryRow,
   FactoryLevel,
+  FactorySection,
   LeftoverProcess,
   Session,
   SessionSummary,

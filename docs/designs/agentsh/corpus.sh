@@ -23,3 +23,5 @@ t "git --config-env alias" 'P=pu""sh git --config-env=alias.p=P p --dry-run'
 t "GIT_CONFIG_GLOBAL alias" $'printf \'[alias]\\n\\tp = pu%sh\\n\' s > $PWD/gc; GIT_CONFIG_GLOBAL=$PWD/gc git p --dry-run'
 t "git-push by its path" '/usr/lib/git-core/git-push --dry-run origin main'
 t "argv0 newline" $'exec -a \'g\nit\' git push --dry-run'
+t "quoted command word" "'just' test live"
+t "split quoted word" "ju''st test live"

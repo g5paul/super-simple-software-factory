@@ -49,9 +49,15 @@ The server runs the hub's scripts with a new `--json` flag and caches each resul
 Each piece merges before the next.
 
 1. **Done in 502e91d.** The dashboard binds `127.0.0.1`. On 2026-11-11 `Bun.serve` had no `hostname` (`server/index.ts`), so every repo's `just obs` and `obs-all` listened on every interface. By hand, with a test, shipped to every repo.
-2. **Done.** `--json` for `check_projects.py` and `phase_times.py`, by hand. Hub-only. `check_projects.py --json` adds `stamped`, `behind` and `at_stamp` per repo, which the Projects row's amber and red need: the text checks compare only against the hub's latest skill.
-3. A guard run that adds `drops: {type: count}` to the `agentsh_denials` event. Today the counts are only sentences in its notes, whose wording changed twice in one week.
+2. **Done in 3e86590.** `--json` for `check_projects.py` and `phase_times.py`, by hand. Hub-only. `check_projects.py --json` adds `stamped`, `behind` and `at_stamp` per repo, which the Projects row's amber and red need: the text checks compare only against the hub's latest skill.
+3. **Done in 76d053c** (guard run da6a05c1). The `agentsh_denials` event carries `drops: {type: count}`, `{}` when the journal had no drop lines and `null` when it wasn't counted. Before it the counts were only sentences in its notes, whose wording changed twice in one week.
 4. The page itself, by an SSSF chain run on a hub branch (`adw_plan_build_test`) from a brief that points here. It is the hub's first non-guard feature run under agentsh, so it also tests Bun and Vite under the policy. The hub session steps in by hand only if the chain gets stuck.
+
+   **Not started; waiting on the engineer (2026-11-11).** A dry run of the dashboard's checks under the hub's agentsh policy found that an agent can't connect to a server on `127.0.0.1`: the policy's network rules allow only the model, login and registry hosts, so a connect to loopback gets "Permission denied" in Python and Bun alike. `server/listen.test.ts`, which starts the real server, fails in the builder's shell (110 of 111 pass), and so would any test of the page that starts it. `bun test`, `vue-tsc` and the `vite` build otherwise work under the policy, in 12 seconds, when run from the dashboard's folder. (`agentsh wrap` starts in `--root`, so a `bun test` from there searches the whole hub through the FUSE mount and looks hung.)
+
+   The hub's `quality.py` now runs `bun test` and `vue-tsc --noEmit` in the dashboard's folder in its test phase and its full check, since before it the chain's test step ran only the Python suite and would never have seen the page's tests. The test step runs outside agentsh, so it can run the real-server tests.
+
+   The choice: start now, with the request telling the builder that loopback is denied in its shell, that the page's tests should call the server's handler rather than a socket, and that the chain's test step is the judge; or fix loopback first (see open.md).
 5. This doc and the open items, updated as each piece lands.
 
 ### Done

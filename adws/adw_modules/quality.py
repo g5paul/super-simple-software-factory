@@ -160,6 +160,31 @@ def chain_test(run) -> QualityCheckResult:
     ), run)
 
 
+VISUALIZER = ".claude/skills/sssf/apps/visualizer"
+
+
+def visualizer_test(run) -> QualityCheckResult:
+    """The dashboard's own tests (bun test), run from its folder."""
+    return _run(QualityCheckSpec(
+        name="visualizer_test",
+        area="frontend",
+        operation="build",
+        argv=["bash", "-c", f"cd {VISUALIZER} && bun test"],
+        timeout_seconds=300,
+    ), run)
+
+
+def visualizer_typecheck(run) -> QualityCheckResult:
+    """The dashboard's types, checked by vue-tsc from its folder."""
+    return _run(QualityCheckSpec(
+        name="visualizer_typecheck",
+        area="frontend",
+        operation="typecheck",
+        argv=["bash", "-c", f"cd {VISUALIZER} && npx --no-install vue-tsc --noEmit"],
+        timeout_seconds=300,
+    ), run)
+
+
 def run_tests(run) -> QualityResult:
     """The test suite alone, as a QualityResult — the deterministic test phase.
 
@@ -168,12 +193,13 @@ def run_tests(run) -> QualityResult:
     subprocess already knows; the repair loop is unchanged, because a failure
     still reaches the builder through `as_envelope` below.
     """
-    check = test(run)
-    failures = ([] if check.passed else
-                [f"{check.name}: `{check.command}` exited {check.returncode}\n"
-                 f"{check.output_tail}".rstrip()])
-    return QualityResult(passed=check.passed, checks=[check], failures=failures,
-                         artifacts=[check.output_artifact])
+    # The hub's test phase also runs the dashboard's tests and types, since a
+    # feature run there changes TypeScript the Python suite never loads.
+    checks = [test(run), visualizer_test(run), visualizer_typecheck(run)]
+    failures = [f"{c.name}: `{c.command}` exited {c.returncode}\n{c.output_tail}".rstrip()
+                for c in checks if not c.passed]
+    return QualityResult(passed=not failures, checks=checks, failures=failures,
+                         artifacts=[c.output_artifact for c in checks])
 
 
 def as_envelope(result: QualityResult, what: str) -> VerifyOutput:
@@ -204,10 +230,12 @@ def run_quality(run) -> QualityResult:
     The runner did its job; the CODE is what failed. Hand this result to the
     builder and let the bounded repair loop decide the run's fate.
     """
-    # The hub has no lint, format, typecheck or build step: the skill's suite
-    # and the chain's tests are the checks.
+    # The hub has no lint or format step: the skill's suite, the dashboard's
+    # tests and types, and the chain's tests are the checks.
     blocks: list[Callable] = [
         test,
+        visualizer_test,
+        visualizer_typecheck,
         chain_test,
     ]
     checks = [block(run) for block in blocks]

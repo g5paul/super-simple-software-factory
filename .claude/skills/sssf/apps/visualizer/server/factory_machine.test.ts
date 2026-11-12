@@ -92,6 +92,15 @@ test("the agentsh store: 10 GiB ok, 16 amber, 26 red, both null amber", () => {
   expect(level(null, null)).toBe("amber");
 });
 
+test("the agentsh store's next step is config.md's: move events.db aside", () => {
+  const row = pruneRows({ store_bytes: 10 * GIB, audit_bytes: 6 * GIB, last_prune: hoursAgo(1), last_analyze: null, last_run: null }, NOW)[0];
+  expect(row.level).toBe("amber");
+  expect(row.next).toContain("stop agentsh");
+  expect(row.next).toContain("/var/lib/agentsh/events.db");
+  expect(row.next).toContain("-wal and -shm");
+  expect(row.next).not.toContain("hub session");
+});
+
 test("the prune: 1 h ok, 4 h amber, 7 h red, never amber, no file amber for both rows", () => {
   const level = (last: string | null) =>
     pruneRows({ store_bytes: 1, audit_bytes: 1, last_prune: last, last_analyze: null, last_run: null }, NOW)[1].level;

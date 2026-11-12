@@ -51,9 +51,13 @@ function seed(opts: { processes?: boolean } = {}): SssfDb {
   session("arch1", "success", 2, 1);
   event("ok1", "agent_end", "x", { cost: 1 });
   event("ok1", "log", "agentsh_denials", { slowest_poll_seconds: 2 }, 2);
-  event("ok1", "sandbox", "sandbox", { provider: "daytona", vm: "vm-open" }, 3);
-  event("ok1", "sandbox", "sandbox", { provider: "daytona", vm: "vm-done" }, 3);
-  event("ok1", "sandbox", "sandbox_end", { provider: "daytona", vm: "vm-done" }, 2);
+  // a VM run as the hub writes it: the sandbox phase's events around the VM's start and end
+  event("ok1", "phase_start", "sandbox", { phase: "sandbox" }, 3.5);
+  event("ok1", "log", "sandbox", { message: "creating", level: "info" }, 3.4);
+  event("ok1", "log", "sandbox", { vm: "vm-open", provider: "daytona", session_minutes: 30 }, 3);
+  event("ok1", "log", "sandbox", { vm: "vm-done", provider: "daytona", session_minutes: 30 }, 3);
+  event("ok1", "log", "sandbox_end", { provider: "daytona", vm: "vm-done" }, 2);
+  event("ok1", "phase_end", "sandbox", { phase: "sandbox" }, 1.9);
   db.close();
   return new SssfDb(path);
 }
@@ -128,6 +132,28 @@ test("polls and open VMs come from the trace", () => {
   expect(db.agentshPolls(SINCE).length).toBe(1);
   expect(db.openSandboxes().map((v) => v.vm)).toEqual(["vm-open"]);
   expect(db.openSandboxes()[0].run_status).toBe("success");
+});
+
+test("the sandbox phase's own events are not VMs", () => {
+  const path = join(dir, "vm.db");
+  const raw = new Database(path);
+  raw.exec("CREATE TABLE sessions (adw_id TEXT, status TEXT)");
+  raw.exec("CREATE TABLE events (adw_id TEXT, phase_id TEXT, type TEXT, name TEXT, payload_json TEXT, started_at TEXT)");
+  raw.query("INSERT INTO sessions VALUES ('r1', 'success')").run();
+  const ev = (type: string, name: string, p: unknown, h: number) =>
+    raw.query("INSERT INTO events VALUES ('r1', 'p', ?, ?, ?, ?)").run(type, name, JSON.stringify(p), ago(h));
+  ev("phase_start", "sandbox", {}, 5);
+  ev("log", "sandbox", { message: "creating", level: "info" }, 4.9);
+  ev("log", "sandbox", { vm: "v1", provider: "daytona", session_minutes: 30 }, 4.8);
+  ev("log", "sandbox_end", { vm: "v1", provider: "daytona" }, 4);
+  ev("phase_end", "sandbox", {}, 3.9);
+  raw.close();
+  const db = new SssfDb(path);
+  expect(db.openSandboxes()).toEqual([]);
+  const raw2 = new Database(path);
+  raw2.query("INSERT INTO events VALUES ('r1', 'p', 'log', 'sandbox', ?, ?)").run(JSON.stringify({ vm: "v2", provider: "daytona", session_minutes: 30 }), ago(3));
+  raw2.close();
+  expect(db.openSandboxes().map((v) => v.vm)).toEqual(["v2"]);
 });
 
 test("parsePhaseTimes wants JSON with a repos array", () => {

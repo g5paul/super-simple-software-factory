@@ -643,7 +643,11 @@ export class SssfDb {
     }
   }
 
-  /** VMs started and not yet ended: a `sandbox` event with no later `sandbox_end` for the same run and vm. */
+  /**
+   * VMs started and not yet ended: a VM's start event (a `log` named `sandbox` whose payload has `vm` and
+   * `provider`) with no later `sandbox_end` for the same run and vm. The `sandbox` phase's own events
+   * (phase_start, phase_end, message-only logs) share the name and are not VMs.
+   */
   openSandboxes(): { adw_id: string; vm: string | null; provider: string | null; at: string; run_status: string | null }[] {
     try {
       return this.db
@@ -652,7 +656,9 @@ export class SssfDb {
                   json_extract(b.payload_json, '$.provider') AS provider,
                   b.started_at AS at, s.status AS run_status
              FROM events b LEFT JOIN sessions s ON s.adw_id = b.adw_id
-            WHERE b.name = 'sandbox'
+            WHERE b.name = 'sandbox' AND b.type = 'log'
+              AND json_extract(b.payload_json, '$.vm') IS NOT NULL
+              AND json_extract(b.payload_json, '$.provider') IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM events x WHERE x.adw_id = b.adw_id AND x.name = 'sandbox_end'
                                 AND x.started_at >= b.started_at
                                 AND json_extract(x.payload_json, '$.vm') IS json_extract(b.payload_json, '$.vm'))

@@ -134,7 +134,7 @@ export function pruneRows(status: PruneStatus | null, now: number, path = ""): F
     rows.push(machineRow("agentsh-store", "agentsh store", level, {
       figure: gib(total),
       problems: level === "ok" ? [] : [`the agentsh store and audit log hold ${gib(total)}`],
-      next: level === "ok" ? null : "ask the hub session to check why the prune isn't shrinking the store",
+      next: level === "ok" ? null : "with no run going, stop agentsh, move /var/lib/agentsh/events.db and its -wal and -shm files aside, start it, and delete them once a run works",
     }));
   }
   const last = status.last_prune ? Date.parse(status.last_prune) : NaN;

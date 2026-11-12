@@ -2745,7 +2745,54 @@ def test_check_machine_notes_the_store_and_audit_log_together(machine):
         notes = agentsh_guard.check_machine(machine.guard)
         assert len(notes) == count, (store, audit)
         if count:
-            assert "events.db" in notes[0] and "15 GB" in notes[0]
+            assert "15 GB" in notes[0]
+            if isinstance(store, (int, float)) and not isinstance(store, bool) and store >= (audit or 0):
+                assert "events.db" in notes[0]
+            else:
+                assert "audit.jsonl.<N>" in notes[0]
+
+
+def test_store_note_names_the_bigger_part(machine):
+    pointer = "Running local agents under agentsh"
+    _write_status(machine, store_bytes=10e9, audit_bytes=6e9)
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1
+    for want in ("10.0 GB", "6.0 GB", "16.0 GB", "move /var/lib/agentsh/events.db"):
+        assert want in notes[0]
+    assert "audit.jsonl.<N>" not in notes[0] and "sudo find" not in notes[0]
+    assert "\n" not in notes[0] and pointer in notes[0]
+
+    _write_status(machine, store_bytes=4e9, audit_bytes=12e9)
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1
+    for want in ("4.0 GB", "12.0 GB", "audit.jsonl.<N>", "2 hours", "skips while the service lists a session",
+                 r"-maxdepth 1 -type f -regex '.*/audit\.jsonl\.[0-9]+' -delete", "no run going"):
+        assert want in notes[0]
+    assert "move /var/lib/agentsh/events.db" not in notes[0]
+    assert "\n" not in notes[0] and pointer in notes[0]
+
+    _write_status(machine, store_bytes=8e9, audit_bytes=8e9)
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1 and "move /var/lib/agentsh/events.db" in notes[0]
+    assert "audit.jsonl.<N>" not in notes[0]
+    assert "\n" not in notes[0] and pointer in notes[0]
+
+
+def test_store_note_with_one_size(machine):
+    _write_status(machine, store_bytes=None, audit_bytes=16e9)
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1 and "audit.jsonl.<N>" in notes[0]
+    assert "the audit log is 16.0 GB" in notes[0] and "the event store is" not in notes[0]
+
+    _write_status(machine, store_bytes=16e9)
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1 and "move /var/lib/agentsh/events.db" in notes[0]
+    assert "the event store is 16.0 GB" in notes[0] and "the audit log is" not in notes[0]
+
+    _write_status(machine, store_bytes=16e9, audit_bytes=True)
+    notes = agentsh_guard.check_machine(machine.guard)
+    assert len(notes) == 1 and "move /var/lib/agentsh/events.db" in notes[0]
+    assert "the audit log is" not in notes[0] and "audit.jsonl.<N>" not in notes[0]
 
 
 def test_check_machine_reads_an_old_status_as_the_store_alone(machine):

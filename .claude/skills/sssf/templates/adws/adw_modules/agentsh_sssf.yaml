@@ -18,10 +18,11 @@ audit:
   # agentsh rotates this log by size only: at max_size_mb it renames it to .1, shifts
   # .1 to .2 and so on, and overwrites the last of max_backups. max_age_days and
   # compress parse but do nothing in this build. At most 6 files of about 200 MB,
-  # 1.2 GB; the prune deletes rotated files older than 6 hours. The store levels off
-  # at about 8.4 to 9.8 GB at the measured 1.4 GB an hour, so together they can pass
-  # the 10 GB note at a sustained peak; the log's own rate is an estimate. See
-  # config.md, "The event store".
+  # 1.2 GB; the prune deletes rotated files older than 2 hours. The store grew
+  # 1.4 GB an hour at the rollout and 3.3 GB an hour with chains back to back
+  # (2026-11-11), so 2 hours plus up to an hour before the next prune levels off
+  # at about 2.8 to 4.2 GB, and 6.6 to 9.9 GB at the peak. With the audit log's
+  # 1.2 GB cap that stays under the 15 GB note. See config.md, "The event store".
   rotation:
     max_size_mb: 200
     max_backups: 5

@@ -2515,15 +2515,15 @@ def prune_env(tmp_path, monkeypatch):
     api.server.shutdown()
 
 
-def test_the_prune_keeps_the_last_six_hours_in_several_batches(prune_env, monkeypatch):
+def test_the_prune_keeps_the_last_two_hours_in_several_batches(prune_env, monkeypatch):
     monkeypatch.setattr(prune_env.m, "BATCH", 3)
-    prune_env.add(*([3 * DAY] * 7), 6 * 3600 + 1, 6 * 3600 - 1, 0)
+    prune_env.add(*([3 * DAY] * 7), 2 * 3600 + 1, 2 * 3600 - 1, 0)
     statements = []
     real = sqlite3.connect
     monkeypatch.setattr(prune_env.m.sqlite3, "connect", lambda *a, **k: (
         c := real(*a, **k), c.set_trace_callback(lambda s: statements.append(s) if s.startswith("DELETE") else None))[0])
     result = prune_env.run()
-    assert prune_env.ages() == [6 * 3600 - 1, 0]
+    assert prune_env.ages() == [2 * 3600 - 1, 0]
     assert result["deleted"] == 8 and result["error"] is None and result["skipped"] is None
     assert len(statements) == 3 and result["last_prune"]
 
@@ -2610,7 +2610,8 @@ def _old_audit_files(prune_env, tmp_path):
     t = prune_env.touch
     t("audit.jsonl", 3 * DAY)
     t("audit.jsonl.1", 3600)
-    t("audit.jsonl.2", 6 * 3600 + 1)
+    t("audit.jsonl.2", 2 * 3600 + 1)
+    t("audit.jsonl.5", 2 * 3600 - 1)
     t("audit.jsonl.10", 3 * DAY)
     t("audit.jsonl.bak", 3 * DAY)
     t("audit.jsonl.\u0661", 3 * DAY)
@@ -2636,7 +2637,7 @@ def test_a_due_prune_deletes_only_old_rotated_audit_files(prune_env, tmp_path):
     result = prune_env.run()
     assert result["error"] is None
     assert sorted(p.name for p in folder.iterdir()) == sorted(
-        ["audit.jsonl", "audit.jsonl.1", "audit.jsonl.3", "audit.jsonl.4", "audit.jsonl.bak", "audit.jsonl.\u0661"])
+        ["audit.jsonl", "audit.jsonl.1", "audit.jsonl.3", "audit.jsonl.5", "audit.jsonl.4", "audit.jsonl.bak", "audit.jsonl.\u0661"])
     assert outside.read_text() == "keep"
 
 
@@ -2681,7 +2682,7 @@ def test_an_audit_unlink_error_is_recorded_and_exits_1(prune_env, monkeypatch):
     real = os.unlink
 
     def unlink(path, *a, **k):
-        if str(path) == str(old):
+        if path == old.name and k.get("dir_fd") is not None:
             raise PermissionError("nope")
         return real(path, *a, **k)
     monkeypatch.setattr(prune_env.m.os, "unlink", unlink)
@@ -2692,19 +2693,65 @@ def test_an_audit_unlink_error_is_recorded_and_exits_1(prune_env, monkeypatch):
     assert status["error"].startswith("PermissionError") and set(status) == keys | {"audit_bytes"}
 
 
+def test_a_linked_audit_folder_keeps_every_file_in_its_target(prune_env, tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    target.mkdir()
+    for name in ("audit.jsonl.2", "audit.jsonl"):
+        (target / name).write_text("keep " + name)
+        os.utime(target / name, (NOW - 3 * DAY, NOW - 3 * DAY))
+    linked = tmp_path / "linked"
+    os.symlink(target, linked)
+    prune_env.add(3 * DAY)
+    result = prune_env.run(audit=str(linked / "audit.jsonl"))
+    for name in ("audit.jsonl.2", "audit.jsonl"):
+        assert (target / name).read_text() == "keep " + name
+    assert result["error"] and "linked" in result["error"]
+    assert result["audit_bytes"] is None and result["last_prune"] is None
+    monkeypatch.setattr(prune_env.m.time, "time", lambda: NOW)
+    monkeypatch.setattr(prune_env.m, "DB", str(prune_env.db))
+    monkeypatch.setattr(prune_env.m, "API", prune_env.api.url)
+    monkeypatch.setattr(prune_env.m, "STATUS", str(prune_env.status))
+    monkeypatch.setattr(prune_env.m, "AUDIT", str(linked / "audit.jsonl"))
+    assert prune_env.m.main() == 1
+    assert (target / "audit.jsonl.2").exists() and (target / "audit.jsonl").exists()
+
+
+def test_the_audit_step_deletes_through_the_folder_it_opened(prune_env, tmp_path, monkeypatch):
+    prune_env.touch("audit.jsonl.2", 3 * DAY)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "audit.jsonl.2").write_text("keep")
+    os.utime(elsewhere / "audit.jsonl.2", (NOW - 3 * DAY, NOW - 3 * DAY))
+    folder = prune_env.audit.parent
+    moved = tmp_path / "moved"
+    real = os.listdir
+    swapped = []
+
+    def listdir(arg):
+        if isinstance(arg, int) and not swapped:
+            swapped.append(1)
+            os.rename(folder, moved)
+            os.symlink(elsewhere, folder)
+        return real(arg)
+    monkeypatch.setattr(prune_env.m.os, "listdir", listdir)
+    result = prune_env.run()
+    assert swapped and (elsewhere / "audit.jsonl.2").read_text() == "keep"
+    assert not (moved / "audit.jsonl.2").exists() and result["error"] is None
+
+
 def test_check_machine_notes_the_store_and_audit_log_together(machine):
-    for store, audit, count in [(6e9, 5e9, 1), (6e9, 3e9, 0), (None, 11e9, 1), (9e9, True, 0)]:
+    for store, audit, count in [(9e9, 6e9, 1), (9e9, 6e9 - 1, 0), (None, 15e9, 1), (14e9, True, 0), (15e9 - 1, None, 0)]:
         _write_status(machine, store_bytes=store, audit_bytes=audit)
         notes = agentsh_guard.check_machine(machine.guard)
         assert len(notes) == count, (store, audit)
         if count:
-            assert "events.db" in notes[0]
+            assert "events.db" in notes[0] and "15 GB" in notes[0]
 
 
 def test_check_machine_reads_an_old_status_as_the_store_alone(machine):
-    _write_status(machine, store_bytes=11e9)
+    _write_status(machine, store_bytes=16e9)
     assert len(agentsh_guard.check_machine(machine.guard)) == 1
-    _write_status(machine, store_bytes=9e9)
+    _write_status(machine, store_bytes=14e9)
     assert agentsh_guard.check_machine(machine.guard) == []
 
 
@@ -2802,7 +2849,7 @@ def test_check_machine_notes_a_stale_prune_and_escapes_the_reason(machine):
 
 
 def test_check_machine_notes_a_big_store(machine):
-    _write_status(machine, store_bytes=11e9)
+    _write_status(machine, store_bytes=16e9)
     notes = agentsh_guard.check_machine(machine.guard)
     assert len(notes) == 1 and "move" in notes[0] and "events.db" in notes[0]
 

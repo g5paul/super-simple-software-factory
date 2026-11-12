@@ -1,4 +1,4 @@
-"""Prune agentsh's event store and its rotated audit log to the last 6 hours. Runs as root from
+"""Prune agentsh's event store and its rotated audit log to the last 2 hours. Runs as root from
 sssf-agentsh-prune.service.
 
 Standard library only. It deletes nothing and runs no ANALYZE while the service lists a session or
@@ -21,7 +21,7 @@ DB = "/var/lib/agentsh/events.db"            # agentsh_sssf.yaml audit.storage.s
 API = "http://127.0.0.1:18080"               # agentsh_guard.API
 STATUS = "/var/lib/sssf-agentsh-prune/status.json"   # agentsh_guard.PRUNE_STATUS
 AUDIT = "/var/lib/agentsh/audit.jsonl"      # agentsh_sssf.yaml audit.output
-KEEP_SECONDS = 6 * 3600
+KEEP_SECONDS = 2 * 3600
 # The timer looks every 10 minutes. A prune is due once the last is at least PRUNE_EVERY - PRUNE_SLACK
 # old, so a check that lands a second short of the hour still prunes. Because of that bound, prunes
 # never come less than 50 minutes apart; they land at the 50- or 60-minute check, by the timer's jitter.
@@ -77,51 +77,65 @@ def store_bytes(db):
     return size
 
 
-def rotated(audit):
-    """(path, lstat) of each regular file named audit.<N>, N one or more ASCII digits, beside the live log."""
-    folder = os.path.dirname(audit)
+def open_folder(audit):
+    """An fd on the audit log's folder. Raises OSError when the folder is a link, missing or not a directory,
+    so nothing is listed or deleted through a link."""
+    return os.open(os.path.dirname(audit), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+
+def rotated(audit, fd):
+    """(name, lstat) of each regular file named audit.<N>, N one or more ASCII digits, beside the live log.
+    Works on bare names in the folder the fd holds."""
     prefix = os.path.basename(audit) + "."
     found = []
-    for name in os.listdir(folder):
+    for name in os.listdir(fd):
         if not name.startswith(prefix):
             continue
         suffix = name[len(prefix):]
         if not (suffix.isascii() and suffix.isdigit()):
             continue
-        path = os.path.join(folder, name)
         try:
-            info = os.lstat(path)
+            info = os.lstat(name, dir_fd=fd)
         except FileNotFoundError:
             continue
         if stat.S_ISREG(info.st_mode):
-            found.append((path, info))
+            found.append((name, info))
     return found
 
 
 def audit_bytes(audit):
-    """Size of the live audit log and its rotated files, or None when the folder can't be listed."""
+    """Size of the live audit log and its rotated files, or None when the folder is a link or can't be listed."""
     try:
-        files = rotated(audit)
-        total = sum(info.st_size for _, info in files)
+        fd = open_folder(audit)
         try:
-            live = os.lstat(audit)
-            if stat.S_ISREG(live.st_mode):
-                total += live.st_size
-        except FileNotFoundError:
-            pass
+            files = rotated(audit, fd)
+            total = sum(info.st_size for _, info in files)
+            try:
+                live = os.lstat(os.path.basename(audit), dir_fd=fd)
+                if stat.S_ISREG(live.st_mode):
+                    total += live.st_size
+            except FileNotFoundError:
+                pass
+        finally:
+            os.close(fd)
     except OSError:
         return None
     return total
 
 
 def prune_audit(audit, now):
-    """Delete rotated audit files last modified more than KEEP_SECONDS ago. Never the live log."""
-    for path, info in rotated(audit):
-        if now - info.st_mtime > KEEP_SECONDS:
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                pass
+    """Delete rotated audit files last modified more than KEEP_SECONDS ago. Never the live log.
+    Deletes nothing when the folder is a link."""
+    fd = open_folder(audit)
+    try:
+        for name, info in rotated(audit, fd):
+            if now - info.st_mtime > KEEP_SECONDS:
+                try:
+                    os.unlink(name, dir_fd=fd)
+                except FileNotFoundError:
+                    pass
+    finally:
+        os.close(fd)
 
 
 def write_status(path, data):

@@ -598,7 +598,8 @@ def _event_forwarder(run, phase: Phase, agent_name: str, interface, enforced: li
                                                   "notes": event.get("notes", []),
                                                   "polls": event.get("polls"),
                                                   "pages": event.get("pages"),
-                                                  "slowest_poll_seconds": event.get("slowest_poll_seconds")}))
+                                                  "slowest_poll_seconds": event.get("slowest_poll_seconds"),
+                                                  "drops": event.get("drops")}))
             return
         if harness is None or (isinstance(etype, str) and etype in RULE_EVENT_TYPES[harness]):
             check(event)

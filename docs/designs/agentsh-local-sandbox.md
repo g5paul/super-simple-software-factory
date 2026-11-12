@@ -1214,6 +1214,21 @@ The review found no bypass. Its two old holes are on root-owned paths no agent c
 
 The first prune after run 87b8ab19's reinstall recorded `audit_bytes` at 3.73 GB against a cap near 1.2 GB. The likely reason: under agentsh's old defaults the log kept up to ten 500 MB files, and with `max_backups: 5` agentsh no longer shifts `.6` to `.10`, so they sit there until the prune's age limit takes them. The store grew about 2 GB in the 20 minutes of one planner's call and barely at all during the build and review that followed, so the rate swings with what the agents do. The prune also deletes nothing while a session is listed, so back-to-back runs keep more than the setting says.
 
+### The prompts and store-note run, cc4ff1ee
+
+The rules refused 11 commands on 2026-11-11, in 8 guard runs, and none was an attempt to get past a guard. Seven were inline scripts carrying a forbidden command or `.env` as data (`python3 - <<'EOF'` edits, `cat >` heredocs, `python -c` checks, a grep for `\.env`), two were real secret probes refused before they ran, and two were `rsync --exclude .env` while copying the repo to test outside it.
+
+Run cc4ff1ee took `specs/tasks/guard-agent-prompts-and-store-note.md` and merged as 5b0b162. $4.41.
+
+- The builder and reviewer prompts, shipped and hub, cover editing and inline code: text naming a forbidden command or a secret file goes in a file written with the file tool, and searches use the grep tool. A new line says to probe only a decoy secret file in a scratch repo of the agent's own.
+- The 15 GB note gives both sizes and, when the audit log is the bigger part, advises on the rotated `audit.jsonl.<N>` files.
+- `config.md` lists the two root-path links from run c0f9d9d8.
+- `build_brief()` in the chain gives a copy command, `git ls-files --cached --others --exclude-standard` into rsync, so `.gitignore` leaves `.env` out without the command naming it. `adws/adw_*.py` is protected, so the engineer's session added it by hand in 5594a9f, with a test.
+
+The first spec review blocked once: the threat model covered only the hub under agentsh, and the shipped prompts also run under `local_guard: text`. The bypass review found no bypass. Its new old hole: under text mode, nothing reads what a script file the agent runs does. That was true at the baseline, and the new prompt line points agents at files for data, so 5594a9f names it in `config.md`. The reviewer's first probe imported a module whose `load_dotenv()` walked up to the hub's real `.env`, and agentsh denied the open: the secret-file deny works on a path the text rules never see.
+
+The first prune at 2 hours ran at 16:40, in a gap between the run's agent calls. It deleted 5.2 million rows, and `audit_bytes` fell from 3.68 GB to 1.25 GB, so the old `.6` to `.10` files are gone. The store file stays near 11 GB, since freed pages are reused rather than returned.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1238,6 +1253,6 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 16. **Done: warnings an engineer sees**, by [run 0463a6c3](#the-warnings-run-0463a6c3). After the reinstall, check the journal's drop count against run 05f96f0f's 34.
 17. **Done: an agent forging the guard's notes**, by [run 955ca723](#the-note-forgery-run-955ca723).
 18. **Done: pi's read loop**, by [run 361de0f2](#the-pi-read-loop-run-361de0f2).
-19. **Done: retention for the store and the audit log**, by [run 87b8ab19](#the-retention-run-87b8ab19) and [run c0f9d9d8](#the-two-hour-run-c0f9d9d8): 2 hours and a 15 GB note. Left: check over an evening that `audit_bytes` falls under about 1.2 GB and the store levels off under 15 GB.
-20. **Builder and reviewer prompts**: write test files with the Write tool, not a heredoc, so test data doesn't trip the rules (four runs in a row on 2026-11-11, builders and a reviewer); and probe secret files with decoys only (run 361de0f2's reviewer and run 87b8ab19's builder each tried the real `.env`, refused before it ran). Both are prompt lines on what an agent may do, so they go through the chain. A third false alarm, run c0f9d9d8's `rsync --exclude .env`, is the text guard's to keep: it becomes a case in `docs/designs/agentsh/corpus.sh`.
-21. **The store note's advice and the root-path links.** When the audit log is the bigger part of the 15 GB, the note should name the old `audit.jsonl.<N>` files, not only `events.db`. `config.md` should say that only the audit folder's last part is checked for a link, and that the store path follows one.
+19. **Done: retention for the store and the audit log**, by [run 87b8ab19](#the-retention-run-87b8ab19) and [run c0f9d9d8](#the-two-hour-run-c0f9d9d8): 2 hours and a 15 GB note. The first 2-hour prune brought `audit_bytes` to 1.25 GB. Left: check over a day that the store file levels off under 15 GB with the audit log.
+20. **Done: builder and reviewer prompts**, by [run cc4ff1ee](#the-prompts-and-store-note-run-cc4ff1ee), and the chain's copy command in 5594a9f. Left: count the refusals in the next few guard runs against 2026-11-11's 11 in 8.
+21. **Done: the store note's advice and the root-path links**, by run cc4ff1ee.

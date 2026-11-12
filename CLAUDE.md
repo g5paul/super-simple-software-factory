@@ -21,3 +21,17 @@ This repo is public. Some of the repos SSSF is installed in are private or unlis
 - Name a private repo nowhere this repo tracks or sends: files, commit messages, test fixtures, and output pasted into either. Call it "a project", and describe a fix it turned up without its name, its packages or its commands. Its records go in the private repo `CLAUDE.local.md` names.
 - Treat command output as public before it's pasted. `adws/check_projects.py`, the trace and logs name every repo they touch; use `check_projects.py --listed` when the output goes anywhere public.
 - `.git/sssf-private-names` lists the private names, and the pre-push hook refuses a push that adds one. That's the backstop, not the plan: a name caught there was already written down.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown: each feature's spec and tickets live in `.scratch/<feature>/`, and `docs/open.md` stays the one backlog. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

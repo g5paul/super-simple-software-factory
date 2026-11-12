@@ -469,3 +469,26 @@ def test_the_guard_list_is_the_one_claude_md_names():
                       if line.startswith("Guard code is what limits an agent"))
     named = [n for n in guard_line.split("`") if n.endswith((".py", ".ts"))]
     assert sorted(named) == sorted(gc.GUARD_MODULES)
+
+
+def test_the_build_brief_copy_takes_what_git_sees_and_leaves_ignored_files_out(tmp_path):
+    repo, dest = tmp_path / "repo", tmp_path / "copy"
+    repo.mkdir()
+    dest.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".gitignore").write_text(".env\n")
+    for name in ("kept.txt", "changed.txt", "gone.txt"):
+        (repo / name).write_text("old\n")
+    (repo / "sub").mkdir()
+    (repo / "sub" / "deep.txt").write_text("deep\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "init")
+    (repo / "changed.txt").write_text("new\n")
+    (repo / "gone.txt").unlink()
+    (repo / "added.txt").write_text("added\n")
+    (repo / ".env").write_text("DECOY=1\n")
+    assert "env" not in gc.COPY_TO_D and gc.COPY_TO_D in gc.build_brief("specs/x.md")
+    subprocess.run(["bash", "-c", gc.COPY_TO_D], cwd=repo, check=True, env={**os.environ, "D": str(dest)})
+    got = sorted(str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file())
+    assert got == [".gitignore", "added.txt", "changed.txt", "kept.txt", "sub/deep.txt"]
+    assert (dest / "changed.txt").read_text() == "new\n"

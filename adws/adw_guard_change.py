@@ -177,8 +177,20 @@ the `sssf.config.yaml` SSSF ships, under `.claude/skills/sssf/templates/`, never
 test-only one."""
 
 
+# Copies the checkout to "$D" without naming a secret file: git lists tracked and untracked
+# files, and .gitignore, which ignores .env, keeps the rest out. --ignore-missing-args skips a
+# tracked file the build deleted.
+COPY_TO_D = ('git ls-files -z --cached --others --exclude-standard '
+             '| rsync -a --from0 --ignore-missing-args --files-from=- ./ "$D/"')
+
+
 def build_brief(spec: str) -> str:
     return f"""Build the guard change the spec at `{spec}` describes.
+
+To run the suite outside the repo, copy it with
+`D=$(mktemp -d) && {COPY_TO_D}` from the repo root, then run the suite in `$D`. The copy
+holds what git sees, without the files `.gitignore` ignores, so the command never needs to
+name a secret file.
 
 Add a test for each case the change fixes. A guard test builds its config from the
 `sssf.config.yaml` SSSF ships, under `.claude/skills/sssf/templates/`, never a

@@ -1180,13 +1180,15 @@ def journal_drops(since: float, until: float,
 
 def close(process, on_event: Optional[Callable[[dict], None]] = None) -> None:
     """After the agent exits: end the session, count the events agentsh dropped (from its journal, as a
-    floor), and trace the denials that didn't count, with the poll figures. Never raises, and does
+    floor), and trace the denials that didn't count, with the poll figures and the drop counts by
+    type (`drops`: `None` when the journal couldn't be read or the call has no start time). Never raises, and does
     nothing for another process type."""
     if not isinstance(process, AgentshProcess):
         return
     try:
         process._end_session()
         atexit.unregister(process._at_exit)
+        drops: Optional[dict[str, int]] = None
         try:
             if process.started_at is not None:
                 counts, problem = journal_drops(process.started_at, time.time())
@@ -1194,18 +1196,20 @@ def close(process, on_event: Optional[Callable[[dict], None]] = None) -> None:
                     process.trace_notes.append(
                         f"agentsh's journal couldn't be read for this call ({problem}), so events agentsh dropped "
                         "are not counted; check with `journalctl -u agentsh --since <start> | grep -c 'event channel full'`")
-                elif counts:
-                    total = sum(counts.values())
-                    detail = ", ".join(f"{t} {n}" for t, n in sorted(counts.items()))
-                    process.trace_notes.append(
-                        f"agentsh dropped at least {total} event(s) during this call, when its store's channel was "
-                        f"full: {detail}. journald's rate limit can hide more. The trace's denials may be short by "
-                        "these. Drops are counted for the agentsh service as a whole, so a concurrent run's drops "
-                        "show here too")
-                    if counts.get("ptrace_execve"):
+                else:
+                    drops = {t: n for t, n in sorted(counts.items())}
+                    if counts:
+                        total = sum(counts.values())
+                        detail = ", ".join(f"{t} {n}" for t, n in sorted(counts.items()))
                         process.trace_notes.append(
-                            f"at least {counts['ptrace_execve']} dropped event(s) were ptrace_execve: a denied exec "
-                            "may have gone uncounted toward the three-refusal stop. agentsh still enforced it")
+                            f"agentsh dropped at least {total} event(s) during this call, when its store's channel was "
+                            f"full: {detail}. journald's rate limit can hide more. The trace's denials may be short by "
+                            "these. Drops are counted for the agentsh service as a whole, so a concurrent run's drops "
+                            "show here too")
+                        if counts.get("ptrace_execve"):
+                            process.trace_notes.append(
+                                f"at least {counts['ptrace_execve']} dropped event(s) were ptrace_execve: a denied exec "
+                                "may have gone uncounted toward the three-refusal stop. agentsh still enforced it")
             if process.slowest > SLOW_POLL_SECONDS:
                 process.trace_notes.append(
                     f"the slowest agentsh event poll took {process.slowest:.1f} s; a poll request gives up at 5 s "
@@ -1222,7 +1226,7 @@ def close(process, on_event: Optional[Callable[[dict], None]] = None) -> None:
             try:
                 on_event({"type": "agentsh_denials", "denials": denials, "notes": process.trace_notes,
                           "polls": process.polls, "pages": process.pages,
-                          "slowest_poll_seconds": round(process.slowest, 2)})
+                          "slowest_poll_seconds": round(process.slowest, 2), "drops": drops})
             except Exception:
                 pass
     except Exception:

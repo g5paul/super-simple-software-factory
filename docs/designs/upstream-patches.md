@@ -85,6 +85,8 @@ Settled with the engineer in a grilling session on 2026-11-12. Terms are in [GLO
 24. **Three ways to name a feature.** `just merge` deletes a worktree run's branch, so decision 11's `<branch>` isn't enough. The export takes a branch (its commits since it left `main`, or `--base`), `--run <adw_id>` (the commits that run made, by the shas the trace records), or `--feature <slug>` (the commits carrying `SSSF-Feature: <slug>`). The output branch is named after the form used, such as `export/<adw_id>`.
 25. **No fetch.** The export uses the local `upstream/main` as it stands, and prints that ref's date and the command to refresh it. That keeps decision 11's "changes nothing else" exact, and a machine with no network still exports.
 26. **Merge commits.** The export replays only the non-merge commits, in order. A merge that only joins history is skipped. A merge that carries changes of its own, such as a conflict resolution, stops the export, which names it.
+27. **agentsh's local `main` can't be pushed.** After the install, `main` holds the SSSF install and still tracks `origin/main`, and `push.default` is unset, so a plain `git push` on `main` would publish SSSF to the fork. The install sets `git config branch.main.pushRemote no-push`, a remote that doesn't exist, so a plain `git push` on `main` fails, and pushes of `export/*` and `sssf/links-listing` still work. Checked in a scratch clone with `git rev-parse main@{push}`. It doesn't stop `git push origin main`, which names the remote and skips `pushRemote`. A stronger guard would be the pre-push hook refusing a push whose commits hold SSSF files; that's a later skill change, not part of the install. Claude sessions can't push on this machine anyway; this covers a push the engineer types.
+28. **agentsh commits as the noreply address.** The install sets the clone's `user.email` to `g5paul@users.noreply.github.com`. An export keeps each commit's author, so a chain commit made with the global identity would publish that email upstream. The fixture fork found this.
 
 ### Facts found along the way
 
@@ -98,6 +100,32 @@ Settled with the engineer in a grilling session on 2026-11-12. Terms are in [GLO
   - `CGO_ENABLED=0 go test -short -p 4 ./...` takes 122 s. 120 packages pass and 5 fail. Three of the failures come from the environment: the shim against a loopback server, `internal/api`'s peer-uid checks, and `kernelinstall`, which refuses an inherited seccomp filter. `internal/db/proxy/postgres` fails on a dial timeout. `internal/ocsf` fails for real: `ptrace_signal`, the event the fork's signal commit added, isn't registered.
   - `internal/ptrace`'s 314 untagged tests pass here, but they start tracees with `PTRACE_TRACEME`. Under agentsh's tracer the test process is already a tracee, so they would most likely fail hard rather than skip. That's read from the code, not run. The integration-tagged ones need root, FUSE or Docker.
 
+## The workflow for agentsh, once installed
+
+How work reaches GitHub after the install, as explained to the engineer on 2026-11-12. In the clone that day, `origin/main` equals `upstream/main` (a07c7897), so none of the fork's fixes is on GitHub yet. All 18 fixes sit on `sssf/links-listing`, and `git cherry` finds every commit of the `fix/*` and other `sssf/*` branches already there. None of the 18 touches an SSSF file.
+
+| Branch | Holds | Goes to GitHub |
+|---|---|---|
+| `upstream/main` | canyonroad's code | it's theirs |
+| `sssf/links-listing` | upstream plus the 18 fixes | yes, when the engineer decides to publish them |
+| local `main` | upstream, the 18 fixes and the SSSF install | never (decision 27) |
+| `export/<name>` | upstream plus one feature's product changes | yes: the branch the engineer pushes and opens a PR from |
+
+SSSF lives only on local `main` and the feature branches cut from it. Everything pushed comes from a branch that never held SSSF.
+
+**The fixes that exist.** They need no export (decision 14). Publishing them to the fork is `git push origin sssf/links-listing`, run by the engineer. A PR per fix to canyonroad is ordinary git work: branches cut from `upstream/main`, the fix cherry-picked onto each, stacked where one fix leans on another.
+
+**New work a chain builds, such as the vet fix.**
+
+1. The engineer asks the agentsh project session for the change. It runs a chain on a branch cut from local `main`, or as a worktree run.
+2. The chain commits the spec (`specs/<adw_id>_*.md`), the code, and the write-up (`app_docs/<adw_id>_*.md`).
+3. `just export --run <adw_id>` builds `export/<adw_id>` on `upstream/main`. It replays only the code, drops the spec and write-up commits, strips the `SSSF-*` trailers, and runs `export_checks` (the `CGO_ENABLED=0` build and tests) on the clean branch.
+4. The engineer reviews the branch, pushes it with `git push origin export/<adw_id>`, and opens the PR.
+
+**Work that leans on the unpublished fixes, such as bind.** Replayed onto bare `upstream/main`, it won't apply, and the export stops and names the commit (decision 8). The engineer then either gets the fixes upstream first and exports once `upstream/main` has them, or exports onto the fixes with `just export --run <adw_id> --onto sssf/links-listing`, which still has no SSSF files, and opens a PR stacked on the fixes' branch. Fork-only work such as the `ocsf` fix (decision 19) works the same way: exported `--onto sssf/links-listing` to put it on the fork, or left on local `main`.
+
+**Who does what.** This session installs SSSF in agentsh and then stops writing there (decision 5). The agentsh project session, started after the install so it loads `/sssf`, runs the chains and the exports. The engineer runs every push.
+
 ## Open questions
 
-None. The grilling session's design tree was empty after decision 26.
+None. The grilling session's design tree was empty after decision 26. Decisions 27 and 28 came from the export's fixture run and the engineer's review of the agentsh workflow on 2026-11-12.

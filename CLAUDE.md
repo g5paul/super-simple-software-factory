@@ -10,6 +10,8 @@ Make a guard change through the guard-change chain, `adws/adw_guard_change.py`, 
 
 The `bypass-reviewer` subagent stays for a quick check outside a run, or on a run that looks wrong. A merge no longer needs it: f11ed7c0, d6fb947e and d071d025 passed the chain three times in a row with the subagent finding nothing the chain missed, and the engineer dropped the step on 2026-11-03. If the subagent ever finds a bypass that a passing run missed, run it before every merge again until three more runs come back clean.
 
+That happened on 2026-11-12. Run 37d69462 passed, and the subagent found five old holes rated High that the chain's review missed: gitignored files, index flags, coarse fingerprints, `local.just` and modules beside the ADW scripts. None was a regression, but they count, so the subagent runs before every merge again. Clean runs since: none.
+
 The review exists because a guard change once passed every test and still let `cat <<EOF | bash` past every agent rule. Two project sessions caught it after the update was sent.
 
 The text guard's patches are frozen since 2026-11-08, because agentsh is replacing it under `sandbox: none` ([the design](docs/designs/agentsh-local-sandbox.md)). A new spelling that gets past the text checks becomes a case in `docs/designs/agentsh/corpus.sh`, not another regex.

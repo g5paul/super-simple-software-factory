@@ -49,6 +49,10 @@ test("the server listens on 127.0.0.1 and nowhere else", async () => {
   }
   expect(out).toContain(`http://127.0.0.1:${port}`);
   expect(await answers(`http://127.0.0.1:${port}/api/health`)).toBe(true);
+  // Without --factory the health board does not exist and runs nothing.
+  expect((await fetch(`http://127.0.0.1:${port}/api/factory`)).status).toBe(404);
+  const listing = (await (await fetch(`http://127.0.0.1:${port}/api/projects`)).json()) as { factory?: boolean };
+  expect(listing.factory).toBe(false);
   for (const address of otherAddresses()) {
     expect(await answers(`http://${address}:${port}/api/health`)).toBe(false);
   }

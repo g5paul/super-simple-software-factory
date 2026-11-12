@@ -55,6 +55,23 @@ export function resolveDbPath(argv: string[] = Bun.argv): string {
   return isAbsolute(raw) ? raw : resolve(process.cwd(), raw);
 }
 
+/** One run as the factory board reads it from the trace. */
+export interface FactoryRunRow {
+  adw_id: string;
+  adw_name: string | null;
+  status: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  last_error: string | null;
+  open_pid: number | null;
+  open_host: string | null;
+  has_processes: number;
+  refusals: number;
+  bypasses: number | null;
+  blocking: number | null;
+  blocked_reviews: number;
+}
+
 export class SssfDb {
   readonly path: string;
   /**
@@ -568,6 +585,89 @@ export class SssfDb {
           WHERE p.kind = 'adw' AND p.ended_at IS NULL`,
       )
       .all();
+  }
+
+  private hasTable(name: string): boolean {
+    return this.db
+      .query<{ n: number }, [string]>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(name)?.n === 1;
+  }
+
+  /** The factory board's run facts: live or recent sessions, with their errors, refusals, guard findings and spec rulings. */
+  factoryRuns(since: string): FactoryRunRow[] {
+    try {
+      const hasProcesses = this.hasTable("processes");
+      const hasEnvelopes = this.hasTable("envelopes");
+      const archived = this.hasColumn("sessions", "archived") ? "AND s.archived = 0" : "";
+      return this.db
+        .query<FactoryRunRow, [string, string]>(
+          `SELECT s.adw_id, s.adw_name, s.status, s.started_at, s.ended_at,
+                  (SELECT e.name FROM events e WHERE e.adw_id = s.adw_id AND e.type = 'error'
+                    ORDER BY e.rowid DESC LIMIT 1) AS last_error,
+                  ${hasProcesses
+                    ? `(SELECT p.pid FROM processes p WHERE p.adw_id = s.adw_id AND p.kind = 'adw' AND p.ended_at IS NULL LIMIT 1) AS open_pid,
+                       (SELECT p.host FROM processes p WHERE p.adw_id = s.adw_id AND p.kind = 'adw' AND p.ended_at IS NULL LIMIT 1) AS open_host,`
+                    : "NULL AS open_pid, NULL AS open_host,"}
+                  ${hasProcesses ? "1" : "0"} AS has_processes,
+                  (SELECT count(*) FROM events e WHERE e.adw_id = s.adw_id AND e.type = 'log' AND e.name = 'rule_refused') AS refusals,
+                  (SELECT sum(json_extract(e.payload_json, '$.bypasses')) FROM events e
+                    WHERE e.adw_id = s.adw_id AND e.type = 'log' AND e.name LIKE 'bypass_review_%'
+                      AND json_type(e.payload_json, '$.blocking') IN ('integer', 'real')) AS bypasses,
+                  (SELECT sum(json_extract(e.payload_json, '$.blocking')) FROM events e
+                    WHERE e.adw_id = s.adw_id AND e.type = 'log' AND e.name LIKE 'bypass_review_%'
+                      AND json_type(e.payload_json, '$.blocking') IN ('integer', 'real')) AS blocking,
+                  ${hasEnvelopes
+                    ? `(SELECT count(*) FROM envelopes v WHERE v.adw_id = s.adw_id AND v.output_type = 'ReviewOutput'
+                         AND json_extract(v.payload_json, '$.approved') = 0)`
+                    : "0"} AS blocked_reviews
+             FROM sessions s
+            WHERE (s.status = 'running' OR s.started_at >= ? OR s.ended_at >= ?) ${archived}
+            ORDER BY s.started_at`,
+        )
+        .all(since, since);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Every agentsh_denials log event since `since`. */
+  agentshPolls(since: string): { at: string; payload_json: string | null }[] {
+    try {
+      return this.db
+        .query<{ at: string; payload_json: string | null }, [string]>(
+          `SELECT started_at AS at, payload_json FROM events WHERE name = 'agentsh_denials' AND started_at >= ? ORDER BY started_at`,
+        )
+        .all(since);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * VMs started and not yet ended: a VM's start event (a `log` named `sandbox` whose payload has `vm` and
+   * `provider`) with no later `sandbox_end` for the same run and vm. The `sandbox` phase's own events
+   * (phase_start, phase_end, message-only logs) share the name and are not VMs.
+   */
+  openSandboxes(): { adw_id: string; vm: string | null; provider: string | null; at: string; run_status: string | null }[] {
+    try {
+      return this.db
+        .query<{ adw_id: string; vm: string | null; provider: string | null; at: string; run_status: string | null }, []>(
+          `SELECT b.adw_id, json_extract(b.payload_json, '$.vm') AS vm,
+                  json_extract(b.payload_json, '$.provider') AS provider,
+                  b.started_at AS at, s.status AS run_status
+             FROM events b LEFT JOIN sessions s ON s.adw_id = b.adw_id
+            WHERE b.name = 'sandbox' AND b.type = 'log'
+              AND json_extract(b.payload_json, '$.vm') IS NOT NULL
+              AND json_extract(b.payload_json, '$.provider') IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM events x WHERE x.adw_id = b.adw_id AND x.name = 'sandbox_end'
+                                AND x.started_at >= b.started_at
+                                AND json_extract(x.payload_json, '$.vm') IS json_extract(b.payload_json, '$.vm'))
+            ORDER BY b.started_at`,
+        )
+        .all();
+    } catch {
+      return [];
+    }
   }
 
   /** A trial's attempts, each tag joined to its run (trial.py's attempts). */

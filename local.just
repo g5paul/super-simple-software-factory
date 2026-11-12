@@ -5,6 +5,10 @@
 # The clone the hub installs its own SSSF from, so the hub's runs use merged skill code.
 install_clone := env_var_or_default("SSSF_INSTALL_CLONE", home_directory() / "github/sssf-install")
 
+# the hub's health board across every repo and this machine, read-only: just factory
+factory:
+    cd .claude/skills/sssf/apps/visualizer && bun install --backend=copyfile --silent && bunx vite build --logLevel warn && bun run server/index.ts --factory "{{justfile_directory()}}"
+
 # a change to guard code, through the chain: just guard-change specs/tasks/<task>.md [--worktree]
 guard-change *ARGS:
     uv run adws/adw_guard_change.py "$@"

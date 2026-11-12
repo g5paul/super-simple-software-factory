@@ -542,6 +542,8 @@ export interface DaySpend {
 export interface ProjectsResponse {
   all: boolean;
   projects: ProjectSummary[];
+  /** The server was started with --factory, so the landing page shows the health board. */
+  factory?: boolean;
 }
 
 export interface ApiError {
@@ -803,4 +805,38 @@ export interface RosterRow {
   /** Over the attempts that passed every gate. */
   median_cost: number | null;
   median_seconds: number | null;
+}
+
+export type FactoryLevel = "red" | "amber" | "ok";
+export type FactorySection = "projects" | "machine" | "runs";
+
+export interface LeftoverProcess { pid: number; age_s: number | null; command: string; cwd: string | null; }
+
+export interface FactoryRow {
+  section: FactorySection;
+  key: string;              // stable id, e.g. "projects/<repo>", "machine/memory", "runs/<repo>/<adw_id>"
+  level: FactoryLevel;
+  title: string;            // repo name, "Memory", "<repo> <adw_id> <chain>"
+  problems: string[];       // what's wrong, one sentence per tripped rule; [] when ok
+  figure: string | null;    // the number that tripped it, e.g. "1.2 GiB free", "3.4× its p90"
+  next: string | null;      // the next step: a command or which session to ask
+  repo: string | null;      // registry name, for the link and the listed-only filter
+  adw_id: string | null;
+  notes: string[];          // neutral facts: sandbox default, image built, drops not recorded
+  processes?: LeftoverProcess[];   // leftover-processes row only
+  refusals?: number;               // runs rows: rule_refused count
+  guard?: { bypasses: number; blocking: number } | null;  // runs rows with bypass_review findings
+}
+
+export interface FactoryBoard {
+  generated_at: string;
+  hub: string;
+  listed: boolean;          // the switch as asked
+  private_names: boolean;   // the hub's sssf-private-names file exists
+  hidden: number;           // repos the switch hid
+  red: number;
+  amber: number;
+  rows: FactoryRow[];       // red, then amber, then ok; within a level, projects, machine, runs
+  errors: string[];         // a script that failed or printed unparseable output, a trace that would not open
+  scripts_at: string | null; // when the cached script results were taken
 }

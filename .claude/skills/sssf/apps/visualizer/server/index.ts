@@ -11,6 +11,11 @@
  *   bun run server/index.ts --db /path/to/repo/adws/adw_data/sssf.db
  *   SSSF_DB=/path/to/sssf.db SSSF_OBS_PORT=4610 bun run server/index.ts
  *   bun run server/index.ts --all              # every repo in the registry
+ *   bun run server/index.ts --factory /path/to/hub   # the hub's health board on #/ (implies --all)
+ *
+ * --factory is the one mode that runs commands: the hub's check_projects.py
+ * and phase_times.py (both --json), git, and the OpenShell image check
+ * (podman). Without it nothing is run and /api/factory does not exist.
  *
  * It listens on 127.0.0.1 only. The trace holds every command and prompt an
  * agent ran, and the --all registry names every repo, private ones included,
@@ -30,6 +35,7 @@ import { machineDay, readMachineCap } from "./machine.ts";
 import { sandboxUsage } from "./sandbox.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import { leaderboard, rosterSha, trialView } from "./trials.ts";
+import { Factory, bunRunner, factoryHandler, factoryHub } from "./factory.ts";
 import type {
   AccountUsage,
   AgentPrompts,
@@ -56,11 +62,19 @@ const HOST = "127.0.0.1";
 const DIST_DIR = resolve(import.meta.dir, "..", "dist");
 
 const ALL = Bun.argv.includes("--all");
+let FACTORY_HUB: string | null = null;
+try {
+  FACTORY_HUB = factoryHub(Bun.argv);
+} catch (error) {
+  console.error(`[sssf] ${(error as Error).message}`);
+  process.exit(1);
+}
+const LISTING = ALL || FACTORY_HUB !== null;
 
 // One repo: its db must exist, so a wrong path fails at startup with the
 // reason. All repos: a repo with no runs yet is listed, not an error.
 let projects: Projects;
-if (ALL) {
+if (LISTING) {
   projects = new Projects(null);
 } else {
   const only = projectForDb(resolveDbPath());
@@ -72,6 +86,11 @@ if (ALL) {
   }
   projects = new Projects(only);
 }
+
+const factory = FACTORY_HUB !== null ? new Factory({ hub: FACTORY_HUB, projects, runner: bunRunner }) : null;
+
+const factoryRoutes: Record<string, (req: Request) => Promise<Response>> =
+  factory ? { "/api/factory": factoryHandler(factory) } : {};
 
 const account = new Account();
 const piSessions = new PiSessions();
@@ -210,9 +229,13 @@ const server = listen((port) => Bun.serve({
   routes: {
     "/api/health": safely(() => json({ ok: true, all: projects.all })),
 
+    // The hub's health board: registered only under --factory.
+    ...factoryRoutes,
+
     "/api/projects": safely(() =>
       json({
         all: projects.all,
+        factory: factory !== null,
         projects: projects.list().map((p) => {
           const db = projects.db(p);
           const counts = db?.overview();
@@ -406,7 +429,8 @@ const server = listen((port) => Bun.serve({
 }));
 
 console.log(`[sssf] visualizer api  http://${HOST}:${server.port}`);
-if (ALL) {
+if (FACTORY_HUB !== null) console.log(`[sssf] factory board    ${FACTORY_HUB}`);
+if (LISTING) {
   const listed = projects.list();
   console.log(`[sssf] registry        ${registryPath()}  [${listed.length} projects]`);
   for (const p of listed) console.log(`[sssf]   ${p.name.padEnd(20)} ${p.root}`);

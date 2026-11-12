@@ -134,6 +134,14 @@ rebase ADW_ID:
 discard ADW_ID:
     uv run adws/adw_worktree.py discard {{ADW_ID}} --config {{config}}
 
+# ── send a feature upstream ─────────────────────────────────────────────────
+# Builds a local branch export/<name> on upstream/main holding a feature's
+# product changes, with no SSSF files, then runs repo.yaml's export_checks on
+# it. It never fetches or pushes. See cookbooks/run_adw.md, "Send a feature upstream".
+# a feature's changes without SSSF files: just export <branch> | --run <adw_id> | --feature <slug>
+export *ARGS:
+    uv run adws/adw_export.py --config {{config}} "$@"
+
 # ── race rosters ────────────────────────────────────────────────────────────
 # A trial runs one request under several rosters, each as its own worktree
 # run of simple-sdlc, then a panel reviews them blind. You pick the winner.

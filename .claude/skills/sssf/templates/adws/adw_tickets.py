@@ -106,6 +106,24 @@ def main(folder: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         raise
 
 
+def feature_sssf_changes(feature_slug: str) -> str:
+    """The SSSF-file changes in the feature's own commits (the ones with the
+    `SSSF-Feature` trailer), for the reviewers to report to the engineer, or
+    "" when there are none. An "Update SSSF" commit between runs carries no
+    trailer, so it never shows."""
+    lines = []
+    for sha, _step in git_helper.feature_commits(feature_slug):
+        subject, paths = git_helper.changed_in(sha, git_helper.SSSF_PATHS)
+        if paths:
+            lines.append(f"- {git_helper.short_sha(sha)} {subject}: {', '.join(paths)}")
+    if not lines:
+        return ""
+    header = ("SSSF files this feature's own commits changed. These are for the engineer to judge: "
+              "report each as a non-blocking finding naming its path, never as blocking. "
+              "Inspect with git show <sha> -- adws/ .claude/skills/sssf/")
+    return header + "\n" + "\n".join(lines)
+
+
 def build_feature(run, folder: str) -> int:
     def commit(ph, subject: str, body: str = "", step: str = "") -> None:
         trailers = f"SSSF-Feature: {feature.slug}" + (f"\nSSSF-Step: {step}" if step else "")
@@ -192,23 +210,27 @@ def build_feature(run, folder: str) -> int:
 
     # SSSF's own files are not the feature's work. Updating SSSF on the feature
     # branch between runs is routine, and a reviewer shown it calls it scope creep.
+    # The feature's OWN commits that touch them are listed in a separate,
+    # non-blocking section (feature_sssf_changes).
     outside = " ".join(f"':(exclude){p}'" for p in git_helper.SSSF_PATHS)
     diff = f"git diff {git_helper.short_sha(base)}..HEAD -- . {outside}"
     commits = git_helper.log_oneline(base, exclude=git_helper.SSSF_PATHS)
-    protected = ", ".join(run.cfg.defaults.protected_files)
+    sssf = feature_sssf_changes(feature.slug)
+    sssf_section = f"\n{sssf}" if sssf else ""
+    protected = ", ".join(permissions.protected(run.cfg))
     hands_off = (f"Protected paths, which no agent may change: {protected}. A finding that needs "
                  f"one of them changed is for the engineer, so it is never blocking.")
     with run.phase(PhaseParams(name="review_standards", kind="agent", owner="standards_reviewer",
                                description="Does the feature follow this repo's standards?")) as ph:
         standards = ph.call(AgentCall(output_type=AxisReviewOutput,
-                                      prompt=f"Diff: {diff}\nCommits:\n{commits}\n{hands_off}",
+                                      prompt=f"Diff: {diff}\nCommits:\n{commits}{sssf_section}\n{hands_off}",
                                       gates=[gates.artifacts_exist, gates.files_non_empty]))
     with run.phase(PhaseParams(name="review_spec", kind="agent", owner="spec_reviewer",
                                description="Does the feature do what its spec and tickets ask?")) as ph:
         spec = ph.call(AgentCall(output_type=AxisReviewOutput,
                                  prompt=(f"Spec: {feature.spec}\nTickets:\n"
                                          + "\n".join(t.path for t in feature.tickets)
-                                         + f"\nDiff: {diff}\nCommits:\n{commits}\n{hands_off}"),
+                                         + f"\nDiff: {diff}\nCommits:\n{commits}{sssf_section}\n{hands_off}"),
                                  gates=[gates.artifacts_exist, gates.files_non_empty]))
 
     # A reviewer can still block on a file the fixer may not touch. Such a
@@ -218,7 +240,12 @@ def build_feature(run, folder: str) -> int:
     blocking, for_engineer = [], []
     for f in standards.blocking + spec.blocking:
         path = f.where.split(":")[0].strip()
-        fixable = not path or permissions.permitted(path, builder, run.cfg)
+        # A path under SSSF_PATHS always goes to the engineer, even when
+        # `permitted` would allow it. A finding with an empty `where` rests on
+        # the section header's instruction; it costs at most the one fix pass
+        # the chain already allows.
+        fixable = not path or (permissions.permitted(path, builder, run.cfg)
+                               and not path.startswith(git_helper.SSSF_PATHS))
         (blocking if fixable else for_engineer).append(f)
     if for_engineer:
         run.console.advise("blocking findings for the engineer, in files no agent may change:\n"

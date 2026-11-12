@@ -22,6 +22,11 @@ defaults:
   # Enforced in adw_modules/permissions.py after each call, the same as on Pi:
   # --permission-mode bypassPermissions lets claude act, and this check decides
   # whether what it did stands.
+  # SSSF always protects its own factory files too: all of adws/ (except the runtime under
+  # data_dir), all of .claude/, .pi/, .mcp.json, justfile, sssf.just, local.just and .githooks/.
+  # A roster can't drop them; only an agent's own `writes` naming one unlocks it. Gitignored
+  # files are never checked. A repo whose justfile holds product recipes names
+  # `justfile` in the builder's `writes`.
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/
@@ -71,7 +76,7 @@ agents:
       system: adws/adw_data/prompt_engineering/builder/system.md
       user: adws/adw_data/prompt_engineering/builder/user.md
     # No `writes` key: unrestricted, and the only agent that is. It still cannot
-    # touch defaults.protected_files.
+    # touch defaults.protected_files or SSSF's factory files.
     tools:
       - read
       - grep

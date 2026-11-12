@@ -259,7 +259,8 @@ def test_the_fixer_is_told_what_it_may_not_touch(repo):
     repo.blocking = True
     run()
     fix_prompt = repo.of("ticket_builder")[-1][2]
-    assert "Never change these protected paths: .scratch/" in fix_prompt
+    assert "Never change these protected paths: " in fix_prompt
+    assert "justfile" in fix_prompt and ".scratch/" in fix_prompt
 
 
 def test_a_blocking_finding_in_a_protected_file_goes_to_the_engineer(repo, capsys):
@@ -335,6 +336,55 @@ def test_the_reviewers_never_see_an_sssf_update(repo, monkeypatch):
         prompt = repo.of(name)[-1][2]
         assert "Update SSSF" not in prompt and "02: B" in prompt
         assert "':(exclude)adws/' ':(exclude).claude/skills/sssf/'" in prompt
+        assert SSSF_HEADER not in prompt
+
+
+SSSF_HEADER = "SSSF files this feature's own commits changed"
+
+
+def test_feature_sssf_changes_lists_only_the_features_own_commits(repo):
+    for path in ("adws/adw_data/prompt_engineering/reviewer/system.md", "src/a.py"):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text("edit\n")
+    git("add", "-Af")
+    git("commit", "-qm", "t\n\nSSSF-Feature: summaries")
+    first = git("rev-parse", "--short", "HEAD")
+    Path("adws/adw_modules").mkdir(parents=True)
+    Path("adws/adw_modules/new.py").write_text("update\n")
+    git("add", "-Af")
+    git("commit", "-qm", "Update SSSF to skill abc1234")
+
+    text = adw_tickets.feature_sssf_changes("summaries")
+    assert text.startswith(SSSF_HEADER)
+    assert "reviewer/system.md" in text and first in text and " t: " in text
+    assert "src/a.py" not in text
+    assert "new.py" not in text and "Update SSSF" not in text
+    assert adw_tickets.feature_sssf_changes("other") == ""
+
+
+def test_the_reviewers_see_the_features_own_sssf_changes(repo, monkeypatch):
+    real = quality.run_quality
+    monkeypatch.setattr(quality, "run_quality",
+                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+    run()
+    Path("src/t02.py").unlink()
+    Path(".claude/skills/sssf").mkdir(parents=True)
+    Path(".claude/skills/sssf/SKILL.md").write_text("edit\n")
+    git("add", "-A")
+    git("commit", "-qm", "Edit the skill\n\nSSSF-Feature: summaries")
+    monkeypatch.setattr(quality, "run_quality", real)
+    assert run() == 0
+    for name in ("standards_reviewer", "spec_reviewer"):
+        prompt = repo.of(name)[-1][2]
+        assert SSSF_HEADER in prompt and ".claude/skills/sssf/SKILL.md" in prompt
+
+
+def test_a_blocking_finding_on_an_sssf_file_goes_to_the_engineer(repo, capsys):
+    repo.blocking = True
+    repo.where = ".claude/skills/sssf/SKILL.md:3"
+    assert run() == 0
+    assert len(repo.of("ticket_builder")) == 3             # no fix pass
+    assert "for the engineer" in capsys.readouterr().out
 
 
 # ── a ticket run on its own branch (parallel-worktree-runs decisions 26 to 38) ──

@@ -30,4 +30,6 @@ The gaps, confirmed on 2026-11-12 in a clone of sssf-sandbox with no agent, unde
 
 That's an open.md bug for the guard-change chain. It's also the main reason to reopen this decision: if protecting the factory inside the tree keeps leaking, take the factory out of the tree.
 
+The first fix, run 37d69462 on branch `guard-factory-files`, added a fixed list of factory paths that a roster can't drop and narrowed the grant to the runtime. Its reviews then found ten more ways past the after-call check, all open on `main` as well. A second run closes those. One class it can't close: the check reads git, so it can't see gitignored files. An agent can still write `.claude/settings.local.json` where it's excluded, or a `.pyc` that Python loads in place of guard code. That needs a write rule that acts as the agent writes, such as agentsh's, not a better git check. If that also leaks, it counts toward reopening this decision.
+
 **Everything else stays.** A repo's history holds SSSF files and "Update SSSF" commits, and its tools need excludes. Those are the costs the export exists to keep away from upstream.

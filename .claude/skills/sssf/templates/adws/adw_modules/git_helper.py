@@ -8,7 +8,8 @@ from . import sandbox
 
 
 # What `just sssf-update` writes. It is SSSF's work, not the project's, so a
-# reviewer or documenter shown the project's change never sees it.
+# reviewer or documenter shown the project's change never sees it. The ticket
+# review shows the feature's own changes to these paths in a separate section.
 SSSF_PATHS = ("adws/", ".claude/skills/sssf/")
 
 
@@ -115,6 +116,15 @@ def ref_exists(ref: str) -> bool:
 
 def rev(ref: str = "HEAD") -> str:
     return _git("rev-parse", ref)
+
+
+def changed_in(sha: str, paths: tuple[str, ...]) -> tuple[str, list[str]]:
+    """(subject, files) a commit changed under `paths`. `-m --first-parent`
+    makes a merge commit list everything it changed against its first parent;
+    without them git shows a combined diff that leaves files out."""
+    out = _git("show", "-m", "--first-parent", "--format=%s", "--name-only", sha, "--", *paths)
+    lines = out.splitlines()
+    return (lines[0] if lines else ""), [ln for ln in lines[1:] if ln.strip()]
 
 
 def short_sha(ref: str = "HEAD") -> str:

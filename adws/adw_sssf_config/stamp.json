@@ -129,11 +129,11 @@
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
-      "sha256": "9719721903e7ac3312c6f5a2691b31bc06f9ea9f33f8eb50186a5116ce7a560a",
+      "sha256": "bfe9d6a99cd24a5e98b79f649237f6089e8cd7abe31ba0573ad9a911e8b9104c",
       "source": "adws/adw_modules/agentsh_guard.py"
     },
     "adws/adw_modules/agentsh_sssf.yaml": {
-      "sha256": "6145882266ccbb9661848d2d0533cdaa9b8d5d9637b21be9f21dc45a0489f25d",
+      "sha256": "c9fdd535c0dc006df9382b004f6bae8f0b099305f1dd7a0ae4937f60c819bc1e",
       "source": "adws/adw_modules/agentsh_sssf.yaml"
     },
     "adws/adw_modules/budget.py": {
@@ -337,5 +337,5 @@
       "source": "justfile"
     }
   },
-  "skill": "837bd01"
+  "skill": "bc04f22"
 }

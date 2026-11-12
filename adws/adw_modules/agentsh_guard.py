@@ -49,7 +49,7 @@ ATTACH_SECONDS = 30
 PAGE = 5000
 PRUNE_STATUS = "/var/lib/sssf-agentsh-prune/status.json"
 PRUNE_STALE_SECONDS = 3 * 3600
-STORE_WARN_BYTES = 10 * 10**9
+STORE_WARN_BYTES = 15 * 10**9
 POLL_SECONDS = 5
 SLOW_POLL_SECONDS = 1.0      # a poll request slower than this gets a note
 JOURNAL_SECONDS = 10         # the journal read's timeout
@@ -531,8 +531,9 @@ def store_notes(now: Optional[float] = None) -> list[str]:
         counted = [data.get(key) for key in ("store_bytes", "audit_bytes")]
         counted = [v for v in counted if isinstance(v, (int, float)) and not isinstance(v, bool)]
         total = sum(counted)
-        if counted and total > STORE_WARN_BYTES:
-            notes.append(f"agentsh's event store and audit log are {total / 1e9:.1f} GB together, over 10 GB; with no "
+        if counted and total >= STORE_WARN_BYTES:
+            notes.append(f"agentsh's event store and audit log are {total / 1e9:.1f} GB together, at least "
+                         f"{STORE_WARN_BYTES / 1e9:.0f} GB; with no "
                          "run going, stop the service, move /var/lib/agentsh/events.db and its -wal and -shm files "
                          "aside, start it, and delete the moved files once a run works (see \"Running local agents "
                          "under agentsh\" in .claude/skills/sssf/references/config.md)")

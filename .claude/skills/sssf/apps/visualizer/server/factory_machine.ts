@@ -152,14 +152,25 @@ export function pruneRows(status: PruneStatus | null, now: number, path = ""): F
   return rows;
 }
 
-export function pollRows(perRepo: { repo: string; events: { at: string; payload: Record<string, unknown> | null }[] }[]): FactoryRow[] {
+export interface PollEvent { at: string; adw_id?: string | null; payload: Record<string, unknown> | null; }
+
+/** What to do about a slow poll. A big store is the usual cause, and the store row already shows its size. */
+export function slowPollNext(run: string | null): string {
+  const look = run ? `otherwise open run ${run}, the slowest` : "otherwise look at the slowest call in the trace";
+  return `if the agentsh store row is amber or red, move the store aside as it says, since a big store slows polls; ${look}. The row clears 24 h after that call`;
+}
+
+export function pollRows(perRepo: { repo: string; events: PollEvent[] }[]): FactoryRow[] {
   const rows: FactoryRow[] = [];
   for (const { repo, events } of perRepo) {
     if (!events.length) continue;
-    const slowest = Math.max(0, ...events.map((e) => Number(e.payload?.slowest_poll_seconds) || 0));
+    const pollOf = (e: PollEvent) => Number(e.payload?.slowest_poll_seconds) || 0;
+    const worst = events.reduce((a, b) => (pollOf(b) > pollOf(a) ? b : a));
+    const slowest = Math.max(0, pollOf(worst));
     let level: FactoryLevel = slowest > POLL_RED_S ? "red" : slowest > POLL_AMBER_S ? "amber" : "ok";
+    const slowRun = level === "ok" ? null : (worst.adw_id ?? null);
     const problems: string[] = [];
-    if (level !== "ok") problems.push(`agentsh's slowest poll took ${slowest.toFixed(1)} s`);
+    if (level !== "ok") problems.push(`agentsh's slowest poll took ${slowest.toFixed(1)} s${slowRun ? ` in run ${slowRun} at ${worst.at.slice(0, 16).replace("T", " ")} UTC` : ""}`);
     let figure: string | null = level === "ok" ? null : `${slowest.toFixed(1)} s slowest poll`;
     const totals = new Map<string, number>();
     let recorded = false;
@@ -179,9 +190,11 @@ export function pollRows(perRepo: { repo: string; events: { at: string; payload:
       problems.push(`agentsh dropped ${ptrace} ptrace_execve events`);
       figure = `${ptrace} ptrace_execve dropped`;
     }
+    const next = level === "ok" ? null
+      : slowest > POLL_AMBER_S ? slowPollNext(slowRun)
+      : "agentsh still enforced the dropped execs, but they weren't counted toward the three-refusal stop; see \"A dropped ptrace_execve\" in references/config.md";
     rows.push(machineRow(`polls/${repo}`, `agentsh polls in ${repo}`, level, {
-      repo, problems, figure, notes,
-      next: level === "ok" ? null : `ask the hub session to look at agentsh's poll times in \`${repo}\`'s trace`,
+      repo, problems, figure, notes, adw_id: slowRun, next,
     }));
   }
   return rows;

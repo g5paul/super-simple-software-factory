@@ -273,7 +273,7 @@ export class Factory {
           events: db.agentshPolls(since).map((e) => {
             let payload: Record<string, unknown> | null = null;
             try { payload = e.payload_json ? JSON.parse(e.payload_json) : null; } catch { /* unreadable payload */ }
-            return { at: e.at, payload };
+            return { at: e.at, adw_id: e.adw_id, payload };
           }),
         });
         vms.push({ repo: p.name, open: db.openSandboxes() });

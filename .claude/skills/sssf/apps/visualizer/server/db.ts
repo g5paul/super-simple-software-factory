@@ -631,11 +631,11 @@ export class SssfDb {
   }
 
   /** Every agentsh_denials log event since `since`. */
-  agentshPolls(since: string): { at: string; payload_json: string | null }[] {
+  agentshPolls(since: string): { at: string; adw_id: string | null; payload_json: string | null }[] {
     try {
       return this.db
-        .query<{ at: string; payload_json: string | null }, [string]>(
-          `SELECT started_at AS at, payload_json FROM events WHERE name = 'agentsh_denials' AND started_at >= ? ORDER BY started_at`,
+        .query<{ at: string; adw_id: string | null; payload_json: string | null }, [string]>(
+          `SELECT started_at AS at, adw_id, payload_json FROM events WHERE name = 'agentsh_denials' AND started_at >= ? ORDER BY started_at`,
         )
         .all(since);
     } catch {

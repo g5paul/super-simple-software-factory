@@ -130,6 +130,22 @@ test("polls: 0.5 s ok, 1.5 s amber, 3.5 s red", () => {
   expect(pollRows([{ repo: "r", events: [] }])).toEqual([]);
 });
 
+test("polls: a slow poll names its run and points at the store first", () => {
+  const row = pollRows([{ repo: "r", events: [
+    { at: "2026-11-01T09:10:00.000+00:00", adw_id: "fast0001", payload: { slowest_poll_seconds: 0.4, drops: {} } },
+    { at: "2026-11-01T10:20:00.000+00:00", adw_id: "slow0002", payload: { slowest_poll_seconds: 3.9, drops: {} } },
+  ] }])[0];
+  expect(row.level).toBe("red");
+  expect(row.adw_id).toBe("slow0002");
+  expect(row.problems[0]).toBe("agentsh's slowest poll took 3.9 s in run slow0002 at 2026-11-01 10:20 UTC");
+  expect(row.next).toStartWith("if the agentsh store row is amber or red, move the store aside");
+  expect(row.next).toContain("open run slow0002");
+  expect(row.next).not.toContain("hub session");
+  const ok = pollRows([{ repo: "r", events: [{ at: hoursAgo(1), adw_id: "a", payload: { slowest_poll_seconds: 0.2, drops: {} } }] }])[0];
+  expect(ok.adw_id).toBeNull();
+  expect(ok.next).toBeNull();
+});
+
 test("polls: ptrace_execve drops are amber, empty drops ok, unrecorded drops get a note", () => {
   const dropped = polls({ slowest_poll_seconds: 0.2, drops: { ptrace_execve: 2 } })[0];
   expect(dropped.level).toBe("amber");

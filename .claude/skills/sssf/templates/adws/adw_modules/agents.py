@@ -125,7 +125,7 @@ def prompt_variables(run, phase: Phase, call: AgentCall) -> dict[str, str]:
         "previous_envelope": call.previous.model_dump_json(indent=2) if call.previous else "(none)",
         "context_handoff_dir": str(run.context_handoff_dir),
         "phase_name": phase.params.name,
-        "protected_files": "\n".join(f"- `{p}`" for p in run.cfg.defaults.protected_files)
+        "protected_files": "\n".join(f"- `{p}`" for p in permissions.protected(run.cfg))
                            or "(none)",
     }
 
@@ -414,7 +414,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                          type="error", name="permission_breach",
                                          payload={"agent": agent.name, "error": str(breach),
                                                   "writes": agent.writes,
-                                                  "protected_files": run.cfg.defaults.protected_files}))
+                                                  "protected_files": permissions.protected(run.cfg)}))
             raise
         if touched:
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,

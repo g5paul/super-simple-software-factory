@@ -33,6 +33,8 @@ and roll back, and for the chain's own commit phase to commit. An agent that mov
 
 Two keys drive it, both in sssf.config.yaml:
     defaults.protected_files   paths no agent may touch unless it names them itself
+SSSF's fixed `FACTORY_FILES` are checked on top of `protected_files`, and a
+roster can't drop them.
     agents[].writes      None = unrestricted · [] = read-only · [...] = only these
 """
 
@@ -73,8 +75,8 @@ def snapshot(run) -> dict[str, str]:
 
     Tracked files carry their numstat counts, so an edit to an already-dirty
     file still registers as a change. Untracked files are listed by name.
-    Gitignored paths never appear, which is why the session runtime under
-    `data_dir` — where handoff files legitimately land — needs no special case.
+    Gitignored paths never appear. The session runtime is normally gitignored,
+    but `always_writable` grants it anyway, so a missing gitignore line is safe.
     """
     fingerprints: dict[str, str] = {}
     for line in _git(["diff", "HEAD", "--numstat"], run.repo_root).splitlines():
@@ -861,21 +863,58 @@ def _matches(path: str, pattern: str) -> bool:
     return path == pattern
 
 
-def always_writable(cfg: SSSFConfig) -> list[str]:
-    """The session runtime, which EVERY agent must be able to write.
+# SSSF's own files: the prompts, the extensions, the skill, the recipes, the
+# hooks, Claude Code's settings (their hooks run on the host) and the ADW
+# code. Protected whatever the roster says. Only an agent's own `writes`,
+# naming one, unlocks it. FACTORY_DATA is relative to data_dir.
+FACTORY_DATA = ("prompt_engineering/", "harness_engineering/")
+FACTORY_FILES = (".claude/skills/sssf/", "justfile", "sssf.just", ".githooks/",
+                 ".claude/settings.json", ".claude/settings.local.json",
+                 "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py")
+# The runtime under data_dir: the agents' own (sessions, tool caches) and
+# SSSF's worktrees. The trace db is added from cfg.observability.db when it
+# is inside data_dir.
+RUNTIME = ("sessions/", "agent-cache/", "worktrees/")
+_DB_SIBLINGS = ("", "-wal", "-shm", "-journal")
 
+
+def factory_files(cfg: SSSFConfig) -> list[str]:
+    """SSSF's fixed list of protected paths, with data_dir filled in."""
+    data = cfg.defaults.data_dir.rstrip("/")
+    return [f"{data}/{p}" for p in FACTORY_DATA] + list(FACTORY_FILES)
+
+
+def protected(cfg: SSSFConfig) -> list[str]:
+    """The fixed list, then the roster's `protected_files`, each entry once.
+
+    For DISPLAY only (prompts, messages, the trace). Never use it to decide.
+    """
+    return list(dict.fromkeys(factory_files(cfg) + list(cfg.defaults.protected_files)))
+
+
+def always_writable(cfg: SSSFConfig) -> list[str]:
+    """The runtime EVERY agent must be able to write.
+
+    The session runtime and the tool caches are always writable.
     `context_handoff/` is the one place agents hand work to each other, and an
     agent's own prompts, raw_output.jsonl, and envelope.json land beside it.
     Scout writes its findings there, the reviewer its review, the planner its
     plan — a read-only agent is read-only with respect to the REPO, never with
     respect to its own report.
 
-    This is granted from `data_dir` rather than left to .gitignore. The runtime
-    is normally ignored, so it never even appears in a snapshot — but an agent's
-    ability to record its work must not hang on a gitignore entry that someone
-    can delete or that a changed `data_dir` can outgrow.
+    SSSF's worktrees and trace db are granted too, inside `data_dir` only, so a
+    missing gitignore line can't get them deleted by a rollback. The rest of
+    `data_dir`, the prompts and the extensions, is factory and protected.
     """
-    return [cfg.defaults.data_dir.rstrip("/") + "/"]
+    data = cfg.defaults.data_dir.rstrip("/")
+    grants = [f"{data}/{p}" for p in RUNTIME]
+    db = cfg.observability.db
+    # Only inside data_dir, so the grant stays within the baseline's (all of
+    # data_dir), and never on a factory path. A worktree run pins db absolute,
+    # outside the worktree; an absolute path never matches a snapshot path.
+    if _matches(db, data + "/") and not any(_matches(db, f) for f in factory_files(cfg)):
+        grants += [db + s for s in _DB_SIBLINGS]
+    return grants
 
 
 def _names(entry: str, protected: str) -> bool:
@@ -890,6 +929,11 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
     if any(_matches(path, p) for p in always_writable(cfg)):
         return True
     writes = agent.writes or []
+    # SSSF's own files, whatever the roster says. A separate check: it can only
+    # refuse, so the roster check below still decides everything it did before.
+    fixed = [p for p in factory_files(cfg) if _matches(path, p)]
+    if fixed and not any(_matches(path, w) and _names(w, g) for w in writes for g in fixed):
+        return False
     guards = [p for p in cfg.defaults.protected_files if _matches(path, p)]
     if guards:
         # Naming a protected path is what unlocks it. The documenter's `**/*.md`
@@ -943,7 +987,7 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str]) -> list[str]
     outcomes = {p: _roll_back(run, p, before, after) for p in breaches}
     scope = ("read-only" if agent.writes == []
              else f"limited to {agent.writes}" if agent.writes
-             else f"barred from {run.cfg.defaults.protected_files}")
+             else f"barred from {protected(run.cfg)}")
     detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
     message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
     # The run stops here, so the agent's permitted changes are never verified,

@@ -20,6 +20,10 @@ defaults:
     - find
   # Off-limits to every agent that does not name them in its own `writes`.
   # Enforced in adw_modules/permissions.py after each call.
+  # SSSF always protects its own factory files too (prompts, extensions, the skill, justfile,
+  # sssf.just, .githooks/, .claude/settings*.json, adws/ code). A roster can't drop them; only an
+  # agent's own `writes` naming one unlocks it. A repo whose justfile holds product recipes names
+  # `justfile` in the builder's `writes`.
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/
@@ -68,7 +72,7 @@ agents:
       system: adws/adw_data/prompt_engineering/builder/system.md
       user: adws/adw_data/prompt_engineering/builder/user.md
     # No `writes` key: unrestricted, and the only agent that is. It still cannot
-    # touch defaults.protected_files.
+    # touch defaults.protected_files or SSSF's factory files.
     tools:
       - read
       - grep

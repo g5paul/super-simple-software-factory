@@ -46,7 +46,11 @@ def test_every_prompt_can_name_the_protected_paths(tmp_path):
     phase = SimpleNamespace(params=SimpleNamespace(name="plan"))
     call = AgentCall(output_type=PlanOutput, prompt="x")
     variables = agents.prompt_variables(run, phase, call)
-    assert variables["protected_files"] == "- `adws/adw_modules/`\n- `specs/`"
+    text = variables["protected_files"]
+    assert text == "\n".join(f"- `{p}`" for p in permissions.protected(config()))
+    assert "- `justfile`" in text
+    assert text.endswith("- `specs/`")
+    assert text.count("`adws/adw_modules/`") == 1
 
 
 @pytest.mark.parametrize("agent", ["planner", "builder", "ticket_builder"])

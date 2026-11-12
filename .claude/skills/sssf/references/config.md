@@ -73,7 +73,7 @@ agents:
 | `color` | no | Hex color, such as `"#a78bfa"`, for this agent's lane in the dashboard. It goes from the roster to `agent_sessions.color` to `/api/projects/:project/sessions/:adw_id`. The `agent_start` event carries it too, so a lane has its color while the agent is still running. Unset means the dashboard's fallback palette. |
 | `coding_agent`, `model`, `thinking`, `color`, `harness_engineering` | no | Override the corresponding `defaults` key. |
 | `tools` | no | Allowlist. Omitting the key makes every tool usable. The list grants capabilities and sets no boundary. `writes` sets the boundary. |
-| `writes` | no | What this agent may modify in the repo, enforced after every call. Omitted means unrestricted, but still barred from `protected_files`. `[]` means no repo writes at all. A list means only those paths: a trailing `/` is a directory prefix, `*` matches within one path segment, `**` crosses segments, and anything else is an exact path. Naming a `protected_files` path here is what unlocks it. The session runtime under `data_dir` is always writable, so `writes: []` makes the agent read-only in the repo but still lets it write its own report. |
+| `writes` | no | What this agent may modify in the repo, enforced after every call. Omitted means unrestricted, but still barred from `protected_files` and SSSF's factory files. `[]` means no repo writes at all. A list means only those paths: a trailing `/` is a directory prefix, `*` matches within one path segment, `**` crosses segments, and anything else is an exact path. Naming a `protected_files` path here is what unlocks it. The session runtime (`data_dir/sessions/`, `agent-cache/`) is always writable, so `writes: []` makes the agent read-only in the repo but still lets it write its own report. |
 | `max_call_cost` | no | Claude Code only. The most one call may spend, in estimated dollars, passed to `claude -p --max-budget-usd`. Claude Code counts it per call, even on a resumed session, and checks it after each API request. A call that hits it stops the run with no retry, recorded as `call_budget_stop`, and its spend still counts toward `max_run_cost`. A call that keeps hitting it is doing too much, so split the task. |
 
 The roster has no output types. The roster says who an agent is, and the ADW's call site says how it's used. One agent serves many calls, each with the same system prompt and its own user prompt and output type.
@@ -335,12 +335,28 @@ In one real run, the builder's repo-wide `ruff format .` rewrote the Python
 examples inside a committed spec, and `git add -A` carried the change into the
 code commit.
 
-The session runtime under `data_dir` is always writable, for every agent.
+Only `data_dir/sessions/` and `data_dir/agent-cache/` are always writable, for every agent.
 `context_handoff/` is how agents hand work to each other, and each agent's
 prompts, `raw_output.jsonl` and `envelope.json` sit beside it. That grant comes
 from `data_dir`, not from `.gitignore`. The runtime is normally ignored, so it
 never appears in a snapshot. But an agent's ability to record its own work must
-not depend on a gitignore line someone can delete.
+not depend on a gitignore line someone can delete. SSSF's own `worktrees/` and
+the trace db are writable too, when the db is inside `data_dir`, so a rollback
+never deletes them. `prompt_engineering/` and `harness_engineering/` are protected.
+
+**SSSF's fixed factory files.** On top of the roster's `protected_files`, SSSF
+always protects: `<data_dir>/prompt_engineering/`, `<data_dir>/harness_engineering/`,
+`.claude/skills/sssf/`, `justfile`, `sssf.just`, `.githooks/`,
+`.claude/settings.json`, `.claude/settings.local.json`, `adws/adw_modules/`,
+`adws/adw_sssf_config/` and `adws/adw_*.py`. A roster can't drop an entry. An
+agent's own `writes` unlocks an entry by naming it: the same entry, or a path
+inside a protected folder. A broad glob doesn't unlock it. Unlocking a fixed
+folder doesn't unlock a roster entry inside it. Why: prompts are read at each
+call and extensions are loaded by agents, so an agent that could edit them would
+change what judges it. Claude Code settings hooks run on the host in the
+engineer's next session. A repo whose own `justfile` holds product recipes
+unlocks it by naming `justfile` in the builder's `writes`. Otherwise a builder
+edit to it is refused.
 
 Narrow `tools` by role, not by reflex. An agent that must produce a `context_handoff/` file needs `write`, or it falls back on a `bash` heredoc. Withhold `edit` and `write` only where the restriction is the guarantee. For example, a reviewer that can't edit can't quietly fix what it was asked to report.
 
@@ -599,7 +615,7 @@ In the VM, no command gets `OBS_AUTH_TOKEN`, whether a check, git, setup, or an 
 
 **Known limits on secrets in a VM.** They hold for `--sandbox openshell` too. Only that one name is held back, so a secret under another `OBS_` or `SSSF_` name crosses. The Claude token reaches Claude Code agents and pi's ChatGPT token reaches pi agents, by design, and nothing scans the commits or handoff folder that come back for secrets, so an agent that writes a token into the clone brings it to the host branch. A secret committed in the repo is in the clone too. The pre-push secret scan, when the repo has it, is what stops such a token leaving the machine.
 
-**Known limit.** An agent can edit a committed extension in the VM, and the edited one loads for the next agent call. A host run has the same exposure, since an extension isn't a protected file. Nothing checks it.
+**Known limit.** An agent's edit to a committed extension under `<data_dir>/harness_engineering/` is now refused after the call, on the host and in a VM, and rolled back before the next agent call loads it. Still open: an extension edited and loaded within one call, for example by a subagent the agent starts. A worktree run loads extensions from the launch checkout, which is outside the tree its check covers.
 
 ### pi in the operator container
 

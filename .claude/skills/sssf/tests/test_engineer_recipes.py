@@ -112,3 +112,11 @@ def test_local_just_is_loaded_when_it_exists(tmp_path):
     done = run(tmp_path, repo, "mine")
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "mine"
+
+
+def test_export_passes_its_arguments_through(tmp_path):
+    repo = repo_with_justfile(tmp_path)
+    done = run(tmp_path, repo, "export", "--run", "a1b2c3d4", "--replace")
+    assert done.returncode == 0, done.stderr
+    assert calls(tmp_path) == [
+        "uv run adws/adw_export.py --config adws/adw_sssf_config/sssf.config.yaml --run a1b2c3d4 --replace"]

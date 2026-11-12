@@ -60,6 +60,7 @@ You run the system, observe the system, and help the user interact with it. **Yo
 | extend adw_modules with new low-level logic | [cookbooks/update_modules.md](cookbooks/update_modules.md) |
 | run / monitor an ADW | [cookbooks/how_to_prompt_for_the_eng.md](cookbooks/how_to_prompt_for_the_eng.md) **first**, then [cookbooks/run_adw.md](cookbooks/run_adw.md) |
 | run on its own branch, merge or discard a worktree run | [cookbooks/run_adw.md](cookbooks/run_adw.md), section "On its own branch: `--worktree`" |
+| send a feature upstream from a fork, without SSSF files (`just export`) | [cookbooks/run_adw.md](cookbooks/run_adw.md), section "Send a feature upstream" |
 | run a chain's work in a VM: Vercel, E2B or a local OpenShell microVM | [cookbooks/run_adw.md](cookbooks/run_adw.md), section "In a VM: `--sandbox vercel`, `e2b` or `openshell`" |
 | try one request under several rosters and pick the best (a trial) | [cookbooks/how_to_prompt_for_the_eng.md](cookbooks/how_to_prompt_for_the_eng.md) **first**, then [cookbooks/trial.md](cookbooks/trial.md) |
 | turn a request into an ADW prompt | [cookbooks/how_to_prompt_for_the_eng.md](cookbooks/how_to_prompt_for_the_eng.md) |

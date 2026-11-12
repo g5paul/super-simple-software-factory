@@ -180,3 +180,33 @@ A killed run ends `fail` and its process rows close, so the trace never claims w
 Tell the engineer, in order: which chain and which roster you launched (name the config whenever it was not the default), which phase is running now (or which failed), phase statuses in sequence, and for a failure the gate violations or the error verbatim. A `verify_N` phase that shows `success` means the checks ran, not that they passed: a failing check hands the output to the builder, and its phase still succeeds. Read each verify phase's `checks` tally, or the `quality:*` events' `passed`, and report how many rounds failed and why. Remember **every phase defaults to `fail`** — a phase showing `fail` may simply never have completed; `queued` means it never started. Don't dress up a partial run as a success.
 
 For a visual live view, the visualizer app in the skill (`just obs`, which prints its address: the first free port from 4600, or `SSSF_OBS_PORT`) polls this same db — sessions as cards, runs as swim lanes, phases and tool calls drill-in. `just obs-all` shows every repo SSSF is installed in, in one dashboard, under a panel with the Claude account's usage limits and where its spend went, and, once a repo has run in a remote VM, each provider's free allowance. A `--sandbox` run's page shows its VM, VM time, CPU and cost. The sqlite queries above remain the headless equivalent.
+
+## Send a feature upstream
+
+In a fork, the feature's commits sit on top of the SSSF install, and its runs add records under `specs/` and `app_docs/`. `just export` builds a local branch, `export/<name>`, on `upstream/main`, holding only the feature's product changes. **Run it only when the engineer asks**, and only in a repo with an `upstream` remote.
+
+Name the feature the way it was built:
+
+```bash
+just export --run <adw_id>        # a run, merged or not: the commits its trace records
+just export --feature <slug>      # a ticket feature: the commits with SSSF-Feature: <slug>
+just export <branch>              # a branch: its commits since it left main (--base <branch> otherwise)
+```
+
+`just merge` deletes a worktree run's branch, so for a merged run use `--run`. `--onto <ref>` picks another base than `upstream/main`.
+
+The export replays each commit onto the base without its SSSF files (`adws/`, `.claude/skills/sssf/`, `.scratch/`, `.githooks/`, `sssf.just`, `docs/sssf.md`, and records named `specs/<adw_id>_*.md` or `app_docs/<adw_id>_*.md`). The project's own `specs/` and `app_docs/` files go with it. A commit left empty is dropped, a merge that only joins history is skipped, and `SSSF-*` trailers come off the messages. Then it runs `export_checks` from `repo.yaml` in the export's own tree. It never fetches, never pushes, and leaves the feature's branch and the checkout as they were.
+
+It stops, with no branch built, when:
+
+- the checkout has uncommitted changes to tracked files;
+- `export/<name>` already exists. Pass `--replace` only when the engineer says to rebuild it;
+- a `--run` commit is on no branch, because the run was rebased or discarded. Export the branch its work landed on instead;
+- every commit holds only SSSF files, so nothing is left;
+- a commit won't apply onto the base, usually because it leans on a fork commit upstream lacks. It names the commit. Report it; whether that fork commit goes upstream first is the engineer's call;
+- a merge carries changes of its own, such as a conflict resolution. It names the merge;
+- a line the export adds still names an SSSF path, such as an `adws/` exclude in `pyproject.toml`. It names the file and line, for the engineer to fix on the feature branch.
+
+A failed check still builds the branch and exits 1. Report the check and its output. With no `export_checks`, the report says "unchecked": tell the engineer, since nothing has shown the export works without SSSF. The report also gives the date of the local `upstream/main`. Fetch a newer one only when the engineer says to, then export again with `--replace`.
+
+Report the branch, its commits, the commits dropped or skipped, the files changed and each check's result. The engineer reviews the branch, then pushes it and opens the PR. Both are theirs, never yours.

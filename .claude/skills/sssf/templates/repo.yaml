@@ -50,6 +50,12 @@ sandbox: none
 worktree_setup: []
 # Seconds each setup command may take before the run stops.
 worktree_setup_timeout: 600
+# In a fork: the repo's own checks, run by `just export` on the branch it builds
+# for upstream. That branch has no SSSF files, so no quality.py. Shell commands,
+# run in order from the branch's root. Empty: the export reports "unchecked".
+#   export_checks:
+#     - uv run pytest -q
+export_checks: []
 # Rules every agent gets at the end of its system prompt, whatever its role.
 # A plain string only asks. A rule with `forbid` is also enforced: its regexes
 # are searched in every shell command an agent runs, and a match kills the

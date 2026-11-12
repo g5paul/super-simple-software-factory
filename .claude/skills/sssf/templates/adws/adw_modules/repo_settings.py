@@ -127,6 +127,10 @@ class RepoSettings(BaseModel):
     # nothing, so the cost caps never see it (silence.py). None = off.
     max_silence_minutes: Optional[float] = Field(15, gt=0)
     worktree_setup: list[str] = Field(default_factory=list)
+    # The repo's own checks, run on a `just export` branch, which holds no SSSF
+    # files and so no quality.py. Each is a shell command from the repo root.
+    # Empty: the export reports "unchecked".
+    export_checks: list[str] = Field(default_factory=list)
     worktree_setup_timeout: int = Field(600, ge=1)
     # Rules every agent gets at the end of its system prompt, whatever its role.
     # A string only asks; an AgentRule with `forbid` also stops the run (rules.py).

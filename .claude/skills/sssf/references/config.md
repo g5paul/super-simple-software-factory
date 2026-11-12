@@ -424,6 +424,7 @@ The sandbox's network is closed except for default rules written per coding agen
 | `max_silence_minutes` | `15` | See [below](#agents-that-go-quiet-max_silence_minutes). |
 | `worktree_setup` | `[]` | Shell commands run in order from a worktree's root before its first agent, such as `bun install --frozen-lockfile` (under agentsh, `bun install --frozen-lockfile --backend=copyfile`). |
 | `worktree_setup_timeout` | `600` | Seconds each setup command may take before the run stops. |
+| `export_checks` | `[]` | In a fork, the repo's own checks, run in order by `just export` from the root of the branch it builds for upstream, which has no SSSF files and so no `quality.py`. Empty: the export reports "unchecked". See `cookbooks/run_adw.md`, "Send a feature upstream". |
 | `agent_rules` | `[]` | See [Rules for every agent](#rules-for-every-agent-agent_rules). |
 | `secret_files`, `agent_env` | `[]` | See [Secret files](#secret-files-secret_files-and-agent_env). |
 | `local_guard` | `text` | `text` keeps SSSF's base guards alone. `agentsh` keeps them and also runs each local agent under the agentsh service with a generated default-deny policy. It needs `sandbox: none` and a git checkout. See [Running local agents under agentsh](#running-local-agents-under-agentsh-local_guard). |

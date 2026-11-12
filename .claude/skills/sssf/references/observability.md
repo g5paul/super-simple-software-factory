@@ -191,7 +191,7 @@ Keep the highest `rowid` returned as the next cursor. History is **the same quer
 | Variable | Effect |
 |---|---|
 | `SSSF_DB` | the trace db when `--db` isn't passed |
-| `SSSF_OBS_PORT`, `PORT` | pin the port, and a taken pinned port is an error. Unset, the server takes the first free port from 4600. |
+| `SSSF_OBS_PORT`, `PORT` | pin the port, and a taken pinned port is an error. Unset, the server takes the first free port from 4600. The server listens on `127.0.0.1` only. |
 | `SSSF_REGISTRY` | the project registry file. Default `$XDG_CONFIG_HOME/sssf/projects.json`, or `~/.config/sssf/projects.json`. |
 | `SSSF_CODEX_LIMITS` | `1` reads the ChatGPT plan's usage windows through `codex app-server`. Off by default. |
 | `CLAUDE_CONFIG_DIR` | where Claude Code's transcripts are read, `<dir>/projects`. Default `~/.claude`. |

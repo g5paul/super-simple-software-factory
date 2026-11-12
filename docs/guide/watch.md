@@ -40,7 +40,7 @@ just obs        # this repo's runs
 just obs-all    # every repo SSSF is installed in, from one process
 ```
 
-Each recipe builds the dashboard and prints its address. The dashboard needs bun. `just obs` takes the first free port from 4600, so several repos can run their own at once. To pin a port, set `SSSF_OBS_PORT` in `.env`. `just obs-dev` is only for working on the dashboard itself. It runs this repo's server on port 4600 and Vite's dev server on 4601, which reloads the page on each edit.
+Each recipe builds the dashboard and prints its address. The dashboard listens on `127.0.0.1` only, since the trace holds every command and prompt an agent ran; under WSL, a Windows browser still reaches it at `localhost`. The dashboard needs bun. `just obs` takes the first free port from 4600, so several repos can run their own at once. To pin a port, set `SSSF_OBS_PORT` in `.env`. `just obs-dev` is only for working on the dashboard itself. It runs this repo's server on port 4600 and Vite's dev server on 4601, which reloads the page on each edit.
 
 <p align="center">
   <img src="../../images/00_swimlane_waterfall.svg" alt="A run drawn as swim lanes, with engineer, code, planner, builder and reviewer phases laid on a time axis, each block labelled with its duration, one phase still running and the next still queued" width="850">

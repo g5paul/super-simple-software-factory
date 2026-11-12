@@ -11,6 +11,10 @@
  *   bun run server/index.ts --db /path/to/repo/adws/adw_data/sssf.db
  *   SSSF_DB=/path/to/sssf.db SSSF_OBS_PORT=4610 bun run server/index.ts
  *   bun run server/index.ts --all              # every repo in the registry
+ *
+ * It listens on 127.0.0.1 only. The trace holds every command and prompt an
+ * agent ran, and the --all registry names every repo, private ones included,
+ * so nothing beyond this machine should reach it.
  */
 import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
@@ -48,6 +52,7 @@ import type {
 const PINNED_PORT = process.env.SSSF_OBS_PORT ?? process.env.PORT;
 const FIRST_PORT = 4600;
 const PORT_TRIES = 50;
+const HOST = "127.0.0.1";
 const DIST_DIR = resolve(import.meta.dir, "..", "dist");
 
 const ALL = Bun.argv.includes("--all");
@@ -200,6 +205,7 @@ function listen(start: (port: number) => ReturnType<typeof Bun.serve>) {
 }
 
 const server = listen((port) => Bun.serve({
+  hostname: HOST,
   port,
   routes: {
     "/api/health": safely(() => json({ ok: true, all: projects.all })),
@@ -399,7 +405,7 @@ const server = listen((port) => Bun.serve({
   },
 }));
 
-console.log(`[sssf] visualizer api  http://localhost:${server.port}`);
+console.log(`[sssf] visualizer api  http://${HOST}:${server.port}`);
 if (ALL) {
   const listed = projects.list();
   console.log(`[sssf] registry        ${registryPath()}  [${listed.length} projects]`);

@@ -131,7 +131,7 @@ describe("ChatGPT's closed weeks", () => {
 describe("the timer", () => {
   test("reads at once and on each tick, with no page asking", async () => {
     let reads = 0;
-    const limits = new CodexLimits(true, async () => { reads++; return parse(ACCOUNT, LIMITS, Date.now()); }, join(dir, "h.jsonl"));
+    const limits = new CodexLimits(true, async () => { reads++; return parse(ACCOUNT, LIMITS, NOW); }, join(dir, "h.jsonl"));
     let ticks = 0;
     const current = limits.current.bind(limits);
     limits.current = (now?: number) => { ticks++; return current(now); };

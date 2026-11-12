@@ -1,6 +1,10 @@
 // Single switch point onto the server's contract: everything UI-side imports
 // table shapes from here, which re-exports shared/types.ts.
 export type {
+  FactoryBoard,
+  FactoryRow,
+  FactoryLevel,
+  LeftoverProcess,
   Session,
   SessionSummary,
   SessionUsage,

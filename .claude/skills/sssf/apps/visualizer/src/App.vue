@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, hrefFor, phaseCrumb, projectHref, trialHref } from './lib/router'
 import { fetchProjects } from './lib/api'
+import FactoryBoard from './components/FactoryBoard.vue'
 import ProjectsList from './components/ProjectsList.vue'
 import SessionsList from './components/SessionsList.vue'
 import SessionTrace from './components/SessionTrace.vue'
@@ -12,11 +13,14 @@ const route = useRoute()
 // `just obs` serves one repo, so the projects page is skipped and its crumb
 // hidden. `just obs-all` (all=true) opens on the projects page.
 const all = ref<boolean | null>(null)
+// Started with --factory: the landing page shows the health board above the repo list.
+const factory = ref(false)
 
 onMounted(async () => {
   try {
     const listing = await fetchProjects()
     all.value = listing.all
+    factory.value = listing.factory === true
     const [only] = listing.projects
     if (!listing.all && only && route.value.project !== only.name) {
       window.location.replace(projectHref(only.name))
@@ -65,7 +69,10 @@ onMounted(async () => {
       <span class="live-hint"><span class="live-dot" /> live</span>
     </header>
     <main>
-      <ProjectsList v-if="!route.project && all" />
+      <template v-if="!route.project && all">
+        <FactoryBoard v-if="factory" />
+        <ProjectsList />
+      </template>
       <TrialView
         v-else-if="route.project && route.trialId"
         :key="`${route.project}/trial/${route.trialId}`"

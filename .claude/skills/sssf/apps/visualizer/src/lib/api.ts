@@ -7,6 +7,7 @@ import type {
   Envelope,
   EventRow,
   EventsPage,
+  FactoryBoard,
   GateResult,
   HealthResponse,
   ProjectsResponse,
@@ -133,6 +134,15 @@ export function fetchRosters(project: string): Promise<RosterRow[]> {
 
 export function fetchProjects(): Promise<ProjectsResponse> {
   return getJson('/api/projects') as Promise<ProjectsResponse>
+}
+
+export async function fetchFactory(listed: boolean, refresh = false): Promise<FactoryBoard> {
+  const res = await fetch(`/api/factory?listed=${listed ? 1 : 0}&refresh=${refresh ? 1 : 0}`)
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new Error(body?.error ?? `GET /api/factory → ${res.status}`)
+  }
+  return (await res.json()) as FactoryBoard
 }
 
 export function fetchAccount(span: Span = '5h', piSpan: Span = '5h'): Promise<AccountUsage> {

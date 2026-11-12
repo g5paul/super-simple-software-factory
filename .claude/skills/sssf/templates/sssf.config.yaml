@@ -27,9 +27,10 @@ defaults:
   # the session runtime under data_dir/sessions/ and data_dir/agent-cache/ — context_handoff/, envelopes, prompts,
   # raw output. Every agent can always write its own report; `writes: []` means
   # read-only with respect to the repo, not mute.
-  # SSSF always protects its own factory files too (prompts, extensions, the skill, justfile,
-  # sssf.just, .githooks/, .claude/settings*.json, adws/ code). A roster can't drop them; only an
-  # agent's own `writes` naming one unlocks it. A repo whose justfile holds product recipes names
+  # SSSF always protects its own factory files too: all of adws/ (except the runtime under
+  # data_dir), all of .claude/, .pi/, .mcp.json, justfile, sssf.just, local.just and .githooks/.
+  # A roster can't drop them; only an agent's own `writes` naming one unlocks it. Gitignored
+  # files are never checked. A repo whose justfile holds product recipes names
   # `justfile` in the builder's `writes`.
   protected_files:
     - adws/adw_modules/

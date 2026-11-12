@@ -86,8 +86,10 @@ def test_git_goes_through_the_sandbox(recording, repo):
 def test_the_tree_check_and_its_rollback_go_through_the_sandbox(recording, repo):
     run = type("Run", (), {"repo_root": repo})()
     (repo / "new.txt").write_text("x\n")
-    assert permissions.snapshot(run) == {"new.txt": "untracked"}
-    assert permissions._roll_back(run, "new.txt", {}, {"new.txt": "untracked"}) == "deleted"
+    after = permissions.snapshot(run)
+    assert set(after) == {"new.txt"}
+    assert after["new.txt"].startswith("?:")
+    assert permissions._roll_back(run, "new.txt", {}, after) == "deleted"
     assert not (repo / "new.txt").exists()
     assert ("remove", str(repo / "new.txt")) in recording.calls
 

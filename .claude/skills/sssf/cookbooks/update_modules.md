@@ -25,7 +25,7 @@ Extend `adws/adw_modules/` with new low-level logic.
 | `utils.py` | safe subprocess env, logging, `resolve_prompt` |
 | `plan_checks.py` | the plan's own checks, such as a validation script the plan requires, run as code beside `quality.py`'s blocks |
 | `quality.py` | the repo's fixed commands: test, lint, format, typecheck, build. The one module a repo edits, and `--update` keeps it |
-| `permissions.py` | what an agent may change: checks `writes:` and `protected_files` after every agent call and rolls back what it wasn't allowed to change |
+| `permissions.py` | what an agent may change: checks `writes:`, `protected_files` and SSSF's fixed factory files, reading renames, index flags and content hashes, after every agent call and rolls back what it wasn't allowed to change |
 | `rules.py` | the repo's `agent_rules` from `repo.yaml`, checked against every shell command an agent runs |
 | `sssf_refuse.py` | refuse mode for `agent_rules` and the secret-file rule on Claude Code agents: refuses a matching command before it runs |
 | `sssf_rules.ts` | the same refuse mode as a pi extension, loaded into every pi agent; also blocks `read`, `grep`, `find` and `ls` on a secret file |

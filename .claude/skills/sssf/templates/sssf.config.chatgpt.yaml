@@ -20,9 +20,10 @@ defaults:
     - find
   # Off-limits to every agent that does not name them in its own `writes`.
   # Enforced in adw_modules/permissions.py after each call.
-  # SSSF always protects its own factory files too (prompts, extensions, the skill, justfile,
-  # sssf.just, .githooks/, .claude/settings*.json, adws/ code). A roster can't drop them; only an
-  # agent's own `writes` naming one unlocks it. A repo whose justfile holds product recipes names
+  # SSSF always protects its own factory files too: all of adws/ (except the runtime under
+  # data_dir), all of .claude/, .pi/, .mcp.json, justfile, sssf.just, local.just and .githooks/.
+  # A roster can't drop them; only an agent's own `writes` naming one unlocks it. Gitignored
+  # files are never checked. A repo whose justfile holds product recipes names
   # `justfile` in the builder's `writes`.
   protected_files:
     - adws/adw_modules/

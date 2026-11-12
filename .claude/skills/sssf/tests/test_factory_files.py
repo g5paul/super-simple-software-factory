@@ -31,6 +31,9 @@ FIXED_SAMPLES = [
     "justfile", "sssf.just", ".githooks/pre-push",
     ".claude/settings.json", ".claude/settings.local.json",
     "adws/adw_modules/rules.py", "adws/adw_sssf_config/sssf.config.yaml", "adws/adw_tickets.py",
+    "local.just", "adws/yaml.py", "adws/yaml/__init__.py",
+    ".claude/agents/bypass-reviewer.md", ".claude/hooks/x.sh", ".claude/skills/other/SKILL.md",
+    ".pi/extensions/x.ts", ".pi/settings.json", ".mcp.json",
 ]
 READ_ONLY = ["reviewer", "scout", "standards_reviewer", "spec_reviewer"]
 
@@ -82,6 +85,13 @@ def test_naming_an_entry_unlocks_it():
     assert not permissions.permitted(".claude/skills/sssf/SKILL.md", skill, cfg)
     prompts = with_writes(cfg, "builder", ["adws/adw_data/prompt_engineering/"])
     assert permissions.permitted("adws/adw_data/prompt_engineering/reviewer/system.md", prompts, cfg)
+    for entry, path in (("local.just", "local.just"), (".pi/", ".pi/extensions/x.ts"),
+                        (".mcp.json", ".mcp.json"), ("adws/yaml.py", "adws/yaml.py"),
+                        (".claude/skills/other/", ".claude/skills/other/SKILL.md")):
+        agent = with_writes(cfg, "builder", [entry])
+        assert permissions.permitted(path, agent, cfg), entry
+    other = with_writes(cfg, "builder", [".claude/skills/other/"])
+    assert not permissions.permitted(".claude/skills/sssf/SKILL.md", other, cfg)
 
 
 def test_a_roster_entry_inside_a_fixed_folder_stays_refused():

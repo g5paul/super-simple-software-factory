@@ -152,7 +152,8 @@ A write has already happened, so prompting again fixes nothing. Instead, SSSF
 does three things:
 
 1. It rolls back every unauthorized change the agent introduced. It restores
-   tracked files with `git checkout --` and deletes untracked ones.
+   tracked files from `HEAD` with `git checkout HEAD --` and deletes untracked ones.
+   Paths are taken literally, never as globs.
 2. It leaves alone a path that was already dirty before the agent ran. The
    engineer had uncommitted work there, and discarding it to tidy up would be
    the same harm this module exists to prevent.
@@ -343,20 +344,39 @@ never appears in a snapshot. But an agent's ability to record its own work must
 not depend on a gitignore line someone can delete. SSSF's own `worktrees/` and
 the trace db are writable too, when the db is inside `data_dir`, so a rollback
 never deletes them. `prompt_engineering/` and `harness_engineering/` are protected.
+Data paths are normalised: `./adws/adw_data` and `adws//adw_data/` mean
+`adws/adw_data`. The trace db is granted only as a file path inside `data_dir`,
+never one ending in `/` or holding a glob.
 
 **SSSF's fixed factory files.** On top of the roster's `protected_files`, SSSF
 always protects: `<data_dir>/prompt_engineering/`, `<data_dir>/harness_engineering/`,
-`.claude/skills/sssf/`, `justfile`, `sssf.just`, `.githooks/`,
-`.claude/settings.json`, `.claude/settings.local.json`, `adws/adw_modules/`,
-`adws/adw_sssf_config/` and `adws/adw_*.py`. A roster can't drop an entry. An
+`.claude/`, `.pi/`, `.mcp.json`, `justfile`, `sssf.just`, `local.just`,
+`.githooks/` and `adws/`. A roster can't drop an entry. An
 agent's own `writes` unlocks an entry by naming it: the same entry, or a path
 inside a protected folder. A broad glob doesn't unlock it. Unlocking a fixed
 folder doesn't unlock a roster entry inside it. Why: prompts are read at each
 call and extensions are loaded by agents, so an agent that could edit them would
 change what judges it. Claude Code settings hooks run on the host in the
-engineer's next session. A repo whose own `justfile` holds product recipes
+engineer's next session. `local.just` is imported by the justfile, so its
+`set shell` runs every recipe. `uv run` puts `adws/` first on `sys.path`, so a
+module there shadows a dependency. Claude Code and pi load `.claude/`, `.pi/`
+and `.mcp.json`. A repo whose own `justfile` holds product recipes
 unlocks it by naming `justfile` in the builder's `writes`. Otherwise a builder
 edit to it is refused.
+
+A project file under a fixed path needs an unlock to edit: other skills under
+`.claude/skills/`, `.claude/agents/` and `.claude/hooks/`, `.pi/`, `.mcp.json`
+and `local.just`. Name it in the builder's `writes`, for example
+`.claude/skills/myskill/`.
+
+The check never sees gitignored files. Python's `__pycache__/` and the skill's
+`node_modules/` are written during normal work, so a gitignored file in a fixed
+path isn't checked.
+
+How the check sees a change: a rename counts as a delete and an add; index flags
+(`skip-worktree`, `assume-unchanged`) don't hide a change; a rewrite of an
+already-dirty file counts. A refused change to a file that was clean is restored
+from `HEAD`, while one that was already dirty is left as it is.
 
 Narrow `tools` by role, not by reflex. An agent that must produce a `context_handoff/` file needs `write`, or it falls back on a `bash` heredoc. Withhold `edit` and `write` only where the restriction is the guarantee. For example, a reviewer that can't edit can't quietly fix what it was asked to report.
 

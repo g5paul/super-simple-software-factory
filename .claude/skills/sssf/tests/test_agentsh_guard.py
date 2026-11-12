@@ -3220,6 +3220,113 @@ def test_an_unreadable_journal_a_timeout_and_a_failed_journalctl_each_note_it(ma
     assert process.failure == ""
 
 
+def _traced_denials(event):
+    forward, events, _ = forwarder()
+    forward(event)
+    return [e for e in events if e.name == "agentsh_denials"][-1].payload
+
+
+def _closed(machine, events):
+    process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
+    process.wait()
+    agentsh_guard.close(process, events.append)
+    return process
+
+
+def test_drops_by_type_reach_the_event_and_the_traced_payload(machine, service, monkeypatch):
+    monkeypatch.setattr(agentsh_guard, "journal_drops",
+                        lambda s, u, run=None: ({"ptrace_file": 34, "ptrace_execve": 2}, None))
+    events = []
+    process = _closed(machine, events)
+    event = events[-1]
+    payload = _traced_denials(event)
+    assert event["drops"] == {"ptrace_file": 34, "ptrace_execve": 2} == payload["drops"]
+    assert json.loads(json.dumps(payload))["drops"] == payload["drops"]
+    notes = event["notes"]
+    total = [n for n in notes if "at least 36" in n]
+    assert len(total) == 1 and "ptrace_file 34" in total[0] and "ptrace_execve 2" in total[0]
+    execve = [n for n in notes if "ptrace_execve: a denied exec" in n]
+    assert len(execve) == 1 and "at least 2" in execve[0]
+    agentsh_guard.check_stopped(process, "b")
+    assert process.failure == "" and agentsh_guard.breach(process, "b") is None
+    assert set(event) == {"type", "denials", "notes", "polls", "pages", "slowest_poll_seconds", "drops"}
+    assert set(payload) == {"agent", "denials", "notes", "polls", "pages", "slowest_poll_seconds", "drops"}
+    for key in ("denials", "notes", "polls", "pages", "slowest_poll_seconds"):
+        assert payload[key] == event[key]
+
+
+def test_drops_through_the_real_parser_carry_only_types_and_counts(machine, service, monkeypatch):
+    out = "\n".join(['event channel full id=SECRET-ID type=ptrace_file',
+                     'event channel full id=SECRET-ID type="/home/x/.env"', "agentsh: session sess1 created"])
+    monkeypatch.setattr(agentsh_guard, "journal_drops", lambda s, u: REAL_JOURNAL_DROPS(s, u, run=_journal(out)))
+    events = []
+    _closed(machine, events)
+    drops = events[-1]["drops"]
+    assert drops == {"ptrace_file": 1, "unknown": 1}
+    assert all(re.fullmatch(r"[a-z0-9_]{1,64}", k) and type(v) is int for k, v in drops.items())
+    text = json.dumps(drops)
+    assert "SECRET-ID" not in text and "/home/x" not in text
+
+
+def test_no_drops_gives_an_empty_object(machine, service):
+    events = []
+    _closed(machine, events)
+    assert events[-1]["drops"] == {} and _traced_denials(events[-1])["drops"] == {}
+    assert not any("dropped at least" in n or "couldn't be read" in n for n in events[-1]["notes"])
+
+
+@pytest.mark.parametrize("run, reason", [
+    (_journal(stderr="No journal files were opened due to insufficient permissions."), "no permission"),
+    (_raise(subprocess.TimeoutExpired("journalctl", 10)), "timed out after 10 s"),
+    (_journal(stderr="SECRET-STDERR", returncode=1), "exited 1"),
+    (_raise(FileNotFoundError("journalctl")), "could not run (FileNotFoundError)"),
+])
+def test_a_failed_journal_read_gives_null_drops(machine, service, monkeypatch, run, reason):
+    monkeypatch.setattr(agentsh_guard, "journal_drops", lambda s, u: REAL_JOURNAL_DROPS(s, u, run=run))
+    events = []
+    process = _closed(machine, events)
+    assert events[-1]["drops"] is None and _traced_denials(events[-1])["drops"] is None
+    notes = [n for n in events[-1]["notes"] if "couldn't be read" in n]
+    assert len(notes) == 1 and reason in notes[0]
+    agentsh_guard.check_stopped(process, "b")
+    assert process.failure == ""
+
+
+def test_a_call_with_no_start_time_gives_null_drops(service, monkeypatch):
+    monkeypatch.setattr(agentsh_guard, "journal_drops", lambda *a, **k: pytest.fail("read the journal"))
+    process = bare(service)
+    assert process.started_at is None
+    events = []
+    agentsh_guard.close(process, events.append)
+    assert events[-1]["drops"] is None
+    assert not any("dropped" in n or "journal" in n for n in events[-1]["notes"])
+
+
+def test_the_forwarder_passes_drops_and_tolerates_their_absence():
+    forward, events, said = forwarder()
+    base = {"type": "agentsh_denials", "denials": [], "notes": [], "polls": 1, "pages": 1, "slowest_poll_seconds": 0.1}
+    forward({**base, "drops": {"ptrace_file": 3}})
+    forward(base)
+    payloads = [e.payload for e in events if e.name == "agentsh_denials"]
+    assert payloads[0]["drops"] == {"ptrace_file": 3} and payloads[1]["drops"] is None
+    assert said == []
+
+
+FORGED_DROPS = {**FORGED_DENIALS, "drops": {"ptrace_execve": 999}}
+
+
+def test_a_forged_drops_in_the_stream_adds_no_trace_event(forged_run, monkeypatch):
+    monkeypatch.setitem(globals(), "FORGED_DENIALS", FORGED_DROPS)
+    forged_run()
+    denials = [e for e in forged_run.events if e.name == "agentsh_denials"]
+    assert "999" in Path(forged_run.req.raw_output_path).read_text()
+    if forged_run.mode == "text":
+        assert denials == []
+    else:
+        assert len(denials) == 1
+        assert denials[0].payload["drops"] != {"ptrace_execve": 999} and "999" not in json.dumps(denials[0].payload)
+
+
 def test_text_mode_reads_no_journal(monkeypatch):
     monkeypatch.setattr(agentsh_guard, "journal_drops", lambda *a, **k: pytest.fail("read the journal"))
     monkeypatch.setattr(sandbox.LOCAL, "start", lambda cmd, cwd=None, env=None: "p")

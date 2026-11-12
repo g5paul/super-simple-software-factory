@@ -1202,6 +1202,18 @@ The first try skipped every such line. Its review found that a real pi `bash` ca
 
 Measured after the 13:26 reset: about 3.3 GB an hour with chains back to back, so 6 hours levels off near 20 to 23 GB. Run H, `specs/tasks/guard-agentsh-retention-2h.md`, cuts it to 2 hours and moves the note to 15 GB. On the fresh store the slowest polls were 0.33 to 0.55 s with no drops, against 3.9 s and 1,015 drops on the 5.7 GB store before it.
 
+### The two-hour run, c0f9d9d8
+
+Run c0f9d9d8 took `specs/tasks/guard-agentsh-retention-2h.md` and merged as 6c829e6. $2.77, and the first of the day's runs whose spec passed its first review.
+
+- The prune keeps 2 hours of store rows and rotated audit files.
+- The store-and-audit note fires at 15 GB.
+- The audit step opens its folder without following a link, which closes run 87b8ab19's broken promise.
+
+The review found no bypass. Its two old holes are on root-owned paths no agent can link: a link above the audit folder, such as `/var/lib`, is still followed, and so is a link at the store path. `config.md` mentions neither.
+
+The first prune after run 87b8ab19's reinstall recorded `audit_bytes` at 3.73 GB against a cap near 1.2 GB. The likely reason: under agentsh's old defaults the log kept up to ten 500 MB files, and with `max_backups: 5` agentsh no longer shifts `.6` to `.10`, so they sit there until the prune's age limit takes them. The store grew about 2 GB in the 20 minutes of one planner's call and barely at all during the build and review that followed, so the rate swings with what the agents do. The prune also deletes nothing while a session is listed, so back-to-back runs keep more than the setting says.
+
 ### Status on 2026-11-09: published, opt-in
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
@@ -1226,5 +1238,6 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 16. **Done: warnings an engineer sees**, by [run 0463a6c3](#the-warnings-run-0463a6c3). After the reinstall, check the journal's drop count against run 05f96f0f's 34.
 17. **Done: an agent forging the guard's notes**, by [run 955ca723](#the-note-forgery-run-955ca723).
 18. **Done: pi's read loop**, by [run 361de0f2](#the-pi-read-loop-run-361de0f2).
-19. **Done: retention for the store and the audit log**, by [run 87b8ab19](#the-retention-run-87b8ab19). Run H, `specs/tasks/guard-agentsh-retention-2h.md`: 2 hours, a 15 GB note, and no linked audit folder.
-20. **Builder and reviewer prompts**: write test files with the Write tool, not a heredoc, so test data doesn't trip the rules (four runs in a row on 2026-11-11, builders and a reviewer); and probe secret files with decoys only (run 361de0f2's reviewer and run 87b8ab19's builder each tried the real `.env`, refused before it ran). Both are prompt lines on what an agent may do, so they go through the chain.
+19. **Done: retention for the store and the audit log**, by [run 87b8ab19](#the-retention-run-87b8ab19) and [run c0f9d9d8](#the-two-hour-run-c0f9d9d8): 2 hours and a 15 GB note. Left: check over an evening that `audit_bytes` falls under about 1.2 GB and the store levels off under 15 GB.
+20. **Builder and reviewer prompts**: write test files with the Write tool, not a heredoc, so test data doesn't trip the rules (four runs in a row on 2026-11-11, builders and a reviewer); and probe secret files with decoys only (run 361de0f2's reviewer and run 87b8ab19's builder each tried the real `.env`, refused before it ran). Both are prompt lines on what an agent may do, so they go through the chain. A third false alarm, run c0f9d9d8's `rsync --exclude .env`, is the text guard's to keep: it becomes a case in `docs/designs/agentsh/corpus.sh`.
+21. **The store note's advice and the root-path links.** When the audit log is the bigger part of the 15 GB, the note should name the old `audit.jsonl.<N>` files, not only `events.db`. `config.md` should say that only the audit folder's last part is checked for a link, and that the store path follows one.

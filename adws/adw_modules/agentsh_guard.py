@@ -501,7 +501,8 @@ def _plain(value) -> str:
 
 
 def store_notes(now: Optional[float] = None) -> list[str]:
-    """Notes about agentsh's event store and audit log (counted together), from the prune's status file. They are printed at the agent's
+    """Notes about agentsh's event store and audit log (counted together), from the prune's status file. The size
+    note gives both sizes it has and advises on the bigger part. They are printed at the agent's
     start and kept in the end-of-call event. Never raises, never refuses."""
     try:
         now = time.time() if now is None else now
@@ -528,15 +529,29 @@ def store_notes(now: Optional[float] = None) -> list[str]:
                          "`sudo systemctl start sssf-agentsh-prune.service`. If it still skips on an active "
                          "session, a session may have been left open: with no run going, run "
                          "`sudo systemctl restart agentsh`")
-        counted = [data.get(key) for key in ("store_bytes", "audit_bytes")]
-        counted = [v for v in counted if isinstance(v, (int, float)) and not isinstance(v, bool)]
-        total = sum(counted)
-        if counted and total >= STORE_WARN_BYTES:
-            notes.append(f"agentsh's event store and audit log are {total / 1e9:.1f} GB together, at least "
-                         f"{STORE_WARN_BYTES / 1e9:.0f} GB; with no "
-                         "run going, stop the service, move /var/lib/agentsh/events.db and its -wal and -shm files "
-                         "aside, start it, and delete the moved files once a run works (see \"Running local agents "
-                         "under agentsh\" in .claude/skills/sssf/references/config.md)")
+        sizes = {key: data.get(key) for key in ("store_bytes", "audit_bytes")}
+        sizes = {k: v for k, v in sizes.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        total = sum(sizes.values())
+        if sizes and total >= STORE_WARN_BYTES:
+            parts = []
+            if "store_bytes" in sizes:
+                parts.append(f"the event store is {sizes['store_bytes'] / 1e9:.1f} GB")
+            if "audit_bytes" in sizes:
+                parts.append(f"the audit log is {sizes['audit_bytes'] / 1e9:.1f} GB")
+            text = (f"agentsh's event store and audit log are {total / 1e9:.1f} GB together, at least "
+                    f"{STORE_WARN_BYTES / 1e9:.0f} GB ({' and '.join(parts)}); ")
+            if sizes.get("audit_bytes", 0) > sizes.get("store_bytes", 0):
+                text += ("the audit log is the bigger part, in its rotated files /var/lib/agentsh/audit.jsonl.<N>. "
+                         "A prune deletes each one once it is more than 2 hours old, but skips while the service "
+                         "lists a session. To free the space sooner, with no run going, run `sudo find "
+                         "/var/lib/agentsh "
+                         r"-maxdepth 1 -type f -regex '.*/audit\.jsonl\.[0-9]+' -delete`, which deletes the same names "
+                         "the prune does and leaves the live audit.jsonl")
+            else:
+                text += ("with no run going, stop the service, move /var/lib/agentsh/events.db and its -wal and -shm "
+                         "files aside, start it, and delete the moved files once a run works")
+            notes.append(text + " (see \"Running local agents under agentsh\" in "
+                         ".claude/skills/sssf/references/config.md)")
         return notes
     except Exception:
         return []

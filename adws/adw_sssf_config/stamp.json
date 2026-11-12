@@ -29,7 +29,7 @@
       "source": "harness_engineering/themeMap.ts"
     },
     "adws/adw_data/prompt_engineering/builder/system.md": {
-      "sha256": "dca7f56937cf1bb599d1344b7c94ffdedb11f4d2c33cc2a41b92249afbd67832",
+      "sha256": "ad7d5d137d6c7f1fc31c2b214df29889f1e457db642cfb84f1245d8212791273",
       "source": "prompt_engineering/builder/system.md"
     },
     "adws/adw_data/prompt_engineering/builder/user.md": {
@@ -61,7 +61,7 @@
       "source": "prompt_engineering/referee/user.md"
     },
     "adws/adw_data/prompt_engineering/reviewer/system.md": {
-      "sha256": "eeba036153d091d2e029de9047ab0ddb863b9b9c9ec5e5b47f451e0ff4fe185f",
+      "sha256": "9d59c308706986db2700f30c5aa2642c98cac60722a856822a0b4cddb25dade3",
       "source": "prompt_engineering/reviewer/system.md"
     },
     "adws/adw_data/prompt_engineering/reviewer/user.md": {
@@ -129,7 +129,7 @@
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
-      "sha256": "bfe9d6a99cd24a5e98b79f649237f6089e8cd7abe31ba0573ad9a911e8b9104c",
+      "sha256": "9b9832aff8157aee7dfa7d42997be1eed0ec14ac6d9dc90ebfcdf22f93221bbe",
       "source": "adws/adw_modules/agentsh_guard.py"
     },
     "adws/adw_modules/agentsh_sssf.yaml": {
@@ -337,5 +337,5 @@
       "source": "justfile"
     }
   },
-  "skill": "bc04f22"
+  "skill": "5594a9f"
 }

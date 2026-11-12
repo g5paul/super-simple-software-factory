@@ -209,4 +209,4 @@ It stops, with no branch built, when:
 
 A failed check still builds the branch and exits 1. Report the check and its output. With no `export_checks`, the report says "unchecked": tell the engineer, since nothing has shown the export works without SSSF. The report also gives the date of the local `upstream/main`. Fetch a newer one only when the engineer says to, then export again with `--replace`.
 
-Report the branch, its commits, the commits dropped or skipped, the files changed and each check's result. The engineer reviews the branch, then pushes it and opens the PR. Both are theirs, never yours.
+Report the branch, its commits, the commits dropped or skipped, the files changed and each check's result. The export keeps each commit's author, which is the identity git committed with, the global one unless the repo sets its own. So report the authors' email too (`git log --format=%ae <onto>..export/<name>`), and tell the engineer if it's an address they may not want public. The engineer reviews the branch, then pushes it and opens the PR. Both are theirs, never yours.

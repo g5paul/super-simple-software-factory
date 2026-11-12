@@ -49,8 +49,8 @@ The engineer's fork at `~/github/agentsh` is the first case: it holds fixes to s
 
 So agentsh splits into two jobs:
 
-- **The patches that exist.** They don't need the export at all. They need fetching upstream again, a topic branch per fix rebased onto the new `upstream/main`, each one's tests run there, and a report per fix like the draft. That's work this session can do by hand today.
-- **A proving ground for the export.** Installing SSSF in agentsh and building the next fix through a chain would test option 4 on a real public fork with a Go toolchain. It has risks to probe first:
+- **The patches that exist wait.** The engineer decided on 2026-11-12 not to publish them yet. The setup comes first: SSSF installed in agentsh, the export built and working there. Whether and how to send the fixes upstream is decided after that. Publishing them wouldn't need the export, since they hold no SSSF files: it would mean fetching upstream again, a topic branch per fix rebased onto the new `upstream/main`, each one's tests run there, and a report per fix like the draft.
+- **A proving ground for the export.** This is the work now. Installing SSSF in agentsh and building the next fix through a chain would test option 4 on a real public fork with a Go toolchain. It has risks to probe first:
   - **agentsh would be guarding its own source.** Under `local_guard: agentsh`, the agent runs inside the installed agentsh while it edits agentsh. The installed binary is root's and isn't touched, but a test that runs the built binary runs it inside the tracer.
   - **Nested ptrace.** agentsh's ptrace tests trace child processes. Under the ptrace tracer, those children are already traced, so the tests may fail or need `local_guard: text`.
   - **Tests that need root or containers.** Many of agentsh's integration tests use Docker or root. `quality.py` would have to name the tests an agent can run.
@@ -59,5 +59,5 @@ So agentsh splits into two jobs:
 
 1. Option 4, as above?
 2. Records: their own commit with a trailer, or moved under `adws/adw_data/`?
-3. agentsh: publish the existing patches first, by hand, and install SSSF in agentsh only after the export exists? On 2026-11-10 you chose to wait on publishing until SSSF's high-priority items close, so this would change that.
+3. agentsh: build and prove the export on sssf-sandbox against a fake upstream first, then install in agentsh? Or install in agentsh first and build the export there?
 4. List agentsh publicly in `docs/projects.md`? The fork is public, but unlisted is the default.

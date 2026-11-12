@@ -173,6 +173,7 @@ Keep the highest `rowid` returned as the next cursor. History is **the same quer
 | `GET /api/account` | the Claude account's usage windows and where its spend went, plus pi and ChatGPT use |
 | `GET /api/machine/day` | every repo's last 24 hours against `max_daily_cost` in `~/.config/sssf/limits.yaml` |
 | `GET /api/machine/sandbox` | what VM runs used of each provider's free allowance |
+| `GET /api/factory` | only when the server is started with `--factory <hub>`: the hub's health board, every registered repo and the machine, red rows first. `?listed=1` drops every row of a repo in the hub's `.git/sssf-private-names`; `?refresh=1` reruns the hub's `check_projects.py --json` and `phase_times.py --json` instead of using the 30-second cache |
 | `GET /api/projects/:project/health` | the db path, journal mode and session count |
 | `GET /api/projects/:project/day` | the last 24 hours against `repo.yaml`'s `max_daily_cost` |
 | `GET /api/projects/:project/live` | what live runs spend together against `max_live_cost` |

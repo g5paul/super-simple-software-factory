@@ -124,6 +124,22 @@ just obs-all
 
 The dashboard reads the machine-wide registry, so it shows every project from any repo. Run from here, it's built from the skill source, always the newest, and nothing runs in a project's repo. It only reads their traces. `just obs` in a project still shows that one repo.
 
+## The factory board
+
+```bash
+just factory
+```
+
+This starts the same dashboard with `--factory <hub>`, and its landing page becomes a health board for every registered repo and this machine, with the project list below it. Red rows come first. Each row says what's wrong, the number that tripped it, and the next step: a command, or which session to ask. The tab title carries the red count.
+
+- **Projects**, from `check_projects.py --json`: red for a dirty tree, a skill that doesn't match the hub's at its stamp, or a failed last quality run; amber for a skill behind the hub's latest, or no passing quality run since the update.
+- **Machine**: free memory, leftover pytest processes, live VMs from the traces, agentsh's store size and the last prune, and each trace's slowest agentsh poll and dropped `ptrace_execve` events in the last day.
+- **Runs**, from each trace and `phase_times.py --json`, for the last 24 hours: red for a failed or stopped run, a guard run with a blocking finding or a bypass, or a phase at three times its usual top; amber for a refusal, a blocked spec review, a phase at twice its usual top or a run at twice its usual cost.
+
+The board only reads. It never kills a process or starts a prune; the row says how. The page polls every 10 seconds. Projects and runs are cached for 30 seconds, and "refresh now" reruns the two scripts. The thresholds are constants in `apps/visualizer/server/factory_limits.ts`.
+
+The board names every repo. Before a screenshot or an export, tick "listed only": it hides every row of a repo in `.git/sssf-private-names` and says how many it hid. On 2026-11-11 the listed-only JSON named none of them. The server listens on `127.0.0.1` only, and `curl 'http://127.0.0.1:<port>/api/factory?listed=1'` gives the same board as JSON. Why it's built this way, and what was left out, is in [the design](designs/factory-page.md).
+
 ## Check the projects' updates
 
 After the hub asks each project session to update, check their reports:

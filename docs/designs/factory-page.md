@@ -1,6 +1,6 @@
 # Design: a factory page on the dashboard
 
-Status: proposed 2026-11-08, decided 2026-11-11 in a grilling session with the engineer (20 questions, every recommended answer accepted). The open items are in [open.md](../open.md).
+Status: proposed 2026-11-08, decided 2026-11-11 in a grilling session with the engineer (20 questions, every recommended answer accepted). The first release shipped the same day, merged in a6f0bc3; [the hub doc](../sssf.md#the-factory-board) says how to use it. What it left out is under Deferred and in [open.md](../open.md).
 
 A page on the dashboard, started from the hub with `just factory`, that shows, across every repo SSSF is installed in, what today only the hub session sees after asking each project session and checking its claims: which skill each repo runs, whether its tree and checks are healthy, what its runs cost, and whether the machine itself is healthy.
 
@@ -29,7 +29,7 @@ It stays local. The server binds `127.0.0.1` only. The page shows every repo by 
 
 - Memory, from `/proc/meminfo`: amber under 3 GB free, red under 1.5 GB.
 - Leftover test processes, from `/proc`: any process of the engineer's whose command line or working folder is under `$TMPDIR/pytest-of-$USER/` or `/tmp/pytest-of-$USER/` while no pytest process runs. Red at any. The page lists PID, age and command, and never kills them. This catches all 360 relays of 2026-11-08.
-- Live VMs, from the traces: a `sandbox_start` with no `sandbox_end`. Amber when one has no running SSSF run. A VM a crash leaked before its start event is missed; see Deferred.
+- Live VMs, from the traces: a VM's start event, a `sandbox` log line with `vm` and `provider`, with no later `sandbox_end`. The `sandbox` phase's own events share the name and don't count. Amber when one has no running SSSF run. A VM a crash leaked before its start event is missed; see Deferred.
 - agentsh's store and audit log, from `/var/lib/sssf-agentsh-prune/status.json`: amber at 15 GB together, red at 25 GB. The prune: amber when the last is over 3 hours old, red over 6.
 - Polls and drops, from each trace's `agentsh_denials` events in the last day: amber at a slowest poll over 1 second or a dropped `ptrace_execve`, red at a poll over 3 seconds. Drops come from a structured `drops` field the guard adds (piece 3); a call from before the field shows "drops: not recorded".
 
@@ -51,18 +51,18 @@ Each piece merges before the next.
 1. **Done in 502e91d.** The dashboard binds `127.0.0.1`. On 2026-11-11 `Bun.serve` had no `hostname` (`server/index.ts`), so every repo's `just obs` and `obs-all` listened on every interface. By hand, with a test, shipped to every repo.
 2. **Done in 3e86590.** `--json` for `check_projects.py` and `phase_times.py`, by hand. Hub-only. `check_projects.py --json` adds `stamped`, `behind` and `at_stamp` per repo, which the Projects row's amber and red need: the text checks compare only against the hub's latest skill.
 3. **Done in 76d053c** (guard run da6a05c1). The `agentsh_denials` event carries `drops: {type: count}`, `{}` when the journal had no drop lines and `null` when it wasn't counted. Before it the counts were only sentences in its notes, whose wording changed twice in one week.
-4. The page itself, by an SSSF chain run on a hub branch (`adw_plan_build_test`) from a brief that points here. It is the hub's first non-guard feature run under agentsh, so it also tests Bun and Vite under the policy. The hub session steps in by hand only if the chain gets stuck.
+4. **Done in a6f0bc3.** The page itself, by an SSSF chain run on a hub branch (`adw_plan_build_test`). It was the hub's first non-guard feature run under agentsh.
 
-   **Not started; waiting on the engineer (2026-11-11).** A dry run of the dashboard's checks under the hub's agentsh policy found that an agent can't connect to a server on `127.0.0.1`: the policy's network rules allow only the model, login and registry hosts, so a connect to loopback gets "Permission denied" in Python and Bun alike. `server/listen.test.ts`, which starts the real server, fails in the builder's shell (110 of 111 pass), and so would any test of the page that starts it. `bun test`, `vue-tsc` and the `vite` build otherwise work under the policy, in 12 seconds, when run from the dashboard's folder. (`agentsh wrap` starts in `--root`, so a `bun test` from there searches the whole hub through the FUSE mount and looks hung.)
+   An agent under the hub's agentsh policy can't connect to `127.0.0.1`: the network rules allow only the model, login and registry hosts. So `server/listen.test.ts`, which starts the real server, fails in the builder's shell. The engineer chose to build now rather than fix loopback first (see open.md). The request told the builder to test through the server's handler and functions, and the chain's test step, which runs outside agentsh, judged the result. The hub's `quality.py` now runs `bun test` and `vue-tsc --noEmit` in the dashboard's folder, since before it the test step ran only the Python suite. (`agentsh wrap` starts in `--root`, so a `bun test` from there searches the whole hub through the FUSE mount and looks hung.)
 
-   The hub's `quality.py` now runs `bun test` and `vue-tsc --noEmit` in the dashboard's folder in its test phase and its full check, since before it the chain's test step ran only the Python suite and would never have seen the page's tests. The test step runs outside agentsh, so it can run the real-server tests.
-
-   The choice: start now, with the request telling the builder that loopback is denied in its shell, that the page's tests should call the server's handler rather than a socket, and that the chain's test step is the judge; or fix loopback first (see open.md).
-5. This doc and the open items, updated as each piece lands.
+   Run e089a1ee built it for $2.23 with no refusals, and its tests passed first time: the Python suite, 139 dashboard tests, 28 of them new, and the type check. The real check against the hub's traces then found two bugs. The live-VM rows counted the `sandbox` phase's own events as VMs that never ended, about 60 where there were none, which put 300 amber rows on the board; the seeded traces had held only the VM's event. And the store row's next step was wrong. Run 0cb2bd66 fixed both for $0.61, with a test seeded the way a real VM run writes its trace. After it the board had 27 rows and no VMs.
+5. **Done.** This doc, the open items, [the hub doc](../sssf.md#the-factory-board) and the skill's endpoint table in `references/observability.md`.
 
 ### Done
 
 Tests against seeded traces and a fake `/proc` for every colour rule above. Then one real check from the hub, read from the page's JSON API rather than a screenshot: every registered repo, the switch hiding the unlisted ones, the night's prune status, and the day's guard runs with their refusals.
+
+Met on 2026-11-11, after run 0cb2bd66. `/api/factory` listed all six registered repos. `?listed=1` hid the two unlisted ones, and its JSON named neither. The prune row showed the last prune 0.8 hours earlier, and the store row showed amber at 15.8 GiB. The runs rows showed the day's eleven guard runs: twelve refusals across eight of them, none in run da6a05c1, and red for the three that failed or had a blocking finding.
 
 ## Deferred
 
@@ -71,7 +71,7 @@ Left out of the first release on purpose, to consider later:
 - **A trends tab**: `levers.py`'s weekly rows, `features.py`'s cost per feature (4 seconds a run today, so it needs its own cache), and `phase_times.py`'s usual-times table, as against its slow list, which the board uses. They mean more after a few more weeks of data.
 - **VM allowance use**, from the sums `server/sandbox.ts` already makes over every repo (`/api/machine/sandbox`). The board shows live VMs only.
 - **The page in project repos.** That means moving the four hub scripts into the skill's `scripts/`, with the version comparison shown only where a hub checkout is found. Reopen if the engineer finds they want the board from a project's dashboard.
-- **Live VMs from the providers' APIs**, which would catch a VM leaked before its `sandbox_start` event, at the price of a provider token on the page.
+- **Live VMs from the providers' APIs**, which would catch a VM leaked before its start event, at the price of a provider token on the page.
 - **Alerts outside the page**: a desktop notification or a terminal line when a row turns red.
 - **Actions**: a button that kills a leftover process, starts a prune, or archives a run. The board only reads.
 - **Thresholds in config.** The first release keeps them as constants in the factory module, since only the hub runs it.

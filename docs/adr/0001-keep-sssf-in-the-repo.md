@@ -22,10 +22,11 @@ SSSF stays installed inside each repo it works on, committed with it. A feature 
 - `protected_files` is checked after every agent call. An edit to a protected path fails the run. The starter roster protects `adws/adw_modules/`, `adws/adw_sssf_config/`, `adws/adw_*.py`, `specs/`, `.scratch/`, `GLOSSARY.md`, `GLOSSARY-MAP.md` and `docs/adr/`.
 - The check comes after the call, so an edit to a protected file is live until that call ends. In a VM that's open item "a VM agent can overwrite `sssf_refuse.py`".
 
-The gaps, found from the code on 2026-11-12 and not yet tested:
+The gaps, confirmed on 2026-11-12 in a clone of sssf-sandbox with no agent, under the text guard:
 
-- **Unprotected factory files.** Nothing protects `adws/adw_data/prompt_engineering/`, `adws/adw_data/harness_engineering/`, `.claude/skills/sssf/`, the `justfile` or `.githooks/`. Prompts are read from disk at each call (`prompts.render`), so a builder that edits `reviewer/system.md` changes what the reviewer is told later in the same run.
-- **The ticket chain's reviewer doesn't see SSSF files.** Its review diff leaves out `adws/` and `.claude/skills/sssf/` (`adw_tickets.py`, by `SSSF_PATHS`), so that edit wouldn't appear in what it reviews either.
+- **Every agent may edit the prompts and pi extensions.** `permissions.permitted` grants all of `data_dir`, `adws/adw_data/`, before it looks at `protected_files`, since that's where the session runtime lives. But `prompt_engineering/` and `harness_engineering/` live there too. So the reviewer, with `writes: []`, may edit its own `system.md`, and listing those folders in `protected_files` wouldn't help.
+- **Other factory files are open to the builder.** It may edit `.claude/skills/sssf/`, the `justfile` and `.githooks/`, and the documenter's `**/*.md` reaches the skill's cookbooks.
+- **The edit is live and unseen.** Prompts are read from disk at each call (`prompts.render`), so a builder that edits `reviewer/system.md` changes what the reviewer is told later in the same run. The ticket chain's review diff leaves out `adws/` and `.claude/skills/sssf/` (`adw_tickets.py`, by `SSSF_PATHS`), and in the test it came back empty. An edit to `adws/adw_modules/rules.py` was refused, as it should be.
 
 That's an open.md bug for the guard-change chain. It's also the main reason to reopen this decision: if protecting the factory inside the tree keeps leaking, take the factory out of the tree.
 

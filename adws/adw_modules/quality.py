@@ -139,7 +139,7 @@ def test(run) -> QualityCheckResult:
         area="backend",
         operation="build",
         # The hub suite, the command each test file's docstring gives, run from
-        # the skill folder. It takes about 75 seconds.
+        # the skill folder. It took about 8 minutes on 2026-11-11 (2,067 tests).
         argv=["uv", "run", "--directory", ".claude/skills/sssf",
               "--with", "pytest", "--with", "pydantic", "--with", "pyyaml",
               "--with", "python-dotenv", "--with", "rich",

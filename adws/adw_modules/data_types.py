@@ -416,7 +416,9 @@ class AgentConfig(BaseModel):
     # (see adw_modules/permissions.py). `tools` cannot express this: `bash` runs
     # anything and `write` reaches any path, so an agent's capability list is a
     # statement of intent that nothing checks.
-    #   None  -> unrestricted, except the roster-wide `protected_files` paths
+    #   None  -> unrestricted, except the roster-wide `protected_files` paths and
+    #            SSSF's fixed factory files (`permissions.FACTORY_FILES`: all of
+    #            `adws/` and `.claude/`, and more)
     #   []    -> read-only: may modify nothing tracked
     #   [...] -> only these. A trailing "/" means a directory prefix; a "*"
     #            makes it a glob; anything else is an exact path.
@@ -438,6 +440,9 @@ class ConfigDefaults(BaseModel):
     # The factory's own code is the default: an agent must not be able to edit
     # the machinery that decides whether its work passed. specs/ is on record
     # once commit_plan lands, so only the planner, which names it, may change it.
+    # SSSF's fixed factory files (`permissions.FACTORY_FILES`: all of `adws/` and
+    # `.claude/`, and more) are always checked on top of this list, and can't be
+    # dropped here.
     protected_files: list[str] = Field(default_factory=lambda: [
         "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py", "specs/",
     ])

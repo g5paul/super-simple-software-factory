@@ -20,6 +20,12 @@ Comparing change-sets, rather than watching for writes, is what catches the
 afterwards has been reverted, and a reversion is a modification. Appearing,
 disappearing, and changing all count.
 
+The change-set is read without renames (a rename is a delete and an add), with
+-z (names are never quoted), with the paths an index flag hides from `git diff`
+(skip-worktree, assume-unchanged), and with a content hash for each changed,
+untracked or flagged path, so a rewrite of a file that was already dirty
+registers. Gitignored paths are never seen.
+
 A breach is NOT a gate violation. Gates are for work an agent can be asked to
 redo; a breach cannot be corrected by re-prompting, because the write already
 happened. It aborts the phase and names every offending path.
@@ -33,6 +39,8 @@ and roll back, and for the chain's own commit phase to commit. An agent that mov
 
 Two keys drive it, both in sssf.config.yaml:
     defaults.protected_files   paths no agent may touch unless it names them itself
+SSSF's fixed `FACTORY_FILES` are checked on top of `protected_files`, and a
+roster can't drop them.
     agents[].writes      None = unrestricted · [] = read-only · [...] = only these
 """
 
@@ -56,8 +64,12 @@ class PermissionBreach(RuntimeError):
 _SAFE = ["-c", "core.fsmonitor="]     # empty: off on every git; "false" runs `false` before 2.36
 _NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
 
-def _gitargv(args: list[str], *, writes: bool = False) -> list[str]:
-    return ["git", *_SAFE, *(_NO_HOOKS if writes else []), *args]
+def _gitargv(args: list[str], *, writes: bool = False, literal: bool = True) -> list[str]:
+    # --literal-pathspecs: a path an agent made, such as `.claude/*` or
+    # `app/[id]/page.tsx`, names that file only, never every file it matches.
+    # check-ignore takes paths, not pathspecs, and refuses the option.
+    return ["git", *_SAFE, *(["--literal-pathspecs"] if literal else []),
+            *(_NO_HOOKS if writes else []), *args]
 
 
 def _git(args: list[str], cwd) -> str:
@@ -68,24 +80,80 @@ def _git(args: list[str], cwd) -> str:
     return out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else out
 
 
+def _fields(text: str) -> list[str]:
+    """NUL-separated output as fields, without the trailing empty one."""
+    fields = text.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    return fields
+
+
+# Prints one NUL-terminated field per path argument: L and the link target for
+# a symlink, F and the blob hash for a regular file (no filter or textconv
+# runs), D for a directory (a gitlink, a nested repo), - for a missing path.
+_CONTENT = """for p in "$@"; do
+  if [ -L "$p" ]; then printf "L%s\\0" "$(readlink "$p")"
+  elif [ -f "$p" ]; then printf "F%s\\0" "$(git -c core.fsmonitor= hash-object --no-filters -- "$p" 2>/dev/null)"
+  elif [ -d "$p" ]; then printf "D\\0"
+  else printf -- "-\\0"; fi
+done
+"""
+_CHUNK = 256
+
+
 def snapshot(run) -> dict[str, str]:
     """Fingerprint every path the working tree currently differs on.
 
-    Tracked files carry their numstat counts, so an edit to an already-dirty
-    file still registers as a change. Untracked files are listed by name.
-    Gitignored paths never appear, which is why the session runtime under
-    `data_dir` — where handoff files legitimately land — needs no special case.
+    Each value is `kind:content`. The kind is git's status for the path
+    (M, A, D, T), `?` for untracked, and `flag-<tag>` for an index flag
+    (skip-worktree, assume-unchanged) that hides a change from `git diff`;
+    several are joined with commas, for example `D,?` for a file taken out of
+    the index and written again. The content is the file's blob hash, so any
+    rewrite of an already-dirty or untracked file registers.
+
+    Renames show as a delete and an add. Names are never quoted (-z). Flagged
+    paths show by content. Gitignored paths never appear. The session runtime
+    is normally gitignored, but `always_writable` grants it anyway, so a
+    missing gitignore line is safe. Only changed, untracked and flagged paths
+    are hashed.
     """
+    root = run.repo_root
+    kinds: dict[str, str] = {}
+
+    def add(path: str, kind: str) -> None:
+        kinds[path] = f"{kinds[path]},{kind}" if path in kinds else kind
+
+    diff = _fields(_git(["diff", "HEAD", "--no-renames", "--no-ext-diff", "--no-textconv",
+                         "--name-status", "-z"], root))
+    for status, path in zip(diff[::2], diff[1::2]):
+        add(path, status)
+    for path in _fields(_git(["ls-files", "--others", "--exclude-standard", "-z"], root)):
+        add(path, "?")
+    for record in _fields(_git(["ls-files", "-v", "-z"], root)):
+        tag, _, path = record.partition(" ")
+        if tag and tag != "H" and path:
+            add(path, f"flag-{tag}")
+
     fingerprints: dict[str, str] = {}
-    for line in _git(["diff", "HEAD", "--numstat"], run.repo_root).splitlines():
-        fields = line.split("\t")
-        if len(fields) >= 3:
-            path = fields[-1].strip()
-            fingerprints[path] = f"{fields[0]},{fields[1]}"
-    for path in _git(["ls-files", "--others", "--exclude-standard"],
-                     run.repo_root).splitlines():
-        if path.strip():
-            fingerprints[path.strip()] = "untracked"
+    paths = list(kinds)
+    for i in range(0, len(paths), _CHUNK):
+        chunk = paths[i:i + _CHUNK]
+        contents: list[str] | None = None
+        try:
+            done = sandbox.current().run(["sh", "-c", _CONTENT, "sh", *chunk], cwd=root, text=False)
+            out = done.stdout
+            out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+            contents = _fields(out)
+        except Exception:
+            contents = None
+        if contents is None or len(contents) != len(chunk):
+            # A broken sandbox, not something the agent controls. If this fails
+            # both before and after the call, a rewrite of an already-dirty or
+            # untracked file in the chunk looks the same on both sides and isn't
+            # seen. Appearing, vanishing and a status change still are.
+            contents = ["?"] * len(chunk)
+        for path, content in zip(chunk, contents):
+            fingerprints[path] = f"{kinds[path]}:{content}"
     return fingerprints
 
 
@@ -99,8 +167,8 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
     """Undo commits an agent made itself, keeping their changes unstaged in the tree.
 
     Returns the short shas undone, newest first, or [] when HEAD did not move.
-    Unstaged matters: _roll_back restores a path from the index, so a staged
-    change would be "restored" to itself. Raises PermissionBreach when HEAD
+    Unstaged matters: a reset keeps the changes in the tree, and _roll_back
+    restores a clean path from HEAD. Raises PermissionBreach when HEAD
     moved somewhere a reset can't safely
     bring back: onto another branch, or to a commit that doesn't descend from
     where it was.
@@ -861,21 +929,99 @@ def _matches(path: str, pattern: str) -> bool:
     return path == pattern
 
 
-def always_writable(cfg: SSSFConfig) -> list[str]:
-    """The session runtime, which EVERY agent must be able to write.
+# SSSF's own files, protected whatever the roster says. Only an agent's own
+# `writes`, naming one, unlocks it. FACTORY_DATA is relative to data_dir.
+#   .claude/    the skill, agents, hooks and settings Claude Code loads
+#   .pi/        pi's extensions and settings
+#   .mcp.json   the MCP servers both harnesses start
+#   justfile, sssf.just, local.just
+#               the recipes and the local.just the justfile imports
+#   .githooks/  the hooks
+#   adws/       the ADW code, and any module beside it that would shadow an import
+# The runtime under data_dir stays writable: always_writable is checked first.
+# FACTORY_DATA stays for a data_dir outside adws/.
+FACTORY_DATA = ("prompt_engineering/", "harness_engineering/")
+FACTORY_FILES = (".claude/", ".pi/", ".mcp.json", "justfile", "sssf.just", "local.just",
+                 ".githooks/", "adws/")
+# The runtime under data_dir: the agents' own (sessions, tool caches) and
+# SSSF's worktrees. The trace db is added from cfg.observability.db when it
+# is a file path strictly inside data_dir.
+RUNTIME = ("sessions/", "agent-cache/", "worktrees/")
+_DB_SIBLINGS = ("", "-wal", "-shm", "-journal")
 
+
+def _clean(path: str) -> str:
+    """A config path as a repo-relative path: no leading ./, no doubled or
+    trailing slash. "" for the repo root. Absolute paths stay absolute."""
+    import posixpath
+    path = path.strip()
+    if not path:
+        return ""
+    clean = posixpath.normpath(path)
+    if clean == ".":
+        return ""
+    if path.startswith("//"):        # normpath keeps a double leading slash
+        clean = "/" + clean.lstrip("/")
+    return clean
+
+
+def _joined(data: str, p: str) -> str:
+    return f"{data}/{p}" if data else p
+
+
+def factory_files(cfg: SSSFConfig) -> list[str]:
+    """SSSF's fixed list of protected paths, with data_dir filled in."""
+    data = _clean(cfg.defaults.data_dir)
+    return [_joined(data, p) for p in FACTORY_DATA] + list(FACTORY_FILES)
+
+
+def protected(cfg: SSSFConfig) -> list[str]:
+    """The fixed list, then the roster's `protected_files`, each entry once.
+
+    For DISPLAY only (prompts, messages, the trace). Never use it to decide.
+    """
+    return list(dict.fromkeys(factory_files(cfg) + list(cfg.defaults.protected_files)))
+
+
+def always_writable(cfg: SSSFConfig) -> list[str]:
+    """The runtime EVERY agent must be able to write.
+
+    The session runtime and the tool caches are always writable.
     `context_handoff/` is the one place agents hand work to each other, and an
     agent's own prompts, raw_output.jsonl, and envelope.json land beside it.
     Scout writes its findings there, the reviewer its review, the planner its
     plan — a read-only agent is read-only with respect to the REPO, never with
     respect to its own report.
 
-    This is granted from `data_dir` rather than left to .gitignore. The runtime
-    is normally ignored, so it never even appears in a snapshot — but an agent's
-    ability to record its work must not hang on a gitignore entry that someone
-    can delete or that a changed `data_dir` can outgrow.
+    SSSF's worktrees and trace db are granted too, inside `data_dir` only, so a
+    missing gitignore line can't get them deleted by a rollback. The rest of
+    `data_dir`, the prompts and the extensions, is factory and protected.
     """
-    return [cfg.defaults.data_dir.rstrip("/") + "/"]
+    data = _clean(cfg.defaults.data_dir)
+    grants = [_joined(data, p) for p in RUNTIME]
+    raw = cfg.observability.db
+    db = _clean(raw)
+    # A run pins the db absolute, under data_root (data_dir in the launch
+    # checkout). Read it back as the data_dir-relative path a snapshot shows,
+    # so its WAL, which changes on every call, isn't refused where the
+    # db isn't gitignored. Only a db under data_root: nothing else is read back.
+    root = _clean(cfg.defaults.data_root)
+    if db.startswith("/") and root.startswith("/") and db.startswith(root + "/"):
+        db = _joined(data, db[len(root) + 1:])
+    # A file path strictly inside data_dir, so the grant stays within the
+    # baseline's (all of data_dir): no directory, no glob. With data_dir at the
+    # repo root, any relative path without `..`. Never on a FACTORY_DATA path.
+    # Not checked against all of factory_files: `adws/` matches the default db,
+    # which must stay granted. A worktree run pins db absolute, outside the
+    # worktree; an absolute path never matches a snapshot path.
+    if data:
+        inside = db.startswith(data + "/") and db != data
+    else:
+        inside = bool(db) and not db.startswith("/") and ".." not in db.split("/")
+    if (inside and not raw.endswith("/") and not any(c in raw for c in "*?[")
+            and not any(_matches(db, _joined(data, p)) for p in FACTORY_DATA)):
+        grants += [db + s for s in _DB_SIBLINGS]
+    return grants
 
 
 def _names(entry: str, protected: str) -> bool:
@@ -890,6 +1036,12 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
     if any(_matches(path, p) for p in always_writable(cfg)):
         return True
     writes = agent.writes or []
+    # SSSF's own files, whatever the roster says. A separate check: it can only
+    # refuse, so the roster check below still decides everything it did before.
+    # `path + "/"` so a bare `.pi` or `.githooks` (a link, a file) is inside its folder.
+    fixed = [p for p in factory_files(cfg) if _matches(path, p) or _matches(path + "/", p)]
+    if fixed and not any(_matches(path, w) and _names(w, g) for w in writes for g in fixed):
+        return False
     guards = [p for p in cfg.defaults.protected_files if _matches(path, p)]
     if guards:
         # Naming a protected path is what unlocks it. The documenter's `**/*.md`
@@ -903,24 +1055,53 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
 def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) -> str:
     """Undo one unauthorized change. Returns a word describing what happened.
 
-    Only changes the agent INTRODUCED are undone. A path that was already dirty
-    when the agent started is left exactly as it is: the operator had
-    uncommitted work there, and discarding it to tidy up would be the same harm
-    this module exists to prevent, committed by the cleanup instead of the agent.
+    Only changes the agent INTRODUCED are undone. A path that was already dirty,
+    untracked or flagged when the agent started is left exactly as it is: the
+    operator had uncommitted work there, and discarding it to tidy up would be
+    the same harm this module exists to prevent, committed by the cleanup
+    instead of the agent.
+
+    A path untracked alone (kind `?`) is deleted. A staged-new path is
+    unstaged, then deleted only if git says it isn't ignored. Anything in HEAD
+    (including `D,?`, a file taken out of the index and written again) has its
+    index flags cleared and is restored from HEAD, index and tree both.
     """
     if path in before:
         # Already dirty beforehand. If it is gone from the diff now, the agent
         # reverted an engineer's uncommitted work and the content is not ours
         # to reconstruct — say so loudly rather than pretend it was handled.
         return "REVERTED-BY-AGENT (uncommitted work lost, cannot restore)" \
-            if path not in after else "left as-is (was already modified)"
-    if after.get(path) == "untracked":
+            if path not in after else \
+            "left as-is (it was already changed, untracked or flagged before the call, so it may hold your work)"
+    kind = after.get(path, "").partition(":")[0]
+    parts = kind.split(",")
+    box = sandbox.current()
+
+    def delete() -> str:
         try:
-            sandbox.current().remove(Path(run.repo_root) / path)
+            box.remove(Path(run.repo_root) / path)
             return "deleted"
         except OSError as error:
             return f"could not delete ({error})"
-    result = sandbox.current().run(_gitargv(["checkout", "--", path], writes=True), cwd=run.repo_root)
+    if kind == "?":
+        return delete()
+    if parts[0] == "A" and not any(p.startswith("flag-") for p in parts):
+        if box.run(_gitargv(["rm", "-q", "--cached", "--force", "--", path], writes=True),
+                   cwd=run.repo_root).returncode != 0:
+            return "could not unstage"
+        ignored = box.run(_gitargv(["check-ignore", "-q", "--no-index", "--", path], literal=False),
+                          cwd=run.repo_root).returncode
+        if ignored == 1:
+            done = delete()
+            return "unstaged and deleted" if done == "deleted" else f"unstaged; {done}"
+        return ("unstaged; left on disk because it is gitignored and may be yours, "
+                "so check it by hand")
+    # The path may no longer be in the index, so their status is ignored. One
+    # flag per call: git applies only the last of two given together.
+    for flag in ("--no-skip-worktree", "--no-assume-unchanged"):
+        box.run(_gitargv(["update-index", "-q", flag, "--", path], writes=True),
+                cwd=run.repo_root)
+    result = box.run(_gitargv(["checkout", "HEAD", "--", path], writes=True), cwd=run.repo_root)
     return "rolled back" if result.returncode == 0 else "could not roll back"
 
 
@@ -943,7 +1124,7 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str]) -> list[str]
     outcomes = {p: _roll_back(run, p, before, after) for p in breaches}
     scope = ("read-only" if agent.writes == []
              else f"limited to {agent.writes}" if agent.writes
-             else f"barred from {run.cfg.defaults.protected_files}")
+             else f"barred from {protected(run.cfg)}")
     detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
     message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
     # The run stops here, so the agent's permitted changes are never verified,

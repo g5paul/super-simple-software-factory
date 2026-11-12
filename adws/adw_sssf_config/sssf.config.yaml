@@ -22,6 +22,11 @@ defaults:
   # Enforced in adw_modules/permissions.py after each call, the same as on Pi:
   # --permission-mode bypassPermissions lets claude act, and this check decides
   # whether what it did stands.
+  # SSSF always protects its own factory files too: all of adws/ (except the runtime under
+  # data_dir), all of .claude/, .pi/, .mcp.json, justfile, sssf.just, local.just and .githooks/.
+  # A roster can't drop them; only an agent's own `writes` naming one unlocks it. Gitignored
+  # files are never checked. The hub's product is the skill under .claude/skills/sssf/, so the
+  # builder and ticket_builder name it below.
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/
@@ -78,8 +83,12 @@ agents:
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/builder/system.md
       user: adws/adw_data/prompt_engineering/builder/user.md
-    # No `writes` key: unrestricted, and the only agent that is. It still cannot
-    # touch defaults.protected_files.
+    # `**` is everything outside defaults.protected_files and SSSF's factory files.
+    # The hub's product is the skill, which is under the factory path .claude/, so
+    # the builder names it to unlock it. Nothing else under .claude/ is unlocked.
+    writes:
+      - "**"
+      - .claude/skills/sssf/
     tools:
       - read
       - grep
@@ -128,8 +137,12 @@ agents:
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/ticket_builder/system.md
       user: adws/adw_data/prompt_engineering/ticket_builder/user.md
-    # Unrestricted like builder, minus protected_files, so it cannot edit the
-    # ticket it is building or the spec it is judged against.
+    # Like builder: everything outside protected_files and the factory files, so
+    # it cannot edit the ticket it is building or the spec it is judged against,
+    # plus the skill, which it names to unlock.
+    writes:
+      - "**"
+      - .claude/skills/sssf/
     tools:
       - read
       - grep
@@ -222,6 +235,10 @@ agents:
       - docs/
       - "**/*.md"
       - "*.md"
+      # The skill's own docs, under the factory path .claude/, which **/*.md doesn't unlock.
+      - .claude/skills/sssf/SKILL.md
+      - .claude/skills/sssf/references/
+      - .claude/skills/sssf/cookbooks/
     tools:
       - read
       - grep

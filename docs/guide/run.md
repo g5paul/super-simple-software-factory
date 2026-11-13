@@ -171,7 +171,7 @@ A merge that doesn't conflict can still break. The second run's merge commit lan
 
 Both runs need `--worktree`. A plain run works in your checkout, and `just merge` needs that checkout clean, so a plain run can't go beside a worktree run. A trial's attempts are worktree runs too, and count toward `max_worktree_runs`; `just trial-merge` lands the winner and discards the rest, so they never need merging together.
 
-`max_worktree_runs` caps one repo. Runs from all your repos share one machine. A run takes 1 to 2 GB of memory while its tests run, so a machine with 16 GB for WSL or Linux takes about three runs at once, or four with staggered starts. Under `local_guard: agentsh`, one agentsh server traces every run's agents.
+`max_worktree_runs` caps one repo. Runs from all your repos share one machine. A run takes 1 to 2 GB of memory while its tests run, so a machine with 16 GB for WSL or Linux takes about three runs at once, or four with staggered starts. Under `local_guard: agentsh`, one agentsh server traces every run's agents, and after each agent call SSSF reads all of that call's events into memory: a call that ran a large test suite has pushed one run past 8 GB. Until that read is fixed, run one or two at once under agentsh.
 
 Each run's `max_run_cost` holds for that run alone, so two runs can spend twice that amount. `max_live_cost` in `repo.yaml` caps what live runs spend together. If your checks bind a fixed port or share a test database, set `max_worktree_runs: 1`.
 

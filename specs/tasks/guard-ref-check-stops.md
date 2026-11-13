@@ -68,7 +68,11 @@ Edit every file at its path inside the run's worktree, `adws/adw_data/worktrees/
 
 The hub stays on `local_guard: agentsh`. The builder runs the suite from a copy outside the repo, with the copy command the build brief gives.
 
-agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. That holds for the builder, the bypass reviewer and any harness an agent writes. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. The chain's verify phase runs as code, outside agentsh, and runs both. To give a bare repo a commit, as an upstream for a fetch case, fetch into it: `git -C <bare> fetch -q <work> main:main`.
+agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. That holds for the builder, the bypass reviewer and any harness an agent writes. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. The chain's verify phase runs as code, outside agentsh, and runs both.
+
+Under agentsh, run only the tests this change touches: `pytest tests/test_agent_commits.py -q`, and any other file whose tests you changed. Leave the whole suite to the chain's verify phase. This goes for the builder, its fix rounds and the bypass reviewer. After each agent call SSSF reads every agentsh event of the call into memory, and run 92434a0e's first build ran the whole suite under ptrace several times: the read grew to 8.6 GB, timed out, and failed the build with its code done.
+
+To give a bare repo a commit, as an upstream for a fetch case, fetch into it: `git -C <bare> fetch -q <work> main:main`.
 
 ## Out of scope
 

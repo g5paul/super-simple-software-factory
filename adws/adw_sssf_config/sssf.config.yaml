@@ -49,8 +49,9 @@ defaults:
     - GLOSSARY-MAP.md
     - docs/adr/
   rate_limit_stop: 0.8                 # stop before an agent starts once a usage window (5-hour, where the plan has one, or 7-day) is this full, and stop any call once the account moves onto usage credits; null = off for both
-  # Hub: a guard run makes up to three Opus bypass reviews at up to $5 each.
-  max_run_cost: 20.00                  # stop before any send once the run has spent this many estimated dollars; null = off
+  # Hub: a guard run makes up to three Opus bypass reviews at up to $5 each, and from 2026-11-13
+  # its planner is Fable at up to $4 a call, so the cap went from $20 to $30.
+  max_run_cost: 30.00                  # stop before any send once the run has spent this many estimated dollars; null = off
   data_dir: adws/adw_data              # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 
 observability:
@@ -59,8 +60,8 @@ observability:
 
 agents:
   - name: planner
-    model: anthropic/claude-opus-5-5   # the plan sets the ceiling for everything after it
-    max_call_cost: 2.00                # one call stops itself here (claude --max-budget-usd); about twice the most one has cost
+    model: anthropic/claude-fable-5-2  # the plan sets the ceiling for everything after it
+    max_call_cost: 4.00                # one call stops itself here (claude --max-budget-usd); about twice the most one has cost
     thinking: high
     color: "#a78bfa"
     purpose: Turn a request into a plan the builder can implement without asking questions.
@@ -114,8 +115,8 @@ agents:
       - write
 
   - name: reviewer
-    model: anthropic/claude-opus-5-5   # a different model from the builder, so it does not share its blind spots
-    max_call_cost: 1.00
+    model: anthropic/claude-fable-5-2  # a different model from the builder, so it does not share its blind spots
+    max_call_cost: 2.00
     thinking: high
     color: "#fb7185"
     purpose: Confirm that what was built is what was asked for; change nothing.
@@ -152,8 +153,8 @@ agents:
       - write
 
   - name: standards_reviewer
-    model: anthropic/claude-opus-5-5
-    max_call_cost: 1.00
+    model: anthropic/claude-fable-5-2
+    max_call_cost: 2.00
     thinking: high
     color: "#f97316"
     purpose: Check a feature's diff against the repo's documented standards and a code smell baseline; change nothing.
@@ -169,8 +170,8 @@ agents:
       - write
 
   - name: spec_reviewer
-    model: anthropic/claude-opus-5-5
-    max_call_cost: 1.00
+    model: anthropic/claude-fable-5-2
+    max_call_cost: 2.00
     thinking: high
     color: "#f43f5e"
     purpose: Check a feature's diff against its spec and tickets; change nothing.

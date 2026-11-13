@@ -225,6 +225,61 @@ watched as written. If the agent changes it, the run stops with "NOT all put
 back" and SSSF doesn't write it back, since it can't check where the links on
 the way lead.
 
+**Refs other than HEAD.** An agent with HEAD on its run branch can still
+write a commit on another ref with `git commit-tree` and `git update-ref
+refs/heads/main`, a tag, another run's `sssf/*` branch or `refs/replace/*`,
+and leave its own branch and tree clean. So SSSF records every ref
+(`git for-each-ref`) before each agent call and lists them again after it,
+once the git-directory restore, the commit undo and the tree rollback are done.
+A run stops when a ref other than the run's own branch gained a commit that
+changes a path the agent is barred from (a fixed factory path or one in
+`protected_files`, unless the agent's own `writes` names it), when any
+`refs/replace/` ref is created, moved or deleted, or when SSSF can't compare
+the refs. The breach names the ref, its old and new sha, each commit and its
+paths, and holds for `writes: []` agents too. A merge is judged against each
+parent. It doesn't stop for commits on the run's own branch (undone as above),
+for commits that change only paths the agent may write, or for deleted refs,
+rewinds, fast-forwards and new refs at commits that already existed.
+SSSF only reads: it moves, deletes and fetches nothing, and runs no hook,
+filter or external diff. The breach says how to move a branch back by hand.
+
+The check has costs. It can't tell the agent's commit from yours, or from
+another run's:
+
+- **Concurrent runs stop each other on protected paths the chain commits.** In
+  the hub that is every plan commit under `specs/`, and any commit under
+  `adws/`, `.claude/`, `docs/adr/`, `GLOSSARY.md`, `CLAUDE.md` or
+  `docs/projects.md` on any ref. The stopped run's breach names the other
+  run's branch and commit; nothing needs undoing.
+- **Protected edits, yours or the agent's.** A commit, merge, pull, fetch (it
+  moves `refs/remotes/*`) or stash (`refs/stash`) that brings in a commit
+  changing a protected path during an agent call stops that run. That includes
+  the agent's own `git stash` then `git stash apply` over uncommitted protected
+  work (the stash commit counts, though the tree ends unchanged; `stash pop`
+  doesn't), and its own fetch of an upstream commit that changes a protected
+  path. A true merge commit is
+  judged against both parents, so it stops the run when either side changed a
+  protected path since the fork, even if those commits were old. Run again.
+- **Concurrent guard runs.** Their commits change guard code, so they stop a
+  feature run whose agent is working.
+- **Size.** One `for-each-ref` before and after each call, and more git only
+  when a ref changed: one `rev-list`, and one `diff-tree` per new commit. A repo
+  with more refs than fit on one command line stops with "could not compare"
+  when a ref moves.
+
+Not covered: commits that change only unprotected paths on another ref, another
+worktree's `HEAD` and per-worktree refs, pseudo-refs outside `refs/`, a ref
+moved to a tree or blob, and a ref moved after the check or by an agent that
+killed the chain first. A new commit is judged by its own diff against the
+parent it names, so an agent can give `main` the protected content of any
+existing commit (another run's unreviewed guard tip, or one that reverts a
+guard fix) by committing that tree on top of `main`; likewise it can
+fast-forward or rewind a ref to an existing commit. A `git symbolic-ref
+refs/heads/main refs/heads/<run branch>` reports nothing at check time, and
+afterwards every commit the chain makes on the run branch moves `main` too.
+No ref report is made when the run stops for a switched
+or rewound HEAD.
+
 SSSF's own git never runs an fsmonitor, and its undo and rollback run no
 hooks. Two gaps it shares with a run without this check: an ignore file the
 agent changed through a link can hide one of its own new files from the

@@ -128,25 +128,31 @@ SSSF lives only on local `main` and the feature branches cut from it. Everything
 
 ### Status on 2026-11-12
 
-The setup works inside the fork. Going upstream is untried on agentsh.
+The setup works inside the fork, and the export works on a real repo. Nothing has gone upstream; the engineer hasn't decided to submit.
 
 Proven:
 
 - The install (b165f676). `quality.py` and `export_checks` run the `CGO_ENABLED=0` build and tests, and since 77d3a9e0 they test `internal/ocsf` too.
 - Scout run 9ab6e3ba.
 - The first chain run, cda7b802 (`adw_simple_sdlc`, worktree, $1.03, 6.6 minutes), fixed the `ocsf` test (decision 19). Review 1 blocked, the builder revised, and review 2 approved. `just merge` fast-forwarded local `main` to d5e14cb1. Every commit carries the noreply email (decision 28), and nothing was pushed.
-- The project session ran it through `/sssf` and reported, as the hub's handoff rules expect, and its report matched the trace.
+- The vet fix, run c948cb31 ($0.49, 4.2 minutes), approved on the first review. Before launch the project session added `go vet ./...` to the checks with the engineer's OK (84e0c440). `just merge` fast-forwarded `main` to 62128cc0.
+- The export, `just export --run c948cb31`. It built `export/c948cb31` on `upstream/main` (a07c7897, as fetched on 2026-11-07): one commit, a4925afd, changing the two Go files and nothing else. It dropped the spec and write-up commits, kept the noreply author, and passed `go build`, `go test` and `go vet`. Nothing was pushed. Before a PR, the engineer fetches `upstream` and exports again with `--replace`, so the branch starts from current code.
+- The project session ran both through `/sssf` and reported, as the hub's handoff rules expect, and each report matched the trace and git.
 
 To do and test, in order:
 
-1. The export on a real repo: the vet fix, through `just export --run`, with `export_checks` on a clean `upstream/main` branch. So far the export has run only on the test pair.
-2. `--onto sssf/links-listing`, for bind and for putting the `ocsf` fix on `sssf/links-listing` before that branch is published. Without the fix, the published branch fails its own `internal/ocsf` test.
-3. Decision 27's guard against a push the engineer types: a plain `git push` from `main` should fail. `git push origin main` still goes through until the pre-push hook refuses SSSF files (a row in open.md).
-4. A PR to canyonroad, when the engineer decides to publish.
+1. `--onto sssf/links-listing`, for bind and for putting the `ocsf` fix on `sssf/links-listing` before that branch is published. Without the fix, the published branch fails its own `internal/ocsf` test.
+2. Decision 27's guard against a push the engineer types: a plain `git push` from `main` should fail. `git push origin main` still goes through until the pre-push hook refuses SSSF files (a row in open.md).
+3. A PR to canyonroad, when the engineer decides to publish.
 
 agentsh's checkout keeps `local_guard: text` by design, as its `docs/sssf.md` says: under the agentsh guard, its own ptrace tests would run inside a tracer, and its loopback tests would hit the policy's loopback denial.
 
-A note from the first run: when a fix should turn a skipped check back on, no agent can do it, since `quality.py` is a factory file. The project session edited it before launch, with the engineer's OK. The run cookbook should say so (a row in open.md).
+Notes from the first two runs, for the run cookbook (a row in open.md):
+
+- When a fix should turn a skipped check back on, no agent can do it, since `quality.py` is a factory file. Both times the project session edited it before launch, with the engineer's OK.
+- Skip a failing test, not its package. `internal/db/proxy/postgres` was skipped whole for one test that times out on this machine, so neither verify nor the export ran the tests of the package the vet fix changed; only vet and the reviewer, by hand, covered it. The engineer approved running the package with `-skip` on that one test. With that test skipped, the package passes in about 22 seconds.
+- Under full-suite load, the postgres package's own tests race: a test dials its proxy's socket and gets "connection refused", a different test each run, on the code before the vet fix too. The package passes alone, so the engineer approved running it on its own after the parallel suite. Whether the vet fix raises the failure rate is a Projects row in open.md, to settle before it goes upstream.
+- A chain's commit message is a subject line, and the export keeps it. An upstream PR's context goes in the PR description the engineer writes.
 
 ## Open questions
 

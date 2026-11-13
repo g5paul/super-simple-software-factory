@@ -1,4 +1,4 @@
-# Stop the ref check stopping runs for SSSF's own records and a stash
+# Stop the ref check stopping runs for SSSF's own specs and a stash
 
 This is open.md's three P1 rows on the ref check merged in 06f6886: "The after-call ref check stops a run when another run commits a protected path", "`git stash -u` during any agent call stops the run", and "Two gaps in the ref check's own reads". No SSSF update goes to the projects until they're fixed. Run it with `--worktree` and `--base main`, on the hub's own config. `guard_builder` writes the shipped guard code and its tests, so this run needs no one-run config.
 
@@ -6,7 +6,7 @@ This is open.md's three P1 rows on the ref check merged in 06f6886: "The after-c
 
 `permissions.ref_moves` lists the commits that became reachable during an agent call on refs other than the run's own branch, and runs `diff-tree -r -m --root` on each. It stops the run if any listed path is barred to the agent. Two things make it stop runs it shouldn't:
 
-- **Records.** The shipped roster protects `specs/` and `.scratch/`, and every chain's plan phase commits its spec under `specs/` on its own `sssf/*` branch. So in every project, another run's plan commit stops a running builder or reviewer. `just trial` starts its attempts at once, so they stop each other. An engineer merge of a finished run does the same.
+- **Specs.** The shipped roster protects `specs/`, and every chain's plan phase commits its spec under `specs/` on its own `sssf/*` branch. So in every project, another run's plan commit stops a running builder or reviewer. `just trial` starts its attempts at once, so they stop each other. An engineer merge of a finished run does the same.
 - **A stash.** `git stash -u` makes a commit whose third parent holds the untracked files and is a root commit. With `-m`, the stash commit is diffed against that parent too, which lists every tracked file. So any `git stash -u` during a call stops the run and names protected files nobody touched. Git 2.43 makes that parent even with nothing untracked. SSSF's own `just merge` error says "Commit or stash them first".
 
 And two gaps in the check's reads, both found by the `bypass-reviewer` subagent on run ae5ebd82:
@@ -18,11 +18,15 @@ And two gaps in the check's reads, both found by the `bypass-reviewer` subagent 
 
 This brief settles the design. Spend the spec on making it exact.
 
-1. **Records don't count on other refs.** In `ref_moves` only, a path under `specs/` or `.scratch/` is never barred. The run's own branch is unchanged: `enforce` and `undo_commits` judge it as today, so a builder still can't write `specs/` in its own tree. Name the two folders in one constant in the first build, with a comment on why.
-2. **Each new commit is judged against its first parent**, or against nothing for a root commit, instead of against every parent. That covers the stash: the stash commit is judged against `HEAD`, its index commit against `HEAD`, and its untracked commit, a root, by its own tree, which holds only the untracked files. A merge judged against its first parent still lists everything the merge brings into that line, including a second parent's changes. The spec says what `-m` caught that this doesn't, and checks that each such case is already one of open.md's filed ref-move holes (re-parenting on an existing commit, a fast-forward or rewind to one, a symbolic ref). If any isn't, say so and keep `-m` for commits that aren't stash-shaped instead.
-3. **No grafts.** `_REF_READ` and `_COMMIT_PATHS` set `GIT_GRAFT_FILE=/dev/null`, beside the env they set today.
+1. **Specs don't count on other refs.** In `ref_moves` only, a path under `specs/` is never barred, as long as no part of the path is `..`, `.` or empty. The run's own branch is unchanged: `enforce` and `undo_commits` judge it as today, so a builder still can't write `specs/` in its own tree. Name the folder in one constant in the first build, with a comment on why. `.scratch/` is not exempt: `adw_tickets.py` hands each ticket under `.scratch/` straight to `ticket_builder`, with no planner between, so a ticket planted on `main` would be built.
+2. **Each new commit is judged against every parent, as on `main`, except a parent that is a root commit.** A root commit is still judged by its own tree. That covers a real stash: `git stash -u`'s untracked parent is a root, so the stash commit is no longer diffed against it, and the root itself lists only the untracked files. A merge, an octopus merge and a forged stash whose untracked parent isn't a root are still diffed against every parent.
+3. **No grafts.** `_REF_READ` and `_COMMIT_PATHS` set `GIT_GRAFT_FILE=/dev/null` and `-c advice.graftFileDeprecated=false`, beside the env and flags they set today, so a breach never opens with git's grafts hint.
 
-Decided by the engineer on 2026-11-13, so not open here: exempting live runs' `sssf/*` branches was turned down, since `just merge` would land a hijack of one; barring only paths every agent is barred from was turned down, since in the hub `guard_builder` may write the guard code and a reviewer could then put guard code on `main`.
+Decided by the engineer on 2026-11-13, so not open here: exempting live runs' `sssf/*` branches was turned down, since `just merge` would land a hijack of one; barring only paths every agent is barred from was turned down, since in the hub `guard_builder` may write the guard code and a reviewer could then put guard code on `main`; exempting `.scratch/` was turned down for the ticket reason above.
+
+### Why not first-parent judging
+
+Run 92434a0e judged each commit against its first parent only, and the `bypass-reviewer` subagent found it let through what `main` stops. An agent makes a merge whose first parent is `main~1`, the commit before a guard fix, and whose second parent is `main`, with `main~1`'s tree, and points `main` at it. Against its first parent it changes nothing; against `main` it reverts the fix. It descends from `main`, so it is a fast-forward that a plain push or `pull --ff-only` accepts. The same shape with an octopus merge, the run's own branch, or a new root holding only `src/` as first parent lands unreviewed guard code or strips the factory files. A forged stash whose untracked parent is an existing commit, not a root, restored a deleted protected file on `git stash pop` the same way. Judging every parent but a root keeps all of these stopped.
 
 ## Rules from the last two guard runs
 
@@ -34,18 +38,19 @@ Decided by the engineer on 2026-11-13, so not open here: exempting live runs' `s
 
 The baseline is `main`.
 
-- Everything `main` stops still stops: the `commit-tree` plus `update-ref` hijack of `main`, a tag, another branch or an `sssf/*` branch with a new commit changing a protected path outside `specs/` and `.scratch/`, any `refs/replace/` change, for every agent including `writes: []` reviewers. The breach still names the ref, both shas, the commits and the paths.
+- Everything `main` stops still stops: the `commit-tree` plus `update-ref` hijack of `main`, a tag, another branch or an `sssf/*` branch with a new commit changing a protected path outside `specs/`, every shape in "Why not first-parent judging", a path under `specs/` with a `..` or `.` part, any `refs/replace/` change, for every agent including `writes: []` reviewers. The breach still names the ref, both shas, the commits and the paths.
 - The hijack of `main` behind a symlinked `.git/info` with a live graft: the breach names `refs/heads/main`.
-- No stop for: another run's plan commit under `specs/`; a commit under `.scratch/` on another ref; an engineer merge, true or fast-forward, of a finished run whose protected changes are only under `specs/` and `.scratch/`; `git stash` and `git stash -u` of unprotected files, by the engineer or an agent; two runs started at once, each committing its plan, as `just trial` does.
-- Still a stop: a stash of a protected file outside `specs/` and `.scratch/`, tracked or untracked.
+- No stop for: another run's plan commit under `specs/`; an engineer merge, true or fast-forward, of a finished run whose protected changes are only under `specs/`; `git stash` and `git stash -u` of unprotected files, by the engineer or an agent; two runs started at once, each committing its plan, as `just trial` does.
+- Still a stop: a stash of a protected file outside `specs/`, tracked or untracked; a commit under `.scratch/` on another ref.
 - No engineer commit, branch or file is deleted or overwritten, and no ref is moved.
 - No change to the run's own branch: `enforce` and `undo_commits` behave as on `main`.
 - No change to any ADW script, and no new module-level mutable state.
 
 ## Costs the spec states
 
-- An agent can put a spec or a `.scratch/` file on another ref, `main` included, without a stop. A spec on `main` runs nothing, but a later run's planner may read it.
-- What first-parent judging gives up, from design point 2.
+- An agent can put a spec on another ref, `main` included, without a stop. A spec on `main` runs nothing, but a later run's planner may read it.
+- A ticket run's commits under `.scratch/` still stop other runs' builders and reviewers while they work.
+- What skipping a root parent gives up, if anything: say whether any shape lands protected content through a root parent that the root's own tree and the other parents don't show.
 
 ## Testing
 
@@ -54,8 +59,11 @@ In `.claude/skills/sssf/tests/test_agent_commits.py`, through `permissions.head`
 - another worktree's plan commit under `specs/` on its own branch during a builder's call and a reviewer's call: no stop. Fails on `main`, passes after;
 - two runs in two worktrees, each committing a plan while the other's builder runs: no stop for either;
 - the engineer's `git stash -u` with an unprotected change and with nothing untracked: no stop. Fails on `main`;
-- a stash of a protected file outside `specs/` and `.scratch/`, tracked and untracked: stopped;
+- a stash of a protected file outside `specs/`, tracked and untracked: stopped;
 - the true merge into `main` of a branch whose only protected changes are under `specs/`: no stop; and of a branch carrying a protected change outside them: stopped;
+- each shape in "Why not first-parent judging": the swapped-parent merge reverting a guard fix, the octopus form, the run's own branch as first parent, a new root with only `src/` as first parent, and the forged stash: stopped, on `main` and after;
+- a tree entry `specs/../<guard file>` and `specs/./<guard file>` on `main`: stopped; a `.scratch/` commit on another ref: stopped;
+- a breach from a read that fails carries no grafts hint;
 - the hijack behind a symlinked `.git/info` with a live graft: the breach names `refs/heads/main`. Fails on `main`;
 - a commit whose tree is missing, with a promisor remote whose `uploadpack` is a script that writes a marker: the marker never appears, and the test fails when the no-fetch env is removed from `_REF_READ` or `_COMMIT_PATHS`;
 - every existing ref test still passes.

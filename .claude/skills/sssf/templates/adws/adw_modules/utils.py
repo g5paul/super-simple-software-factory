@@ -61,16 +61,34 @@ def operator_env() -> dict[str, str]:
     same `python3` the engineer gets in their terminal. The ADW's own imports
     are unaffected; this env is only ever handed to child processes.
 
+    An ADW launched by another, as `just trial` launches each attempt, sits
+    inside two `uv run` environments, and VIRTUAL_ENV names only the inner
+    one. So every venv inside uv's cache leaves PATH too. A venv the engineer
+    activated lives elsewhere and stays.
+
     Agents get agent_env(operator_env()); everything else gets all of it.
     """
     env = os.environ.copy()
     venv = env.pop("VIRTUAL_ENV", "")
-    if not venv:
-        return env
-    venv_bin = str(Path(venv) / "bin")
-    parts = [p for p in env.get("PATH", "").split(os.pathsep) if p and p != venv_bin]
+    dropped = {str(Path(venv) / "bin")} if venv else set()
+    cache = _uv_cache(env)
+    parts = [p for p in env.get("PATH", "").split(os.pathsep)
+             if p and p not in dropped and not _uv_run_env(p, cache)]
     env["PATH"] = os.pathsep.join(parts)
     return env
+
+
+def _uv_cache(env: dict[str, str]) -> Path:
+    """uv's cache folder: UV_CACHE_DIR, else $XDG_CACHE_HOME/uv, else ~/.cache/uv."""
+    if env.get("UV_CACHE_DIR"):
+        return Path(env["UV_CACHE_DIR"]).expanduser()
+    return Path(env.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "uv"
+
+
+def _uv_run_env(entry: str, cache: Path) -> bool:
+    """True for a venv's bin inside uv's cache, which only `uv run` puts on PATH."""
+    folder = Path(entry).parent
+    return folder.is_relative_to(cache) and (folder / "pyvenv.cfg").is_file()
 
 
 # Install from a cache by copying, never by hardlink, so a tree SSSF builds shares no file with a cache.

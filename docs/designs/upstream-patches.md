@@ -77,7 +77,7 @@ Settled with the engineer in a grilling session on 2026-11-12. Terms are in [GLO
 16. **agentsh runs with `local_guard: text`.** Under the agentsh guard, its own ptrace tests would most likely fail, since the test process is already a tracee, and its loopback tests fail on the policy's loopback denial. The text guard still refuses push, `gh` writes and secret reads, and an agent can't change the installed binary, which is root's. `--sandbox openshell` can come later: it needs Go in the image, the Go module proxy allowed, and ptrace proven in the microVM.
 17. **agentsh's checks build with `CGO_ENABLED=0`.** A cgo build needs `libseccomp-dev`, `libfuse-dev` and `libfuse3-dev`, which only the engineer can install. Until then, the 42 `linux && cgo` test files that upstream's CI runs aren't compiled.
 18. **The first feature to export is the `go vet` lock-copy fix** in `internal/db/proxy/postgres/cancelmap.go`, upstream's own code and independent of the fork's fixes, so it tests the whole path from chain to export to review. Bind (open.md) is second: its code is ptrace and network code the fork changed heavily, so it will test decision 8's stop.
-19. **The fork's `ocsf` bug is the agentsh session's first job,** as a fork-only commit that registers `ptrace_signal`. It's never exported, since upstream has no `ptrace_signal`. It's a row in open.md.
+19. **The fork's `ocsf` bug is the agentsh session's first job,** as a fork-only commit that registers `ptrace_signal`. It's never exported, since upstream has no `ptrace_signal`. Done on 2026-11-12 by run cda7b802, merged to local `main` as d5e14cb1.
 20. **agentsh's check set, in both `quality.py` and `export_checks`:** `CGO_ENABLED=0 go build ./...`, then `CGO_ENABLED=0 go test -short -p 4 -timeout 8m` on every package except `cmd/agentsh-shell-shim`, `internal/api`, `internal/shim/kernelinstall` and `internal/db/proxy/postgres`, which fail here because of the environment, and `internal/ocsf`, until decision 19's fix adds it back. Both run with Go's `~/.local/go/bin` on `PATH`. `go vet ./...` joins with the vet fix. `gofmt` stays out, since the tree already fails it and upstream's CI doesn't check it.
 21. **The order of the work.** The design is committed. This session builds the export test-first in the skill, proves it on the fixture pair, and updates the hub and sssf-sandbox. Then it installs SSSF in agentsh: `main` fast-forwards to `sssf/links-listing`, the install goes on top, and agentsh is listed. Last, it hands agentsh to its project session for the `ocsf` fix, the vet fix and its export, then bind. Nothing is pushed unless the engineer says so.
 22. **The fixture pair is a tiny Python package.** It has one module, pytest tests, a `pyproject.toml`, and its own `specs/` folder with one file that isn't a record, to test decision 7's edge case for real. A real chain on a Claude roster with a cheap model builds one small function, and the engineer reviews its export. The pair has no GitHub remote, and it's listed in `docs/projects.md` as a test bed.
@@ -125,6 +125,27 @@ SSSF lives only on local `main` and the feature branches cut from it. Everything
 **Work that leans on the unpublished fixes, such as bind.** Replayed onto bare `upstream/main`, it won't apply, and the export stops and names the commit (decision 8). The engineer then either gets the fixes upstream first and exports once `upstream/main` has them, or exports onto the fixes with `just export --run <adw_id> --onto sssf/links-listing`, which still has no SSSF files, and opens a PR stacked on the fixes' branch. Fork-only work such as the `ocsf` fix (decision 19) works the same way: exported `--onto sssf/links-listing` to put it on the fork, or left on local `main`.
 
 **Who does what.** This session installs SSSF in agentsh and then stops writing there (decision 5). The agentsh project session, started after the install so it loads `/sssf`, runs the chains and the exports. The engineer runs every push.
+
+### Status on 2026-11-12
+
+The setup works inside the fork. Going upstream is untried on agentsh.
+
+Proven:
+
+- The install (b165f676). `quality.py` and `export_checks` run the `CGO_ENABLED=0` build and tests, and since 77d3a9e0 they test `internal/ocsf` too.
+- Scout run 9ab6e3ba.
+- The first chain run, cda7b802 (`adw_simple_sdlc`, worktree, $1.03, 6.6 minutes), fixed the `ocsf` test (decision 19). Review 1 blocked, the builder revised, and review 2 approved. `just merge` fast-forwarded local `main` to d5e14cb1. Every commit carries the noreply email (decision 28), and nothing was pushed.
+- The project session ran it through `/sssf` and reported, as the hub's handoff rules expect, and its report matched the trace.
+
+To do and test, in order:
+
+1. The export on a real repo: the vet fix, through `just export --run`, with `export_checks` on a clean `upstream/main` branch. So far the export has run only on the test pair.
+2. `--onto sssf/links-listing`, for bind and for putting the `ocsf` fix on `sssf/links-listing` before that branch is published. Without the fix, the published branch fails its own `internal/ocsf` test.
+3. Decision 27's guard against a push the engineer types: a plain `git push` from `main` should fail. `git push origin main` still goes through until the pre-push hook refuses SSSF files (a row in open.md).
+4. agentsh as the guard in this checkout. It runs `local_guard: text`, and agentsh has run as the guard only in sssf-sandbox and the hub. That waits for the rollout.
+5. A PR to canyonroad, when the engineer decides to publish.
+
+A note from the first run: when a fix should turn a skipped check back on, no agent can do it, since `quality.py` is a factory file. The project session edited it before launch, with the engineer's OK. The run cookbook should say so (a row in open.md).
 
 ## Open questions
 

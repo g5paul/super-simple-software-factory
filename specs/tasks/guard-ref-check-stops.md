@@ -32,6 +32,7 @@ Run 92434a0e judged each commit against its first parent only, and the `bypass-r
 
 - **All git runs in the run's own repo**, never with a `cwd` inside another worktree or checkout.
 - **Reads can't run agent code or fetch.** Every object read keeps the env and flags `_REF_READ` has, plus the graft line.
+- **Argument lists stay short.** The read's script gets its commits and parents on stdin, never as arguments. A commit can have any number of parents: one with 60,000 is 2.4 MB of shas, past the kernel's 2 MB argument limit. `main` sends 256 commits per call, one sha each, so it never hits the limit. Run e3997d9a's first build put each commit's parents on the `sh` command line, and its bypass review's 60,000-parent case was refused 102 times by agentsh, which refuses any command whose arguments pass 64 KB.
 - **Constants go in the build.** A fix round that adds any module-level name stops the run, even a constant.
 
 ## The bar
@@ -42,6 +43,7 @@ The baseline is `main`.
 - The hijack of `main` behind a symlinked `.git/info` with a live graft: the breach names `refs/heads/main`.
 - No stop for: another run's plan commit under `specs/`; an engineer merge, true or fast-forward, of a finished run whose protected changes are only under `specs/`; `git stash` and `git stash -u` of unprotected files, by the engineer or an agent; two runs started at once, each committing its plan, as `just trial` does.
 - Still a stop: a stash of a protected file outside `specs/`, tracked or untracked; a commit under `.scratch/` on another ref.
+- A commit with 60,000 parents, one of them changing a protected path: stopped, as on `main`, with no read failing on the argument limit.
 - No engineer commit, branch or file is deleted or overwritten, and no ref is moved.
 - No change to the run's own branch: `enforce` and `undo_commits` behave as on `main`.
 - No change to any ADW script, and no new module-level mutable state.
@@ -64,6 +66,7 @@ In `.claude/skills/sssf/tests/test_agent_commits.py`, through `permissions.head`
 - each shape in "Why not first-parent judging": the swapped-parent merge reverting a guard fix, the octopus form, the run's own branch as first parent, a new root with only `src/` as first parent, and the forged stash: stopped, on `main` and after;
 - a tree entry `specs/../<guard file>` and `specs/./<guard file>` on `main`: stopped; a `.scratch/` commit on another ref: stopped;
 - a breach from a read that fails carries no grafts hint;
+- a commit with 60,000 parents on `main`, judged without the read failing; make the commit with `git hash-object -t commit -w --stdin`;
 - the hijack behind a symlinked `.git/info` with a live graft: the breach names `refs/heads/main`. Fails on `main`;
 - a commit whose tree is missing, with a promisor remote whose `uploadpack` is a script that writes a marker: the marker never appears, and the test fails when the no-fetch env is removed from `_REF_READ` or `_COMMIT_PATHS`;
 - every existing ref test still passes.
@@ -79,6 +82,8 @@ The hub stays on `local_guard: agentsh`. The builder runs the suite from a copy 
 agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. That holds for the builder, the bypass reviewer and any harness an agent writes. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. The chain's verify phase runs as code, outside agentsh, and runs both.
 
 Under agentsh, run only the tests this change touches: `pytest tests/test_agent_commits.py -q`, and any other file whose tests you changed. Leave the whole suite to the chain's verify phase. This goes for the builder, its fix rounds and the bypass reviewer. After each agent call SSSF reads every agentsh event of the call into memory, and run 92434a0e's first build ran the whole suite under ptrace several times: the read grew to 8.6 GB, timed out, and failed the build with its code done.
+
+Under agentsh, a command whose arguments pass 64 KB is refused, and the refusals stop the call. Write a long list to a file or stdin. That holds for test harnesses that call the ref check from inside an agent's call.
 
 To give a bare repo a commit, as an upstream for a fetch case, fetch into it: `git -C <bare> fetch -q <work> main:main`.
 

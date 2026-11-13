@@ -35,7 +35,8 @@ HAIKU = ('<h3>Haiku 5.5</h3><p>Fastest, most cost-efficient model</p><p>Prompt c
 
 
 def page(opus_output: str = "20") -> str:
-    return ("<html><body>" + card("Fable 5.1", "0.25", "12.50", "10", "50")
+    return ("<html><body>" + card("Fable 5.2", "0.20", "10", "8", "40")
+            + card("Fable 5.1", "0.25", "12.50", "10", "50")
             + card("Opus 5.5", "0.20", "5", "4", opus_output) + card("Sonnet 5.5", "0.10", "2.50", "2", "10")
             + HAIKU + card("Opus 4.8", "0.50", "6.25", "5", "25") + "</body></html>")
 

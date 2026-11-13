@@ -76,6 +76,8 @@ The hub stays on `local_guard: agentsh`. The builder runs the suite from a copy 
 
 agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos under the test's temp folder, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. Neither file touches what this change does. The chain's verify phase runs as code, outside agentsh, and runs both. Run 5db82031's first build ran them, was refused 51 times, and stopped.
 
+The same holds for the bypass reviewer and any harness an agent writes. To give a bare repo a commit, as an upstream for a fetch case, fetch into it instead: `git -C <bare> fetch -q <work> main:main`. Run ae5ebd82's first bypass review built its upstream with `git push`, was refused 156 times, and stopped.
+
 ## Out of scope
 
 - The `--no-replace-objects` half of the `git replace` row for the rest of the guard's git. This change's own reads use it.

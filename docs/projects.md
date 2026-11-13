@@ -28,8 +28,9 @@ Which of [open.md](open.md#sssf)'s SSSF rows reach a project depends on its setu
 
 | Setup | Open rows it brings in |
 |---|---|
-| Every install | A resumed run commits the failed attempt's leftover code with the new spec. Three gaps in the after-call check: gitignored files, `git replace`, and a background write that lands after it. An agent may write any run's worktree. An agent's command can write to its harness's stdout. The push pattern backtracks exponentially |
+| Every install | Three gaps in the after-call check: gitignored files, `git replace`, and a background write that lands after it. An agent may write any run's worktree. An agent's command can write to its harness's stdout. The push pattern backtracks exponentially |
 | Skill before 3f5be72 | Agents can edit SSSF's factory files. The fix is merged, and the update waits for the rollout |
+| Skill before bed6436 | A resumed run commits the failed attempt's leftover code with the new spec. Fixed in bed6436 |
 | Claude roster | A command that prints SSSF's refusal and exits 126 counts as a real refusal |
 | pi roster | Regex differences between Python and pi's extension that the load check can't reject |
 | `local_guard: agentsh` | Loopback connections are denied, `timeout` leaves the wrapped processes running, bind gets past the policy (fixed in the fork, not installed), dropped events, a leftover session stops the prune, the tracer stall, and npm's warnings about pnpm settings. Installing a new agentsh binary before the hub changes its pin would stop every run here |
@@ -38,12 +39,12 @@ Which of [open.md](open.md#sssf)'s SSSF rows reach a project depends on its setu
 
 | Project | Skill | Roster | Guard | Sandbox | Rows that reach it |
 |---|---|---|---|---|---|
-| pi-agent-observability | 4d7e6bc | pi | text | none | Every install, skill before 3f5be72, pi roster |
-| fusion-harness | 4d7e6bc | Claude | text | none | Every install, skill before 3f5be72, Claude roster |
-| sssf-sandbox | 1ea669c | Claude, and pi in trials | agentsh | none | Every install, Claude roster, pi roster, `local_guard: agentsh` |
-| agentsh | 1ea669c | Claude | text | none | Every install, Claude roster |
-| sssf-export-fork | 180ded1 | Claude | text | none | Every install, Claude roster |
-| super-simple-software-factory | 1ea669c | Claude | agentsh | none | Every install, Claude roster, `local_guard: agentsh`, the hub only |
+| pi-agent-observability | 4d7e6bc | pi | text | none | Every install, skill before 3f5be72, skill before bed6436, pi roster |
+| fusion-harness | 4d7e6bc | Claude | text | none | Every install, skill before 3f5be72, skill before bed6436, Claude roster |
+| sssf-sandbox | 1ea669c | Claude, and pi in trials | agentsh | none | Every install, skill before bed6436, Claude roster, pi roster, `local_guard: agentsh` |
+| agentsh | 1ea669c | Claude | text | none | Every install, skill before bed6436, Claude roster |
+| sssf-export-fork | 180ded1 | Claude | text | none | Every install, skill before bed6436, Claude roster |
+| super-simple-software-factory | 1ea669c | Claude | agentsh | none | Every install, skill before bed6436, Claude roster, `local_guard: agentsh`, the hub only |
 
 The unlisted projects' setups are in the private record.
 

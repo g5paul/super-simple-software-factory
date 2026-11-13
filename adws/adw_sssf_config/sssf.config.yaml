@@ -26,7 +26,9 @@ defaults:
   # data_dir), all of .claude/, .pi/, .mcp.json, justfile, sssf.just, local.just and .githooks/.
   # A roster can't drop them; only an agent's own `writes` naming one unlocks it. Gitignored
   # files are never checked. The hub's product is the skill under .claude/skills/sssf/, so the
-  # builder and ticket_builder name it below.
+  # builder and ticket_builder name it below. That unlock no longer reaches the shipped guard
+  # paths listed at the end: a `writes` entry unlocks a protected entry only when it equals it
+  # or sits inside a protected folder, and .claude/skills/sssf/ does neither.
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/
@@ -48,6 +50,40 @@ defaults:
     - GLOSSARY.md
     - GLOSSARY-MAP.md
     - docs/adr/
+    # The guard code SSSF ships, the tests that pin it and the fixtures those tests read.
+    # Only guard_builder names them, so only the guard-change chain changes them. A new guard
+    # module, test or fixture is unprotected until it is added here and to guard_builder.
+    - .claude/skills/sssf/templates/adws/adw_modules/rules.py
+    - .claude/skills/sssf/templates/adws/adw_modules/sssf_refuse.py
+    - .claude/skills/sssf/templates/adws/adw_modules/sssf_rules.ts
+    - .claude/skills/sssf/templates/adws/adw_modules/secret_files.py
+    - .claude/skills/sssf/templates/adws/adw_modules/permissions.py
+    - .claude/skills/sssf/templates/adws/adw_modules/agent_cc.py
+    - .claude/skills/sssf/templates/adws/adw_modules/agent_pi.py
+    - .claude/skills/sssf/templates/adws/adw_modules/gates.py
+    - .claude/skills/sssf/templates/adws/adw_modules/sandbox_openshell.py
+    - .claude/skills/sssf/templates/adws/adw_modules/agentsh_guard.py
+    - .claude/skills/sssf/templates/adws/adw_modules/agentsh_sssf.yaml
+    - .claude/skills/sssf/scripts/agentsh_install.py
+    - .claude/skills/sssf/tests/test_rules.py
+    - .claude/skills/sssf/tests/test_rules_continuation.py
+    - .claude/skills/sssf/tests/test_rules_heredoc.py
+    - .claude/skills/sssf/tests/test_rules_multiline.py
+    - .claude/skills/sssf/tests/test_rules_portable.py
+    - .claude/skills/sssf/tests/test_rules_tab_heredoc.py
+    - .claude/skills/sssf/tests/test_secret_files.py
+    - .claude/skills/sssf/tests/test_git_dir_guard.py
+    - .claude/skills/sssf/tests/test_factory_files.py
+    - .claude/skills/sssf/tests/test_factory_holes.py
+    - .claude/skills/sssf/tests/test_agent_commits.py
+    - .claude/skills/sssf/tests/test_agent_cc.py
+    - .claude/skills/sssf/tests/test_agent_pi.py
+    - .claude/skills/sssf/tests/test_plan_gate.py
+    - .claude/skills/sssf/tests/test_sandbox_openshell.py
+    - .claude/skills/sssf/tests/test_agentsh_guard.py
+    - .claude/skills/sssf/tests/fixtures/cc_turn1.jsonl
+    - .claude/skills/sssf/tests/fixtures/cc_turn2.jsonl
+    - .claude/skills/sssf/tests/fixtures/agentsh-first-real-runs/
   rate_limit_stop: 0.8                 # stop before an agent starts once a usage window (5-hour, where the plan has one, or 7-day) is this full, and stop any call once the account moves onto usage credits; null = off for both
   # Hub: a guard run makes up to three Opus bypass reviews at up to $5 each, and from 2026-11-13
   # its planner is Fable at up to $4 a call, so the cap went from $20 to $30.
@@ -86,7 +122,8 @@ agents:
       user: adws/adw_data/prompt_engineering/builder/user.md
     # `**` is everything outside defaults.protected_files and SSSF's factory files.
     # The hub's product is the skill, which is under the factory path .claude/, so
-    # the builder names it to unlock it. Nothing else under .claude/ is unlocked.
+    # the builder names it to unlock it. Nothing else under .claude/ is unlocked, and the
+    # shipped guard paths in protected_files stay refused: only guard_builder names them.
     writes:
       - "**"
       - .claude/skills/sssf/
@@ -140,7 +177,8 @@ agents:
       user: adws/adw_data/prompt_engineering/ticket_builder/user.md
     # Like builder: everything outside protected_files and the factory files, so
     # it cannot edit the ticket it is building or the spec it is judged against,
-    # plus the skill, which it names to unlock.
+    # plus the skill, which it names to unlock. The shipped guard paths in protected_files
+    # stay refused: only guard_builder names them.
     writes:
       - "**"
       - .claude/skills/sssf/
@@ -202,6 +240,58 @@ agents:
       - grep
       - find
       - bash
+      - write
+
+  # Hub only: the builder plus the shipped guard paths, which protected_files lists and only
+  # these entries name. Only adws/adw_guard_change.py uses it. The entries appear twice
+  # because YAML can't share a list, and each must equal its protected_files entry.
+  - name: guard_builder
+    max_call_cost: 1.50
+    color: "#22d3ee"
+    purpose: Implement a guard change's spec exactly; report every changed file in the envelope.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/builder/system.md
+      user: adws/adw_data/prompt_engineering/builder/user.md
+    writes:
+      - "**"
+      - .claude/skills/sssf/
+      - .claude/skills/sssf/templates/adws/adw_modules/rules.py
+      - .claude/skills/sssf/templates/adws/adw_modules/sssf_refuse.py
+      - .claude/skills/sssf/templates/adws/adw_modules/sssf_rules.ts
+      - .claude/skills/sssf/templates/adws/adw_modules/secret_files.py
+      - .claude/skills/sssf/templates/adws/adw_modules/permissions.py
+      - .claude/skills/sssf/templates/adws/adw_modules/agent_cc.py
+      - .claude/skills/sssf/templates/adws/adw_modules/agent_pi.py
+      - .claude/skills/sssf/templates/adws/adw_modules/gates.py
+      - .claude/skills/sssf/templates/adws/adw_modules/sandbox_openshell.py
+      - .claude/skills/sssf/templates/adws/adw_modules/agentsh_guard.py
+      - .claude/skills/sssf/templates/adws/adw_modules/agentsh_sssf.yaml
+      - .claude/skills/sssf/scripts/agentsh_install.py
+      - .claude/skills/sssf/tests/test_rules.py
+      - .claude/skills/sssf/tests/test_rules_continuation.py
+      - .claude/skills/sssf/tests/test_rules_heredoc.py
+      - .claude/skills/sssf/tests/test_rules_multiline.py
+      - .claude/skills/sssf/tests/test_rules_portable.py
+      - .claude/skills/sssf/tests/test_rules_tab_heredoc.py
+      - .claude/skills/sssf/tests/test_secret_files.py
+      - .claude/skills/sssf/tests/test_git_dir_guard.py
+      - .claude/skills/sssf/tests/test_factory_files.py
+      - .claude/skills/sssf/tests/test_factory_holes.py
+      - .claude/skills/sssf/tests/test_agent_commits.py
+      - .claude/skills/sssf/tests/test_agent_cc.py
+      - .claude/skills/sssf/tests/test_agent_pi.py
+      - .claude/skills/sssf/tests/test_plan_gate.py
+      - .claude/skills/sssf/tests/test_sandbox_openshell.py
+      - .claude/skills/sssf/tests/test_agentsh_guard.py
+      - .claude/skills/sssf/tests/fixtures/cc_turn1.jsonl
+      - .claude/skills/sssf/tests/fixtures/cc_turn2.jsonl
+      - .claude/skills/sssf/tests/fixtures/agentsh-first-real-runs/
+    tools:
+      - read
+      - grep
+      - find
+      - bash
+      - edit
       - write
 
   # Hub only. Everything it writes goes under its scratch folder in

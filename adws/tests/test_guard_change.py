@@ -336,11 +336,12 @@ def chain(tmp_path, monkeypatch, reviews, spec_reviews=(APPROVED,), state=None, 
     """Run main() with every agent scripted. `state` maps a round to the
     mechanisms the code check finds going into it."""
     run = FakeRun(tmp_path, {"planner": [PLAN] * 3, "guard_spec_reviewer": list(spec_reviews),
-                             "builder": [BUILD] * 10, "bypass_reviewer": list(reviews)})
+                             "guard_builder": [BUILD] * 10, "bypass_reviewer": list(reviews)})
     shas = iter(f"{n:040d}" for n in range(1, 10))
     rounds = iter(range(1, 10))
     monkeypatch.setattr(gc.agents, "load_config", lambda path: None)
-    monkeypatch.setattr(gc.agents, "validate", lambda cfg, names: None)
+    run.validated = []
+    monkeypatch.setattr(gc.agents, "validate", lambda cfg, names: run.validated.append(list(names)))
     monkeypatch.setattr(gc.session, "ensure", lambda *a, **k: run)
     monkeypatch.setattr(gc.git_helper, "current_branch", lambda: branch)
     monkeypatch.setattr(gc.git_helper, "rev", lambda ref: "f" * 40)
@@ -367,9 +368,42 @@ def test_a_clean_first_round_commits_the_build(tmp_path, monkeypatch):
 def test_a_bypass_goes_back_to_the_builder_and_the_next_round_judges_the_fix(tmp_path, monkeypatch):
     run, code = chain(tmp_path, monkeypatch, [review(bypasses=[finding()]), review()])
     assert code == 0
-    assert owners(run, "builder") == ["build", "fix_round_1"]
+    assert owners(run, "guard_builder") == ["build", "fix_round_1"]
     second = run.calls[-1][2].prompt
     assert f"head: `{2:040d}`" in second and f"git diff {1:040d} {2:040d}" in second
+
+
+def test_the_build_and_fix_phases_run_as_the_guard_builder(tmp_path, monkeypatch):
+    run, code = chain(tmp_path, monkeypatch, [review(bypasses=[finding()]), review()])
+    assert code == 0
+    assert owners(run, "guard_builder") == ["build", "fix_round_1"]
+    assert owners(run, "builder") == []
+
+
+def test_the_config_check_requires_the_guard_builder(tmp_path, monkeypatch):
+    assert "guard_builder" in gc.REQUIRED_AGENTS and "builder" not in gc.REQUIRED_AGENTS
+    real_validate, real_load = gc.agents.validate, gc.agents.load_config
+    run, _ = chain(tmp_path, monkeypatch, [review()])
+    assert run.validated == [gc.REQUIRED_AGENTS]
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.chdir(root)
+    cfg = real_load(str(root / "adws/adw_sssf_config/sssf.config.yaml"))
+    real_validate(cfg, gc.REQUIRED_AGENTS)
+
+
+def test_the_plan_brief_plans_the_listed_paths_for_the_guard_builder():
+    paragraph = ("This chain's builder is `guard_builder`. Its `writes` names every "
+                 "`protected_files` path under `.claude/skills/sssf/`, so plan changes to those "
+                 "paths as builder steps. Every other protected path stays under "
+                 "`## For the engineer`.")
+    assert paragraph in gc.plan_brief("x", "main", "16ae2a5")
+
+
+def test_the_build_brief_names_the_guard_builder():
+    paragraph = ("This run's builder is `guard_builder`. Its `writes` names every "
+                 "`protected_files` path under `.claude/skills/sssf/`, so those are yours to "
+                 "change when the spec asks. Every other protected path stays off-limits.")
+    assert paragraph in gc.build_brief("specs/x.md")
 
 
 def test_the_reviewer_is_briefed_from_the_spec_and_the_baseline(tmp_path, monkeypatch):
@@ -410,13 +444,13 @@ def test_the_reviewer_flagging_a_mechanism_stops_even_a_clean_round(tmp_path, mo
 
 def test_a_false_positive_blocks_unless_allowed(tmp_path, monkeypatch):
     run, code = chain(tmp_path, monkeypatch, [review(false_positives=[finding()]), review()])
-    assert owners(run, "builder") == ["build", "fix_round_1"] and code == 0
+    assert owners(run, "guard_builder") == ["build", "fix_round_1"] and code == 0
 
 
 def test_a_rejected_spec_is_revised_then_the_run_stops(tmp_path, monkeypatch):
     run, code = chain(tmp_path, monkeypatch, [], spec_reviews=[REJECTED, REJECTED])
     assert code == 1 and run.finished[1] == "the spec review never approved the spec"
-    assert owners(run, "planner") == ["plan", "revise_plan_1"] and not owners(run, "builder")
+    assert owners(run, "planner") == ["plan", "revise_plan_1"] and not owners(run, "guard_builder")
     assert "commit_plan" not in run.phases
 
 

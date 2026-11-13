@@ -12,10 +12,13 @@ Usage:
     uv run adws/adw_guard_change.py "<prompt or path/to/prompt.md>" [--base main] [--allow-false-positives] [--adw-id a1b2c3d4] [--worktree]
 
 Phases: engineer(request) -> planner -> guard_spec_reviewer [-> planner(revise) ... bounded]
-        -> git(commit_plan) -> builder -> code(verify) [-> builder(fix) ... bounded]
-        -> bypass_reviewer [-> builder(fix) -> code(verify) -> code(mechanism check)
+        -> git(commit_plan) -> guard_builder -> code(verify) [-> guard_builder(fix) ... bounded]
+        -> bypass_reviewer [-> guard_builder(fix) -> code(verify) -> code(mechanism check)
                             -> bypass_reviewer ... at most MAX_ROUNDS rounds]
         -> code(report) -> git(commit_build)
+
+guard_builder is the builder with the shipped guard paths in its writes. The hub's
+protected_files list those paths, so the feature builders are refused on them.
 
 The chain runs under main's guard: adws/ was stamped from main, and the run
 changes the skill in .claude/skills/sssf/. The reviewer judges a snapshot
@@ -47,7 +50,7 @@ from adw_modules import agents, gates, git_helper, plan_checks, quality, sandbox
 from adw_modules.data_types import (AgentCall, BuildOutput, EnvelopeBase, GateReport,
                                     PhaseParams, PlanOutput, ReviewOutput)
 
-REQUIRED_AGENTS = ["planner", "guard_spec_reviewer", "builder", "bypass_reviewer"]
+REQUIRED_AGENTS = ["planner", "guard_spec_reviewer", "guard_builder", "bypass_reviewer"]
 MAX_SPEC_ROUNDS = 3   # the third only when the review before it blocked on fewer items
 MAX_FIX_LOOPS = 3
 MAX_ROUNDS = 3
@@ -161,6 +164,8 @@ This is a change to SSSF's guard code, in `{GUARD_DIR}/`. Read each guard module
 request touches whole, `.claude/skills/sssf/references/config.md`, and the tests that
 cover it, before you write.
 
+This chain's builder is `guard_builder`. Its `writes` names every `protected_files` path under `.claude/skills/sssf/`, so plan changes to those paths as builder steps. Every other protected path stays under `## For the engineer`.
+
 The spec must have these four `##` sections, besides the usual ones:
 
 - `## Threat model`: what the agent can do, and what this guard can't stop at its
@@ -186,6 +191,8 @@ COPY_TO_D = ('git ls-files -z --cached --others --exclude-standard '
 
 def build_brief(spec: str) -> str:
     return f"""Build the guard change the spec at `{spec}` describes.
+
+This run's builder is `guard_builder`. Its `writes` names every `protected_files` path under `.claude/skills/sssf/`, so those are yours to change when the spec asks. Every other protected path stays off-limits.
 
 To run the suite outside the repo, copy it with
 `D=$(mktemp -d) && {COPY_TO_D}` from the repo root, then run the suite in `$D`. The copy
@@ -445,7 +452,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml",
     spec = specs[0]
 
     def build_until_green(name: str, previous) -> tuple[BuildOutput, object]:
-        with run.phase(PhaseParams(name=name, kind="agent", owner="builder", retries=1,
+        with run.phase(PhaseParams(name=name, kind="agent", owner="guard_builder", retries=1,
                                    description="Change the guard code as the spec says")) as ph:
             build = ph.call(AgentCall(output_type=BuildOutput, prompt=build_brief(spec),
                                       previous=previous, gates=[gates.diff_matches_claims]))
@@ -457,7 +464,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml",
                 record(ph, test)
             if test.passed:
                 break
-            with run.phase(PhaseParams(name=f"{name}_fix_{j}", kind="agent", owner="builder",
+            with run.phase(PhaseParams(name=f"{name}_fix_{j}", kind="agent", owner="guard_builder",
                                        retries=1, description="Repair what the suite reported")) as ph:
                 build = ph.call(AgentCall(output_type=BuildOutput, prompt=build_brief(spec),
                                           previous=quality.as_envelope(test, "checks"),

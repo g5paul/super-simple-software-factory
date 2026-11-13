@@ -11,7 +11,8 @@ Most of `adws/` is the install, the same files every repo gets. A few parts exis
 | `adws/adw_*.py`, `adws/adw_modules/` | no | the AI developer workflows (ADWs) and their modules, stamped from `templates/adws/` ([concepts.md](concepts.md)) |
 | `adws/adw_data/prompt_engineering/` | no, except two | each agent's prompts. `guard_spec_reviewer/` and `bypass_reviewer/` belong to the guard-change chain ([Guard changes](#guard-changes)) |
 | `adws/adw_data/harness_engineering/` | no | pi extensions: `subagents.ts` and its helper `themeMap.ts` |
-| `adws/adw_guard_change.py` | yes | the ADW every change to guard code goes through ([Guard changes](#guard-changes)) |
+| `adws/adw_guard_change.py` | yes | the ADW every change to guard code goes through; it builds as `guard_builder` ([Guard changes](#guard-changes)) |
+| `adws/adw_sssf_config/sssf.config.yaml` | yes | the hub's roster. Its hub-only parts are the three guard-chain agents and the shipped guard paths in `protected_files` |
 | `adws/check_projects.py` | yes | checks each project after an update ([Check the projects' updates](#check-the-projects-updates)) |
 | `adws/levers.py` | yes | the four levers, week by week ([The four levers](#the-four-levers)) |
 | `adws/phase_times.py` | yes | each chain's usual phase times, and the runs well past them ([Phase times](#phase-times)) |
@@ -75,8 +76,10 @@ The run goes through these steps:
 
 1. The planner writes a spec with a threat model, a baseline, a bar and what's out of scope.
 2. `guard_spec_reviewer` passes the spec before any code.
-3. The builder changes the guard, and verify runs the hub suite and the chain's own tests.
+3. `guard_builder` changes the guard, and verify runs the hub suite and the chain's own tests.
 4. `bypass_reviewer` judges a snapshot commit of the tree against the baseline, for at most three rounds.
+
+The hub's `protected_files` list the shipped guard code: the nine modules `CLAUDE.md` names, `agentsh_guard.py`, `agentsh_sssf.yaml` and `scripts/agentsh_install.py`. The tests that pin them and the fixtures those tests read are listed in the config too. Only `guard_builder` names these paths in `writes`, so every other agent, `builder` and `ticket_builder` included, is refused on them and rolled back. The chain's plan and build briefs tell its planner and builder that those paths are `guard_builder`'s to change. A new guard module, test or fixture is unprotected until the engineer adds it to both lists in the config. Left out, because feature work changes them every week or they only provide plumbing: `data_types.py`, `repo_settings.py`, `repo.yaml`, the sandbox modules, `agents.py`, `session.py`, the prompts, the starter rosters and `conftest.py`.
 
 Bypasses, harms and new false positives block. `--allow-false-positives` turns off the last for one run. `--base` names the baseline ref, `main` by default. `--worktree` runs on branch `sssf/<adw_id>` in its own worktree instead of the current branch. A fix that adds module-level state or a `global` to a guard module stops the run, and so does the reviewer's `adds_mechanism`.
 
@@ -86,7 +89,7 @@ Some findings need an agent on the host, in a run with `--sandbox none`, to writ
 
 Every finding lands in `context_handoff/guard_report.md`. A run that passes commits the code. A run that stops leaves the code in the tree for the engineer. Nothing merges to `main` on its own.
 
-The chain, its prompts, its two roster agents and its tests are hub-only: `adws/adw_guard_change.py`, `adws/adw_data/prompt_engineering/` under `bypass_reviewer/` and `guard_spec_reviewer/`, and `adws/tests/`. An update never touches them. `max_run_cost` is $30 here, since a run can make three Opus bypass reviews at up to $5 each, and from 2026-11-13 its planner is Fable at up to $4 a call.
+The chain, its prompts, its three roster agents and its tests are hub-only (`guard_builder` uses the builder's prompts): `adws/adw_guard_change.py`, `adws/adw_data/prompt_engineering/` under `bypass_reviewer/` and `guard_spec_reviewer/`, and `adws/tests/`. An update never touches them. `max_run_cost` is $30 here, since a run can make three Opus bypass reviews at up to $5 each, and from 2026-11-13 its planner is Fable at up to $4 a call.
 
 ## Update SSSF
 

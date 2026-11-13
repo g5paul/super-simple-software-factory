@@ -72,6 +72,8 @@ Edit every file at its path inside the run's worktree, `adws/adw_data/worktrees/
 
 The hub stays on `local_guard: agentsh`. The builder runs the suite from a copy outside the repo, with the copy command the build brief gives.
 
+agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos under the test's temp folder, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. Neither file touches what this change does. The chain's verify phase runs as code, outside agentsh, and runs both. The first build of run 5db82031 ran them, was refused 51 times, and stopped.
+
 ## Out of scope
 
 - The `--no-replace-objects` half of the `git replace` row, unless the spec takes it on.

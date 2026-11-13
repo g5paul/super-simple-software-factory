@@ -85,6 +85,8 @@ Under agentsh, run only the tests this change touches: `pytest tests/test_agent_
 
 Under agentsh, a command whose arguments pass 64 KB is refused, and the refusals stop the call. Write a long list to a file or stdin. That holds for test harnesses that call the ref check from inside an agent's call.
 
+So no agent runs the 60,000-parent test against a read that names a commit's parents as arguments: not as a red step before the read changes, and not as a mutation that drops the bound on parents. Leave it out with `-k` until the read is changed, then run it. Skip that mutation check: it can only run outside agentsh, and the chain's verify phase runs the test there. Run e3997d9a's second build ran the test red against the first build's read and was refused 51 times.
+
 To give a bare repo a commit, as an upstream for a fetch case, fetch into it: `git -C <bare> fetch -q <work> main:main`.
 
 ## Out of scope

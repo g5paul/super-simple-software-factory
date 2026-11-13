@@ -86,7 +86,7 @@ Some findings need an agent on the host, in a run with `--sandbox none`, to writ
 
 Every finding lands in `context_handoff/guard_report.md`. A run that passes commits the code. A run that stops leaves the code in the tree for the engineer. Nothing merges to `main` on its own.
 
-The chain, its prompts, its two roster agents and its tests are hub-only: `adws/adw_guard_change.py`, `adws/adw_data/prompt_engineering/` under `bypass_reviewer/` and `guard_spec_reviewer/`, and `adws/tests/`. An update never touches them. `max_run_cost` is $20 here, since a run can make three Opus bypass reviews at up to $5 each.
+The chain, its prompts, its two roster agents and its tests are hub-only: `adws/adw_guard_change.py`, `adws/adw_data/prompt_engineering/` under `bypass_reviewer/` and `guard_spec_reviewer/`, and `adws/tests/`. An update never touches them. `max_run_cost` is $30 here, since a run can make three Opus bypass reviews at up to $5 each, and from 2026-11-13 its planner is Fable at up to $4 a call.
 
 ## Update SSSF
 

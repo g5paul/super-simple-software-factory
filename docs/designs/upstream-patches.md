@@ -142,8 +142,9 @@ To do and test, in order:
 1. The export on a real repo: the vet fix, through `just export --run`, with `export_checks` on a clean `upstream/main` branch. So far the export has run only on the test pair.
 2. `--onto sssf/links-listing`, for bind and for putting the `ocsf` fix on `sssf/links-listing` before that branch is published. Without the fix, the published branch fails its own `internal/ocsf` test.
 3. Decision 27's guard against a push the engineer types: a plain `git push` from `main` should fail. `git push origin main` still goes through until the pre-push hook refuses SSSF files (a row in open.md).
-4. agentsh as the guard in this checkout. It runs `local_guard: text`, and agentsh has run as the guard only in sssf-sandbox and the hub. That waits for the rollout.
-5. A PR to canyonroad, when the engineer decides to publish.
+4. A PR to canyonroad, when the engineer decides to publish.
+
+agentsh's checkout keeps `local_guard: text` by design, as its `docs/sssf.md` says: under the agentsh guard, its own ptrace tests would run inside a tracer, and its loopback tests would hit the policy's loopback denial.
 
 A note from the first run: when a fix should turn a skipped check back on, no agent can do it, since `quality.py` is a factory file. The project session edited it before launch, with the engineer's OK. The run cookbook should say so (a row in open.md).
 

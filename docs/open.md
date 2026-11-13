@@ -91,4 +91,3 @@ Open items for a listed project, for the engineer to settle with that repo's ses
 | Item | Status | Since | Repo |
 |---|---|---|---|
 | Before `sssf/links-listing` is published, it needs the `ocsf` fix, or the published branch fails its own `internal/ocsf` test. `just export --run cda7b802 --onto sssf/links-listing`, folded into `sssf/links-listing`, would do it and be the first real test of `--onto` | Deferred | 2026-11-12 | agentsh |
-| `quality.py` leaves lint, format and typecheck unset. `gofmt -l` lists four `internal/ocsf` files that were unformatted before run cda7b802, which left them alone | Needs decision | 2026-11-12 | agentsh |

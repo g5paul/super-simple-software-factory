@@ -164,6 +164,15 @@ just discard 84fddff0        # the commits are on master now; this drops the bra
 
 Two runs that touch the same files will conflict like this. Run them side by side when they work in different places, or merge the first before you start the second.
 
+A merge that doesn't conflict can still break. The second run's merge commit lands without a recheck: `just merge` doesn't run your checks, and only `just rebase` does. So two features can each pass alone and fail together, as when one renames a function the other calls. Two ways to cover it:
+
+- Set `merge: ff_only` in `repo.yaml` where features often touch the same code. The second `just merge` then refuses, and `just rebase <adw_id>` moves the branch onto yours, runs `worktree_setup` again and reruns `adw_quality` in the worktree. If those pass, `just merge` fast-forwards. A conflict or a failed check puts the branch back as it was.
+- Or run `just quality` on your branch after the second merge.
+
+Both runs need `--worktree`. A plain run works in your checkout, and `just merge` needs that checkout clean, so a plain run can't go beside a worktree run. A trial's attempts are worktree runs too, and count toward `max_worktree_runs`; `just trial-merge` lands the winner and discards the rest, so they never need merging together.
+
+`max_worktree_runs` caps one repo. Runs from all your repos share one machine. A run takes 1 to 2 GB of memory while its tests run, so a machine with 16 GB for WSL or Linux takes about three runs at once, or four with staggered starts. Under `local_guard: agentsh`, one agentsh server traces every run's agents.
+
 Each run's `max_run_cost` holds for that run alone, so two runs can spend twice that amount. `max_live_cost` in `repo.yaml` caps what live runs spend together. If your checks bind a fixed port or share a test database, set `max_worktree_runs: 1`.
 
 ## A feature from tickets

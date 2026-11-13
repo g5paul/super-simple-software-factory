@@ -3,8 +3,11 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import type { FactoryBoard, FactoryRow, FactorySection } from '../lib/types'
 import { fetchFactory } from '../lib/api'
 import { projectHref } from '../lib/router'
+import { type Level, levelCounts, parseLevels, visibleRows } from '../lib/board'
+import { factoryCounts } from '../lib/factoryCounts'
 
 const KEY = 'sssf.factory.listed'
+const LEVELS_KEY = 'sssf.factory.levels'
 const SECTIONS: { id: FactorySection; label: string }[] = [
   { id: 'projects', label: 'Projects' },
   { id: 'machine', label: 'Machine' },
@@ -16,7 +19,8 @@ const apiError = ref<string | null>(null)
 const listed = ref(readListed())
 // The tile that filters the list, or null for every section.
 const only = ref<FactorySection | null>(null)
-const showOk = ref(false)
+// Which levels' rows are open; red and amber until the viewer closes one.
+const levels = ref(readLevels())
 const open = ref(new Set<string>())
 
 let timer: ReturnType<typeof setInterval> | undefined
@@ -28,6 +32,26 @@ function readListed(): boolean {
     return localStorage.getItem(KEY) === '1'
   } catch {
     return false
+  }
+}
+
+function readLevels(): ReadonlySet<Level> {
+  try {
+    return parseLevels(localStorage.getItem(LEVELS_KEY))
+  } catch {
+    return parseLevels(null)
+  }
+}
+
+function flip(level: Level) {
+  const next = new Set(levels.value)
+  if (next.has(level)) next.delete(level)
+  else next.add(level)
+  levels.value = next
+  try {
+    localStorage.setItem(LEVELS_KEY, [...next].join(','))
+  } catch {
+    // a private window: the toggle still works for this visit
   }
 }
 
@@ -48,6 +72,7 @@ watch(
   board,
   (b) => {
     document.title = b && b.red > 0 ? `(${b.red}) SSSF factory` : 'SSSF factory'
+    factoryCounts.value = b ? { red: b.red, amber: b.amber } : null
   },
   { immediate: true },
 )
@@ -69,6 +94,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearInterval(timer)
   document.title = previousTitle
+  factoryCounts.value = null
 })
 
 /** One tile per section: its counts, and the worst row's first problem. */
@@ -91,9 +117,14 @@ const tiles = computed(() =>
   }),
 )
 
-const inView = computed(() => board.value?.rows.filter((r) => !only.value || r.section === only.value) ?? [])
-const shown = computed(() => inView.value.filter((r) => showOk.value || r.level !== 'ok'))
-const okCount = computed(() => inView.value.filter((r) => r.level === 'ok').length)
+const shown = computed(() => visibleRows(board.value?.rows ?? [], only.value, levels.value))
+// Counted in the picked section, open or closed, so a closed level still says how many it holds.
+const counts = computed(() => levelCounts(board.value?.rows ?? [], only.value))
+const toggles: { level: Level; label: string }[] = [
+  { level: 'red', label: 'red' },
+  { level: 'amber', label: 'amber' },
+  { level: 'ok', label: 'ok' },
+]
 
 function pick(id: FactorySection) {
   only.value = only.value === id ? null : id
@@ -156,13 +187,24 @@ function age(seconds: number | null): string {
 </script>
 
 <template>
-  <section class="factory">
+  <section id="factory" class="factory">
     <div v-if="apiError" class="error-bar">factory board: {{ apiError }}</div>
 
     <div class="strip">
       <template v-if="board">
-        <span class="count red">{{ board.red }} red</span>
-        <span class="count amber">{{ board.amber }} amber</span>
+        <button
+          v-for="t in toggles"
+          :key="t.level"
+          type="button"
+          class="count"
+          :class="[t.level, { closed: !levels.has(t.level) }]"
+          :aria-pressed="levels.has(t.level)"
+          :title="levels.has(t.level) ? `hide the ${t.label} rows` : `show the ${t.label} rows`"
+          @click="flip(t.level)"
+        >
+          <span class="caret" aria-hidden="true">{{ levels.has(t.level) ? '▾' : '▸' }}</span>
+          {{ counts[t.level] }} {{ t.label }}
+        </button>
         <span class="dim small" :title="`board ${board.generated_at}, scripts ${board.scripts_at ?? '?'}`">
           updated {{ clock(board.generated_at) }}
         </span>
@@ -241,12 +283,10 @@ function age(seconds: number | null): string {
           </a>
         </div>
       </li>
-      <li v-if="!shown.length" class="empty dim">nothing red or amber{{ only ? ` in ${only}` : '' }}</li>
+      <li v-if="!shown.length" class="empty dim">
+        {{ levels.size ? 'nothing in the open levels' : 'every level is closed' }}{{ only ? ` in ${only}` : '' }}
+      </li>
     </ul>
-
-    <button v-if="board && okCount" type="button" class="ok-toggle dim" @click="showOk = !showOk">
-      {{ showOk ? 'hide' : 'show' }} {{ okCount }} ok
-    </button>
   </section>
 </template>
 
@@ -270,7 +310,27 @@ function age(seconds: number | null): string {
   font-size: 14px;
 }
 .count {
+  font: inherit;
   font-weight: 700;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.count:hover {
+  border-color: var(--border);
+}
+.count.ok {
+  color: var(--green);
+}
+.count.closed {
+  opacity: 0.6;
+  font-weight: 400;
+}
+.caret {
+  display: inline-block;
+  width: 0.9em;
 }
 .count.red {
   color: var(--red);
@@ -501,17 +561,6 @@ function age(seconds: number | null): string {
 .empty {
   padding: 10px 14px;
 }
-.ok-toggle {
-  align-self: flex-start;
-  font: inherit;
-  font-size: 14px;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
 @media (max-width: 720px) {
   .factory {
     margin: 12px 16px 8px;

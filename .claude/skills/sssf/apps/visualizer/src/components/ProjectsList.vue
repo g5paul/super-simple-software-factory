@@ -8,6 +8,9 @@ import AccountPanel from './AccountPanel.vue'
 import DayGauge from './DayGauge.vue'
 import LiveGauge from './LiveGauge.vue'
 
+// The factory page puts the account panel above the board instead.
+const { account = true } = defineProps<{ account?: boolean }>()
+
 const projects = shallowRef<ProjectSummary[]>([])
 const apiError = ref<string | null>(null)
 const loaded = ref(false)
@@ -53,7 +56,7 @@ const ordered = computed(() =>
   <div class="projects">
     <div v-if="apiError" class="error-bar">api unreachable — retrying {{ apiError }}</div>
 
-    <AccountPanel />
+    <AccountPanel v-if="account" />
 
     <div v-if="ordered.length" class="list-head dim">{{ ordered.length }} projects</div>
 

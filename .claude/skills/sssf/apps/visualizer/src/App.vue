@@ -2,6 +2,8 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, hrefFor, phaseCrumb, projectHref, trialHref } from './lib/router'
 import { fetchProjects } from './lib/api'
+import { factoryCounts } from './lib/factoryCounts'
+import AccountPanel from './components/AccountPanel.vue'
 import FactoryBoard from './components/FactoryBoard.vue'
 import ProjectsList from './components/ProjectsList.vue'
 import SessionsList from './components/SessionsList.vue'
@@ -15,6 +17,10 @@ const route = useRoute()
 const all = ref<boolean | null>(null)
 // Started with --factory: the landing page shows the health board above the repo list.
 const factory = ref(false)
+
+function toBoard() {
+  document.getElementById('factory')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 onMounted(async () => {
   try {
@@ -66,12 +72,26 @@ onMounted(async () => {
           <span class="current">{{ phaseCrumb ?? route.phaseId }}</span>
         </template>
       </nav>
-      <span class="live-hint"><span class="live-dot" /> live</span>
+      <span class="right">
+        <!-- The board sits below the account panel, so its counts stay in view here. -->
+        <button
+          v-if="factoryCounts && !route.project"
+          type="button"
+          class="pin"
+          title="go to the factory board"
+          @click="toBoard"
+        >
+          <span class="pin-red" :class="{ zero: !factoryCounts.red }">{{ factoryCounts.red }} red</span>
+          <span class="pin-amber" :class="{ zero: !factoryCounts.amber }">{{ factoryCounts.amber }} amber</span>
+        </button>
+        <span class="live-hint"><span class="live-dot" /> live</span>
+      </span>
     </header>
     <main>
       <template v-if="!route.project && all">
+        <AccountPanel v-if="factory" />
         <FactoryBoard v-if="factory" />
-        <ProjectsList />
+        <ProjectsList :account="!factory" />
       </template>
       <TrialView
         v-else-if="route.project && route.trialId"
@@ -168,6 +188,44 @@ onMounted(async () => {
   .brand {
     display: none;
   }
+}
+
+.right {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.pin {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  display: inline-flex;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pin-red {
+  color: var(--red);
+}
+
+.pin-amber {
+  color: var(--amber);
+}
+
+.pin .zero {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+/* The header stays over the page, so the board's top clears it when scrolled to. */
+:global(#factory) {
+  scroll-margin-top: 72px;
 }
 
 .live-hint {

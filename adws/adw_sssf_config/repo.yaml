@@ -50,9 +50,10 @@ sandbox: none
 #     - bun install --frozen-lockfile
 #     - cd web && bun install --frozen-lockfile
 # The hub checks the dashboard's types with its own vue-tsc; a worktree starts without it,
-# and npx then finds another TypeScript that can't see bun's or vite's types.
+# and npx then finds another TypeScript that can't see bun's or vite's types. Copied, not
+# bun's default hard links into its cache: the guard starts no agent beside a hard link.
 worktree_setup:
-  - cd .claude/skills/sssf/apps/visualizer && bun install --frozen-lockfile
+  - cd .claude/skills/sssf/apps/visualizer && bun install --frozen-lockfile --backend=copyfile
 # Seconds each setup command may take before the run stops.
 worktree_setup_timeout: 600
 # In a fork: the repo's own checks, run by `just export` on the branch it builds

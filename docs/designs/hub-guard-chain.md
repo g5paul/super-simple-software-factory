@@ -26,8 +26,8 @@ repo.
 
 ```
 engineer(request) -> planner -> spec_reviewer -> git(commit_plan)
-  -> builder -> code(verify: the hub suite) [-> builder(fix) ... bounded]
-  -> bypass_reviewer [-> builder(fix) -> code(verify) -> bypass_reviewer ... at most 3 rounds]
+  -> guard_builder -> code(verify: the hub suite) [-> guard_builder(fix) ... bounded]
+  -> bypass_reviewer [-> guard_builder(fix) -> code(verify) -> bypass_reviewer ... at most 3 rounds]
   -> git(commit_build)
 ```
 
@@ -47,7 +47,9 @@ engineer(request) -> planner -> spec_reviewer -> git(commit_plan)
   sections are present and concrete, and asks whether a smaller design meets
   the same bar. It is the existing spec_reviewer role, briefed for guard
   work.
-- **builder** changes the guard code and adds a test for each case it fixes.
+- **guard_builder** changes the guard code and adds a test for each case it
+  fixes. It is the builder with the shipped guard paths in its `writes`; the
+  hub's `protected_files` list them, so the feature builders are refused there.
   A guard test builds its config from the `sssf.config.yaml` SSSF ships,
   never a test-only one. A round-13 bypass hid behind a test config that
   protected all of `adws/`.
@@ -59,7 +61,7 @@ engineer(request) -> planner -> spec_reviewer -> git(commit_plan)
   scratch directory.
 - **bypass_reviewer** is briefed with the spec, not with the operator's
   latest summary, so the bar can't drift between rounds.
-- **The loop.** A blocking finding goes back to the builder as a fix,
+- **The loop.** A blocking finding goes back to `guard_builder` as a fix,
   re-enters verify, and the reviewer runs again on the new head. Two things
   stop the loop and hand the run to the engineer with the findings so far:
   - a fourth round

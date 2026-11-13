@@ -137,21 +137,25 @@ Proven:
 - The first chain run, cda7b802 (`adw_simple_sdlc`, worktree, $1.03, 6.6 minutes), fixed the `ocsf` test (decision 19). Review 1 blocked, the builder revised, and review 2 approved. `just merge` fast-forwarded local `main` to d5e14cb1. Every commit carries the noreply email (decision 28), and nothing was pushed.
 - The vet fix, run c948cb31 ($0.49, 4.2 minutes), approved on the first review. Before launch the project session added `go vet ./...` to the checks with the engineer's OK (84e0c440). `just merge` fast-forwarded `main` to 62128cc0.
 - The export, `just export --run c948cb31`. It built `export/c948cb31` on `upstream/main` (a07c7897, as fetched on 2026-11-07): one commit, a4925afd, changing the two Go files and nothing else. It dropped the spec and write-up commits, kept the noreply author, and passed `go build`, `go test` and `go vet`. Nothing was pushed. Before a PR, the engineer fetches `upstream` and exports again with `--replace`, so the branch starts from current code.
-- The project session ran both through `/sssf` and reported, as the hub's handoff rules expect, and each report matched the trace and git.
+- Bind, run 3c724f0e ($1.82 over two attempts), merged to `main` as 872fabd0. `just export --run 3c724f0e` refused, naming the commit that won't apply onto `upstream/main` (decision 8). With `--onto sssf/links-listing` it built `export/3c724f0e`: two commits, ten product files, no SSSF files. Its build passed; its test and vet checks failed only because `sssf/links-listing` lacks the `ocsf` and vet fixes.
+- The project session ran all three through `/sssf` and reported, as the hub's handoff rules expect, and each report matched the trace and git.
 
 To do and test, in order:
 
-1. `--onto sssf/links-listing`, for bind and for putting the `ocsf` fix on `sssf/links-listing` before that branch is published. Without the fix, the published branch fails its own `internal/ocsf` test.
+1. Put the `ocsf` and vet fixes on `sssf/links-listing`, so that branch, and every export onto it, passes its checks. Then export bind again, its two commits squashed and reworded (both rows in open.md).
 2. Decision 27's guard against a push the engineer types: a plain `git push` from `main` should fail. `git push origin main` still goes through until the pre-push hook refuses SSSF files (a row in open.md).
 3. A PR to canyonroad, when the engineer decides to publish.
 
 agentsh's checkout keeps `local_guard: text` by design, as its `docs/sssf.md` says: under the agentsh guard, its own ptrace tests would run inside a tracer, and its loopback tests would hit the policy's loopback denial.
 
-Notes from the first two runs, for the run cookbook (a row in open.md):
+Notes from the first three runs, for the run cookbook and the install (rows in open.md):
 
 - When a fix should turn a skipped check back on, no agent can do it, since `quality.py` is a factory file. Both times the project session edited it before launch, with the engineer's OK.
 - Skip a failing test, not its package. `internal/db/proxy/postgres` was skipped whole for one test that times out on this machine, so neither verify nor the export ran the tests of the package the vet fix changed; only vet and the reviewer, by hand, covered it. The engineer approved running the package with `-skip` on that one test. With that test skipped, the package passes in about 22 seconds.
 - Under full-suite load, the postgres package's own tests race: a test dials its proxy's socket and gets "connection refused", a different test each run, on the code before the vet fix too. The package passes alone, so the engineer approved running it on its own after the parallel suite. Whether the vet fix raises the failure rate is a Projects row in open.md, to settle before it goes upstream.
+- `internal/api` is skipped whole too, and bind's router tests live there, so the factory never ran them. The engineer approved the postgres treatment for it.
+- The agents need the checks' tools on their PATH. Go lives off PATH here, and bind's first builder couldn't compile. agentsh's `agent_rules` now says where Go is (6b95be7f).
+- A resumed run commits the first attempt's leftover code with the new spec, so bind's commits carry the wrong messages (a bug row in open.md).
 - A chain's commit message is a subject line, and the export keeps it. An upstream PR's context goes in the PR description the engineer writes.
 
 ## Open questions

@@ -6,7 +6,7 @@ This is open.md's P1 row "An agent can rewrite another branch without the after-
 
 The after-call check knows where HEAD was and nothing else about refs. `permissions.head()` records HEAD's commit and branch, `undo_commits()` resets commits on that branch, and `GIT_WATCHED` lists no refs. agentsh's `sssf-git-data` rule allows the whole git folder (`agentsh_guard.py`).
 
-So an agent, with HEAD on its run branch, can do this, where `R` is any path its `writes` don't allow, such as `.claude/skills/sssf/templates/adws/adw_modules/rules.py`:
+So an agent, with HEAD on its run branch, can do this, where `R` is a protected path such as `.claude/skills/sssf/templates/adws/adw_modules/rules.py`:
 
 ```
 echo hijack > R && git add R && T=$(git write-tree) && \
@@ -14,57 +14,59 @@ C=$(git -c user.name=a -c user.email=a@e commit-tree $T -p main -m x) && \
 git update-ref refs/heads/main $C && git reset -q && git checkout -q -- R
 ```
 
-Its own branch and tree come back clean, so `undo_commits` and `enforce` allow it for every agent, `writes: []` reviewers included, and `main` now carries the edit. The `bypass-reviewer` subagent found it on run fcbb8a7f, on 16ae2a5 and 588b9ec alike. Its probe is `probes/enforce_refs.py` in the scratch folder that review left; reproduce it from the command above if that folder is gone.
+Its own branch and tree come back clean, so `undo_commits` and `enforce` allow it for every agent, `writes: []` reviewers included, and `main` now carries the edit. The `bypass-reviewer` subagent found it on run fcbb8a7f. The same route reaches tags, other runs' `sssf/*` branches and `refs/replace/`.
 
-The same route reaches tags, `refs/replace/`, `refs/stash`, other runs' `sssf/*` branches and a deleted ref. `packed-refs` holds refs too.
+## The design
 
-## What should change
+This brief settles the design. Spend the spec on making it exact, not on choosing another.
 
-Extend the existing before-and-after snapshot to every ref, not only HEAD: record the refs before each agent call, and after it, find every ref other than HEAD's own branch that was created, moved or deleted. Read them through git, as `head()` does, so packed and loose refs both count. HEAD's own branch keeps today's handling in `undo_commits`.
+1. **Before each agent call**, record every ref: `git for-each-ref` in the run's own repo, so loose and packed refs both count.
+2. **After the call**, once `undo_commits` has handled HEAD's own branch and the git-directory check has restored the paths it watches, find the commits that became reachable during the call: those reachable from the refs after it and from none of the refs before it, leaving out HEAD's own branch. For each one, list the paths it changes against each parent, or against nothing for a root commit.
+3. **Stop the run** if any of those paths is one this agent may not write because it is protected: in `protected_files`, or one of the fixed paths `permitted` refuses every agent. The breach names each ref, its old and new commit, the commits and the paths. Nothing is moved back.
+4. **Stop the run** if a ref under `refs/replace/` was created, moved or deleted.
+5. **Don't stop** for a deleted ref, or a ref that moved without new commits, such as a rewind or a fast-forward to commits that already existed. `just merge` and `just discard` delete branches during other runs.
 
-The fix should change `permissions.py`, the call site in `agents.py` if it needs one, and the tests that pin them. A new mechanism stops the run; widening the snapshot SSSF already takes is not one.
+Who made the commits doesn't matter. A commit on another branch that changes only paths outside the protection is allowed, whoever made it. That is how the engineer's commits to `main`, other runs' commits and merges go through without a stop.
 
-## What the spec must decide
+## Rules from run 5db82031
 
-The check can't tell who moved a ref. Two kinds of move during an agent call are normal and must not be refused or undone:
+Run 5db82031 tried a design that judged each moved branch against the files in the checkout holding it. Its bypass review found a harm and three false positives, and its fix added a module-level name, which stopped it. So:
 
-- **The engineer's own commits.** The engineer commits to the launch branch, often `main`, while a `--worktree` run is going. On 2026-11-13 the hub's `main` moved four times during one guard run.
-- **Other runs.** Concurrent `--worktree` runs commit to their own `sssf/<adw_id>` branches, and SSSF's code makes and removes those branches.
-
-So the spec says, for each kind of ref, what the check does when it moves, and why:
-
-- the launch branch and other `refs/heads/*`;
-- other runs' `refs/heads/sssf/*`;
-- `refs/tags/*`, `refs/replace/*`, `refs/stash`, `refs/remotes/*` and anything else under `refs/`.
-
-Undoing a ref move can destroy the engineer's work, so the default is the one `permissions.py` already uses for a change to a shared config file outside the repo: stop the run and name the ref, its old and new commit, and leave the ref where it is for the engineer. A spec that moves a ref back says why that move can't be the engineer's.
-
-If the spec stops a run on a move it can't tell from the engineer's, it says how often that will happen and what the engineer sees. A design that tells the agent's commit from the engineer's by what the new commits change, checked against the agent's `writes`, is one option to weigh, not a requirement.
-
-The `git replace` row in open.md asks for `--no-replace-objects` on the guard's git and a watch on `refs/replace/` and `packed-refs`. Say whether this change closes the watch half. The `--no-replace-objects` half stays with that row unless the spec takes it on and says so.
+- **All git runs in the run's own repo.** Never use a `cwd` inside another worktree or checkout, and never read another checkout's files. Another worktree's `.git/worktrees/<id>/commondir` and `gitdir` can be redirected by an agent, and run 5db82031's check ran an agent's `uploadpack` script that way.
+- **Reads can't run agent code or fetch.** Every object read passes `-c core.commitGraph=false` and `--no-replace-objects`, with no hook, filter, textconv or external diff. This machine's git is 2.43, which has no `GIT_NO_LAZY_FETCH`, so a missing object counts as a stop, never a fetch.
+- **Constants go in the build.** A fix round that adds any module-level name stops the run, even a constant. Put new constants in the first build, or keep them local to a function.
 
 ## The bar
 
 The baseline is `main`.
 
-- On `main`, the command above gets past the check for every agent. After the change, each agent's run stops on it and the breach names the ref, unless the spec shows why that ref's move can't be told from normal work.
-- The same holds for creating, moving or deleting a tag, a `refs/replace/` entry and a ref under `refs/heads/` other than the run's own branch.
-- No new refusal or stop of normal work: commits on the run's own branch, which `undo_commits` already handles, the engineer's commits to the launch branch, and other runs' commits to their branches, unless the spec names the case and its cost.
-- No engineer commit, branch or file is deleted or overwritten, and no ref is moved back that the engineer might have moved.
+- The command above is stopped for every agent, `writes: []` reviewers included, and `main` keeps the hijack commit for the engineer to see, with the breach naming it.
+- The same holds for a tag, another branch and an `sssf/*` branch carrying a new commit that changes a protected path. Any change under `refs/replace/` stops the run.
+- No stop for: commits on the run's own branch, which `undo_commits` handles as today; the engineer's commits, merges or pulls on the launch branch that touch only unprotected paths; other runs' commits on their own branches that do the same; deleted branches; rewinds and fast-forwards with no new commits.
+- No engineer commit, branch or file is deleted or overwritten, and no ref is moved.
+- No git command runs in another checkout, and no read can run a hook, filter, external diff, or fetch.
 - Every refusal at `main` stays a refusal. A run that switches HEAD to another branch is still refused as today.
 - No change to any ADW script, and no new module-level mutable state.
+
+## Costs the spec states
+
+- **The engineer's own protected edits.** A commit to a protected path on any branch during an agent call stops that run: in the hub, `CLAUDE.md`, `docs/projects.md`, `adws/`, `.claude/agents/` and the shipped guard code. Merging a guard run while another run's agent is working is one such commit. Say how often that should happen and what the engineer sees.
+- **Concurrent guard runs.** Another guard run's commits change guard code, so they stop a feature run whose agent is working at the time.
+- **What stays open.** An agent can still land commits that change only paths outside the protection on another branch, outside review. A reviewer with `writes: []` could put product code on `main` that way. Name it as the gap this design leaves, for an open.md row.
 
 ## Testing
 
 In the skill's `tests/`, beside `test_agent_commits.py` and `test_factory_holes.py`, through `permissions.head`, `undo_commits` and `enforce` in throwaway git repos, as those tests do:
 
-- the command above, refused or stopped as the spec says, with `main`'s sha before and after checked;
-- a tag, a `refs/replace/` entry and another branch, each created, moved and deleted;
-- a commit on the run's own branch, still undone as today;
-- a commit made to the launch branch from outside the agent call, standing in for the engineer, handled as the spec says, and never moved back;
-- another worktree's commit on its own `sssf/*` branch during the call, handled as the spec says.
+- the command above, for a builder and for a `writes: []` reviewer: stopped, with `main`'s sha checked unchanged by the check;
+- a tag, another branch and an `sssf/*` branch, each given a new commit that changes a protected path: stopped;
+- a `refs/replace/` entry created: stopped;
+- a commit made outside the agent call on the launch branch changing an unprotected path, standing in for the engineer, and another worktree's commit on its own branch: no stop;
+- a deleted branch and a rewound branch: no stop;
+- a commit on the run's own branch: undone as today;
+- a second worktree whose `commondir` points at a repo with a promisor remote and an `uploadpack` script, with that worktree's branch moved: the script never runs.
 
-Each new case fails on `main` and passes after. The tests never start a real agent.
+Each stopping case fails on `main` and passes after. The tests never start a real agent.
 
 ## Where to edit
 
@@ -72,11 +74,12 @@ Edit every file at its path inside the run's worktree, `adws/adw_data/worktrees/
 
 The hub stays on `local_guard: agentsh`. The builder runs the suite from a copy outside the repo, with the copy command the build brief gives.
 
-agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos under the test's temp folder, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. Neither file touches what this change does. The chain's verify phase runs as code, outside agentsh, and runs both. The first build of run 5db82031 ran them, was refused 51 times, and stopped.
+agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos under the test's temp folder, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. Neither file touches what this change does. The chain's verify phase runs as code, outside agentsh, and runs both. Run 5db82031's first build ran them, was refused 51 times, and stopped.
 
 ## Out of scope
 
-- The `--no-replace-objects` half of the `git replace` row, unless the spec takes it on.
+- The `--no-replace-objects` half of the `git replace` row for the rest of the guard's git. This change's own reads use it.
+- Agent commits on other branches that change only unprotected paths, as above.
 - The other after-call gaps open.md lists: gitignored files, a write landing after the check, and an agent that kills the chain before the check.
 - The holes filed with this one: a package standing in for a listed module, the guard files off the protected list, and `adw_prompt.py --agent guard_builder`.
 - agentsh's policy. A rule that denied ref writes would be per project, not per run, so it couldn't let a run's own branch move.

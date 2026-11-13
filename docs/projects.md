@@ -8,10 +8,10 @@ In the Skill column, the first commit is the skill commit the project is on, and
 |---|---|---|---|
 | pi-agent-observability | `main` | 4d7e6bc (aec6772). Has the operator container, with bun added for its `quality.py`. Its pi roster ran there with obs on, in run a97a2d4b. In a VM, its obs events reach the engineer's obs through the relay, as in run 0939000a on Vercel | Leave the obs server alone. The rule is a plain string. Since 2fb103c, `just obs`, `just all` and `scripts/smoke-server.sh` refuse when `SSSF_ADW_ID` is set |
 | fusion-harness | `sssf-run`. `main` feeds the patches and stays clean | 4d7e6bc (63977a8) | Never run the stack recipes or start `pi`, and never read `.env`. Two things enforce the recipe rule: `forbid`, and an `SSSF_ADW_ID` guard in fh-workhorse, fh-sota and fh-stack. Since 41c3432, a second `forbid` rule with `on_match: refuse` refuses `pi` run as a command, by name, path, npx or bunx, or inside `bash -c`, and allows reads under `.pi/`. It misses pi started from a script, `xargs pi` and `eval "pi"` |
-| sssf-sandbox | `agentsh-rollout`, from `master`. `master` is on 1908177 (eb17851) | 1ea669c (d154852). `local_guard: agentsh` with the policy `sssf-sssf-sandbox-claude`, installed from the hub's install clone. Has the operator container. Its default has been `sandbox: none` since c3e1c93 turned agentsh on, because agentsh needs it. From 7c292ee until then it was `openshell`. OpenShell proved itself there with pi in d1c04d1f and with Claude Code in 57ed2b49 | The hub's own test bed. A `forbid` rule with `on_match: refuse` on `SSSF-REFUSE-PROBE`, the refusal test |
+| sssf-sandbox | `agentsh-rollout`, from `master`. `master` is on 1908177 (eb17851) | c9bbdf2 (de238b2). Its `fable` trial roster, `sssf.config.fable.yaml` (3049796), is `main` with Fable 5.2 as planner and reviewers. `local_guard: agentsh` with the policy `sssf-sssf-sandbox-claude`, installed from the hub's install clone. Has the operator container. Its default has been `sandbox: none` since c3e1c93 turned agentsh on, because agentsh needs it. From 7c292ee until then it was `openshell`. OpenShell proved itself there with pi in d1c04d1f and with Claude Code in 57ed2b49 | The hub's own test bed. A `forbid` rule with `on_match: refuse` on `SSSF-REFUSE-PROBE`, the refusal test |
 | agentsh | `main`, local only: `sssf/links-listing` (05b3777f) plus the install. Pushes of `main` go to the remote `no-push` (decision 27 in [upstream-patches.md](designs/upstream-patches.md)); exports go to `origin` | 1ea669c (b165f676). Claude roster, `local_guard: text`, `max_worktree_runs: 1`. `quality.py` and `export_checks` run the `CGO_ENABLED=0` Go build, tests and `go vet` (84e0c440). The tests skip two packages, and eleven tests that fail here whatever the code does, ten in `internal/api` (back since f1c6ae90) and one in the postgres proxy package (back since a973718c, run on its own after the parallel suite since 10ca9dcd, because its tests race under full-suite load); `internal/ocsf` is back since 77d3a9e0. `agent_rules` tells agents where Go is (6b95be7f). Commits use the noreply email. Scout run 9ab6e3ba passed. Chain run cda7b802 fixed the `ocsf` test (merged as d5e14cb1), c948cb31 fixed `go vet` (merged as 62128cc0, exported to `export/c948cb31`), and 3c724f0e made bind follow the network policy (merged as 872fabd0, exported `--onto sssf/links-listing` to `export/3c724f0e`; the binary isn't installed). Nothing pushed | No agent rules |
 | sssf-export-fork | `main`, a clone of the bare `~/github/sssf-export-upstream.git`, its only remote, `upstream` | 180ded1 (750b0c4). A tiny Python package on a Claude roster with every agent on Haiku. `local_guard: text`. Proves `just export` with a real chain, as [upstream-patches.md](designs/upstream-patches.md) decision 22 says | The export's test bed. No agent rules |
-| super-simple-software-factory | `main` | 1ea669c (7c2df78), from the install clone `~/github/sssf-install`, as [sssf.md](sssf.md#the-install-clone) describes. `local_guard: agentsh` with the policy `sssf-super-simple-software-factory-claude` since dd07d8f | The hub itself, for the guard-change chain. A `forbid` rule with `on_match: refuse` refuses `git push` and the `gh` commands that write to GitHub |
+| super-simple-software-factory | `main` | c9bbdf2 (9f8b1b5). `just sssf-update` refuses in the hub, because its skill copy is the source, so `install.py --update` ran from the hub's checkout, clean at 2d4ff5d. The four files it changed match the install clone `~/github/sssf-install` byte for byte. From 2026-11-13 to 2026-11-20 13:00 UTC its planner and reviewers run on Fable 5.2 (efc25f9), a week's test of what Fable does to usage. `local_guard: agentsh` with the policy `sssf-super-simple-software-factory-claude` since dd07d8f | The hub itself, for the guard-change chain. A `forbid` rule with `on_match: refuse` refuses `git push` and the `gh` commands that write to GitHub |
 
 ## Unlisted projects
 
@@ -31,6 +31,7 @@ Which of [open.md](open.md#sssf)'s SSSF rows reach a project depends on its setu
 | Every install | Three gaps in the after-call check: gitignored files, `git replace`, and a background write that lands after it. An agent may write any run's worktree. An agent's command can write to its harness's stdout. The push pattern backtracks exponentially |
 | Skill before 3f5be72 | Agents can edit SSSF's factory files. The fix is merged, and the update waits for the rollout |
 | Skill before bed6436 | A resumed run commits the failed attempt's leftover code with the new spec. Fixed in bed6436 |
+| Skill before c9bbdf2 | In a `just trial` attempt, agents get the trial's Python as `python3`. Fixed in c9bbdf2 |
 | Claude roster | A command that prints SSSF's refusal and exits 126 counts as a real refusal |
 | pi roster | Regex differences between Python and pi's extension that the load check can't reject |
 | `local_guard: agentsh` | Loopback connections are denied, `timeout` leaves the wrapped processes running, bind gets past the policy (fixed in the fork, not installed), dropped events, a leftover session stops the prune, the tracer stall, and npm's warnings about pnpm settings. Installing a new agentsh binary before the hub changes its pin would stop every run here |
@@ -39,12 +40,12 @@ Which of [open.md](open.md#sssf)'s SSSF rows reach a project depends on its setu
 
 | Project | Skill | Roster | Guard | Sandbox | Rows that reach it |
 |---|---|---|---|---|---|
-| pi-agent-observability | 4d7e6bc | pi | text | none | Every install, skill before 3f5be72, skill before bed6436, pi roster |
-| fusion-harness | 4d7e6bc | Claude | text | none | Every install, skill before 3f5be72, skill before bed6436, Claude roster |
-| sssf-sandbox | 1ea669c | Claude, and pi in trials | agentsh | none | Every install, skill before bed6436, Claude roster, pi roster, `local_guard: agentsh` |
-| agentsh | 1ea669c | Claude | text | none | Every install, skill before bed6436, Claude roster |
-| sssf-export-fork | 180ded1 | Claude | text | none | Every install, skill before bed6436, Claude roster |
-| super-simple-software-factory | 1ea669c | Claude | agentsh | none | Every install, skill before bed6436, Claude roster, `local_guard: agentsh`, the hub only |
+| pi-agent-observability | 4d7e6bc | pi | text | none | Every install, skill before 3f5be72, skill before bed6436, skill before c9bbdf2, pi roster |
+| fusion-harness | 4d7e6bc | Claude | text | none | Every install, skill before 3f5be72, skill before bed6436, skill before c9bbdf2, Claude roster |
+| sssf-sandbox | c9bbdf2 | Claude, and pi and Fable in trials | agentsh | none | Every install, Claude roster, pi roster, `local_guard: agentsh` |
+| agentsh | 1ea669c | Claude | text | none | Every install, skill before bed6436, skill before c9bbdf2, Claude roster |
+| sssf-export-fork | 180ded1 | Claude | text | none | Every install, skill before bed6436, skill before c9bbdf2, Claude roster |
+| super-simple-software-factory | c9bbdf2 | Claude, Fable planner and reviewers to 2026-11-20 | agentsh | none | Every install, Claude roster, `local_guard: agentsh`, the hub only |
 
 The unlisted projects' setups are in the private record.
 
@@ -69,6 +70,9 @@ pi-agent-observability and fusion-harness each added the hook by hand before the
 ## Checks on the next real runs
 
 The hub makes these checks read-only, from the trace and the raw logs, as each run happens.
+
+- **The first hub run on Fable, after efc25f9.** The planner and reviewers should show `claude-fable-5-2` in `agent_sessions`, and their calls `--effort high`. No call should stop at its doubled cap, and the run's cost should include the Fable calls, which the hub's price table has had since 9f8b1b5. Look at `rate_limits.json` for a window besides `seven_day`, such as a separate one for Fable's cap of half the weekly limit.
+- **The Fable week, on 2026-11-20 13:00 UTC.** Compare its peak reading and its spend by model and seat with the week before, 41% and $946 at list price. The method and the expected 54% to 75% are in the private record.
 
 - **The output count, on the next Claude Code run in a project.** It's the first such run since 102217c. Each agent's `raw_output.jsonl` should hold one `message_delta` per message and no text deltas. Each finished call, priced from the raw log the way a killed call is priced, should match its `total_cost_usd`. sssf-sandbox runs 28f436d5 and b2367eda matched to the cent.
 - **The first refusal in a project.** It can happen in fusion-harness, whose recipe rule refuses on Claude Code and pi agents alike. It can also happen in pi-agent-observability, if its engineer adopts a refuse rule. Three things should hold:

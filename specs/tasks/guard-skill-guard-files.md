@@ -47,6 +47,8 @@ The tests never start a real agent.
 
 The guard chain's `builder` can't write under `adws/`, and this change lives there. For this run only, `sssf.config.guard-p1.yaml` adds three entries to that builder's `writes`: `adws/adw_sssf_config/sssf.config.yaml`, `adws/adw_*.py` and `adws/tests/`. `adws/adw_*.py` is there because `_names` only unlocks the hub's `adws/adw_*.py` entry by that exact pattern. The builder changes `adws/adw_guard_change.py` and no other ADW script.
 
+Edit every file at its path inside the run's worktree, `adws/adw_data/worktrees/<adw_id>/`, never under the launch checkout above it. agentsh refuses writes outside the worktree. Run 97746fcd's builder sent an `Edit` to the launch checkout's `adws/adw_guard_change.py`, got `EACCES`, took it for the unlock failing, reverted its own change and stopped. An `EACCES` on a path outside the worktree means a wrong path, not a missing unlock.
+
 After the run, the engineer's session checks that `git diff main..HEAD --stat -- adws/` touches only `adws/adw_sssf_config/sssf.config.yaml`, `adws/adw_guard_change.py` and `adws/tests/`. It runs the `bypass-reviewer` subagent on `main..HEAD` and deletes `sssf.config.guard-p1.yaml`. The file is never committed.
 
 ## This run is exposed to the gap it fixes

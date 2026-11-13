@@ -92,7 +92,8 @@ const factory = FACTORY_HUB !== null ? new Factory({ hub: FACTORY_HUB, projects,
 const factoryRoutes: Record<string, (req: Request) => Promise<Response>> =
   factory ? { "/api/factory": factoryHandler(factory) } : {};
 
-const account = new Account();
+// Every project's runs, for the transcripts agents under agentsh keep in their own config folder.
+const account = new Account(undefined, undefined, () => projects.everyProject().map((p) => p.dbPath));
 const piSessions = new PiSessions();
 const codexLimits = new CodexLimits();
 codexLimits.start();

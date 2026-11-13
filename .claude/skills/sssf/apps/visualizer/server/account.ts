@@ -11,9 +11,11 @@
  *   scripts/statusline.py. Without it, the file is as fresh as the last
  *   SSSF send.
  * - Claude Code's transcripts, ~/.claude/projects/**.jsonl (or
- *   $CLAUDE_CONFIG_DIR/projects). Every API call is there with its model and
- *   token counts, SSSF agents' calls included. A call is SSSF's when its
- *   session id is in a registered repo's agent_sessions table.
+ *   $CLAUDE_CONFIG_DIR/projects), and each run's own config folder,
+ *   <data_dir>/sessions/<adw_id>/claude-config/projects, where an agent under
+ *   agentsh writes its transcript instead. Every API call is in one of them
+ *   with its model and token counts. A call is SSSF's when its session id is
+ *   in a registered repo's agent_sessions table.
  *
  * Transcripts only report tokens, so cost is an estimate at list price (see PRICES). Files
  * are read incrementally: each poll reads only what was appended.
@@ -76,6 +78,29 @@ export function ratesFilePath(): string {
 
 export function transcriptsDir(): string {
   return join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "projects");
+}
+
+/**
+ * Each run's own Claude Code transcripts, for every project db given. Runs keep
+ * their session folders beside the db, in data_dir. Only claude-config/projects:
+ * the agents' raw_output.jsonl beside it is a stream log, not a transcript.
+ */
+export function runTranscriptDirs(dbPaths: string[]): string[] {
+  const dirs: string[] = [];
+  for (const db of dbPaths) {
+    const sessions = join(dirname(db), "sessions");
+    let runs;
+    try {
+      runs = readdirSync(sessions, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const run of runs) {
+      const dir = join(sessions, run.name, "claude-config", "projects");
+      if (run.isDirectory() && existsSync(dir)) dirs.push(dir);
+    }
+  }
+  return dirs;
 }
 
 function jsonlFiles(dir: string, out: string[] = []): string[] {
@@ -353,11 +378,14 @@ export class Account {
   constructor(
     readonly transcripts: string = transcriptsDir(),
     readonly ratesFile: string = ratesFilePath(),
+    /** The project dbs whose runs' own transcripts count too (runTranscriptDirs). */
+    readonly projectDbs: () => string[] = () => [],
   ) {}
 
   /** Read what each transcript appended since the last call; a partial last line waits. */
   private refresh(now: number): Call[] {
-    for (const path of jsonlFiles(this.transcripts)) {
+    const dirs = [this.transcripts, ...runTranscriptDirs(this.projectDbs())];
+    for (const path of dirs.flatMap((d) => jsonlFiles(d))) {
       let stat;
       try {
         stat = statSync(path);

@@ -52,6 +52,36 @@ describe("Account", () => {
     expect(usage.window.by_model.map((r) => r.key).toSorted()).toEqual(["claude-haiku-5-5", "claude-opus-5-5"]);
   });
 
+  // Since 57bca99, a Claude Code agent under agentsh runs from its run's own config folder,
+  // so its transcript is under <data_dir>/sessions/<adw_id>/claude-config/projects, not ~/.claude.
+  test("reads each run's own Claude config folder, beside the project's db", () => {
+    const data = join(dir, "repo", "adws", "adw_data");
+    const own = join(data, "sessions", "97746fcd", "claude-config", "projects", "-repo");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(own, "s.jsonl"),
+      call({ id: "f", at: "2026-10-29T15:00:00Z", session: "agent", cwd: "/repo", model: "claude-fable-5-2" }));
+    // The agent's stream log sits beside it in the session folder; it is not a transcript.
+    mkdirSync(join(data, "sessions", "97746fcd", "planner"), { recursive: true });
+    writeFileSync(join(data, "sessions", "97746fcd", "planner", "raw_output.jsonl"),
+      call({ id: "raw", at: "2026-10-29T15:00:00Z", session: "agent", cwd: "/repo", model: "claude-fable-5-2" }));
+    const usage = new Account(transcripts, ratesFile, () => [join(data, "sssf.db")])
+      .summary(NOW, new Set(["agent"]), projectOf);
+    expect(usage.week.by_model.map((r) => [r.key, r.calls])).toEqual([["claude-fable-5-2", 1]]);
+    expect(usage.week.by_kind.map((r) => r.key)).toEqual(["sssf"]);
+  });
+
+  test("a call in both ~/.claude and a run's folder counts once", () => {
+    const data = join(dir, "repo", "adws", "adw_data");
+    const own = join(data, "sessions", "a1", "claude-config", "projects", "-repo");
+    mkdirSync(own, { recursive: true });
+    const line = call({ id: "1", at: "2026-10-29T15:00:00Z", session: "agent", cwd: "/repo" });
+    writeFileSync(join(own, "s.jsonl"), line);
+    writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"), line);
+    const usage = new Account(transcripts, ratesFile, () => [join(data, "sssf.db")])
+      .summary(NOW, new Set(["agent"]), projectOf);
+    expect(usage.week.calls).toBe(1);
+  });
+
   test("counts a streamed message once, though it repeats per content block", () => {
     const line = call({ id: "1", at: "2026-10-29T15:00:00Z", session: "s", cwd: "/repos/yt" });
     writeFileSync(join(transcripts, "-repos-yt", "a.jsonl"), line + line + line);

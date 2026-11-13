@@ -210,3 +210,33 @@ def test_simple_sdlc_ends_before_review_when_the_checks_stay_red(repo, monkeypat
     assert run_adw("adw_simple_sdlc") == 1
     assert not [n for n in seen if n.startswith(("review_", "revise_", "document"))]
     assert subjects()[0] == "Add the slugify spec"     # the plan commit stands
+
+
+def test_a_resumed_runs_leftover_code_waits_for_the_code_commit(repo, monkeypatch):
+    # agentsh run 3c724f0e: attempt 1's builder failed and left its code in the
+    # tree. On resume, commit_plan's `git add -A` swept that code into the spec
+    # commit, before verify and review, and the code commit got a gofmt touch-up.
+    # The plan commit takes only what the planner may write.
+    from adw_modules.data_types import AgentConfig, PromptEngineering
+    planner = AgentConfig(name="planner", writes=["specs/"],
+                          prompt_engineering=PromptEngineering(system="s.md", user="u.md"))
+    monkeypatch.setattr(agents, "load_config", lambda path=None: SSSFConfig(agents=[planner]))
+    monkeypatch.setattr(quality, "run_quality", suite(True))
+    monkeypatch.setattr(quality, "run_tests", no_tests_only)
+
+    def planner_writes_a_spec(run, phase, call):
+        if phase.params.owner == "planner":
+            Path("specs").mkdir(exist_ok=True)
+            Path("specs/abc123_slugify.md").write_text("spec")
+            return PlanOutput(status="success", summary="plan", commit_message="Add the slugify spec")
+        return fake_execute(run, phase, call)
+    monkeypatch.setattr(agents, "execute", _always_approve(planner_writes_a_spec))
+    Path("leftover.py").write_text("code from the failed attempt")
+
+    assert run_adw("adw_simple_sdlc") == 0
+    by_subject = {}
+    for sha in git("rev-list", "HEAD").split():
+        files = git("show", "--format=", "--name-only", sha).split()
+        by_subject[git("log", "-1", "--format=%s", sha).strip()] = files
+    assert by_subject["Add the slugify spec"] == ["specs/abc123_slugify.md"]
+    assert "leftover.py" in by_subject[FEATURE]

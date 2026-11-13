@@ -161,7 +161,7 @@
       "source": "adws/adw_modules/gates.py"
     },
     "adws/adw_modules/git_helper.py": {
-      "sha256": "5bdf6a7cc38ff3a6cd17508c134bee37d142c978b992ddbca39bc67662554c02",
+      "sha256": "d55b92162689d5b2857add672083e86ecf9adfbcf4525d7bf83ab6cbca270793",
       "source": "adws/adw_modules/git_helper.py"
     },
     "adws/adw_modules/kill.py": {
@@ -181,7 +181,7 @@
       "source": "adws/adw_modules/plan_checks.py"
     },
     "adws/adw_modules/prices.json": {
-      "sha256": "89f0a95e349a278a0e0b149a57f1394edd42edfcfe6eeb4636950c3df9ba1412",
+      "sha256": "9f0a8294be98acd17abf9f9a2552029d36a93936e734ad9e20002fc144e8ad19",
       "source": "adws/adw_modules/prices.json"
     },
     "adws/adw_modules/prices.py": {
@@ -273,7 +273,7 @@
       "source": "adws/adw_modules/trial.py"
     },
     "adws/adw_modules/utils.py": {
-      "sha256": "56cff3072a11b4a62f04b06e90155f82354f5acfa9984fedaa5f8f9b134feb8d",
+      "sha256": "d37cbc2ddecc6a90499db44894be2a595b2d0cdd1ec3ea8c3695ee8396faef54",
       "source": "adws/adw_modules/utils.py"
     },
     "adws/adw_modules/worktree.py": {
@@ -313,7 +313,7 @@
       "source": "adws/adw_scout.py"
     },
     "adws/adw_simple_sdlc.py": {
-      "sha256": "27519f188116300bc800430e78b14453991f15e8a9e58565172ea48591e01e5c",
+      "sha256": "6b3d03e181f760c5d2ff340e4e0312f61e85e991270d2aedf3d75152174ece6d",
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {

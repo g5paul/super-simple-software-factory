@@ -51,14 +51,16 @@ def repo_root() -> Path:
     return Path.cwd().resolve()
 
 
-def commit_all(message: str) -> str:
-    """Stage the working tree and commit it. Returns the new short sha."""
+def commit_all(message: str, only: list[str] | None = None) -> str:
+    """Stage the working tree, or just the `only` paths, and commit it. Returns
+    the new short sha. With `only`, other changes stay in the tree for a later
+    commit."""
     if not is_repo():
         raise RuntimeError(
             "not a git repository — a commit phase needs one. Run `git init` in the "
             "repo root (and make a first commit) before running an ADW that commits.")
-    _git("add", "-A")
-    if not _git("status", "--porcelain"):
+    _git("add", "-A", *(["--", *only] if only else []))
+    if not _git("diff", "--cached", "--name-only"):
         raise RuntimeError("nothing to commit — the preceding phases changed no files")
     _git("commit", "-m", message)
     return _git("rev-parse", "--short", "HEAD")

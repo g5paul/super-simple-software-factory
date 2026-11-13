@@ -670,6 +670,25 @@ Each `harness_engineering` path must be inside the repo, committed or not, or th
 
 **Known limit.** As in a VM, an agent can edit an extension in the repo, and the edited one loads for the next agent call.
 
+## Starter rosters
+
+`install.py` stamps one of three rosters, and `make_config.py` takes the same flags. All three have the same eight agents, prompts and `writes`. They differ in the coding agent, the models, and how each agent signs in. Each cell gives the model, then `thinking`.
+
+| Agent | Pi, the default | Claude Code, `--coding-agent claude_code` | ChatGPT, `--chatgpt` |
+|---|---|---|---|
+| planner | `fireworks/accounts/fireworks/models/kimi-k3`, high | `anthropic/claude-opus-5-5`, high | `openai/gpt-6.1-sol`, high |
+| builder | `google/gemini-3.6-flash`, medium | `anthropic/claude-sonnet-5-5`, medium | `openai/gpt-6.1-sol`, medium |
+| ticket_builder | `google/gemini-3.6-flash`, medium | `anthropic/claude-sonnet-5-5`, medium | `openai/gpt-6.1-sol`, medium |
+| scout | `google/gemini-3.6-flash`, medium | `anthropic/claude-haiku-5-5`, medium | `openai/gpt-6.1-terra`, medium |
+| reviewer | `openai/gpt-5.6-terra`, high | `anthropic/claude-opus-5-5`, high | `openai/gpt-6.1-sol`, high |
+| standards_reviewer | `openai/gpt-5.6-terra`, high | `anthropic/claude-opus-5-5`, high | `openai/gpt-6.1-sol`, high |
+| spec_reviewer | `openai/gpt-5.6-terra`, high | `anthropic/claude-opus-5-5`, high | `openai/gpt-6.1-sol`, high |
+| documenter | `openai/gpt-5.6-luna`, medium | `anthropic/claude-haiku-5-5`, medium | `openai/gpt-6.1-terra`, medium |
+| Template | `templates/sssf.config.yaml` | `templates/sssf.config.claude_code.yaml` | `templates/sssf.config.chatgpt.yaml` |
+| Signs in with | an API key per provider in `.env` | the engineer's Claude subscription | the engineer's ChatGPT subscription, through pi |
+
+A trial's referees aren't in any roster. `adw_trial` adds one per model family, from `prompt_engineering/referee/`. After an install, the repo's own `sssf.config.yaml` is the record, so read it before trusting this table.
+
 ## ChatGPT, pi on a ChatGPT subscription
 
 `install.py --chatgpt`, or `make_config.py --chatgpt`, stamps `templates/sssf.config.chatgpt.yaml`. The coding agent stays pi, so every field above applies unchanged. Only the models differ: `openai/gpt-6.1-sol` for the planner, builders, and reviewers, and `openai/gpt-6.1-terra` for the scout and documenter, as tested on 2026-10-29. The reviewers share the builder's model, so they don't get a second model's view.

@@ -34,7 +34,17 @@ Most of `adws/` is the install, the same files every repo gets. A few parts exis
 uv run .claude/skills/sssf/scripts/install.py --coding-agent claude_code
 ```
 
-The Claude Code roster as shipped puts planner, reviewer, standards_reviewer and spec_reviewer on Opus, builder and ticket_builder on the default, Sonnet, and scout and documenter on Haiku.
+The hub's roster is the Claude Code starter ([config.md](../.claude/skills/sssf/references/config.md#starter-rosters) lists each starter's seats), with these changes:
+
+| Agent | Model | Thinking | Why |
+|---|---|---|---|
+| planner, reviewer, standards_reviewer, spec_reviewer | Fable 5.2 | high | The Fable week (efc25f9), from 2026-11-13 to 2026-11-20 13:00 UTC, to measure what Fable does to usage. The starter has Opus 5.5 here |
+| builder, ticket_builder | Sonnet 5.5 | medium | as shipped |
+| scout, documenter | Haiku 5.5 | medium | as shipped |
+| guard_spec_reviewer, bypass_reviewer | Opus 5.5 | high | the guard-change chain's reviewers, kept on Opus through the Fable week so the guard check doesn't change mid-trial |
+| guard_builder | Sonnet 5.5 | medium | the builder plus the shipped guard paths, for the guard-change chain only |
+
+The last three are hub-only. Whether the Fable seats stay, or move to medium, is decided after the week ends; see the open.md rows on Fable.
 
 `protected_files` adds the hub's own rules and records to the shipped list: `.claude/agents/`, `CLAUDE.md`, `CLAUDE.local.md`, `docs/projects.md` and `adws/tests/`.
 

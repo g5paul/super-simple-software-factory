@@ -37,6 +37,15 @@ their changes are back in the working tree, unstaged, for `enforce()` to check
 and roll back, and for the chain's own commit phase to commit. An agent that moved HEAD anywhere else
 (another branch, a rebase, a reset) stops the run instead.
 
+An agent can also move a ref other than HEAD: `git commit-tree` and
+`git update-ref refs/heads/main` leave its own branch and tree clean.
+`head()` therefore records every ref too, and `enforce()` lists them again
+afterwards through `ref_moves()`. A ref other than the run's own branch that
+gained commits changing a path the agent is barred from, or any change under
+`refs/replace/`, stops the run. The check only reads: nothing is moved back,
+deleted or fetched, and no hook, filter or external diff runs. It can't tell
+the agent's commit from the engineer's.
+
 Two keys drive it, both in sssf.config.yaml:
     defaults.protected_files   paths no agent may touch unless it names them itself
 SSSF's fixed `FACTORY_FILES` are checked on top of `protected_files`, and a
@@ -157,24 +166,67 @@ def snapshot(run) -> dict[str, str]:
     return fingerprints
 
 
-def head(run) -> dict[str, str]:
-    """Where HEAD is: its commit and the branch it is on (empty when detached)."""
+REFS_UNREAD = "(refs unread)"
+REF_COMMITS_SHOWN = 20
+REF_PATHS_SHOWN = 10
+# Every git command of the ref check starts with this: no transport for a child
+# fetch (empty GIT_ALLOW_PROTOCOL refuses all), no lazy fetch, no fsmonitor, no
+# commit-graph, no replace objects, and a fixed locale.
+_REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "LC_ALL=C", "git",
+             "-c", "core.fsmonitor=", "-c", "core.commitGraph=false", "--no-replace-objects")
+# One NUL-terminated list of paths per commit, then one empty field. A path is
+# never empty, so the empty field ends a commit's list. -m lists a merge against
+# each parent, --root a root commit against nothing, --name-only reads no blob.
+# diff-tree, not log: log honours log.showSignature and can run gpg.program.
+_COMMIT_PATHS = """for c in "$@"; do
+  env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false --no-replace-objects diff-tree -r -m --root --no-commit-id --name-only -z --no-renames --no-ext-diff --no-textconv "$c" || exit 1
+  printf '\\0'
+done
+"""
+
+
+def _head(run) -> dict[str, str]:
     return {"sha": _git(["rev-parse", "-q", "--verify", "HEAD"], run.repo_root).strip(),
             "branch": _git(["symbolic-ref", "-q", "HEAD"], run.repo_root).strip()}
+
+
+def _refs(run) -> str:
+    """Every ref as `<sha> <name>` lines, or REFS_UNREAD when git can't list them."""
+    try:
+        done = sandbox.current().run([*_REF_READ, "for-each-ref", "--format=%(objectname) %(refname)"],
+                                     cwd=run.repo_root, text=False)
+    except Exception:
+        return REFS_UNREAD
+    if done.returncode != 0:
+        return REFS_UNREAD
+    out = done.stdout
+    return out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+
+
+def head(run) -> dict[str, str]:
+    """Where HEAD is (its commit and the branch it is on, empty when detached)
+    and every ref in the repo, as `git for-each-ref` lists them.
+
+    The refs are what `ref_moves()` compares after the call. Nothing here
+    moves, opens or fetches anything.
+    """
+    return {**_head(run), "refs": _refs(run)}
 
 
 def undo_commits(run, before: dict[str, str]) -> list[str]:
     """Undo commits an agent made itself, keeping their changes unstaged in the tree.
 
     Returns the short shas undone, newest first, or [] when HEAD did not move.
-    Unstaged matters: a reset keeps the changes in the tree, and _roll_back
+    Only HEAD's sha and branch are compared, never the recorded refs: a moved
+    tag or another branch is `ref_moves()`'s, and sending it into a reset would
+    unstage the engineer's staged work. Unstaged matters: a reset keeps the changes in the tree, and _roll_back
     restores a clean path from HEAD. Raises PermissionBreach when HEAD
     moved somewhere a reset can't safely
     bring back: onto another branch, or to a commit that doesn't descend from
     where it was.
     """
-    after = head(run)
-    if after == before:
+    after = _head(run)
+    if (after["sha"], after["branch"]) == (before["sha"], before["branch"]):
         return []
     if after["branch"] != before["branch"]:
         raise PermissionBreach(
@@ -1105,7 +1157,128 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
     return "rolled back" if result.returncode == 0 else "could not roll back"
 
 
-def enforce(run, phase, agent: AgentConfig, before: dict[str, str]) -> list[str]:
+def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
+    """The breach text for refs other than the run's own branch that gained
+    commits changing a path `agent` is barred from, or "" when there is none.
+
+    Reads only. Compares `before["refs"]`, recorded by `head()`, with the refs
+    now. Barred means protected and not unlocked by the agent's own `writes`:
+    `permitted` is False for it, and still False for the same agent with
+    `writes=None`. Replace refs count whatever they point at. Any failure to
+    compare is itself reported, never passed; this function never raises.
+    """
+    def cannot(err: str = "") -> str:
+        said = f" git said:\n{_said(err, 0)}\n" if err.strip() else " "
+        return ("SSSF could not compare the repo's refs before and after "
+                f"{agent.name} ran.{said}No ref was moved and no fetch was tried. "
+                "Check `git for-each-ref` by hand before the next run.")
+
+    def git(*args: str):
+        done = sandbox.current().run([*_REF_READ, *args], cwd=run.repo_root, text=False)
+        out, err = done.stdout, done.stderr
+        out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+        err = err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or "")
+        return done.returncode, out, err
+
+    def parse(text: str) -> dict[str, str] | None:
+        found: dict[str, str] = {}
+        for line in text.split("\n"):
+            if not line:
+                continue
+            sha, _, name = line.partition(" ")
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) or not name:
+                return None
+            found[name] = sha
+        return found
+
+    try:
+        then_text = (before or {}).get("refs")
+        if then_text is None:
+            return ""
+        now_text = _refs(run)
+        if then_text == now_text:
+            return ""
+        if REFS_UNREAD in (then_text, now_text):
+            return cannot()
+        then, now = parse(then_text), parse(now_text)
+        if then is None or now is None:
+            return cannot("a ref line was not `<sha> <name>`")
+        own = before.get("branch", "")
+        replaced = {}
+        for name in sorted(set(then) | set(now)):
+            if name.startswith("refs/replace/") and then.get(name) != now.get(name):
+                replaced[name] = ("created" if name not in then
+                                  else "deleted" if name not in now else "moved")
+        tips = {n: s for n, s in now.items() if n != own and then.get(n) != s}
+        offenders: dict[str, list[str]] = {}
+        old = sorted(set(then.values()))
+        if tips:
+            code, out, err = git("rev-list", *sorted(set(tips.values())), "--not", *old)
+            if code != 0:
+                return cannot(err)
+            commits = out.split()
+            open_ = agent.model_copy(update={"writes": None})
+            for i in range(0, len(commits), _CHUNK):
+                chunk = commits[i:i + _CHUNK]
+                done = sandbox.current().run(["sh", "-c", _COMMIT_PATHS, "sh", *chunk],
+                                             cwd=run.repo_root, text=False)
+                text = done.stdout
+                text = text.decode("utf-8", "surrogateescape") if isinstance(text, bytes) else (text or "")
+                if done.returncode != 0:
+                    err = done.stderr
+                    return cannot(err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or ""))
+                fields = _fields(text)
+                if fields.count("") != len(chunk):
+                    return cannot()
+                lists, current = [], []
+                for field in fields:
+                    if field == "":
+                        lists.append(current)
+                        current = []
+                    else:
+                        current.append(field)
+                for sha, paths in zip(chunk, lists):
+                    barred = sorted({p for p in paths
+                                     if not permitted(p, agent, run.cfg)
+                                     and not permitted(p, open_, run.cfg)})
+                    if barred:
+                        offenders[sha] = barred
+        if not offenders and not replaced:
+            return ""
+
+        lines = [f"Refs other than the run's own branch gained commits that change protected "
+                 f"paths while {agent.name} ran, or a replace ref changed. Nothing was moved "
+                 "back, deleted or rewritten:"]
+        for name in sorted(tips):
+            code, out, _err = git("rev-list", tips[name], "--not", *old)
+            mine = [c for c in out.split() if c in offenders] if code == 0 else []
+            if code == 0 and not mine:
+                continue
+            lines.append(f"  - {_said_line(name)}: {then.get(name, '(new)')} -> {tips[name]}"
+                         + ("" if code == 0 else " (could not list its commits)"))
+            for sha in mine[:REF_COMMITS_SHOWN]:
+                paths = [_said_line(p) for p in offenders[sha]]
+                more = len(paths) - REF_PATHS_SHOWN
+                lines.append(f"      {sha} changes: {', '.join(paths[:REF_PATHS_SHOWN])}"
+                             + (f" (+{more} more)" if more > 0 else ""))
+            if len(mine) > REF_COMMITS_SHOWN:
+                lines.append(f"      (+{len(mine) - REF_COMMITS_SHOWN} more commits)")
+        for name, how in replaced.items():
+            ends = " -> ".join(f"{label}{sha}" for label, sha in
+                               (("", then.get(name)), ("", now.get(name))) if sha)
+            lines.append(f"  - {_said_line(name)}: {how}" + (f" ({ends})" if ends else ""))
+        lines.append("SSSF can't tell who moved a ref. Your own commit, merge, pull, fetch or "
+                     "stash that changes a protected path during an agent call stops the run "
+                     "the same way. If it was yours, nothing needs undoing; run again. If not, "
+                     "`git show --stat <commit>` shows it, and `git update-ref <ref> <old> <new>` "
+                     "moves a branch back.")
+        return "\n".join(lines)
+    except Exception as failed:
+        return cannot(repr(failed))
+
+
+def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
+            head_before: dict[str, str] | None = None) -> list[str]:
     """Compare the tree against `before`; undo and raise if the agent overstepped.
 
     Returns the paths it legitimately changed, so the trace records what an
@@ -1114,24 +1287,36 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str]) -> list[str]
     Detection alone would leave the repo holding the unauthorized change while
     reporting a failure, so anything the agent introduced outside its allowlist
     is rolled back before the phase dies. What it cannot undo, it names.
+
+    With `head_before` (from `head()`), the refs are compared too, after the
+    tree work and its rollbacks: a ref other than the run's own branch that
+    gained commits changing a protected path stops the run, and its report is
+    added to a tree breach if there is one. Refs are only reported, never moved.
+    Without it, only the tree is checked.
     """
     after = snapshot(run)
     touched = changed_paths(before, after)
     breaches = [p for p in touched if not permitted(p, agent, run.cfg)]
-    if not breaches:
+    outcomes = {p: _roll_back(run, p, before, after) for p in breaches}
+    moved = ref_moves(run, agent, head_before) if head_before else ""
+    if not breaches and not moved:
         return touched
 
-    outcomes = {p: _roll_back(run, p, before, after) for p in breaches}
-    scope = ("read-only" if agent.writes == []
-             else f"limited to {agent.writes}" if agent.writes
-             else f"barred from {protected(run.cfg)}")
-    detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
-    message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
     # The run stops here, so the agent's permitted changes are never verified,
     # reviewed, or committed. Name them, so the engineer knows what is sitting
     # uncommitted in the tree and has to be finished or discarded by hand.
     kept = [p for p in touched if p not in outcomes]
+    if not breaches:
+        message = moved
+    else:
+        scope = ("read-only" if agent.writes == []
+                 else f"limited to {agent.writes}" if agent.writes
+                 else f"barred from {protected(run.cfg)}")
+        detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
+        message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
     if kept:
         message += ("\nIts other changes are left uncommitted and unreviewed:\n"
                     + "\n".join(f"  - {p}" for p in kept))
+    if breaches and moved:
+        message += "\n" + moved
     raise PermissionBreach(message)

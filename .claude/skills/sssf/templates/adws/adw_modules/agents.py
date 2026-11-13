@@ -379,6 +379,8 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         # All three checks run, whatever the first finds: a git-directory
         # breach must not skip the commit undo or the rollback, or an agent
         # could touch .git to keep its other changes.
+        # The ref check (a commit moved onto another ref) runs inside enforce,
+        # after the git-directory restore and the commit undo.
         try:
             git_breach = None
             try:
@@ -397,7 +399,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                                  payload={"agent": agent.name, "undone": undone}))
                     run.console.note(f"{agent.name} committed {len(undone)} time(s) itself "
                                      f"({', '.join(undone)}). Undid the commits and kept the changes.")
-                touched = permissions.enforce(run, phase, agent, tree_before)
+                touched = permissions.enforce(run, phase, agent, tree_before, head_before)
             except permissions.PermissionBreach as found:
                 if git_breach:
                     raise permissions.PermissionBreach(f"{git_breach}\n{found}") from found

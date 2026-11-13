@@ -22,6 +22,17 @@ Adding the paths to the hub's `protected_files` alone isn't enough. The guard-ch
 
 The fix should need no change to `permissions.py` or any other shipped module. If it does, say why in the spec. A new mechanism stops the run.
 
+## What three earlier runs' spec reviews settled
+
+Runs 97746fcd, 9796fecf and 35b151a5 each wrote a spec for this brief, and the guard spec reviewer blocked something different in each. Take these as decided, and spend the spec on the rest.
+
+- **The list.** Protect the nine modules, `scripts/agentsh_install.py` (it renders the agentsh policy every project installs), the tests under `.claude/skills/sssf/tests/` that pin those files, and the fixtures those tests read. Name each fixture file a listed test reads, such as `tests/fixtures/cc_turn1.jsonl` and `tests/fixtures/cc_turn2.jsonl`, which `test_agent_cc.py` reads, and check each listed test for others. A fixture folder read only by listed tests may be one entry.
+- **Left out, with these reasons, and named in Out of scope's line on weakening a listed module from an unlisted file.** `data_types.py`, `repo_settings.py` and `templates/repo.yaml` decide what an agent may do but change with feature work every week. `sandbox.py` is where an agent runs, though the after-call check runs its git through `sandbox.current().run`; say so.
+- **No completeness test over a folder.** A test that every file under `tests/fixtures/`, or any folder, is on the list turns every hub feature run that adds a file there red, and that run's builder can't fix it, since `adws/tests/` is protected. A new guard module, test or fixture stays unprotected until someone adds it to the config. Only `GUARD_MODULES` in `adw_guard_change.py`, which stays the nine, is tied to the list by a test.
+- **The entries appear twice**, in `defaults.protected_files` and in the guard-only builder's `writes`, because YAML can't share a list and `_names` needs exact entries. One test holds the two equal.
+- **The build brief gets one fixed paragraph**, not a new function, parameter or value passed through. The builder's system prompt says never to modify a `protected_files` path, and the guard-only builder must change some, so `build_brief` says, in words like: "This run's builder is `guard_builder`. Its `writes` names every `protected_files` path under `.claude/skills/sssf/`, so those are yours to change when the spec asks. Every other protected path stays off-limits." `build_brief` serves only this chain, so the sentence always holds, and its test checks the sentence is there.
+- **The reach, stated exactly.** The guard-only builder reaches what `builder` reaches after this change, plus the listed entries. That sum is what `builder` reaches on `main`, and nothing more.
+
 ## The bar
 
 The baseline is `main`.
@@ -29,6 +40,7 @@ The baseline is `main`.
 - On `main`, the hub's `builder`, `ticket_builder` and `documenter` can each change a listed guard file and its test, and the after-call check lets it through. After the change, each of them is refused and rolled back. The same goes for every other hub agent except the guard-only builder.
 - The guard-only builder can change every listed path, and the chain's build and fix phases run as it.
 - Every refusal at `main` stays a refusal.
+- No engineer file is deleted or overwritten. A refused change rolls back as `_roll_back` does today, and a path that was dirty before the call stays as it was.
 - No new refusal of a hub feature run's normal work: product code in the skill outside the list, tests outside the list, docs, and the planner's spec.
 - No change to any ADW script other than `adws/adw_guard_change.py`.
 - No new module-level mutable state.

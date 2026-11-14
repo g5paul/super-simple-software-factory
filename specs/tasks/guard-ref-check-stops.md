@@ -18,8 +18,8 @@ And two gaps in the check's reads, both found by the `bypass-reviewer` subagent 
 
 This brief settles the design. Spend the spec on making it exact.
 
-1. **Specs don't count on other refs.** In `ref_moves` only, a path under `specs/` is never barred, as long as no part of the path is `..`, `.` or empty. The run's own branch is unchanged: `enforce` and `undo_commits` judge it as today, so a builder still can't write `specs/` in its own tree. Name the folder in one constant in the first build, with a comment on why. `.scratch/` is not exempt: `adw_tickets.py` hands each ticket under `.scratch/` straight to `ticket_builder`, with no planner between, so a ticket planted on `main` would be built.
-2. **Each new commit is judged against every parent, as on `main`, except a parent that is a root commit.** A root commit is still judged by its own tree. That covers a real stash: `git stash -u`'s untracked parent is a root, so the stash commit is no longer diffed against it, and the root itself lists only the untracked files. A merge, an octopus merge and a forged stash whose untracked parent isn't a root are still diffed against every parent.
+1. **Specs don't count on other refs.** In `ref_moves` only, a spec file is never barred. A spec file is a regular file (mode 100644, not a symlink or gitlink) directly in `specs/`, whose name ends in `.md`, doesn't start with `.`, and isn't `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md`. Adding, changing and deleting one are all exempt; plan phases write `specs/<adw_id>_<slug>.md` and its `_v2`, `_v3` revisions, and `just merge` lands them. Anything else under `specs/` counts as today: a subfolder, a symlink, a gitlink, an instruction file. Claude Code loads a folder's `CLAUDE.md` as instructions when it reads files there, and planners read `specs/`, so a planted `specs/CLAUDE.md` would instruct every later planner. The run's own branch is unchanged: `enforce` and `undo_commits` judge it as today, so a builder still can't write `specs/` in its own tree. Name the folder in one constant in the first build, with a comment on why. `.scratch/` is not exempt: `adw_tickets.py` hands each ticket under `.scratch/` straight to `ticket_builder`, with no planner between, so a ticket planted on `main` would be built.
+2. **Each new commit is judged against every parent, as on `main`, except a parent that is a root commit.** Whether a parent is a root comes from its raw object, `git cat-file commit`, having no `parent` line, never from `rev-list --parents`: `rev-list` honours `.git/shallow`, so a commit listed there shows no parents though it has them. A root commit is still judged by its own tree. That covers a real stash: `git stash -u`'s untracked parent is a root, so the stash commit is no longer diffed against it, and the root itself lists only the untracked files. A merge, an octopus merge and a forged stash whose untracked parent isn't a root are still diffed against every parent.
 3. **No grafts.** `_REF_READ` and `_COMMIT_PATHS` set `GIT_GRAFT_FILE=/dev/null` and `-c advice.graftFileDeprecated=false`, beside the env and flags they set today, so a breach never opens with git's grafts hint.
 
 Decided by the engineer on 2026-11-13, so not open here: exempting live runs' `sssf/*` branches was turned down, since `just merge` would land a hijack of one; barring only paths every agent is barred from was turned down, since in the hub `guard_builder` may write the guard code and a reviewer could then put guard code on `main`; exempting `.scratch/` was turned down for the ticket reason above.
@@ -27,6 +27,8 @@ Decided by the engineer on 2026-11-13, so not open here: exempting live runs' `s
 ### Why not first-parent judging
 
 Run 92434a0e judged each commit against its first parent only, and the `bypass-reviewer` subagent found it let through what `main` stops. An agent makes a merge whose first parent is `main~1`, the commit before a guard fix, and whose second parent is `main`, with `main~1`'s tree, and points `main` at it. Against its first parent it changes nothing; against `main` it reverts the fix. It descends from `main`, so it is a fast-forward that a plain push or `pull --ff-only` accepts. The same shape with an octopus merge, the run's own branch, or a new root holding only `src/` as first parent lands unreviewed guard code or strips the factory files. A forged stash whose untracked parent is an existing commit, not a root, restored a deleted protected file on `git stash pop` the same way. Judging every parent but a root keeps all of these stopped.
+
+Run e3997d9a's first passing build judged root-ness by `rev-list --parents`, and the `bypass-reviewer` subagent made the swapped-parent merge pass again: its second parent `m2`, a new commit on `main` with an empty tree, was listed in `.git/shallow`, so `rev-list` showed it with no parents and the check dropped it from the diff. `m2`'s real parent is `main`, so the merge still descends from `main` and lands as a fast-forward. Nothing restores `.git/shallow`.
 
 ## Rules from the last two guard runs
 
@@ -39,7 +41,7 @@ Run 92434a0e judged each commit against its first parent only, and the `bypass-r
 
 The baseline is `main`.
 
-- Everything `main` stops still stops: the `commit-tree` plus `update-ref` hijack of `main`, a tag, another branch or an `sssf/*` branch with a new commit changing a protected path outside `specs/`, every shape in "Why not first-parent judging", a path under `specs/` with a `..` or `.` part, any `refs/replace/` change, for every agent including `writes: []` reviewers. The breach still names the ref, both shas, the commits and the paths.
+- Everything `main` stops still stops: the `commit-tree` plus `update-ref` hijack of `main`, a tag, another branch or an `sssf/*` branch with a new commit changing a protected path outside `specs/`, every shape in "Why not first-parent judging", a path under `specs/` that isn't a spec file as design point 1 defines it, the swapped-parent merge whose second parent is disguised as a root by `.git/shallow`, any `refs/replace/` change, for every agent including `writes: []` reviewers. The breach still names the ref, both shas, the commits and the paths.
 - The hijack of `main` behind a symlinked `.git/info` with a live graft: the breach names `refs/heads/main`.
 - No stop for: another run's plan commit under `specs/`; an engineer merge, true or fast-forward, of a finished run whose protected changes are only under `specs/`; `git stash` and `git stash -u` of unprotected files, by the engineer or an agent; two runs started at once, each committing its plan, as `just trial` does.
 - Still a stop: a stash of a protected file outside `specs/`, tracked or untracked; a commit under `.scratch/` on another ref.
@@ -50,7 +52,7 @@ The baseline is `main`.
 
 ## Costs the spec states
 
-- An agent can put a spec on another ref, `main` included, without a stop. A spec on `main` runs nothing, but a later run's planner may read it.
+- An agent can put a spec file on another ref, `main` included, without a stop, or delete one. A spec on `main` runs nothing, but a later run's planner may read it as it reads any spec.
 - A ticket run's commits under `.scratch/` still stop other runs' builders and reviewers while they work.
 - What skipping a root parent gives up, if anything: say whether any shape lands protected content through a root parent that the root's own tree and the other parents don't show.
 
@@ -66,6 +68,8 @@ In `.claude/skills/sssf/tests/test_agent_commits.py`, through `permissions.head`
 - each shape in "Why not first-parent judging": the swapped-parent merge reverting a guard fix, the octopus form, the run's own branch as first parent, a new root with only `src/` as first parent, and the forged stash: stopped, on `main` and after;
 - a tree entry `specs/../<guard file>` and `specs/./<guard file>` on `main`: stopped; a `.scratch/` commit on another ref: stopped;
 - a breach from a read that fails carries no grafts hint;
+- the `.git/shallow` swapped-parent merge, with `m2` listed in `.git/shallow`, as a builder and as a reviewer, and in a linked worktree writing the common dir's `shallow`: stopped. Fails on run e3997d9a's first build;
+- `specs/CLAUDE.md`, `specs/AGENTS.md`, `specs/.claude/skills/x/SKILL.md`, `specs/sub/x.md`, a `specs/env.md` symlink to `../.env`, a gitlink under `specs/`, and a `specs` symlink in place of the folder, each on `main`: stopped; a plan commit adding `specs/<id>_x.md` and one deleting it: no stop;
 - a commit with 60,000 parents on `main`, judged without the read failing; make the commit with `git hash-object -t commit -w --stdin`;
 - the hijack behind a symlinked `.git/info` with a live graft: the breach names `refs/heads/main`. Fails on `main`;
 - a commit whose tree is missing, with a promisor remote whose `uploadpack` is a script that writes a marker: the marker never appears, and the test fails when the no-fetch env is removed from `_REF_READ` or `_COMMIT_PATHS`;

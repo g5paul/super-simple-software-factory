@@ -169,18 +169,65 @@ def snapshot(run) -> dict[str, str]:
 REFS_UNREAD = "(refs unread)"
 REF_COMMITS_SHOWN = 20
 REF_PATHS_SHOWN = 10
+# Where plan phases commit specs/<adw_id>_<slug>.md on their own sssf/* branch.
+# ref_moves() doesn't judge a regular .md file directly in it on other refs, or
+# every plan commit would stop every other live run. Anything else under it
+# counts. .scratch/ is not here: adw_tickets hands a ticket under it straight
+# to ticket_builder.
+REF_SPECS = "specs/"
+# Never a spec file: a harness loads these as instructions when an agent reads
+# the folder, and planners read specs/. Compared lowercased, for a
+# case-insensitive disk.
+REF_SPEC_NOT = ("claude.md", "claude.local.md", "agents.md")
 # Every git command of the ref check starts with this: no transport for a child
 # fetch (empty GIT_ALLOW_PROTOCOL refuses all), no lazy fetch, no fsmonitor, no
-# commit-graph, no replace objects, and a fixed locale.
-_REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "LC_ALL=C", "git",
-             "-c", "core.fsmonitor=", "-c", "core.commitGraph=false", "--no-replace-objects")
-# One NUL-terminated list of paths per commit, then one empty field. A path is
-# never empty, so the empty field ends a commit's list. -m lists a merge against
-# each parent, --root a root commit against nothing, --name-only reads no blob.
+# commit-graph, no replace objects, no grafts (--no-replace-objects doesn't turn
+# off info/grafts; the advice flag keeps git's grafts hint off stderr, which it
+# prints whenever the graft file opens) and a fixed locale.
+_REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "GIT_GRAFT_FILE=/dev/null",
+             "LC_ALL=C", "git", "-c", "core.fsmonitor=", "-c", "core.commitGraph=false",
+             "-c", "advice.graftFileDeprecated=false", "--no-replace-objects")
+# Per commit, a `:<old mode> <new mode> <old sha> <new sha> <status>` field and a
+# NUL-terminated path for each change, then one empty field. A path is never
+# empty, so the empty field ends a commit's list. The words are, per
+# commit, `<commit> [<parent> [<parent>]] .`. A group with no parent is read as
+# always: -m lists a merge against each parent git finds, --root a root against
+# nothing. A group with parents is diffed against each pair, which ref_moves()
+# does only for a commit of at most three parents with a stash's untracked root
+# (not the first parent, a new commit, a real root) left out. So a
+# call names at most 256 commits and two parents each, 256 * (3 * 65 + 2) =
+# about 50 KB at worst, whatever a commit holds. --raw reads no blob; it gives
+# the modes, so a link or an executable file isn't taken for a spec file.
 # diff-tree, not log: log honours log.showSignature and can run gpg.program.
-_COMMIT_PATHS = """for c in "$@"; do
-  env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false --no-replace-objects diff-tree -r -m --root --no-commit-id --name-only -z --no-renames --no-ext-diff --no-textconv "$c" || exit 1
+_COMMIT_PATHS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false --no-replace-objects diff-tree -r --raw -z --no-renames --no-ext-diff --no-textconv "$@"; }
+while [ $# -gt 0 ]; do
+  c=$1; shift
+  if [ "$1" = . ]; then
+    g -m --root --no-commit-id "$c" || exit 1
+  fi
+  while [ $# -gt 0 ] && [ "$1" != . ]; do
+    g "$1" "$c" || exit 1
+    shift
+  done
+  [ $# -gt 0 ] || exit 1
+  shift
   printf '\\0'
+done
+"""
+# One character per commit argument: r for a real root (the raw object's first
+# line is the tree and the second isn't a parent), p for a commit with a parent,
+# ? for an object that can't be read as a commit. rev-list --parents honours
+# .git/shallow and shows a commit listed there without its parents, so only this
+# tells a root from one that is disguised as one.
+_COMMIT_ROOTS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false --no-replace-objects "$@"; }
+for c in "$@"; do
+  g cat-file commit "$c" 2>/dev/null | {
+    IFS= read -r t; IFS= read -r p
+    case $t in
+      "tree "*) case $p in "parent "*) printf p ;; *) printf r ;; esac ;;
+      *) printf '?' ;;
+    esac
+  }
 done
 """
 
@@ -1166,6 +1213,17 @@ def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
     `permitted` is False for it, and still False for the same agent with
     `writes=None`. Replace refs count whatever they point at. Any failure to
     compare is itself reported, never passed; this function never raises.
+
+    A spec file (a regular `.md` directly in `REF_SPECS`, not dotted, not in
+    `REF_SPEC_NOT`) isn't judged; a `specs` entry in place of the folder is
+    judged as the folder. A new commit is read as on `main` (`diff-tree -m
+    --root`: every parent, a root by its tree), except a commit of at most
+    three parents that has a stash's untracked-files root among them: a parent
+    that is not the first, is itself new and is a real root, told from its raw
+    object since `rev-list` honours `.git/shallow`. That commit is diffed
+    against its other parents, and the root is read by its own tree. So a call
+    names at most 256 commits and two parents each. Grafts are off for every
+    read.
     """
     def cannot(err: str = "") -> str:
         said = f" git said:\n{_said(err, 0)}\n" if err.strip() else " "
@@ -1213,34 +1271,96 @@ def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
         offenders: dict[str, list[str]] = {}
         old = sorted(set(then.values()))
         if tips:
-            code, out, err = git("rev-list", *sorted(set(tips.values())), "--not", *old)
+            code, out, err = git("rev-list", "--parents", *sorted(set(tips.values())), "--not", *old)
             if code != 0:
                 return cannot(err)
-            commits = out.split()
+            commits, parents = [], {}
+            for line in out.split("\n"):
+                if not line:
+                    continue
+                words = line.split(" ")
+                if not all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", w) for w in words):
+                    return cannot("a commit line was not `<sha> [<parent>...]`")
+                commits.append(words[0])
+                parents[words[0]] = words[1:]
             open_ = agent.model_copy(update={"writes": None})
+
+            def run_script(script: str, words: list[str]):
+                done = sandbox.current().run(["sh", "-c", script, "sh", *words],
+                                             cwd=run.repo_root, text=False)
+                text, err = done.stdout, done.stderr
+                text = text.decode("utf-8", "surrogateescape") if isinstance(text, bytes) else (text or "")
+                err = err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or "")
+                return done.returncode, text, err
+
+            # Candidates for a stash's untracked-files root: a later parent of a
+            # commit with at most three parents, itself new, listed without
+            # parents. rev-list honours .git/shallow, so each is read raw.
+            candidates = sorted({p for c in commits if len(parents[c]) <= 3
+                                 for p in parents[c][1:] if p in parents and not parents[p]})
+            roots: set[str] = set()
+            for i in range(0, len(candidates), _CHUNK):
+                chunk = candidates[i:i + _CHUNK]
+                code, text, err = run_script(_COMMIT_ROOTS, chunk)
+                if code != 0:
+                    return cannot(err)
+                if len(text) != len(chunk) or any(ch not in "rp?" for ch in text):
+                    return cannot("a commit's raw object could not be classified")
+                roots.update(p for p, ch in zip(chunk, text) if ch == "r")
+
+            def named(c: str) -> list[str]:
+                # A stash's untracked-files root: not the first parent, a new
+                # commit, a real root. Only for a commit with at most three
+                # parents, so no more than two shas are ever named. Empty: git
+                # reads the parents itself.
+                ps = parents[c]
+                kept = [p for i, p in enumerate(ps) if i == 0 or p not in roots]
+                return kept if len(ps) <= 3 and len(kept) < len(ps) else []
+
+            def judged(path: str, old_mode: str, new_mode: str) -> str | None:
+                # None for a spec file: a regular .md directly in specs/, not
+                # dotted, not an instruction file. `specs` itself is judged as
+                # the folder, so a link in its place doesn't pass.
+                if path == REF_SPECS.rstrip("/"):
+                    return REF_SPECS
+                name = path[len(REF_SPECS):]
+                if (path.startswith(REF_SPECS) and name and "/" not in name
+                        and name.endswith(".md") and not name.startswith(".")
+                        and name.lower() not in REF_SPEC_NOT
+                        and old_mode in ("100644", "000000") and new_mode in ("100644", "000000")):
+                    return None
+                return path
+
             for i in range(0, len(commits), _CHUNK):
                 chunk = commits[i:i + _CHUNK]
-                done = sandbox.current().run(["sh", "-c", _COMMIT_PATHS, "sh", *chunk],
-                                             cwd=run.repo_root, text=False)
-                text = done.stdout
-                text = text.decode("utf-8", "surrogateescape") if isinstance(text, bytes) else (text or "")
-                if done.returncode != 0:
-                    err = done.stderr
-                    return cannot(err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or ""))
+                words = [w for c in chunk for w in (c, *named(c), ".")]
+                code, text, err = run_script(_COMMIT_PATHS, words)
+                if code != 0:
+                    return cannot(err)
                 fields = _fields(text)
                 if fields.count("") != len(chunk):
                     return cannot()
-                lists, current = [], []
-                for field in fields:
-                    if field == "":
+                lists: list[list[tuple[str, str]]] = []
+                current: list[tuple[str, str]] = []
+                at = 0
+                while at < len(fields):
+                    if fields[at] == "":
                         lists.append(current)
                         current = []
-                    else:
-                        current.append(field)
-                for sha, paths in zip(chunk, lists):
-                    barred = sorted({p for p in paths
-                                     if not permitted(p, agent, run.cfg)
-                                     and not permitted(p, open_, run.cfg)})
+                        at += 1
+                        continue
+                    meta = re.fullmatch(r":([0-7]{6}) ([0-7]{6}) [0-9a-f]+ [0-9a-f]+ [A-Z]", fields[at])
+                    if not meta or at + 1 >= len(fields) or fields[at + 1] == "":
+                        return cannot("a raw diff record was not `:<modes> <shas> <status>` and a path")
+                    shown = fields[at + 1]
+                    path = judged(shown, meta.group(1), meta.group(2))
+                    if path is not None:
+                        current.append((path, shown))
+                    at += 2
+                for sha, records in zip(chunk, lists):
+                    barred = sorted({shown for path, shown in records
+                                     if not permitted(path, agent, run.cfg)
+                                     and not permitted(path, open_, run.cfg)})
                     if barred:
                         offenders[sha] = barred
         if not offenders and not replaced:

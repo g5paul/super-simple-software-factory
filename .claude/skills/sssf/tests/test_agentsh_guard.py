@@ -74,6 +74,7 @@ class Service:
         self.status = 200
         self.fail_polls = False      # 500 on the polls
         self.fail_final = False    # 500 on the final read
+        self.fail_final_from: int | None = None    # 500 on a final-read page at or past this offset
         self.poll_delay = 0.0       # seconds a poll waits before it answers 500
         self.null_past_end = False   # a page past the last row answers the body `null`, as the real service does
         self.raw_body: bytes | None = None     # answers this for every good request
@@ -91,7 +92,9 @@ class Service:
                 if not final and outer.poll_delay:
                     time.sleep(outer.poll_delay)
                     outer.fail_polls = True
-                if outer.status != 200 or (outer.fail_final if final else outer.fail_polls):
+                late = final and outer.fail_final_from is not None \
+                    and int(q.get("offset", 0)) >= outer.fail_final_from
+                if outer.status != 200 or late or (outer.fail_final if final else outer.fail_polls):
                     self.send_response(outer.status if outer.status != 200 else 500)
                     self.end_headers()
                     return
@@ -572,6 +575,21 @@ def test_only_a_named_exec_denial_counts_across_pages(service, monkeypatch):
     assert all("type" not in q for q in service.queries[-2:])
     assert process.counted == 2                       # a repeated page counts once
     assert len(process.other_denials) == 61         # 60 file denials and the one unnamed exec denial, traced
+
+
+def test_the_final_read_counts_each_page_as_it_arrives(service, monkeypatch):
+    """A session can hold millions of events, so the final read takes each page as it comes instead of
+    holding them all: a page that fails after two good ones still leaves their denials counted."""
+    monkeypatch.setattr(agentsh_guard, "PAGE", 5)
+    service.final_only = [denial(i, "ptrace_file", rule="sssf-default-deny") for i in range(4)] + [denial(10)] \
+        + [denial(i, "ptrace_file", rule="sssf-default-deny") for i in range(4, 8)] + [denial(11)] \
+        + [denial(i, "ptrace_file", rule="sssf-default-deny") for i in range(8, 13)]
+    service.fail_final_from = 10
+    process = bare(service)
+    process._end_session()
+    assert process.counted == 2 and process.last[0] == "sssf-no-gh"
+    assert len(process.other_denials) == 8
+    assert "final read of agentsh events failed" in process.failure
 
 
 def test_a_new_event_between_polls_counts_once_and_one_behind_the_offset_only_in_the_final_read(service):
@@ -1145,22 +1163,21 @@ def _final_read_evidence(monkeypatch, service):
     chain test steps (2026-11-09 to 11-11) and never outside one, so its failure carries the
     state that tells a final read that raised from one that came back without the denials."""
     reads, closed = [], []
-    real_pages, real_close = agentsh_guard.AgentshProcess._pages, agentsh_guard.close
+    real_read, real_close = agentsh_guard.AgentshProcess._read_all, agentsh_guard.close
 
-    def pages(self, start, extra):
+    def read_all(self):
         began = time.monotonic()
         try:
-            rows = real_pages(self, start, extra)
+            real_read(self)
         except Exception as error:
             reads.append(f"raised {error!r} after {time.monotonic() - began:.3f} s")
             raise
-        reads.append(f"{len(rows)} row(s) in {time.monotonic() - began:.3f} s")
-        return rows
+        reads.append(f"counted {self.counted} in {time.monotonic() - began:.3f} s")
 
     def close(process, on_event=None):
         real_close(process, on_event)
         closed.append(process)
-    monkeypatch.setattr(agentsh_guard.AgentshProcess, "_pages", pages)
+    monkeypatch.setattr(agentsh_guard.AgentshProcess, "_read_all", read_all)
     monkeypatch.setattr(agentsh_guard, "close", close)
 
     def report() -> str:
@@ -1266,7 +1283,7 @@ def test_a_system_exit_in_the_final_read_still_deletes_and_returns_at_once(machi
 
     def interrupted(*args):
         raise SystemExit(2)
-    monkeypatch.setattr(process, "_pages", interrupted)
+    monkeypatch.setattr(process, "_read_all", interrupted)
     with pytest.raises(SystemExit):
         process._end_session()
     assert service.deletes == ["/api/v1/sessions/sess1"]

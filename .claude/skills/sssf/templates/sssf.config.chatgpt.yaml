@@ -23,8 +23,9 @@ defaults:
   # SSSF always protects its own factory files too: all of adws/ (except the runtime under
   # data_dir), all of .claude/, .pi/, .mcp.json, justfile, sssf.just, local.just and .githooks/.
   # A roster can't drop them; only an agent's own `writes` naming one unlocks it. Gitignored
-  # files are never checked. A repo whose justfile holds product recipes names
-  # `justfile` in the builder's `writes`.
+  # files are never checked. A repo whose justfile holds product recipes gives the
+  # builder `writes: ["**", justfile]`. Keep the `**`: a list limits an agent to the
+  # paths it names, so `writes: [justfile]` alone lets the builder change nothing else.
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/

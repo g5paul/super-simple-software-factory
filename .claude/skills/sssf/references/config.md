@@ -460,13 +460,15 @@ engineer's next session. `local.just` is imported by the justfile, so its
 `set shell` runs every recipe. `uv run` puts `adws/` first on `sys.path`, so a
 module there shadows a dependency. Claude Code and pi load `.claude/`, `.pi/`
 and `.mcp.json`. A repo whose own `justfile` holds product recipes
-unlocks it by naming `justfile` in the builder's `writes`. Otherwise a builder
-edit to it is refused.
+unlocks it by naming `justfile` in the builder's `writes`, beside `**`:
+`writes: ["**", justfile]`. A `writes` list limits an agent to what it names, so
+`writes: [justfile]` alone would leave the builder able to change only the
+justfile. Otherwise a builder edit to it is refused.
 
 A project file under a fixed path needs an unlock to edit: other skills under
 `.claude/skills/`, `.claude/agents/` and `.claude/hooks/`, `.pi/`, `.mcp.json`
-and `local.just`. Name it in the builder's `writes`, for example
-`.claude/skills/myskill/`.
+and `local.just`. Name it in the builder's `writes`, beside `**` for a builder
+that writes anywhere else, for example `writes: ["**", .claude/skills/myskill/]`.
 
 The check never sees gitignored files. Python's `__pycache__/` and the skill's
 `node_modules/` are written during normal work, so a gitignored file in a fixed

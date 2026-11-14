@@ -1,6 +1,6 @@
 # Design: trials
 
-Status: built. The one open item, a judge that picks the winner on its own, is in [open.md](../open.md). Settled in one grilling session on 2026-11-01. Where the text and a decision disagree, the decision wins.
+Status: built. One idea is left for later: a judge that picks the winner on its own, once enough scorecards show whether its picks match the engineer's. It left open.md on 2026-11-13, since nothing calls for it yet. Settled in one grilling session on 2026-11-01. Where the text and a decision disagree, the decision wins.
 
 A trial runs one request under several rosters at once, each as its own worktree run, then has a panel of reviewers judge what each one built. The engineer picks the winner from a scorecard, and `just trial-merge` lands it. Every attempt's scorecard stays in the trace, so over many trials a repo builds up a leaderboard of which roster does its work best and at what cost.
 

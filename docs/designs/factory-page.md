@@ -75,3 +75,6 @@ Left out of the first release on purpose, to consider later:
 - **Alerts outside the page**: a desktop notification or a terminal line when a row turns red.
 - **Actions**: a button that kills a leftover process, starts a prune, or archives a run. The board only reads.
 - **Thresholds in config.** The first release keeps them as constants in the factory module, since only the hub runs it.
+- **One place per project.** The page shows the projects twice, in the board's Projects tile and rows and in the project cards below. Each card could carry its own board level, a red or amber dot with the reason ("skill 76e4284 is behind") and the row's detail on click, leaving the board only Machine and Runs. Wait until the engineer has used the page order (account panel, board, cards) for a while.
+
+These left open.md on 2026-11-13. Reopen one there when the engineer asks for it.

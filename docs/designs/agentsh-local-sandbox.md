@@ -93,7 +93,7 @@ The engineer settled these on 2026-11-08, after the proof. OpenShell stays the l
 2. sssf-sandbox runs a full SDLC chain under it. The proof only ran single agents. Done.
 3. The hub moves, so every guard run tests it. Done on 2026-11-09.
 4. One Claude-roster project with a toolchain other than Python moves. This was pi-agent-observability until [Next](#next) item 7 held pi back; fusion-harness took it and passed on 2026-11-14 ([step 4](#rollout-step-4-fusion-harness-2026-11-14)).
-5. pi-agent-observability moves, for heavy pi use and the hang question. Its observability extension's loopback connection stands in the way ([step 5](#rollout-step-5-what-pi-agent-observability-needs-2026-11-14)).
+5. pi-agent-observability moves, for heavy pi use and the hang question. On 2026-11-14 the engineer chose to give up its observability extension's view during SSSF runs rather than open a loopback port ([step 5](#rollout-step-5-what-pi-agent-observability-needs-2026-11-14)).
 
 Each project's session makes the change in its own repo.
 
@@ -1257,7 +1257,9 @@ The repo runs every agent on pi with the ChatGPT sign-in and loads its own obser
 - **It posts each event to `http://127.0.0.1:43190`**, the repo's own server. agentsh denies loopback connections (the open.md row on `127.0.0.1`), and `network_allow` refuses a loopback host, so under agentsh each post would be denied, and the repo would lose the view it exists for. The fix proposed in that row, allowing only listeners in the same agentsh session, wouldn't cover it, since the server is the engineer's own process. Letting one named loopback port through is a guard change, and it would also let an agent post forged events, or reach anything else the server answers on that port.
 - **It reads `.env` and `.env.local` itself**, at load, into the agent's environment for each key not already set. Under `local_guard: text` that undoes SSSF's holdback: the keys SSSF keeps from pi come straight back. agentsh denies the read, as it denied Bun's in step 4. Run f8ce3246 fixed it in the repo on 2026-11-14: the extension skips both files when `SSSF_ADW_ID` is set (d776544, on `main` at 8bb9c98), for $0.22, 10 of 10 phases, the reviewer approving with no blocking finding.
 
-That leaves the first as the decision before step 5 can run. Bun's own `.env` read is still open there under the text guard.
+That left the first as the decision before step 5 could run. Bun's own `.env` read is still open there under the text guard.
+
+**Decided 2026-11-14:** the engineer chose to run the repo under agentsh without the extension's view, so agentsh denies its posts during SSSF runs and no loopback port opens. The engineer's own pi sessions outside SSSF keep the view. The repo's session took step 5 the same day.
 
 ## Next
 
@@ -1267,7 +1269,7 @@ That leaves the first as the decision before step 5 can run. Bun's own `.env` re
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 5. **Done: what agentsh denied ordinary work.** `tar -x` by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09), relative link targets by [the ninth](#the-ninth-patch-link-targets-2026-11-09), and config lookups and the agents' own caches by [run 130ca6e0](#the-tool-config-run-under-agentsh-130ca6e0).
 6. **Done: rollout step 4.** fusion-harness, a TypeScript repo with a Claude Code roster, ran chain e7e226bf under agentsh on 2026-11-14 ([step 4](#rollout-step-4-fusion-harness-2026-11-14)).
-7. pi's policy exists. `guard_for` renders one policy per roster harness, and pi's has its own sign-in file and `~/.pi` writes; the model hosts, ChatGPT's among them, are in every policy. The proof's pi loops and run 361de0f2 ran pi under the wrap, but no real pi chain has yet. For pi-agent-observability, step 5 waits on its observability extension's loopback connection ([step 5](#rollout-step-5-what-pi-agent-observability-needs-2026-11-14)).
+7. pi's policy exists. `guard_for` renders one policy per roster harness, and pi's has its own sign-in file and `~/.pi` writes; the model hosts, ChatGPT's among them, are in every policy. The proof's pi loops and run 361de0f2 ran pi under the wrap, but no real pi chain has yet. For pi-agent-observability, the engineer chose to run without its observability extension's view ([step 5](#rollout-step-5-what-pi-agent-observability-needs-2026-11-14)).
 8. **Done: the DNS proxy's forward**, the tenth fork patch, in build 472d63cf, pinned by run 8a727544 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)).
 9. **Done: signals**, the eleventh fork patch in the same build, with `trace.signal` and its rules from run 8a727544. Its last check, a guard run under agentsh, passed as run 130ca6e0 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)).
 10. **Done: the example pi pattern's miss** is a known limit in `config.md`, by run d48bd070.

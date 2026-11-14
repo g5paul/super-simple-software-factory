@@ -236,8 +236,18 @@ changes a path the agent is barred from (a fixed factory path or one in
 `protected_files`, unless the agent's own `writes` names it), when any
 `refs/replace/` ref is created, moved or deleted, or when SSSF can't compare
 the refs. The breach names the ref, its old and new sha, each commit and its
-paths, and holds for `writes: []` agents too. A merge is judged against each
-parent. It doesn't stop for commits on the run's own branch (undone as above),
+paths, and holds for `writes: []` agents too. Paths under `specs/` aren't
+judged on other refs: every chain's plan phase commits its spec there on its
+own `sssf/*` branch, so judging it would stop every other live run, and a spec
+runs nothing. A `..`, `.` or empty part in the path voids that. `.scratch/` is
+judged, since `adw_tickets` hands a ticket under it straight to the builder.
+A new commit is read as `git diff-tree -m --root` reads it: against every
+parent, a root by its whole tree. The one exception is a commit of at most
+three parents with a stash's untracked-files commit among them, that is a
+parent that is not the first, is itself new and has no parents. It is judged
+against its other parents, and the untracked-files commit by its own tree.
+Git grafts are turned off for the check's
+reads. It doesn't stop for commits on the run's own branch (undone as above),
 for commits that change only paths the agent may write, or for deleted refs,
 rewinds, fast-forwards and new refs at commits that already existed.
 SSSF only reads: it moves, deletes and fetches nothing, and runs no hook,
@@ -247,23 +257,43 @@ The check has costs. It can't tell the agent's commit from yours, or from
 another run's:
 
 - **Concurrent runs stop each other on protected paths the chain commits.** In
-  the hub that is every plan commit under `specs/`, and any commit under
-  `adws/`, `.claude/`, `docs/adr/`, `GLOSSARY.md`, `CLAUDE.md` or
-  `docs/projects.md` on any ref. The stopped run's breach names the other
-  run's branch and commit; nothing needs undoing.
+  the hub that is any commit under `adws/`, `.claude/`, `docs/adr/`,
+  `GLOSSARY.md`, `CLAUDE.md` or `docs/projects.md` on any ref, and a ticket
+  run's commits under `.scratch/`. Plan commits under `specs/` don't count. The
+  stopped run's breach names the other run's branch and commit; nothing needs
+  undoing.
 - **Protected edits, yours or the agent's.** A commit, merge, pull, fetch (it
   moves `refs/remotes/*`) or stash (`refs/stash`) that brings in a commit
-  changing a protected path during an agent call stops that run. That includes
-  the agent's own `git stash` then `git stash apply` over uncommitted protected
-  work (the stash commit counts, though the tree ends unchanged; `stash pop`
-  doesn't), and its own fetch of an upstream commit that changes a protected
-  path. A true merge commit is
-  judged against both parents, so it stops the run when either side changed a
-  protected path since the fork, even if those commits were old. Run again.
+  changing a protected path outside `specs/` during an agent call stops that
+  run. A stash stops it only when it holds such a file, tracked or untracked.
+  That includes the agent's own `git stash` then `git stash apply` over
+  uncommitted protected work (the stash commit counts, though the tree ends
+  unchanged; `stash pop` doesn't), and its own fetch of an upstream commit that
+  changes a protected path. A true merge commit is judged against both
+  parents, so it stops the run when either side changed a protected path since
+  the fork, even if those commits were old. Run again.
+- **Specs on any ref.** An agent can add, change or delete anything under
+  `specs/` on another ref, `main` included, without a stop. A spec on `main`
+  runs nothing, but a later run's planner may read it. A project roster entry
+  that protects a file under `specs/` by another pattern is exempt on other
+  refs too.
+- **Octopus merges.** A commit with four parents or more that has a new root
+  among them is judged against the root too, as before. An engineer's octopus
+  merge of an unrelated new history during a call stops the run and names every
+  file the root lacks.
+- **A new root parent.** In a commit of at most three parents, a parent that
+  is not the first, is a new commit and has no parents isn't diffed against. What this gives up is a path the merge
+  carries unchanged from its first parent that the root lacks. That is the
+  content of an existing commit when the first parent already existed: a merge
+  of an existing commit with a new root, the same as re-parenting below.
+- **No-fetch env.** Either of `GIT_ALLOW_PROTOCOL=` and `GIT_NO_LAZY_FETCH=1`
+  alone stops a fetch, so the tests pin the pair, not each one.
 - **Concurrent guard runs.** Their commits change guard code, so they stop a
   feature run whose agent is working.
 - **Size.** One `for-each-ref` before and after each call, and more git only
-  when a ref changed: one `rev-list`, and one `diff-tree` per new commit. A repo
+  when a ref changed: one `rev-list`, and one `diff-tree` per new commit (or per
+parent pair for a stash's commit). A call names at most 256 commits and two
+parents each, whatever a commit holds. A repo
   with more refs than fit on one command line stops with "could not compare"
   when a ref moves.
 

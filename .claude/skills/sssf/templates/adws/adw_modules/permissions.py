@@ -169,17 +169,41 @@ def snapshot(run) -> dict[str, str]:
 REFS_UNREAD = "(refs unread)"
 REF_COMMITS_SHOWN = 20
 REF_PATHS_SHOWN = 10
+# The one folder ref_moves() doesn't judge on other refs. Every chain's plan
+# phase commits its spec here on its own sssf/* branch, so judging it stops
+# every other live run. A spec runs nothing. .scratch/ is not here:
+# adw_tickets hands a ticket under it straight to ticket_builder.
+REF_SPECS = "specs/"
 # Every git command of the ref check starts with this: no transport for a child
 # fetch (empty GIT_ALLOW_PROTOCOL refuses all), no lazy fetch, no fsmonitor, no
-# commit-graph, no replace objects, and a fixed locale.
-_REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "LC_ALL=C", "git",
-             "-c", "core.fsmonitor=", "-c", "core.commitGraph=false", "--no-replace-objects")
+# commit-graph, no replace objects, no grafts (--no-replace-objects doesn't turn
+# off info/grafts; the advice flag keeps git's grafts hint off stderr, which it
+# prints whenever the graft file opens) and a fixed locale.
+_REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "GIT_GRAFT_FILE=/dev/null",
+             "LC_ALL=C", "git", "-c", "core.fsmonitor=", "-c", "core.commitGraph=false",
+             "-c", "advice.graftFileDeprecated=false", "--no-replace-objects")
 # One NUL-terminated list of paths per commit, then one empty field. A path is
-# never empty, so the empty field ends a commit's list. -m lists a merge against
-# each parent, --root a root commit against nothing, --name-only reads no blob.
+# never empty, so the empty field ends a commit's list. The words are, per
+# commit, `<commit> [<parent> [<parent>]] .`. A group with no parent is read as
+# always: -m lists a merge against each parent git finds, --root a root against
+# nothing. A group with parents is diffed against each pair, which ref_moves()
+# does only for a commit of at most three parents with a stash's untracked root
+# (not the first parent, a new commit, no parents of its own) left out. So a
+# call names at most 256 commits and two parents each, 256 * (3 * 65 + 2) =
+# about 50 KB at worst, whatever a commit holds. --name-only reads no blob.
 # diff-tree, not log: log honours log.showSignature and can run gpg.program.
-_COMMIT_PATHS = """for c in "$@"; do
-  env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false --no-replace-objects diff-tree -r -m --root --no-commit-id --name-only -z --no-renames --no-ext-diff --no-textconv "$c" || exit 1
+_COMMIT_PATHS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false --no-replace-objects diff-tree -r --name-only -z --no-renames --no-ext-diff --no-textconv "$@"; }
+while [ $# -gt 0 ]; do
+  c=$1; shift
+  if [ "$1" = . ]; then
+    g -m --root --no-commit-id "$c" || exit 1
+  fi
+  while [ $# -gt 0 ] && [ "$1" != . ]; do
+    g "$1" "$c" || exit 1
+    shift
+  done
+  [ $# -gt 0 ] || exit 1
+  shift
   printf '\\0'
 done
 """
@@ -1166,6 +1190,14 @@ def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
     `permitted` is False for it, and still False for the same agent with
     `writes=None`. Replace refs count whatever they point at. Any failure to
     compare is itself reported, never passed; this function never raises.
+
+    Paths under `REF_SPECS` (no `..`, `.` or empty part) aren't judged. A new
+    commit is read as on `main` (`diff-tree -m --root`: every parent, a root by
+    its tree), except a commit of at most three parents that has a stash's
+    untracked-files root among them: a parent that is not the first, is itself
+    new and has no parents. That commit is diffed against its other parents,
+    and the root is read by its own tree. So a call names at most 256 commits
+    and two parents each. Grafts are off for every read.
     """
     def cannot(err: str = "") -> str:
         said = f" git said:\n{_said(err, 0)}\n" if err.strip() else " "
@@ -1213,14 +1245,37 @@ def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
         offenders: dict[str, list[str]] = {}
         old = sorted(set(then.values()))
         if tips:
-            code, out, err = git("rev-list", *sorted(set(tips.values())), "--not", *old)
+            code, out, err = git("rev-list", "--parents", *sorted(set(tips.values())), "--not", *old)
             if code != 0:
                 return cannot(err)
-            commits = out.split()
+            commits, parents = [], {}
+            for line in out.split("\n"):
+                if not line:
+                    continue
+                words = line.split(" ")
+                if not all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", w) for w in words):
+                    return cannot("a commit line was not `<sha> [<parent>...]`")
+                commits.append(words[0])
+                parents[words[0]] = words[1:]
             open_ = agent.model_copy(update={"writes": None})
+
+            def named(c: str) -> list[str]:
+                # A stash's untracked-files root: not the first parent, a new
+                # commit, no parents of its own. Only for a commit with at most
+                # three parents, so no more than two shas are ever named. Empty:
+                # git reads the parents itself.
+                ps = parents[c]
+                kept = [p for i, p in enumerate(ps) if i == 0 or p not in parents or parents[p]]
+                return kept if len(ps) <= 3 and len(kept) < len(ps) else []
+
+            def exempt(path: str) -> bool:
+                return (path.startswith(REF_SPECS)
+                        and not any(part in ("", ".", "..") for part in path.split("/")))
+
             for i in range(0, len(commits), _CHUNK):
                 chunk = commits[i:i + _CHUNK]
-                done = sandbox.current().run(["sh", "-c", _COMMIT_PATHS, "sh", *chunk],
+                words = [w for c in chunk for w in (c, *named(c), ".")]
+                done = sandbox.current().run(["sh", "-c", _COMMIT_PATHS, "sh", *words],
                                              cwd=run.repo_root, text=False)
                 text = done.stdout
                 text = text.decode("utf-8", "surrogateescape") if isinstance(text, bytes) else (text or "")
@@ -1239,7 +1294,8 @@ def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
                         current.append(field)
                 for sha, paths in zip(chunk, lists):
                     barred = sorted({p for p in paths
-                                     if not permitted(p, agent, run.cfg)
+                                     if not exempt(p)
+                                     and not permitted(p, agent, run.cfg)
                                      and not permitted(p, open_, run.cfg)})
                     if barred:
                         offenders[sha] = barred

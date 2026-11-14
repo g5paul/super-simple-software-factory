@@ -1261,6 +1261,8 @@ That left the first as the decision before step 5 could run. Bun's own `.env` re
 
 **Decided 2026-11-14:** the engineer chose to run the repo under agentsh without the extension's view, so agentsh denies its posts during SSSF runs and no loopback port opens. The engineer's own pi sessions outside SSSF keep the view. The repo's session took step 5 the same day.
 
+**The first run, ef480069**, on the ChatGPT roster, added tests for `truncateToBytes` and failed in its revise phase, for $0.23. Its first plan stopped before any agent over 19,647 `node_modules` files hard-linked to Bun's cache; the session rebuilt them and the run went on. Verify passed 22 of 22 outside the wrap, and the builder found and fixed a real surrogate-pair cut in `truncateToBytes`. Then agentsh denied the builder the extension test's own `.env` fixtures in a temp folder, the reviewer blocked for want of a passing suite run in the agent, and revise failed. The extension behaved: all 195 network denials were its posts to `127.0.0.1:43190`, with no stall, no drop and a slowest poll of 0.1 s. open.md has rows for the fixture denial and for warning about hard links at install.
+
 ## Next
 
 1. **Done: the pin check's two old holes**, by [run d48bd070](#the-pin-and-root-run-d48bd070). Left for item 14: links at `BINARY` or `CONFIG`, and the other path constants.

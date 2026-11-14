@@ -2622,6 +2622,47 @@ def test_a_null_or_empty_session_list_lets_the_prune_run(prune_env):
     assert prune_env.run()["skipped"] is None and prune_env.ages() == []
 
 
+def _session_event(db, session, age):
+    c = sqlite3.connect(db)
+    c.execute("INSERT INTO events (id, session_id, type, ts_unix_ns, data) VALUES (?,?,?,?,?)",
+              (f"{session}-{age}", session, "file_open", int((NOW - age) * 1e9), "x"))
+    c.commit()
+    c.close()
+
+
+def test_a_session_quiet_for_two_hours_no_longer_stops_the_prune(prune_env):
+    """A leftover session, such as one a cut-short probe left, held the prune off for 10 hours on
+    2026-11-12. One started and last heard from more than KEEP_SECONDS ago has nothing left to read
+    that the prune would keep, so it no longer counts."""
+    prune_env.add(3 * DAY, 0)
+    _session_event(prune_env.db, "S1", 3 * 3600)
+    prune_env.api.body = json.dumps([{"id": "S1", "state": "ready", "created_at": utc(NOW - 5 * 3600)}]).encode()
+    result = prune_env.run()
+    assert result["skipped"] is None and result["last_prune"]
+    assert prune_env.ages() == [0]
+
+
+@pytest.mark.parametrize("how", ["new", "heard_from", "no_created", "bad_created", "no_id"])
+def test_a_session_started_or_heard_from_in_two_hours_still_stops_the_prune(prune_env, how):
+    prune_env.add(3 * DAY)
+    session = {"id": "S1", "state": "ready", "created_at": utc(NOW - 5 * 3600)}
+    if how == "new":
+        session["created_at"] = utc(NOW - 600)
+    elif how == "heard_from":
+        _session_event(prune_env.db, "S1", 3 * 3600)
+        _session_event(prune_env.db, "S1", 60)
+    elif how == "no_created":
+        del session["created_at"]
+    elif how == "bad_created":
+        session["created_at"] = "soon"
+    else:
+        del session["id"]
+    prune_env.api.body = json.dumps([session]).encode()
+    result = prune_env.run()
+    assert "1 active session" in result["skipped"] and result["last_prune"] is None
+    assert len(prune_env.ages()) == (3 if how == "heard_from" else 1)
+
+
 def test_a_session_that_appears_between_batches_stops_the_loop(prune_env, monkeypatch):
     monkeypatch.setattr(prune_env.m, "BATCH", 2)
     prune_env.add(*([3 * DAY] * 6))

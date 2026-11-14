@@ -33,7 +33,7 @@ Which of [open.md](open.md#sssf)'s SSSF rows reach a project depends on its setu
 | Skill before c9bbdf2 | In a `just trial` attempt, agents get the trial's Python as `python3`. Fixed in c9bbdf2 |
 | Claude roster | A command that prints SSSF's refusal and exits 126 counts as a real refusal |
 | pi roster | Regex differences between Python and pi's extension that the load check can't reject |
-| `local_guard: agentsh` | Loopback connections are denied, bind gets past the policy (fixed in the fork, not installed), dropped events, a leftover session stops the prune, the event read's slowness, the store file that never shrinks, and the tracer stall. Installing a new agentsh binary before the hub changes its pin would stop every run here |
+| `local_guard: agentsh` | Loopback connections are denied, bind gets past the policy (fixed in the fork, not installed), dropped events, the event read's slowness, the store file that never shrinks, and the tracer stall. Installing a new agentsh binary before the hub changes its pin would stop every run here |
 | `sandbox: openshell` | An agent can overwrite the VM's refuse script. Two setup gaps: `just openshell-setup`, and the advice when `openshell` is off `PATH`. The VM-mode leftovers, among them how SSSF picks the VM's Python. Claude Code in the image is unpinned |
 | The hub only | The builder may edit the guard code SSSF ships. Three skill tests flaked |
 

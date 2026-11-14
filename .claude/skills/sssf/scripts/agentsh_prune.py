@@ -1,8 +1,12 @@
 """Prune agentsh's event store and its rotated audit log to the last 2 hours. Runs as root from
 sssf-agentsh-prune.service.
 
-Standard library only. It deletes nothing and runs no ANALYZE while the service lists a session or
-doesn't answer; the audit step skips the same way. It writes a status file that anyone can read: counts and times, never event content.
+Standard library only. It deletes nothing and runs no ANALYZE while the service lists a live session
+or doesn't answer; the audit step skips the same way. A session started and last heard from more than
+KEEP_SECONDS ago is stale, such as one a cut-short probe left: it has no event the prune would keep, so it
+doesn't hold the prune off. It never runs VACUUM: agentsh sets no busy timeout and drops a batch of events
+whose write meets a lock, and a run has no session listed between its agent calls. It writes a status
+file that anyone can read: counts and times, never event content.
 
 Exit codes: 0 after a prune, a skip or "not due"; 1 when this attempt recorded an error (so
 `systemctl --failed` lists the service). A skip exits 0 even if the status file still holds an old error.
@@ -46,14 +50,14 @@ def parse(text):
 
 
 def sessions(api):
-    """How many sessions the service lists. Raises on any reply it can't read."""
+    """The sessions the service lists. Raises on any reply it can't read."""
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(f"{api}/api/v1/sessions", timeout=5) as reply:
         if reply.status != 200:
             raise RuntimeError(f"HTTP {reply.status}")
         body = json.loads(reply.read())
     if body is None:
-        return 0
+        return []
     if isinstance(body, dict):
         if "sessions" not in body:
             raise TypeError("sessions reply has no sessions list")
@@ -62,7 +66,27 @@ def sessions(api):
             raise TypeError("sessions reply has a null sessions list")
     if not isinstance(body, list):
         raise TypeError("sessions reply is not a list")
-    return len(body)
+    return body
+
+
+def stale(session, db, now):
+    """True only for a session that agentsh started more than KEEP_SECONDS ago and whose last event in the
+    store is older than that too. Anything it can't read counts as live."""
+    if not isinstance(session, dict) or not isinstance(session.get("id"), str) or not session["id"]:
+        return False
+    started = parse(session.get("created_at"))
+    if started is None or now - started <= KEEP_SECONDS:
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=LOCK_WAIT)
+        try:
+            last = conn.execute("SELECT MAX(ts_unix_ns) FROM events WHERE session_id = ?",
+                                (session["id"],)).fetchone()[0]
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+    return last is None or last / 1e9 < now - KEEP_SECONDS
 
 
 def store_bytes(db):
@@ -173,14 +197,15 @@ def fix_owner(db):
             os.chown(path, owner.st_uid, owner.st_gid, follow_symlinks=False)
 
 
-def skip_reason(api):
-    """None when no session is listed, else why the prune must not run."""
+def skip_reason(api, db, now):
+    """None when every listed session is stale, else why the prune must not run."""
     try:
-        count = sessions(api)
+        listed = sessions(api)
     except Exception as error:
         return f"the service didn't answer its sessions list ({type(error).__name__})"
-    if count > 0:
-        return f"the service reports {count} active session(s)"
+    live = sum(1 for each in listed if not stale(each, db, now))
+    if live:
+        return f"the service reports {live} active session(s)"
     return None
 
 
@@ -209,7 +234,7 @@ def _prune(db, api, status, now, audit):
         data["audit_bytes"] = audit_bytes(audit)
         write_status(status, data)
         return data, False
-    reason = skip_reason(api)
+    reason = skip_reason(api, db, now)
     conn = None
     deleted = 0
     try:
@@ -217,7 +242,7 @@ def _prune(db, api, status, now, audit):
             conn = sqlite3.connect(db, timeout=LOCK_WAIT, isolation_level=None)
             cutoff = int((now - KEEP_SECONDS) * 1e9)
             while True:
-                reason = skip_reason(api)
+                reason = skip_reason(api, db, now)
                 if reason:
                     break
                 try:
@@ -238,13 +263,13 @@ def _prune(db, api, status, now, audit):
             if reason is None:
                 last_analyze = parse(data["last_analyze"])
                 if last_analyze is None or now - last_analyze >= ANALYZE_SECONDS:
-                    reason = skip_reason(api)
+                    reason = skip_reason(api, db, now)
                     if reason is None:
                         conn.execute("PRAGMA analysis_limit=1000")
                         conn.execute("ANALYZE")
                         data["last_analyze"] = iso(now)
             if reason is None:
-                reason = skip_reason(api)
+                reason = skip_reason(api, db, now)
                 if reason is None:
                     prune_audit(audit, now)
         if reason is None:

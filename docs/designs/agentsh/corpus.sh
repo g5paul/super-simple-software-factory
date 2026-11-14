@@ -25,3 +25,4 @@ t "git-push by its path" '/usr/lib/git-core/git-push --dry-run origin main'
 t "argv0 newline" $'exec -a \'g\nit\' git push --dry-run'
 t "quoted command word" "'just' test live"
 t "split quoted word" "ju''st test live"
+t "bun loads .env itself" 'bun -e "console.log(\"FAKE=\"+process.env.FAKE)"'

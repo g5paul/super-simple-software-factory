@@ -317,7 +317,12 @@ fast-forward or rewind a ref to an existing commit. A `git symbolic-ref
 refs/heads/main refs/heads/<run branch>` reports nothing at check time, and
 afterwards every commit the chain makes on the run branch moves `main` too.
 No ref report is made when the run stops for a switched
-or rewound HEAD.
+or rewound HEAD. A new commit listed in `.git/shallow` is read by its own tree only, so a tip
+that only deletes protected paths, such as `main` moved to a commit holding
+only `src/`, isn't stopped, and nothing restores `.git/shallow`. The check reads
+with the commit-graph off, but checkout and merge read
+`.git/objects/info/commit-graph`, so a forged graph may give them a different
+tree for a new commit than the one the check judged; that is untested.
 
 SSSF's own git never runs an fsmonitor, and its undo and rollback run no
 hooks. Two gaps it shares with a run without this check: an ignore file the

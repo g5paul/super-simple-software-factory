@@ -89,13 +89,15 @@ The engineer settled these on 2026-11-08, after the proof. OpenShell stays the l
 
 ## Rollout
 
-1. A guard chain run builds the wrap, behind `local_guard: agentsh` in `repo.yaml`.
-2. sssf-sandbox runs a full SDLC chain under it. The proof only ran single agents.
-3. The hub moves, so every guard run tests it.
-4. pi-agent-observability moves, for heavy pi use and the hang question.
-5. fusion-harness moves.
+1. A guard chain run builds the wrap, behind `local_guard: agentsh` in `repo.yaml`. Done.
+2. sssf-sandbox runs a full SDLC chain under it. The proof only ran single agents. Done.
+3. The hub moves, so every guard run tests it. Done on 2026-11-09.
+4. One Claude-roster project with a toolchain other than Python moves. This was pi-agent-observability until [Next](#next) item 7 held pi back; fusion-harness took it and passed on 2026-11-14 ([step 4](#rollout-step-4-fusion-harness-2026-11-14)).
+5. pi-agent-observability moves, for heavy pi use and the hang question. Its observability extension's loopback connection stands in the way ([step 5](#rollout-step-5-what-pi-agent-observability-needs-2026-11-14)).
 
 Each project's session makes the change in its own repo.
+
+Repos on `sandbox: openshell` stay there. Their chains, tickets and trials already run in a microVM, which is a boundary where agentsh is only a set of rules: the tree goes in as a git bundle, so `.env`, the engineer's home folder and other repos never enter, and the network is closed except the model host, so a push has no route. agentsh needs `sandbox: none` (a VM sandbox with `local_guard: agentsh` is a config error), so moving such a repo would trade the VM for less. What stays on the host there is anything that takes no `--sandbox`, a run started with `--sandbox none`, and what the host does with the commits that come back; those keep the text guard. Two projects are on `sandbox: openshell` today, and [projects.md](../projects.md) has each repo's guard and sandbox.
 
 agentsh becomes the `sandbox: none` default after at least 10 real chain runs across at least two repos, with both agents, no guard miss, no denial that breaks legitimate work, and no hang that a run's timeout fails to stop. New installs then get it. A repo that wants the old guard must say `local_guard: text`, and a machine without the service refuses to run, with no fallback. The patched build exists only on this machine, and agentsh is tested only on this WSL2 setup, so that default reaches no further for now.
 
@@ -1233,6 +1235,30 @@ The first prune at 2 hours ran at 16:40, in a gap between the run's agent calls.
 
 The default stays `local_guard: text`, in the template and in `config.md`, so publishing the hub changes no repo's guard. A repo turns agentsh on itself, with `local_guard: agentsh` and the engineer's sudo install. Two repos have: the hub since dd07d8f, and sssf-sandbox. Both are Python with Claude Code rosters. Projects update from the local hub, not the fork, so they're one `sssf-update` from this code either way, and still on the text guard after it.
 
+### Rollout step 4: fusion-harness, 2026-11-14
+
+fusion-harness updated to skill b4b9b81 (f9e9d15), set `local_guard: agentsh` (46e684b), and the engineer ran the install's three sudo lines. Chain e7e226bf, `adw_simple_sdlc` on the Claude Code roster, added 25 unit tests for two prompt-library functions. It passed 10 of 10 phases and every gate on the first attempt, for $0.74 and 468,104 tokens in under three minutes. Nothing was pushed.
+
+agentsh denied no exec, so nothing counted toward the stop, and dropped no event; the slowest poll took 0.09 s. Every denial was correct and none broke work:
+
+| Rule | Denials | What |
+|---|---|---|
+| `sssf-proc-secrets` | 1,474 | `/proc/<pid>/environ` over about 120 pids, a process scan by Claude Code or Bun |
+| `sssf-default-deny` | 749 | `~/.claude` and its folders (agents use their own config folder), the Python user-site folder, `~` and `~/github` |
+| `sssf-secret-files` | 13 | `.env`, read by Bun on its own at `bun test` |
+| `default-deny-network` | 12 `ptrace_network`, 4 `net_connect` | Claude Code's error telemetry, and 12 with no destination in the trace |
+
+Three open.md rows came from it: Bun's `.env` read, which the text guard can't see; the trace dropping a denied connection's address; and the `/proc` denials burying the rest. The Bun case is in [corpus.sh](agentsh/corpus.sh).
+
+### Rollout step 5: what pi-agent-observability needs, 2026-11-14
+
+The repo runs every agent on pi with the ChatGPT sign-in and loads its own observability extension, `extension/pi-observability.ts`, through `harness_engineering`. pi's policy covers its sign-in file, and every policy allows the ChatGPT hosts. The extension raises two things:
+
+- **It posts each event to `http://127.0.0.1:43190`**, the repo's own server. agentsh denies loopback connections (the open.md row on `127.0.0.1`), and `network_allow` refuses a loopback host, so under agentsh each post would be denied, and the repo would lose the view it exists for. The fix proposed in that row, allowing only listeners in the same agentsh session, wouldn't cover it, since the server is the engineer's own process. Letting one named loopback port through is a guard change, and it would also let an agent post forged events, or reach anything else the server answers on that port.
+- **It reads `.env` and `.env.local` itself**, at load, into the agent's environment for each key not already set. Under `local_guard: text` that undoes SSSF's holdback: the keys SSSF keeps from pi come straight back. agentsh denies the read, as it denied Bun's in step 4.
+
+So the second makes agentsh more useful here than anywhere yet, and the first is the decision before step 5 can run.
+
 ## Next
 
 1. **Done: the pin check's two old holes**, by [run d48bd070](#the-pin-and-root-run-d48bd070). Left for item 14: links at `BINARY` or `CONFIG`, and the other path constants.
@@ -1240,8 +1266,8 @@ The default stays `local_guard: text`, in the template and in `config.md`, so pu
 3. The one model-call hang stays open. If it comes back, see whether a bare pi does it too, and whether the proxy still holds the tunnel.
 4. The real-push check from step 2, for the engineer: each push spelling in [corpus.sh](agentsh/corpus.sh), from a workspace whose remote points at GitHub, under the installed policy. The network rules should refuse every one.
 5. **Done: what agentsh denied ordinary work.** `tar -x` by [the eighth patch](#the-eighth-patch-tar-and-openat2-2026-11-09), relative link targets by [the ninth](#the-ninth-patch-link-targets-2026-11-09), and config lookups and the agents' own caches by [run 130ca6e0](#the-tool-config-run-under-agentsh-130ca6e0).
-6. Rollout step 4, now that items 5, 8 and 9 are done: one Claude-roster project turns agentsh on. The engineer runs its sudo install from the install clone, and the project's session runs one chain and reports what agentsh denied. The hub and sssf-sandbox are both Python, so a project with another toolchain tests patterns neither has. Planned for 2026-11-12, once a night of prunes shows the store file levelling off near 11 GB.
-7. pi under the wrap needs its own policy. Until it has one, every project with a pi roster, pi-agent-observability's ChatGPT roster among them, stays on `local_guard: text`.
+6. **Done: rollout step 4.** fusion-harness, a TypeScript repo with a Claude Code roster, ran chain e7e226bf under agentsh on 2026-11-14 ([step 4](#rollout-step-4-fusion-harness-2026-11-14)).
+7. pi's policy exists. `guard_for` renders one policy per roster harness, and pi's has its own sign-in file and `~/.pi` writes; the model hosts, ChatGPT's among them, are in every policy. The proof's pi loops and run 361de0f2 ran pi under the wrap, but no real pi chain has yet. For pi-agent-observability, step 5 waits on its observability extension's loopback connection ([step 5](#rollout-step-5-what-pi-agent-observability-needs-2026-11-14)).
 8. **Done: the DNS proxy's forward**, the tenth fork patch, in build 472d63cf, pinned by run 8a727544 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)).
 9. **Done: signals**, the eleventh fork patch in the same build, with `trace.signal` and its rules from run 8a727544. Its last check, a guard run under agentsh, passed as run 130ca6e0 ([the patches](#the-tenth-and-eleventh-patches-dns-and-signals-2026-11-10)).
 10. **Done: the example pi pattern's miss** is a known limit in `config.md`, by run d48bd070.

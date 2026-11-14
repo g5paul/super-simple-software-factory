@@ -1255,9 +1255,9 @@ Three open.md rows came from it: Bun's `.env` read, which the text guard can't s
 The repo runs every agent on pi with the ChatGPT sign-in and loads its own observability extension, `extension/pi-observability.ts`, through `harness_engineering`. pi's policy covers its sign-in file, and every policy allows the ChatGPT hosts. The extension raises two things:
 
 - **It posts each event to `http://127.0.0.1:43190`**, the repo's own server. agentsh denies loopback connections (the open.md row on `127.0.0.1`), and `network_allow` refuses a loopback host, so under agentsh each post would be denied, and the repo would lose the view it exists for. The fix proposed in that row, allowing only listeners in the same agentsh session, wouldn't cover it, since the server is the engineer's own process. Letting one named loopback port through is a guard change, and it would also let an agent post forged events, or reach anything else the server answers on that port.
-- **It reads `.env` and `.env.local` itself**, at load, into the agent's environment for each key not already set. Under `local_guard: text` that undoes SSSF's holdback: the keys SSSF keeps from pi come straight back. agentsh denies the read, as it denied Bun's in step 4.
+- **It reads `.env` and `.env.local` itself**, at load, into the agent's environment for each key not already set. Under `local_guard: text` that undoes SSSF's holdback: the keys SSSF keeps from pi come straight back. agentsh denies the read, as it denied Bun's in step 4. Run f8ce3246 fixed it in the repo on 2026-11-14: the extension skips both files when `SSSF_ADW_ID` is set (d776544, on `main` at 8bb9c98), for $0.22, 10 of 10 phases, the reviewer approving with no blocking finding.
 
-So the second makes agentsh more useful here than anywhere yet, and the first is the decision before step 5 can run.
+That leaves the first as the decision before step 5 can run. Bun's own `.env` read is still open there under the text guard.
 
 ## Next
 

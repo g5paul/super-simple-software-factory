@@ -37,6 +37,15 @@ their changes are back in the working tree, unstaged, for `enforce()` to check
 and roll back, and for the chain's own commit phase to commit. An agent that moved HEAD anywhere else
 (another branch, a rebase, a reset) stops the run instead.
 
+An agent can also move a ref other than HEAD: `git commit-tree` and
+`git update-ref refs/heads/main` leave its own branch and tree clean.
+`head()` therefore records every ref too, and `enforce()` lists them again
+afterwards through `ref_moves()`. A ref other than the run's own branch that
+gained commits changing a path the agent is barred from, or any change under
+`refs/replace/`, stops the run. The check only reads: nothing is moved back,
+deleted or fetched, and no hook, filter or external diff runs. It can't tell
+the agent's commit from the engineer's.
+
 Two keys drive it, both in sssf.config.yaml:
     defaults.protected_files   paths no agent may touch unless it names them itself
 SSSF's fixed `FACTORY_FILES` are checked on top of `protected_files`, and a
@@ -157,24 +166,114 @@ def snapshot(run) -> dict[str, str]:
     return fingerprints
 
 
-def head(run) -> dict[str, str]:
-    """Where HEAD is: its commit and the branch it is on (empty when detached)."""
+REFS_UNREAD = "(refs unread)"
+REF_COMMITS_SHOWN = 20
+REF_PATHS_SHOWN = 10
+# Where plan phases commit specs/<adw_id>_<slug>.md on their own sssf/* branch.
+# ref_moves() doesn't judge a regular .md file directly in it on other refs, or
+# every plan commit would stop every other live run. Anything else under it
+# counts. .scratch/ is not here: adw_tickets hands a ticket under it straight
+# to ticket_builder.
+REF_SPECS = "specs/"
+# Never a spec file: a harness loads these as instructions when an agent reads
+# the folder, and planners read specs/. Compared lowercased, for a
+# case-insensitive disk.
+REF_SPEC_NOT = ("claude.md", "claude.local.md", "agents.md")
+# Every git command of the ref check starts with this: no transport for a child
+# fetch (empty GIT_ALLOW_PROTOCOL refuses all), no lazy fetch, no fsmonitor, no
+# commit-graph, no replace objects, no grafts (--no-replace-objects doesn't turn
+# off info/grafts; the advice flag keeps git's grafts hint off stderr, which it
+# prints whenever the graft file opens) and a fixed locale.
+_REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "GIT_GRAFT_FILE=/dev/null",
+             "LC_ALL=C", "git", "-c", "core.fsmonitor=", "-c", "core.commitGraph=false",
+             "-c", "advice.graftFileDeprecated=false", "--no-replace-objects")
+# Per commit, a `:<old mode> <new mode> <old sha> <new sha> <status>` field and a
+# NUL-terminated path for each change, then one empty field. A path is never
+# empty, so the empty field ends a commit's list. The words are, per
+# commit, `<commit> [<parent> [<parent>]] .`. A group with no parent is read as
+# always: -m lists a merge against each parent git finds, --root a root against
+# nothing. A group with parents is diffed against each pair, which ref_moves()
+# does only for a commit of at most three parents with a stash's untracked root
+# (not the first parent, a new commit, a real root) left out. So a
+# call names at most 256 commits and two parents each, 256 * (3 * 65 + 2) =
+# about 50 KB at worst, whatever a commit holds. --raw reads no blob; it gives
+# the modes, so a link or an executable file isn't taken for a spec file.
+# diff-tree, not log: log honours log.showSignature and can run gpg.program.
+_COMMIT_PATHS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false --no-replace-objects diff-tree -r --raw -z --no-renames --no-ext-diff --no-textconv "$@"; }
+while [ $# -gt 0 ]; do
+  c=$1; shift
+  if [ "$1" = . ]; then
+    g -m --root --no-commit-id "$c" || exit 1
+  fi
+  while [ $# -gt 0 ] && [ "$1" != . ]; do
+    g "$1" "$c" || exit 1
+    shift
+  done
+  [ $# -gt 0 ] || exit 1
+  shift
+  printf '\\0'
+done
+"""
+# One character per commit argument: r for a real root (the raw object's first
+# line is the tree and the second isn't a parent), p for a commit with a parent,
+# ? for an object that can't be read as a commit. rev-list --parents honours
+# .git/shallow and shows a commit listed there without its parents, so only this
+# tells a root from one that is disguised as one.
+_COMMIT_ROOTS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false --no-replace-objects "$@"; }
+for c in "$@"; do
+  g cat-file commit "$c" 2>/dev/null | {
+    IFS= read -r t; IFS= read -r p
+    case $t in
+      "tree "*) case $p in "parent "*) printf p ;; *) printf r ;; esac ;;
+      *) printf '?' ;;
+    esac
+  }
+done
+"""
+
+
+def _head(run) -> dict[str, str]:
     return {"sha": _git(["rev-parse", "-q", "--verify", "HEAD"], run.repo_root).strip(),
             "branch": _git(["symbolic-ref", "-q", "HEAD"], run.repo_root).strip()}
+
+
+def _refs(run) -> str:
+    """Every ref as `<sha> <name>` lines, or REFS_UNREAD when git can't list them."""
+    try:
+        done = sandbox.current().run([*_REF_READ, "for-each-ref", "--format=%(objectname) %(refname)"],
+                                     cwd=run.repo_root, text=False)
+    except Exception:
+        return REFS_UNREAD
+    if done.returncode != 0:
+        return REFS_UNREAD
+    out = done.stdout
+    return out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+
+
+def head(run) -> dict[str, str]:
+    """Where HEAD is (its commit and the branch it is on, empty when detached)
+    and every ref in the repo, as `git for-each-ref` lists them.
+
+    The refs are what `ref_moves()` compares after the call. Nothing here
+    moves, opens or fetches anything.
+    """
+    return {**_head(run), "refs": _refs(run)}
 
 
 def undo_commits(run, before: dict[str, str]) -> list[str]:
     """Undo commits an agent made itself, keeping their changes unstaged in the tree.
 
     Returns the short shas undone, newest first, or [] when HEAD did not move.
-    Unstaged matters: a reset keeps the changes in the tree, and _roll_back
+    Only HEAD's sha and branch are compared, never the recorded refs: a moved
+    tag or another branch is `ref_moves()`'s, and sending it into a reset would
+    unstage the engineer's staged work. Unstaged matters: a reset keeps the changes in the tree, and _roll_back
     restores a clean path from HEAD. Raises PermissionBreach when HEAD
     moved somewhere a reset can't safely
     bring back: onto another branch, or to a commit that doesn't descend from
     where it was.
     """
-    after = head(run)
-    if after == before:
+    after = _head(run)
+    if (after["sha"], after["branch"]) == (before["sha"], before["branch"]):
         return []
     if after["branch"] != before["branch"]:
         raise PermissionBreach(
@@ -1105,7 +1204,201 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
     return "rolled back" if result.returncode == 0 else "could not roll back"
 
 
-def enforce(run, phase, agent: AgentConfig, before: dict[str, str]) -> list[str]:
+def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
+    """The breach text for refs other than the run's own branch that gained
+    commits changing a path `agent` is barred from, or "" when there is none.
+
+    Reads only. Compares `before["refs"]`, recorded by `head()`, with the refs
+    now. Barred means protected and not unlocked by the agent's own `writes`:
+    `permitted` is False for it, and still False for the same agent with
+    `writes=None`. Replace refs count whatever they point at. Any failure to
+    compare is itself reported, never passed; this function never raises.
+
+    A spec file (a regular `.md` directly in `REF_SPECS`, not dotted, not in
+    `REF_SPEC_NOT`) isn't judged; a `specs` entry in place of the folder is
+    judged as the folder. A new commit is read as on `main` (`diff-tree -m
+    --root`: every parent, a root by its tree), except a commit of at most
+    three parents that has a stash's untracked-files root among them: a parent
+    that is not the first, is itself new and is a real root, told from its raw
+    object since `rev-list` honours `.git/shallow`. That commit is diffed
+    against its other parents, and the root is read by its own tree. So a call
+    names at most 256 commits and two parents each. Grafts are off for every
+    read.
+    """
+    def cannot(err: str = "") -> str:
+        said = f" git said:\n{_said(err, 0)}\n" if err.strip() else " "
+        return ("SSSF could not compare the repo's refs before and after "
+                f"{agent.name} ran.{said}No ref was moved and no fetch was tried. "
+                "Check `git for-each-ref` by hand before the next run.")
+
+    def git(*args: str):
+        done = sandbox.current().run([*_REF_READ, *args], cwd=run.repo_root, text=False)
+        out, err = done.stdout, done.stderr
+        out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+        err = err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or "")
+        return done.returncode, out, err
+
+    def parse(text: str) -> dict[str, str] | None:
+        found: dict[str, str] = {}
+        for line in text.split("\n"):
+            if not line:
+                continue
+            sha, _, name = line.partition(" ")
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) or not name:
+                return None
+            found[name] = sha
+        return found
+
+    try:
+        then_text = (before or {}).get("refs")
+        if then_text is None:
+            return ""
+        now_text = _refs(run)
+        if then_text == now_text:
+            return ""
+        if REFS_UNREAD in (then_text, now_text):
+            return cannot()
+        then, now = parse(then_text), parse(now_text)
+        if then is None or now is None:
+            return cannot("a ref line was not `<sha> <name>`")
+        own = before.get("branch", "")
+        replaced = {}
+        for name in sorted(set(then) | set(now)):
+            if name.startswith("refs/replace/") and then.get(name) != now.get(name):
+                replaced[name] = ("created" if name not in then
+                                  else "deleted" if name not in now else "moved")
+        tips = {n: s for n, s in now.items() if n != own and then.get(n) != s}
+        offenders: dict[str, list[str]] = {}
+        old = sorted(set(then.values()))
+        if tips:
+            code, out, err = git("rev-list", "--parents", *sorted(set(tips.values())), "--not", *old)
+            if code != 0:
+                return cannot(err)
+            commits, parents = [], {}
+            for line in out.split("\n"):
+                if not line:
+                    continue
+                words = line.split(" ")
+                if not all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", w) for w in words):
+                    return cannot("a commit line was not `<sha> [<parent>...]`")
+                commits.append(words[0])
+                parents[words[0]] = words[1:]
+            open_ = agent.model_copy(update={"writes": None})
+
+            def run_script(script: str, words: list[str]):
+                done = sandbox.current().run(["sh", "-c", script, "sh", *words],
+                                             cwd=run.repo_root, text=False)
+                text, err = done.stdout, done.stderr
+                text = text.decode("utf-8", "surrogateescape") if isinstance(text, bytes) else (text or "")
+                err = err.decode("utf-8", "surrogateescape") if isinstance(err, bytes) else (err or "")
+                return done.returncode, text, err
+
+            # Candidates for a stash's untracked-files root: a later parent of a
+            # commit with at most three parents, itself new, listed without
+            # parents. rev-list honours .git/shallow, so each is read raw.
+            candidates = sorted({p for c in commits if len(parents[c]) <= 3
+                                 for p in parents[c][1:] if p in parents and not parents[p]})
+            roots: set[str] = set()
+            for i in range(0, len(candidates), _CHUNK):
+                chunk = candidates[i:i + _CHUNK]
+                code, text, err = run_script(_COMMIT_ROOTS, chunk)
+                if code != 0:
+                    return cannot(err)
+                if len(text) != len(chunk) or any(ch not in "rp?" for ch in text):
+                    return cannot("a commit's raw object could not be classified")
+                roots.update(p for p, ch in zip(chunk, text) if ch == "r")
+
+            def named(c: str) -> list[str]:
+                # A stash's untracked-files root: not the first parent, a new
+                # commit, a real root. Only for a commit with at most three
+                # parents, so no more than two shas are ever named. Empty: git
+                # reads the parents itself.
+                ps = parents[c]
+                kept = [p for i, p in enumerate(ps) if i == 0 or p not in roots]
+                return kept if len(ps) <= 3 and len(kept) < len(ps) else []
+
+            def judged(path: str, old_mode: str, new_mode: str) -> str | None:
+                # None for a spec file: a regular .md directly in specs/, not
+                # dotted, not an instruction file. `specs` itself is judged as
+                # the folder, so a link in its place doesn't pass.
+                if path == REF_SPECS.rstrip("/"):
+                    return REF_SPECS
+                name = path[len(REF_SPECS):]
+                if (path.startswith(REF_SPECS) and name and "/" not in name
+                        and name.endswith(".md") and not name.startswith(".")
+                        and name.lower() not in REF_SPEC_NOT
+                        and old_mode in ("100644", "000000") and new_mode in ("100644", "000000")):
+                    return None
+                return path
+
+            for i in range(0, len(commits), _CHUNK):
+                chunk = commits[i:i + _CHUNK]
+                words = [w for c in chunk for w in (c, *named(c), ".")]
+                code, text, err = run_script(_COMMIT_PATHS, words)
+                if code != 0:
+                    return cannot(err)
+                fields = _fields(text)
+                if fields.count("") != len(chunk):
+                    return cannot()
+                lists: list[list[tuple[str, str]]] = []
+                current: list[tuple[str, str]] = []
+                at = 0
+                while at < len(fields):
+                    if fields[at] == "":
+                        lists.append(current)
+                        current = []
+                        at += 1
+                        continue
+                    meta = re.fullmatch(r":([0-7]{6}) ([0-7]{6}) [0-9a-f]+ [0-9a-f]+ [A-Z]", fields[at])
+                    if not meta or at + 1 >= len(fields) or fields[at + 1] == "":
+                        return cannot("a raw diff record was not `:<modes> <shas> <status>` and a path")
+                    shown = fields[at + 1]
+                    path = judged(shown, meta.group(1), meta.group(2))
+                    if path is not None:
+                        current.append((path, shown))
+                    at += 2
+                for sha, records in zip(chunk, lists):
+                    barred = sorted({shown for path, shown in records
+                                     if not permitted(path, agent, run.cfg)
+                                     and not permitted(path, open_, run.cfg)})
+                    if barred:
+                        offenders[sha] = barred
+        if not offenders and not replaced:
+            return ""
+
+        lines = [f"Refs other than the run's own branch gained commits that change protected "
+                 f"paths while {agent.name} ran, or a replace ref changed. Nothing was moved "
+                 "back, deleted or rewritten:"]
+        for name in sorted(tips):
+            code, out, _err = git("rev-list", tips[name], "--not", *old)
+            mine = [c for c in out.split() if c in offenders] if code == 0 else []
+            if code == 0 and not mine:
+                continue
+            lines.append(f"  - {_said_line(name)}: {then.get(name, '(new)')} -> {tips[name]}"
+                         + ("" if code == 0 else " (could not list its commits)"))
+            for sha in mine[:REF_COMMITS_SHOWN]:
+                paths = [_said_line(p) for p in offenders[sha]]
+                more = len(paths) - REF_PATHS_SHOWN
+                lines.append(f"      {sha} changes: {', '.join(paths[:REF_PATHS_SHOWN])}"
+                             + (f" (+{more} more)" if more > 0 else ""))
+            if len(mine) > REF_COMMITS_SHOWN:
+                lines.append(f"      (+{len(mine) - REF_COMMITS_SHOWN} more commits)")
+        for name, how in replaced.items():
+            ends = " -> ".join(f"{label}{sha}" for label, sha in
+                               (("", then.get(name)), ("", now.get(name))) if sha)
+            lines.append(f"  - {_said_line(name)}: {how}" + (f" ({ends})" if ends else ""))
+        lines.append("SSSF can't tell who moved a ref. Your own commit, merge, pull, fetch or "
+                     "stash that changes a protected path during an agent call stops the run "
+                     "the same way. If it was yours, nothing needs undoing; run again. If not, "
+                     "`git show --stat <commit>` shows it, and `git update-ref <ref> <old> <new>` "
+                     "moves a branch back.")
+        return "\n".join(lines)
+    except Exception as failed:
+        return cannot(repr(failed))
+
+
+def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
+            head_before: dict[str, str] | None = None) -> list[str]:
     """Compare the tree against `before`; undo and raise if the agent overstepped.
 
     Returns the paths it legitimately changed, so the trace records what an
@@ -1114,24 +1407,36 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str]) -> list[str]
     Detection alone would leave the repo holding the unauthorized change while
     reporting a failure, so anything the agent introduced outside its allowlist
     is rolled back before the phase dies. What it cannot undo, it names.
+
+    With `head_before` (from `head()`), the refs are compared too, after the
+    tree work and its rollbacks: a ref other than the run's own branch that
+    gained commits changing a protected path stops the run, and its report is
+    added to a tree breach if there is one. Refs are only reported, never moved.
+    Without it, only the tree is checked.
     """
     after = snapshot(run)
     touched = changed_paths(before, after)
     breaches = [p for p in touched if not permitted(p, agent, run.cfg)]
-    if not breaches:
+    outcomes = {p: _roll_back(run, p, before, after) for p in breaches}
+    moved = ref_moves(run, agent, head_before) if head_before else ""
+    if not breaches and not moved:
         return touched
 
-    outcomes = {p: _roll_back(run, p, before, after) for p in breaches}
-    scope = ("read-only" if agent.writes == []
-             else f"limited to {agent.writes}" if agent.writes
-             else f"barred from {protected(run.cfg)}")
-    detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
-    message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
     # The run stops here, so the agent's permitted changes are never verified,
     # reviewed, or committed. Name them, so the engineer knows what is sitting
     # uncommitted in the tree and has to be finished or discarded by hand.
     kept = [p for p in touched if p not in outcomes]
+    if not breaches:
+        message = moved
+    else:
+        scope = ("read-only" if agent.writes == []
+                 else f"limited to {agent.writes}" if agent.writes
+                 else f"barred from {protected(run.cfg)}")
+        detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
+        message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
     if kept:
         message += ("\nIts other changes are left uncommitted and unreviewed:\n"
                     + "\n".join(f"  - {p}" for p in kept))
+    if breaches and moved:
+        message += "\n" + moved
     raise PermissionBreach(message)

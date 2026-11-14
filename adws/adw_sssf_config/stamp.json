@@ -129,7 +129,7 @@
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
-      "sha256": "b11c98806f294b54b13491ee49c9ef1f2bd3e6d611819e69c5e61ce73788fc07",
+      "sha256": "4e340a607ae618820aa7b8f9f283cd15eb350e5e06905b54ab1ceb5f37b7645c",
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
@@ -173,7 +173,7 @@
       "source": "adws/adw_modules/obs_relay.py"
     },
     "adws/adw_modules/permissions.py": {
-      "sha256": "2a9331c6f61ea3c7aae3d42b4feedd38b00af9d672133d98fd2345b40c2dfbc7",
+      "sha256": "1f3d5cde35e469f3d32a84e9cb0f8a46c4d5b028d3481841c954df7672c20773",
       "source": "adws/adw_modules/permissions.py"
     },
     "adws/adw_modules/plan_checks.py": {
@@ -321,7 +321,7 @@
       "source": "repo.yaml"
     },
     "adws/adw_sssf_config/sssf.config.yaml": {
-      "sha256": "5891a91685db196fd2ab335aaadfa86eba87a274c8ec89be52a1746b29204181",
+      "sha256": "ddbe336741f1809b8391c501f0b92df8ae30ca41787370c2c78d674359b67bdc",
       "source": "sssf.config.claude_code.yaml"
     },
     "adws/adw_tickets.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "c9bbdf2"
+  "skill": "653d784"
 }

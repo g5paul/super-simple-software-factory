@@ -33,7 +33,13 @@ Two different questions still get asked, in order. The suite asks "does it
 run"; the reviewer asks "is this what was asked for", against `plan.md` — and
 neither can answer the other's. A revision that closes a review finding
 re-enters the suite, so the tree that gets committed is the tree that was both
-tested and approved.
+tested and approved. The reviewer does not run the suite, so the chain writes
+the latest green verify's checks into its brief as `host_verify`; a test the
+agent's sandbox denied is judged by that result, and by `reverify` after a
+revision. The builder is told, in a slot code writes once before its first call
+(`verify_next`), which commands verify will run after it and that a test the
+sandbox denied on a file the test itself made is not its to fix: verify runs
+them outside the sandbox and decides.
 
 The code commit lands after verification, not straight after the build: fixes
 and revisions are part of the same work product, and red code has no business
@@ -98,15 +104,20 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         planner = next((a for a in cfg.agents if a.name == "planner"), None)
         commit(ph, plan, planner.writes if planner else None)
 
+    # Once per run, before any builder call, so the dry run never sees a tree a builder touched.
+    verify_next = plan_checks.builder_brief(run, plan)
+
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
         build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
+                                  verify_next=verify_next,
                                   gates=[gates.diff_matches_claims]))
     # The first build describes the whole change. A fix or a revision reports
     # only its own repair, so its message must never name the code commit.
     built = build
 
     test = None
+    verified_by = ""
     for i in range(1, MAX_FIX_LOOPS + 1):
         with run.phase(PhaseParams(name=f"verify_{i}", kind="code", owner="quality",
                                    description="Run the suite and every quality check — known "
@@ -114,6 +125,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                                "to rediscover them")) as ph:
             test = plan_checks.verify(run, plan)
             record(ph, test)
+            verified_by = f"verify_{i}"
 
         if test.passed:
             break
@@ -125,6 +137,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                                "verbatim output")) as ph:
             build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
                                       previous=quality.as_envelope(test, "checks"),
+                                      verify_next=verify_next,
                                       gates=[gates.diff_matches_claims]))
 
     # Code that never went green is never committed, so a review of it would
@@ -139,6 +152,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name=f"review_{i}", kind="agent", owner="reviewer",
                                    description="Confirm the build matches the plan")) as ph:
             review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt, previous=build,
+                                       host_verify=plan_checks.verify_brief(test, verified_by, revised),
                                        gates=[gates.artifacts_exist, gates.verdict_consistent]))
 
         if review.approved or i == MAX_REVISION_LOOPS:
@@ -147,6 +161,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name=f"revise_{i}", kind="agent", owner="builder", retries=1,
                                    description="Close the reviewer's blocking findings")) as ph:
             build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=review,
+                                      verify_next=verify_next,
                                       gates=[gates.diff_matches_claims]))
             revised = True
 

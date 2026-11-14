@@ -30,7 +30,7 @@ No agent may change these paths unless its own `writes` names them:
    Never write a test and its code in the same step. A test you never saw fail proves nothing.
 4. Run the whole test file, and judge it by exit status. Then emit your `Report` JSON.
 
-## Report
+{{verify_next}}## Report
 
 Respond with ONLY valid JSON matching `BuildOutput`, no prose before or after:
 

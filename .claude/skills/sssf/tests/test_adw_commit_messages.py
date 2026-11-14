@@ -66,8 +66,10 @@ def fake_execute(run, phase, call):
 
 
 def suite(*outcomes: bool):
-    """A fake suite that returns these verdicts in order."""
-    verdicts = iter(outcomes)
+    """A fake suite that returns these verdicts in order. The chain's first call
+    is the dry run that lists verify's commands before the build, so it gets
+    a verdict of its own at the front."""
+    verdicts = iter((True, *outcomes))
 
     def run(_run) -> QualityResult:
         passed = next(verdicts)
@@ -134,7 +136,7 @@ def test_simple_sdlc_sends_a_lint_failure_to_the_builder(repo, monkeypatch):
 
     def lint_fails_once(_run):
         calls.append(1)
-        passed = len(calls) > 1
+        passed = len(calls) > 2             # the first call is the dry run before the build
         return QualityResult(passed=passed,
                              failures=[] if passed else ["lint: `ruff check` exited 1\nE501"])
     seen = []
@@ -193,7 +195,7 @@ def test_a_red_suite_gets_no_fix_it_never_checks(repo, monkeypatch, module, bloc
     monkeypatch.setattr(quality, block, red)
     monkeypatch.setattr(agents, "execute", _always_approve(execute))
     assert run_adw(module) == 1
-    assert len(checks) == 3
+    assert len(checks) == 4                 # the dry run before the build, then three checks
     assert [n for n in seen if n.startswith("fix_")] == ["fix_1", "fix_2"]
 
 

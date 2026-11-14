@@ -40,3 +40,6 @@ def test_reviewer_writes_one_file_per_round():
     assert "<context_handoff_dir>/<phase_name>.md" in template
     rendered = prompts.render(REVIEWER, variables("review_2"))
     assert "### phase_name\n\nreview_2" in rendered
+    # `host_verify` is one of the variables, so the brief has no literal placeholder.
+    assert "### host_verify\n\n(none)" in rendered
+    assert "{{" not in rendered

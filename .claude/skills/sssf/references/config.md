@@ -69,7 +69,7 @@ agents:
 | `name` | yes | The identifier ADW scripts use. ADWs name agents, never models. |
 | `purpose` | yes | One sentence that says what the agent is for. It should match the Purpose in its `system.md`. |
 | `prompt_engineering.system` | yes | Path to the system prompt, which says who the agent is, its one purpose and its output contract. |
-| `prompt_engineering.user` | yes | Path to the default user prompt, the task template with `{{prompt}}`, `{{previous_envelope}}`, `{{context_handoff_dir}}`. |
+| `prompt_engineering.user` | yes | Path to the default user prompt, the task template with `{{prompt}}`, `{{previous_envelope}}`, `{{context_handoff_dir}}`. Also available: `{{host_verify}}` and `{{verify_next}}`, written by a chain's code (see `handoff.md`). Rendering is one pass: a value is never read for placeholders. |
 | `color` | no | Hex color, such as `"#a78bfa"`, for this agent's lane in the dashboard. It goes from the roster to `agent_sessions.color` to `/api/projects/:project/sessions/:adw_id`. The `agent_start` event carries it too, so a lane has its color while the agent is still running. Unset means the dashboard's fallback palette. |
 | `coding_agent`, `model`, `thinking`, `color`, `harness_engineering` | no | Override the corresponding `defaults` key. |
 | `tools` | no | Allowlist. Omitting the key makes every tool usable. The list grants capabilities and sets no boundary. `writes` sets the boundary. |

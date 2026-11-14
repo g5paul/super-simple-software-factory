@@ -122,6 +122,10 @@ def prompt_variables(run, phase: Phase, call: AgentCall) -> dict[str, str]:
     phase (review_1, review_2) which round it is, so it can name its files."""
     return {
         "prompt": call.prompt,
+        # Both slots are written by the chain's code, never from `call.previous`.
+        # getattr: a call object that predates the fields renders as no slot.
+        "host_verify": getattr(call, "host_verify", "") or "(none)",
+        "verify_next": getattr(call, "verify_next", ""),
         "previous_envelope": call.previous.model_dump_json(indent=2) if call.previous else "(none)",
         "context_handoff_dir": str(run.context_handoff_dir),
         "phase_name": phase.params.name,

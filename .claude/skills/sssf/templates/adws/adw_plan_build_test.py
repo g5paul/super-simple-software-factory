@@ -12,6 +12,11 @@ Phases: engineer(request) -> planner -> builder -> code(test) [-> builder(fix) -
 Testing is CODE: the suite's command lives in adw_modules/quality.py, so no
 agent spends a context window rediscovering it. Failures flow back to the
 builder as an envelope, and only an exhausted fix loop fails the run.
+
+The builder is told, in a slot code writes once before its first call
+(`verify_next`), which commands the suite runs after it and that a test the
+sandbox denied on a file the test itself made is not its to fix: the suite runs
+outside the sandbox and decides.
 """
 
 import argparse
@@ -44,9 +49,13 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
                                  gates=gates.PLAN))
 
+    # Once per run, before any builder call: the commands verify will run after it.
+    verify_next = plan_checks.builder_brief(run, plan, base=quality.run_tests)
+
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
         previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
+                                     verify_next=verify_next,
                                      gates=[gates.artifacts_exist]))
     # The first build describes the whole change. A fix or a revision reports
     # only its own repair, so its message must never name the code commit.
@@ -70,6 +79,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                                "verbatim output")) as ph:
             previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
                                          previous=quality.as_envelope(test, "tests"),
+                                         verify_next=verify_next,
                                          gates=[gates.artifacts_exist]))
 
     # Only tested work gets committed — a red suite leaves the tree uncommitted.

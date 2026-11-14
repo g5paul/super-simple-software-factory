@@ -110,6 +110,7 @@ if __name__ == "__main__":
 - **`REQUIRED_AGENTS` + `agents.validate()`** — declare every agent name the script uses and validate before the first phase.
 - **Every agent call declares a concrete output type** from `data_types.py`. No untyped handoffs.
 - **`previous=` carries the chain** — the upstream envelope lands in the next agent's `user.md` as `{{previous_envelope}}`; bulky context moves through `context_handoff/` files the envelope references.
+- **`verify_next` and `host_verify` come from code only.** A new chain passes `verify_next=plan_checks.builder_brief(...)` only to a builder call that a host verify follows before any commit or accept, and computes it once, before its first builder call. A reviewer's `host_verify` comes from `plan_checks.verify_brief(...)` on a green result. Never fill either from an envelope or the prompt; prompts render in one pass, so a value is never read for placeholders.
 - **The engineer request phase comes first**, always.
 - **Four-param rule** — `run.phase()` and `ph.call()` each take exactly one object; new helpers with >4 params get a data type.
 - **Stay thin** — sequencing and acceptance only; real logic goes in `adw_modules/` (`update_modules.md`).

@@ -40,6 +40,12 @@ The two reviewers ask separate questions, blind to each other: does the code
 follow this repo's standards, and does it do what the spec asked? One fix
 pass follows, only for blocking findings, then the checks again.
 
+The ticket builder is told, in a slot code writes once before the first ticket
+(`verify_next`), which commands verify will run after it and that a test the
+sandbox denied on a file the test itself made is not its to fix: verify runs
+them outside the sandbox and decides. The spec reviewer gets the last ticket's
+green verify as `host_verify`, written by code.
+
 A stop never discards work. A ticket that still fails, a cost cap, or a usage
 window leaves earlier tickets committed and says how to look at, keep, or drop
 whatever is uncommitted.
@@ -63,8 +69,8 @@ import os
 import sys
 from pathlib import Path
 
-from adw_modules import (account, agents, budget, changes, gates, git_helper, permissions, quality,
-                         rules, session, tickets, worktree)
+from adw_modules import (account, agents, budget, changes, gates, git_helper, permissions, plan_checks,
+                         quality, rules, session, tickets, worktree)
 from adw_modules.data_types import (AgentCall, AxisReviewOutput, BuildOutput, ChangeCapture,
                                     DocumentOutput, EventRecord, GenericOutput, PhaseParams,
                                     ScoutOutput)
@@ -149,6 +155,7 @@ def build_feature(run, folder: str) -> int:
                                                               "from their verbatim output")) as ph:
                 ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, session=owner_session,
                                   previous=quality.as_envelope(result, "checks"),
+                                  verify_next=verify_next,
                                   gates=[gates.diff_matches_claims]))
         return result
 
@@ -190,6 +197,9 @@ def build_feature(run, folder: str) -> int:
             ph.call(AgentCall(output_type=ScoutOutput, prompt=scout_prompt(feature, notes),
                               gates=[gates.artifacts_exist]))
 
+    # Once per run, before any builder call, so the dry run never sees a tree a builder touched.
+    verify_next = plan_checks.builder_brief(run, None)
+    host_verify = ""
     for ticket in feature.todo:
         n = f"t{ticket.number}"
         prompt = ticket_prompt(feature, ticket, base, notes)
@@ -197,8 +207,10 @@ def build_feature(run, folder: str) -> int:
                                    description=f"Build ticket {ticket.number}, test-first: "
                                                f"{ticket.title}")) as ph:
             build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, session=n,
+                                      verify_next=verify_next,
                                       gates=[gates.diff_matches_claims]))
-        if not verify(n, n, prompt).passed:
+        result = verify(n, n, prompt)
+        if not result.passed:
             return give_up(run, folder, f"ticket {ticket.number} ({ticket.title}) still failed its "
                                         f"checks after {MAX_FIX_LOOPS - 1} fixes. Earlier tickets "
                                         f"are committed; rerun to resume at this one.")
@@ -207,6 +219,7 @@ def build_feature(run, folder: str) -> int:
                                                f"on its own")) as ph:
             tickets.mark_done(ticket)
             commit(ph, f"{ticket.number}: {ticket.title}", build.commit_message)
+        host_verify = plan_checks.verify_brief(result, f"{n}_verify")
 
     # SSSF's own files are not the feature's work. Updating SSSF on the feature
     # branch between runs is routine, and a reviewer shown it calls it scope creep.
@@ -231,6 +244,7 @@ def build_feature(run, folder: str) -> int:
                                  prompt=(f"Spec: {feature.spec}\nTickets:\n"
                                          + "\n".join(t.path for t in feature.tickets)
                                          + f"\nDiff: {diff}\nCommits:\n{commits}{sssf_section}\n{hands_off}"),
+                                 host_verify=host_verify,
                                  gates=[gates.artifacts_exist, gates.files_non_empty]))
 
     # A reviewer can still block on a file the fixer may not touch. Such a
@@ -264,7 +278,7 @@ def build_feature(run, folder: str) -> int:
         with run.phase(PhaseParams(name="review_fix", kind="agent", owner="ticket_builder", retries=1,
                                    description="One fix pass for what the reviewers blocked on")) as ph:
             fix = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, session="review_fix",
-                                    previous=findings, gates=[gates.diff_matches_claims]))
+                                    previous=findings, verify_next=verify_next, gates=[gates.diff_matches_claims]))
         if not verify("review", "review_fix", prompt).passed:
             return give_up(run, folder, "the review fix still failed its checks. Every ticket is "
                                         "committed; rerun to review again.")

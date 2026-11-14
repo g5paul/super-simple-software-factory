@@ -100,6 +100,8 @@ There is no separate continue call to make. `agent_pi.run()` passes `--session-i
 |---|---|
 | `{{prompt}}` | the engineer's ask (or the ADW's per-call prompt) |
 | `{{previous_envelope}}` | the upstream envelope JSON, from `AgentCall(previous=...)` |
+| `{{host_verify}}` | what SSSF's own verify found, from `AgentCall(host_verify=...)`: the checks it ran and passed, or `(none)`. Written by the chain's code through `plan_checks.verify_brief`, never from an envelope. `adw_simple_sdlc` sets it for the reviewer, `adw_tickets` for the spec reviewer. |
+| `{{verify_next}}` | for a builder call that a host verify follows: the commands verify will run, and what to do about a test the sandbox denied. Written by the chain's code through `plan_checks.builder_brief`, once before the run's first builder call, never from an envelope. `adw_simple_sdlc`, `adw_plan_build_test_quality`, `adw_plan_build_test`, `adw_build_test` and `adw_tickets` fill it; every other chain leaves it empty, which renders as nothing. |
 | `{{context_handoff_dir}}` | absolute path to this session's `context_handoff/` |
 | `{{protected_files}}` | SSSF's fixed factory files, then the roster's `protected_files`, as a bullet list |
 | `{{phase_name}}` | the phase's name, e.g. `review_2`. A phase that repeats uses it to name its files, so a later round does not overwrite an earlier one. |

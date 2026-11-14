@@ -393,6 +393,14 @@ class AgentCall(BaseModel):
     # "" = the agent's one session for the run. adw_tickets gives every ticket
     # its own, so each ticket starts fresh and its retries keep their context.
     session: str = ""
+    # What SSSF's own verify phase found, for a reviewer: written by the chain's
+    # code through plan_checks.verify_brief, never from an agent's envelope.
+    # "" = no verify ran before this call.
+    host_verify: str = ""
+    # For a builder call that a host verify follows: the commands verify will
+    # run, written by the chain's code through plan_checks.builder_brief, never
+    # from an envelope. "" = no slot, and the prompt keeps its baseline bytes.
+    verify_next: str = ""
 
 
 # ── Config ───────────────────────────────────────────────────────────────────

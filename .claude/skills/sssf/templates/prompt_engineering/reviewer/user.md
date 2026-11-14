@@ -10,6 +10,10 @@
 
 {{previous_envelope}}
 
+### host_verify
+
+{{host_verify}}
+
 ### context_handoff_dir
 
 {{context_handoff_dir}}

@@ -98,7 +98,7 @@ A repo installed before `stamp.json` existed has no record. Its first update rep
 
 ### Finish the update
 
-Run the update the way the repo takes any change: on a short branch cut from `main`, then fast-forward `main` to it and delete the branch. A repo whose own rules say otherwise follows its rules. Never run it while a chain is going: it refuses anyway.
+Run the update the way the repo takes any change: on a short branch cut from the branch SSSF runs from, then fast-forward that branch to it and delete the short one. That branch is the one the last `Update SSSF` commit sits on (`git branch --contains $(git log --all --grep='Update SSSF' -1 --format=%h)`), which isn't always `main`: a repo may use `master`, or keep SSSF on a working branch ahead of its main. When it is a working branch, leave the repo's main alone. A repo whose own rules say otherwise follows its rules. Never run it while a chain is going: it refuses anyway.
 
 1. Resolve every `!` file with `--take` or `--keep`, then check with `uv run .claude/skills/sssf/scripts/install.py --update` until `to review` is 0. `just sssf-update` refuses here, since the files you resolved leave the tree dirty.
 2. Read `git status` and `git diff`. Expect the files the update listed, `stamp.json`, and the skill copy under `.claude/skills/sssf/`. A file you did not expect is a question for the hub, not something to commit.

@@ -236,18 +236,24 @@ changes a path the agent is barred from (a fixed factory path or one in
 `protected_files`, unless the agent's own `writes` names it), when any
 `refs/replace/` ref is created, moved or deleted, or when SSSF can't compare
 the refs. The breach names the ref, its old and new sha, each commit and its
-paths, and holds for `writes: []` agents too. Paths under `specs/` aren't
-judged on other refs: every chain's plan phase commits its spec there on its
-own `sssf/*` branch, so judging it would stop every other live run, and a spec
-runs nothing. A `..`, `.` or empty part in the path voids that. `.scratch/` is
-judged, since `adw_tickets` hands a ticket under it straight to the builder.
+paths, and holds for `writes: []` agents too. A spec file isn't judged on
+other refs: a regular `.md` file (mode 100644) directly in `specs/`, not
+starting with `.` and not `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md` in any
+case. Every chain's plan phase commits its spec there on its own `sssf/*`
+branch, so judging it would stop every other live run, and a spec runs
+nothing. Anything else under `specs/` is judged: a subfolder, a link, an
+executable file, a dotfile, a non-Markdown file, and an instruction file, which
+a harness loads as instructions when an agent reads the folder. A `specs` entry
+in place of the folder is judged as the folder. `.scratch/` is judged, since
+`adw_tickets` hands a ticket under it straight to the builder.
 A new commit is read as `git diff-tree -m --root` reads it: against every
 parent, a root by its whole tree. The one exception is a commit of at most
-three parents with a stash's untracked-files commit among them, that is a
-parent that is not the first, is itself new and has no parents. It is judged
-against its other parents, and the untracked-files commit by its own tree.
-Git grafts are turned off for the check's
-reads. It doesn't stop for commits on the run's own branch (undone as above),
+three parents with a stash's untracked-files commit among them: a parent that
+is not the first, is itself new and is a real root. It is judged against its
+other parents, and the untracked-files commit by its own tree. A root is told
+from its raw commit object (no `parent` line), not from `git rev-list`, which
+honours `.git/shallow` and shows a commit listed there without its parents.
+Git grafts are turned off for the check's reads. It doesn't stop for commits on the run's own branch (undone as above),
 for commits that change only paths the agent may write, or for deleted refs,
 rewinds, fast-forwards and new refs at commits that already existed.
 SSSF only reads: it moves, deletes and fetches nothing, and runs no hook,
@@ -272,17 +278,20 @@ another run's:
   changes a protected path. A true merge commit is judged against both
   parents, so it stops the run when either side changed a protected path since
   the fork, even if those commits were old. Run again.
-- **Specs on any ref.** An agent can add, change or delete anything under
-  `specs/` on another ref, `main` included, without a stop. A spec on `main`
-  runs nothing, but a later run's planner may read it. A project roster entry
-  that protects a file under `specs/` by another pattern is exempt on other
-  refs too.
+- **Specs on any ref.** An agent can add, change or delete a spec file on
+  another ref, `main` included, without a stop. A spec on `main` runs nothing,
+  but a later run's planner may read it as it reads any spec. A spec that isn't
+  a regular `.md` file directly in `specs/` still stops other runs: one in a
+  subfolder, one with the executable bit, one named `X.MD`. In the hub that
+  includes the engineer's own commit of a task brief under `specs/tasks/`
+  during an agent call.
 - **Octopus merges.** A commit with four parents or more that has a new root
   among them is judged against the root too, as before. An engineer's octopus
   merge of an unrelated new history during a call stops the run and names every
   file the root lacks.
 - **A new root parent.** In a commit of at most three parents, a parent that
-  is not the first, is a new commit and has no parents isn't diffed against. What this gives up is a path the merge
+  is not the first, is a new commit and is a real root isn't diffed against.
+  What this gives up is a path the merge
   carries unchanged from its first parent that the root lacks. That is the
   content of an existing commit when the first parent already existed: a merge
   of an existing commit with a new root, the same as re-parenting below.

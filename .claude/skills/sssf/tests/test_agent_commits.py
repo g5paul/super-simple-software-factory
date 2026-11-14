@@ -689,6 +689,82 @@ def test_a_graft_hiding_the_hijack_of_main_is_stopped(shipped, tmp_path, monkeyp
     assert "refs/heads/main" in str(breach.value) and box["new"] in str(breach.value)
 
 
+def with_entries(run, parent: str, add=None, remove=()) -> str:
+    """A commit on `parent` with tree entries added as {path: (mode, text)} or removed."""
+    index = run.repo_root.parent / "entries.index"
+    index.unlink(missing_ok=True)
+    plumb(run, "read-tree", parent, index=index)
+    for path in remove:
+        plumb(run, "update-index", "--force-remove", path, index=index)
+    for path, (mode, text) in (add or {}).items():
+        blob = plumb(run, "hash-object", "-w", "--stdin", input=text)
+        plumb(run, "update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}", index=index)
+    return forge(run, plumb(run, "write-tree", index=index), parent)
+
+
+def on_main(run, sha: str) -> None:
+    git("update-ref", "refs/heads/main", sha)
+
+
+def shallow_merge_setup(shipped):
+    """main is base then fix; returns act() putting a merge of (base, m2) on main
+    with base's tree, m2 a new empty-tree commit listed in .git/shallow."""
+    base, fix = moved_on(shipped)
+
+    def act():
+        m2 = forge(shipped, plumb(shipped, "mktree", input=""), fix)
+        git("update-ref", "refs/heads/main",
+            forge(shipped, git("rev-parse", f"{base}^{{tree}}"), base, m2))
+        (shipped.repo_root / ".git/shallow").write_text(f"{m2}\n")
+    return act
+
+
+@pytest.mark.parametrize("name", ["builder", "reviewer"])
+def test_a_swapped_parent_merge_with_a_shallow_listed_parent_is_stopped(shipped, name):
+    assert R in stopped(shipped, roster(shipped, name), shallow_merge_setup(shipped))
+
+
+def test_the_same_in_a_linked_worktree_is_stopped(shipped, tmp_path):
+    wt = tmp_path / "run-b"
+    git("worktree", "add", "-q", "-b", "sssf/b", str(wt), "main")
+    run_b = SimpleNamespace(cfg=shipped.cfg, repo_root=wt)
+    assert R in stopped(run_b, roster(shipped, "builder"), shallow_merge_setup(shipped))
+
+
+@pytest.mark.parametrize("path", [
+    "specs/CLAUDE.md", "specs/CLAUDE.local.md", "specs/AGENTS.md", "specs/claude.md",
+    "specs/.claude/skills/x/SKILL.md", "specs/sub/x.md", "specs/.hidden.md", "specs/notes.txt"])
+def test_a_specs_path_that_is_not_a_spec_file_is_stopped(shipped, path):
+    assert path in stopped(shipped, roster(shipped, "builder"),
+                           lambda: hijack(shipped, files={path: "x\n"}))
+
+
+@pytest.mark.parametrize("kind", ["symlink", "gitlink", "executable", "changed"])
+def test_a_specs_md_that_is_not_a_regular_file_is_stopped(shipped, kind):
+    path, mode = {"symlink": ("specs/env.md", "120000"), "gitlink": ("specs/link.md", "160000"),
+                  "executable": ("specs/run.md", "100755"), "changed": ("specs/note.md", "120000")}[kind]
+    assert path in stopped(shipped, roster(shipped, "builder"), lambda: on_main(
+        shipped, with_entries(shipped, git("rev-parse", "main"), {path: (mode, "../.env")})))
+
+
+def test_a_specs_link_in_place_of_the_folder_is_stopped(shipped):
+    assert "changes: specs" in stopped(shipped, roster(shipped, "builder"), lambda: on_main(
+        shipped, with_entries(shipped, git("rev-parse", "main"), {"specs": ("120000", "../.env")},
+                              remove=["specs/note.md"])))
+
+
+@pytest.mark.parametrize("name", ["builder", "reviewer"])
+def test_adding_changing_and_deleting_a_spec_file_is_not_stopped(shipped, name):
+    who = roster(shipped, name)
+    path = "specs/abc123_x.md"
+    assert go(shipped, who, lambda: on_main(shipped, with_entries(
+        shipped, git("rev-parse", "main"), {path: ("100644", "1\n")}))) == []
+    assert go(shipped, who, lambda: on_main(shipped, with_entries(
+        shipped, git("rev-parse", "main"), {path: ("100644", "2\n")}))) == []
+    assert go(shipped, who, lambda: on_main(shipped, with_entries(
+        shipped, git("rev-parse", "main"), remove=[path, "specs/note.md"]))) == []
+
+
 def test_a_commit_with_sixty_thousand_parents_is_read_and_stopped(shipped):
     main = git("rev-parse", "main")
     root = forge(shipped, plumb(shipped, "mktree", input=""))

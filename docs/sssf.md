@@ -19,7 +19,7 @@ Most of `adws/` is the install, the same files every repo gets. A few parts exis
 | `adws/features.py` | yes | what each feature cost ([What each feature cost](#what-each-feature-cost)) |
 | `adws/tests/` | yes | tests for the four hub scripts above |
 | `local.just` | yes | the hub's recipes, which the justfile loads: `guard-change`, `projects`, `levers`, `features`, `phase-times` and `hub-update` |
-| `.claude/agents/bypass-reviewer.md` | yes | a bypass review outside a guard-change run ([Guard changes](#guard-changes)) |
+| `.claude/agents/bypass-reviewer.md` | yes | the second bypass review before every guard merge ([Guard changes](#guard-changes)) |
 | `.githooks/pre-push` | yes | the secret scan and private-name check on every push ([secret-scan.md](secret-scan.md)) |
 
 ## Ground rules
@@ -98,6 +98,8 @@ Without `--worktree`, the run holds the hub's checkout on its branch until it en
 Some findings need an agent on the host, in a run with `--sandbox none`, to write a file outside the repo that the host later runs. Such a finding is a local-mode limit, not a bypass. Decision 14 in [openshell-sandbox.md](designs/openshell-sandbox.md#decided-by-the-engineer) says why.
 
 Every finding lands in `context_handoff/guard_report.md`. A run that passes commits the code. A run that stops leaves the code in the tree for the engineer. Nothing merges to `main` on its own.
+
+Before a passing run merges, the `bypass-reviewer` subagent (`.claude/agents/bypass-reviewer.md`) reviews the branch a second time, from the base and head refs alone. It hasn't read the spec, so it isn't held to the spec's idea of what could go wrong. On 2026-11-14 it found five bypasses in a run the chain had passed.
 
 The chain, its prompts, its three roster agents and its tests are hub-only (`guard_builder` uses the builder's prompts): `adws/adw_guard_change.py`, `adws/adw_data/prompt_engineering/` under `bypass_reviewer/` and `guard_spec_reviewer/`, and `adws/tests/`. An update never touches them. `max_run_cost` is $30 here, since a run can make three Opus bypass reviews at up to $5 each, and from 2026-11-13 its planner is Fable at up to $4 a call.
 

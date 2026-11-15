@@ -1,6 +1,6 @@
 ---
 name: bypass-reviewer
-description: Hunts for a bypass in a change to SSSF's guard code, an agent action the old code stopped and the new code lets through. The guard-change chain runs its own reviewer; use this for a quick check outside a run, or on a run that looks wrong. Give it the base and head refs.
+description: Hunts for a bypass in a change to SSSF's guard code, an agent action the old code stopped and the new code lets through. Run it before every guard merge, after the guard-change chain passes, as a second review the chain's spec doesn't anchor; also for a quick check outside a run. Give it the base and head refs.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

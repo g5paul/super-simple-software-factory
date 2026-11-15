@@ -657,6 +657,8 @@ def builder() -> AgentConfig:
     return AgentConfig(name="builder", prompt_engineering=PromptEngineering(system="s", user="u"))
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_git_config_global_through_a_stow_link_deletes_nothing(repo, home, tmp_path):
     """Eleventh review, q8b: `git config --global color.ui auto` wrote through a
     stow-linked ~/.gitconfig. The guard reports that, and the rollback that
@@ -1780,6 +1782,8 @@ def test_a_real_dir_swapped_for_a_dangling_link_writes_nothing_through_it(repo, 
 # ── a prefix that no longer resolves ──
 
 @pytest.mark.parametrize("how", ["removed", "file", "locked"])
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_dir_before_dotdot_that_no_longer_resolves_is_seen(repo, home, tmp_path, how):
     if how == "locked" and os.geteuid() == 0:
         pytest.skip("root can enter a mode 0 directory")
@@ -1985,6 +1989,8 @@ def test_a_retargeted_home_link_still_puts_back_the_physical_gitconfig(repo, tmp
 # ── a git config git can't read ──
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_symlink_loop_in_an_include_stops_the_run_first(repo, home):
     include = f"{repo}/loop/x.inc"
     git(repo, "config", "--add", "include.path", include)
@@ -2033,6 +2039,8 @@ def test_a_dot_git_git_cannot_read_stops_the_run(tmp_path):
         permissions.guard_git_dir(shipped(root))
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_broken_global_config_outside_a_repo_stops_the_run(tmp_path, home):
     (home / ".gitconfig").write_text(f"[include]\n\tpath = {tmp_path}/gloop/x.inc\n")
     (tmp_path / "gloop").symlink_to("gloop")
@@ -2147,6 +2155,8 @@ def _real(path: str) -> str:
     return permissions._sh(permissions._REAL, path).stdout.split("\0")[0]
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_real_of_an_unnameable_dir_is_marked(unnameable):
     u = unnameable
     u.lock()
@@ -2159,6 +2169,8 @@ def test_real_of_an_unnameable_dir_is_marked(unnameable):
     assert _real(u.inc) == u.physical
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_an_include_under_an_unnameable_dir_is_watched_and_caught(repo, unnameable):
     u = unnameable
     u.lock()
@@ -2178,6 +2190,8 @@ def test_an_include_under_an_unnameable_dir_is_watched_and_caught(repo, unnameab
     assert Path(u.inc).read_bytes() == data
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_dotdot_include_under_an_unnameable_dir_stops_the_run_first(repo, unnameable):
     u = unnameable
     u.lock()
@@ -2193,6 +2207,8 @@ def test_a_dotdot_include_under_an_unnameable_dir_stops_the_run_first(repo, unna
     assert state(repo) == before
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_prefix_that_becomes_unnameable_has_moved(unnameable):
     u = unnameable
     walked = [u.inc]
@@ -2214,6 +2230,8 @@ def _hooks_unnameable(repo: Path) -> None:
         pytest.skip("git can still name this hooks path here")
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_hooks_path_git_cannot_name_stops_the_run_first(repo, home, unnameable):
     hooks = f"{unnameable.base}/A/B/hooks"
     git(repo, "config", "core.hooksPath", hooks)
@@ -2232,6 +2250,8 @@ def test_a_hooks_path_git_cannot_name_stops_the_run_first(repo, home, unnameable
     assert not os.path.lexists(f"{unnameable.physical.rsplit('/', 1)[0]}/hooks")
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_hooks_path_git_can_name_again_is_watched(repo, unnameable):
     git(repo, "config", "core.hooksPath", f"{unnameable.base}/A/B/hooks")
     _hooks_unnameable(repo)

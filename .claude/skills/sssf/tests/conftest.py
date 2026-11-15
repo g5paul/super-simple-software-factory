@@ -43,6 +43,15 @@ def no_dotenv_keys(monkeypatch):
     monkeypatch.setattr(utils, "DOTENV_KEYS", frozenset())
 
 
+def pytest_configure(config):
+    """Two markers for tests that can't pass under agentsh. A marker only labels a test.
+    Nothing here skips or deselects one, so a run with no `-m`, verify's included, runs them
+    all. An agent under agentsh runs `-m 'not pushes and not host_only'`."""
+    config.addinivalue_line("markers", "pushes: the test runs `git push`, which agentsh refuses")
+    config.addinivalue_line("markers", "host_only: the test passes outside agentsh and fails under "
+                            "it, whether its error names the sandbox or only follows from a denial")
+
+
 SKILL_ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
 _CACHES = {".pytest_cache", ".ruff_cache", "__pycache__"}
 

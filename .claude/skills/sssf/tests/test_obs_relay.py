@@ -129,6 +129,8 @@ def _kinds(fwd) -> list[str]:
 
 # --- what the host posts ------------------------------------------------------
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['e0', 'e1', 'e2']
+@pytest.mark.host_only
 def test_events_go_to_obs_with_the_host_token_and_the_calls_own_names(obs):
     fwd = _forwarder(obs)
     fwd.finish("".join(_line(_event(n)) for n in range(3)))
@@ -141,6 +143,8 @@ def test_events_go_to_obs_with_the_host_token_and_the_calls_own_names(obs):
     assert fwd.counts() == {"posted": 3, "rejected": 0, "dropped": 0, "unposted": 0}
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['sssf-abc-s1...host-session']
+@pytest.mark.host_only
 def test_the_run_prefix_goes_on_every_session_id(obs):
     from adw_modules import obs_relay
     fwd = obs_relay.Forwarder(obs_relay.Target(server=obs.url, token="obs-secret", session_prefix="sssf-abc-"))
@@ -148,6 +152,8 @@ def test_the_run_prefix_goes_on_every_session_id(obs):
     assert [e["session_id"] for e in obs.events] == ["sssf-abc-s1", "sssf-abc-a-host-session"]
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['e9']
+@pytest.mark.host_only
 def test_malformed_lines_and_events_are_dropped(obs):
     fwd = _forwarder(obs)
     bad = ["not json\n", "[1, 2]\n", _line({"type": "x", "session_id": "s"}),
@@ -158,6 +164,8 @@ def test_malformed_lines_and_events_are_dropped(obs):
     assert fwd.counts()["dropped"] == 7                   # a blank line isn't an event
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['e0', 'e1', 'e2', 'e3']
+@pytest.mark.host_only
 def test_an_event_seen_live_is_not_posted_again_by_the_sweep(obs):
     fwd = _forwarder(obs)
     fwd.live()
@@ -168,12 +176,16 @@ def test_an_event_seen_live_is_not_posted_again_by_the_sweep(obs):
     assert fwd.counts()["posted"] == 4
 
 
+# host_only, downstream: under agentsh it fails with: assert [] == [50, 50, 20]
+@pytest.mark.host_only
 def test_batches_hold_at_most_50_events(obs):
     fwd = _forwarder(obs)
     fwd.finish("".join(_line(_event(n)) for n in range(120)))
     assert [len(b) for b in obs.batches] == [50, 50, 20]
 
 
+# host_only, downstream: under agentsh it fails with: assert (0 == 6)
+@pytest.mark.host_only
 def test_batches_stay_under_the_byte_limit(obs, monkeypatch):
     from adw_modules import obs_relay
     monkeypatch.setattr(obs_relay, "BATCH_BYTES", 2000)
@@ -182,6 +194,8 @@ def test_batches_stay_under_the_byte_limit(obs, monkeypatch):
     assert len(obs.events) == 6 and all(len(json.dumps(b)) <= 2000 for b in obs.batches)
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert ([] == ['e2']
+@pytest.mark.host_only
 def test_an_event_too_big_for_a_batch_is_dropped(obs, monkeypatch):
     from adw_modules import obs_relay
     monkeypatch.setattr(obs_relay, "BATCH_BYTES", 2000)
@@ -190,6 +204,8 @@ def test_an_event_too_big_for_a_batch_is_dropped(obs, monkeypatch):
     assert [e["event_id"] for e in obs.events] == ["e2"] and fwd.counts()["dropped"] == 1
 
 
+# host_only, downstream: under agentsh it fails with: assert (0 == 5)
+@pytest.mark.host_only
 def test_past_the_event_cap_the_call_stops_posting_and_warns_once(obs, monkeypatch):
     from adw_modules import obs_relay
     monkeypatch.setattr(obs_relay, "MAX_EVENTS", 5)
@@ -199,6 +215,8 @@ def test_past_the_event_cap_the_call_stops_posting_and_warns_once(obs, monkeypat
     assert _kinds(fwd) == ["cap"]
 
 
+# host_only, downstream: under agentsh it fails with: assert (0 == 3)
+@pytest.mark.host_only
 def test_past_the_byte_cap_the_call_stops_posting(obs, monkeypatch):
     from adw_modules import obs_relay
     one = len(json.dumps(_event(1, pool="sssf-abc", agent_name="builder", tags=["sssf", "adw-abc"])))
@@ -225,6 +243,8 @@ def test_obs_that_is_not_listening_warns_and_never_raises(obs):
     assert fwd.counts()["unposted"] == 1 and _kinds(fwd) == ["post"]
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert {'posted': 0,...'unposted': 3} == {'posted': 2,...
+@pytest.mark.host_only
 def test_events_obs_rejects_are_counted(obs):
     obs.reject = {"e1"}
     fwd = _forwarder(obs)
@@ -233,6 +253,8 @@ def test_events_obs_rejects_are_counted(obs):
     assert _kinds(fwd) == ["rejected"]
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['e1']
+@pytest.mark.host_only
 def test_live_posting_sends_events_before_the_call_ends(obs):
     fwd = _forwarder(obs)
     fwd.live()
@@ -284,6 +306,8 @@ def _post(url, body: bytes, path="/events", timeout=30):
 
 
 @node
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_relay_answers_health_and_writes_each_event_as_a_line(relay):
     url, events, proc = relay
     with urllib.request.urlopen(url + "/health", timeout=5) as res:
@@ -317,6 +341,8 @@ def test_the_relay_listens_on_loopback_only(relay):
 
 
 @node
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_relay_refuses_bad_json_and_oversized_bodies(relay):
     url, events, _ = relay
     assert _post(url, b"{nope")[0] == 400
@@ -350,6 +376,8 @@ def test_live_and_sweep_never_post_one_event_twice(obs, monkeypatch):
     assert counts["posted"] == len(ids) and counts["posted"] + counts["unposted"] == 300
 
 
+# host_only, downstream: under agentsh it fails with: assert (0 < 0)
+@pytest.mark.host_only
 def test_the_sweep_has_one_deadline(obs, monkeypatch):
     import time
     from adw_modules import obs_relay
@@ -377,6 +405,8 @@ def test_a_server_answering_a_byte_at_a_time_cant_hold_a_post(obs, monkeypatch):
     assert _kinds(fwd) == ["post"]
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert ([] == ['e6']
+@pytest.mark.host_only
 def test_events_obs_cant_store_are_dropped_here(obs):
     fwd = _forwarder(obs)
     no_ts = {k: v for k, v in _event(1).items() if k != "ts"}
@@ -388,6 +418,8 @@ def test_events_obs_cant_store_are_dropped_here(obs):
     assert [e["event_id"] for e in obs.events] == ["e6"] and fwd.counts()["dropped"] == 5
 
 
+# host_only, downstream: under agentsh it fails with: assert (0 == 70)
+@pytest.mark.host_only
 def test_a_batch_obs_refuses_is_dropped_and_the_rest_still_go(obs):
     obs.bad = {"e3"}
     fwd = _forwarder(obs)
@@ -408,6 +440,8 @@ def test_past_the_cap_the_host_holds_no_more_ids(obs, monkeypatch):
     assert fwd.counts()["dropped"] == 4990
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert {'posted': 0,...'unposted': 2} == {'posted': 1,...
+@pytest.mark.host_only
 def test_odd_lines_and_answers_never_raise(obs):
     deep = "[" * 100_000 + "]" * 100_000 + "\n"
     obs.answer = json.dumps({"rejected": [["not", "hashable"], {"a": 1}, "e1"]}).encode()
@@ -432,6 +466,8 @@ def test_a_malformed_line_seen_live_and_swept_counts_once(obs):
     assert fwd.counts()["dropped"] == 1
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert {'posted': 0,...'unposted': 1} == {'posted': 1,...
+@pytest.mark.host_only
 def test_a_post_that_ran_out_of_time_but_landed_isnt_called_rejected(obs, monkeypatch):
     import time
     from adw_modules import obs_relay
@@ -459,6 +495,8 @@ def test_the_token_never_follows_a_redirect(obs):
         other.close()
 
 
+# host_only, downstream: under agentsh it fails with: assert 0 == 1
+@pytest.mark.host_only
 def test_posts_skip_any_proxy(obs, monkeypatch):
     monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
@@ -470,6 +508,8 @@ def test_posts_skip_any_proxy(obs, monkeypatch):
 
 
 @node
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_relay_answers_while_nobody_reads_its_stdout(tmp_path):
     from adw_modules import obs_relay
     events = tmp_path / "events.jsonl"
@@ -486,6 +526,8 @@ def test_the_relay_answers_while_nobody_reads_its_stdout(tmp_path):
         proc.wait()
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert ([] == ['e5']
+@pytest.mark.host_only
 def test_fields_obs_binds_as_scalars_must_be_scalars(obs):
     fwd = _forwarder(obs)
     fwd.finish(_line(_event(1, model={"id": "x"})) + _line(_event(2, provider=["a"]))

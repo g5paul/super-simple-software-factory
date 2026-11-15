@@ -154,6 +154,8 @@ def test_an_extension_outside_the_repo_stops_the_run(repo, tree, tmp_path, where
     assert "builder" in str(stop.value) and path in str(stop.value)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_directory_or_a_committed_symlink_is_not_an_extension(repo, tree):
     (repo / ".pi/extensions").mkdir(parents=True)
     (repo / ".pi/extensions/a.ts").write_text("// x\n")

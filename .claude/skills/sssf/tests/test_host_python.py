@@ -146,6 +146,8 @@ def _venv(tmp_path):
 
 
 @pytest.mark.parametrize("route", ["pythonpath", "sitecustomize", "pth"])
+# host_only, downstream: under agentsh it fails with: AssertionError: assert 'hello' in ''
+@pytest.mark.host_only
 def test_startup_code_no_longer_reaches_the_answer(tmp_path, monkeypatch, route):
     h = host(tmp_path, monkeypatch)
     if route == "pythonpath":

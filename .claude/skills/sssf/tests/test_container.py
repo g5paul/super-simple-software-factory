@@ -159,6 +159,8 @@ def test_a_stale_socket_and_a_dead_broker_stop_the_session(tmp_path):
     assert not [x for x in lines if x.startswith("run")]
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: the pi token broker at...
+@pytest.mark.host_only
 def test_a_stale_socket_is_replaced_by_a_live_broker(tmp_path):
     done, lines, sock, state, _ = _session(
         tmp_path, (TEMPLATES / "pi_token_broker.py").read_text(), _stale_socket)

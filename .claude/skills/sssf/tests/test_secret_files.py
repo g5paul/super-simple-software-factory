@@ -56,12 +56,16 @@ def find(root: Path, **kw) -> list[str]:
                              skip=[root / "adws/adw_data"], **kw)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_find_returns_the_default_set_and_pattern_matches(tmp_path):
     make_repo(tmp_path)
     assert find(tmp_path) == sorted(str(tmp_path / n) for n in
                                     (".env", "sub/.env.local", "config/creds.json"))
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_worktree_root_outside_the_main_root_is_walked_too(tmp_path):
     main, tree = make_repo(tmp_path / "main"), tmp_path / "wt"
     (tree / "deep").mkdir(parents=True)
@@ -115,6 +119,8 @@ def request_with(files: list[str], tmp: Path) -> AgentRequest:
                         secret_files=files, local_guard=LocalGuard(mode="none"))
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_claude_code_denies_read_of_each_file_once_with_the_double_slash_form(tmp_path):
     make_repo(tmp_path)
     files = find(tmp_path)
@@ -159,6 +165,8 @@ print(json.dumps({
 '''
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_key_the_environment_already_had_is_still_held_back_from_agents(tmp_path):
     stamped_repo(tmp_path)
     (tmp_path / ".env").write_text("APP_SECRET=from-dotenv\nSSSF_X=1\nDATABASE_URL=db\n")
@@ -193,6 +201,8 @@ if "-p" in sys.argv:
 
 @pytest.mark.skipif(not (shutil.which("just") and shutil.which("uv")),
                     reason="needs just and uv on PATH")
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_launch_through_the_stamped_just_recipe_keeps_dotenv_keys_from_the_agent(tmp_path):
     (tmp_path / "repo").mkdir()
     repo = stamped_repo(tmp_path / "repo")
@@ -218,6 +228,8 @@ def refuse(line: str, files: list[str], cwd: Path):
                           text=True, env=env, cwd=cwd)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_the_shell_rule_refuses_commands_naming_a_secret_file(tmp_path):
     make_repo(tmp_path)
     files = find(tmp_path)
@@ -232,6 +244,8 @@ def test_the_shell_rule_refuses_commands_naming_a_secret_file(tmp_path):
     assert re.search(pattern, "cd /x && eval 'cat .env' < /dev/null && pwd -P >| /tmp/c", re.M)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_secret_guard_finds_files_and_builds_the_rule(tmp_path, monkeypatch):
     cfg = shipped_config()
     has = make_repo(tmp_path / "has")
@@ -263,6 +277,8 @@ def test_the_refuse_extension_is_the_last_pi_extension_without_refuse_rules(tmp_
     assert loaded == ["first.ts", str(agent_pi.REFUSE_EXTENSION)]
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_execute_marks_only_the_built_in_rule_in_the_requests_refuse_rules(tmp_path, monkeypatch):
     cfg = shipped_config()
     root = make_repo(tmp_path / "repo")

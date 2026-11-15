@@ -62,6 +62,8 @@ def ask(sock) -> str:
     return data.decode()
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_it_hands_out_the_token_and_asks_pi_the_fixed_way(box):
     _, sock = box.start(box.fake_pi("echo eyJ-access"))
     assert oct(os.stat(sock).st_mode & 0o777) == "0o600"
@@ -70,6 +72,8 @@ def test_it_hands_out_the_token_and_asks_pi_the_fixed_way(box):
         "auth print-bearer-token --provider openai --min-expiry 35m".split())
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_an_api_key_is_refused_and_never_echoed(box):
     p, sock = box.start(box.fake_pi("echo sk-live"))
     reply = ask(sock)
@@ -79,16 +83,22 @@ def test_an_api_key_is_refused_and_never_echoed(box):
     assert "sk-live" not in out + err
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_no_sign_in_is_an_error(box):
     _, sock = box.start(box.fake_pi("exit 1"))
     assert "Sign in with `pi`" in ask(sock) and ask(sock).startswith("ERR ")
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_missing_pi_is_an_error(box):
     _, sock = box.start(str(box.dir / "no-such-pi"))
     assert "not installed" in ask(sock)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_the_token_is_never_printed(box):
     p, sock = box.start(box.fake_pi("echo eyJ-secret"))
     ask(sock)
@@ -97,6 +107,8 @@ def test_the_token_is_never_printed(box):
     assert "eyJ-secret" not in out + err
 
 
+# host_only, downstream: under agentsh it fails with: subprocess.TimeoutExpired: Command '['...
+@pytest.mark.host_only
 def test_a_second_broker_leaves_a_live_socket_alone(box):
     pi = box.fake_pi("echo eyJ-access")
     _, sock = box.start(pi)
@@ -106,6 +118,8 @@ def test_a_second_broker_leaves_a_live_socket_alone(box):
     assert ask(sock) == "OK eyJ-access\n"
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_stale_socket_is_replaced(box):
     sock = box.dir / "b.sock"
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -116,6 +130,8 @@ def test_a_stale_socket_is_replaced(box):
     assert ask(sock) == "OK eyJ-access\n"
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_socket_left_by_a_terminated_broker_is_replaced(box):
     pi = box.fake_pi("echo eyJ-access")
     first, sock = box.start(pi)

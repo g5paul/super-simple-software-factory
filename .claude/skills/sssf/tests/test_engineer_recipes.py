@@ -62,6 +62,8 @@ def calls(tmp_path: Path) -> list[str]:
 
 
 @pytest.mark.parametrize("recipe", RECIPES)
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_recipe_refuses_inside_a_run(tmp_path, recipe):
     repo = repo_with_justfile(tmp_path)
     done = run(tmp_path, repo, recipe, adw_id="abc12345")
@@ -72,6 +74,8 @@ def test_recipe_refuses_inside_a_run(tmp_path, recipe):
     assert calls(tmp_path) == []
 
 
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_container_runs_run_sh_with_its_arguments(tmp_path):
     repo = repo_with_justfile(tmp_path)
     done = run(tmp_path, repo, "container", "-p", "a request")
@@ -79,6 +83,8 @@ def test_container_runs_run_sh_with_its_arguments(tmp_path):
     assert calls(tmp_path) == ["run.sh -p a request"]
 
 
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_container_without_run_sh_says_how_to_stamp_it(tmp_path):
     repo = repo_with_justfile(tmp_path)
     (repo / "container" / "run.sh").unlink()
@@ -88,6 +94,8 @@ def test_container_without_run_sh_says_how_to_stamp_it(tmp_path):
     assert calls(tmp_path) == []
 
 
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_e2b_template_runs_the_script(tmp_path):
     repo = repo_with_justfile(tmp_path)
     done = run(tmp_path, repo, "e2b-template", "--name", "x")
@@ -95,6 +103,8 @@ def test_e2b_template_runs_the_script(tmp_path):
     assert calls(tmp_path) == ["uv run .claude/skills/sssf/scripts/e2b_template.py --name x"]
 
 
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_agentsh_install_finds_the_hub_and_the_main_checkout(tmp_path):
     repo = repo_with_justfile(tmp_path)
     (repo / "sub").mkdir()

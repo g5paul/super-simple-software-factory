@@ -204,12 +204,16 @@ def broker(tmp_path, monkeypatch):
     shutil.rmtree(d, ignore_errors=True)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_the_container_gets_the_brokers_token(broker):
     env = agent_pi._in_container({"OBS_AUTH_TOKEN": "obs"}, sandbox.LOCAL)
     assert env["OPENAI_API_KEY"] == "eyJ-tok"
     assert env["OBS_AUTH_TOKEN"] == "obs" and "OBS_DISABLE" not in env
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_subscription_run_still_gets_the_brokers_token(broker, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-host")
     monkeypatch.setenv("SSSF_PI_AUTH", "subscription")
@@ -217,6 +221,8 @@ def test_a_subscription_run_still_gets_the_brokers_token(broker, monkeypatch):
     assert env["OPENAI_API_KEY"] == "eyJ-tok"
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: Regex pattern did not match.
+@pytest.mark.host_only
 def test_a_broker_error_stops_with_its_message(broker):
     broker["answer"] = b"ERR no sign-in\n"
     with pytest.raises(sandbox.SandboxFailed, match="no sign-in"):
@@ -610,6 +616,8 @@ def _shipped(tmp_path, monkeypatch, roster="sssf.config.yaml"):
     return cfg, [a.name for a in cfg.agents]
 
 
+# host_only, downstream: under agentsh it fails with: SystemExit: config validation failed:
+@pytest.mark.host_only
 def test_the_model_check_signs_in_through_the_broker(broker, catalog, tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     cfg, names = _shipped(tmp_path, monkeypatch)
@@ -619,6 +627,8 @@ def test_the_model_check_signs_in_through_the_broker(broker, catalog, tmp_path, 
     assert "eyJ-tok" not in repr(agent_pi._pi_catalog())
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_broker_error_stops_the_model_check_with_its_message(broker, catalog, tmp_path, monkeypatch):
     broker["answer"] = b"ERR sign in with pi, then /login\n"
     cfg, names = _shipped(tmp_path, monkeypatch)

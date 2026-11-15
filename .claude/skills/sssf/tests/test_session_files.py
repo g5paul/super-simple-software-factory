@@ -35,6 +35,8 @@ def test_write_over_a_symlink_replaces_it(where):
 
 @pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="no /proc/self/fd")
 @pytest.mark.parametrize("prefix", ["/dev/fd", "/proc/self/fd"])
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_write_over_a_descriptor_link_leaves_the_open_file(where, prefix):
     root, folder, outside = where
     held = outside / "held.txt"
@@ -47,6 +49,8 @@ def test_write_over_a_descriptor_link_leaves_the_open_file(where, prefix):
 
 
 @pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="no /proc/self/fd")
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_write_over_a_link_to_an_open_sqlite_db_keeps_the_db(where):
     root, folder, outside = where
     db = outside / "sssf.db"

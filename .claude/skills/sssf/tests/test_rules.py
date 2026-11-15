@@ -543,6 +543,8 @@ def test_a_call_in_a_turn_pi_ended_in_error_is_not_held_for_exit(stop):
 
 
 @pytest.mark.parametrize("dies", ["raises", "returns"])
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_execute_stops_when_the_agent_dies_with_a_refuse_call_pending(tmp_path, monkeypatch, dies):
     from adw_modules.data_types import AgentResult
     from test_secret_files import make_repo, shipped_config
@@ -747,6 +749,8 @@ def test_a_repo_rule_equal_to_the_built_in_one_still_counts():
     assert stop.value.refusals == rules.MAX_REFUSALS
 
 
+# host_only, downstream: under agentsh it fails with: adw_modules.sandbox.SandboxFailed: pi has no ChatGPT sign-in to hand a...
+@pytest.mark.host_only
 def test_a_pi_agent_in_a_vm_gets_the_refuse_extension_without_refuse_rules():
     installed = []
     vm = SimpleNamespace(install=installed.append, name="vercel", relay_obs=lambda t: None)
@@ -755,6 +759,8 @@ def test_a_pi_agent_in_a_vm_gets_the_refuse_extension_without_refuse_rules():
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun to load the pi extension")
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_the_pi_extension_blocks_secret_file_reads_and_the_built_in_pattern(tmp_path):
     from adw_modules import secret_files
     (tmp_path / ".env").write_text("K=v\n")

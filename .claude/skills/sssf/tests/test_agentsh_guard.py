@@ -560,6 +560,8 @@ def bare(service, tally=None):
     return process
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_only_a_named_exec_denial_counts_across_pages(service, monkeypatch):
     monkeypatch.setattr(agentsh_guard, "PAGE", 50)
     service.events = ([denial(i, "ptrace_file", rule="sssf-default-deny") for i in range(60)]
@@ -577,6 +579,8 @@ def test_only_a_named_exec_denial_counts_across_pages(service, monkeypatch):
     assert len(process.other_denials) == 61         # 60 file denials and the one unnamed exec denial, traced
 
 
+# host_only, downstream: under agentsh it fails with: assert (0 == 2)
+@pytest.mark.host_only
 def test_the_final_read_counts_each_page_as_it_arrives(service, monkeypatch):
     """A session can hold millions of events, so the final read takes each page as it comes instead of
     holding them all: a page that fails after two good ones still leaves their denials counted."""
@@ -592,6 +596,8 @@ def test_the_final_read_counts_each_page_as_it_arrives(service, monkeypatch):
     assert "final read of agentsh events failed" in process.failure
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_new_event_between_polls_counts_once_and_one_behind_the_offset_only_in_the_final_read(service):
     service.events = [denial(1)]
     process = bare(service)
@@ -608,6 +614,8 @@ def test_a_new_event_between_polls_counts_once_and_one_behind_the_offset_only_in
 
 
 @pytest.mark.parametrize("harness", ["claude_code", "pi"])
+# host_only, downstream: under agentsh it fails with: AssertionError: assert (not False and -9 is None)
+@pytest.mark.host_only
 def test_two_denials_go_on_and_the_third_stops_with_refusals_3(machine, service, harness):
     service.events = [denial(1), denial(2)]
     process = launch(machine, harness)
@@ -625,6 +633,8 @@ def test_two_denials_go_on_and_the_third_stops_with_refusals_3(machine, service,
     assert service.deletes == ["/api/v1/sessions/sess1"]
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_one_text_refusal_and_two_exec_denials_also_stop(machine, service):
     tally = rules.RefusalTally()
     tally.add()
@@ -637,6 +647,8 @@ def test_one_text_refusal_and_two_exec_denials_also_stop(machine, service):
     assert stop.value.refusals == 3
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_third_denial_seen_only_in_the_final_read_still_raises(machine, service):
     service.events = [denial(1), denial(2)]
     service.final_only = [denial(3)]
@@ -658,6 +670,8 @@ def test_three_failed_polls_end_the_run_as_a_failure_not_a_breach(machine, servi
     assert not isinstance(stop.value, rules.RuleBreach)
 
 
+# host_only, downstream: under agentsh it fails with: IndexError: list index out of range
+@pytest.mark.host_only
 def test_the_denial_trace_event_carries_paths_and_adds_nothing(machine, service):
     service.events = [denial(1, "ptrace_file", rule="sssf-default-deny")]
     process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
@@ -689,6 +703,8 @@ def test_agentsh_lines_do_not_reach_the_output(machine, service):
     assert process.stderr.read() == ""
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['/api/v1/sessions/sess1']
+@pytest.mark.host_only
 def test_stop_tree_kills_the_child_and_deletes_the_session_once(machine, service):
     process = launch(machine, "pi")
     process.stop_tree()
@@ -714,6 +730,8 @@ def test_live_service_is_active():
 
 # ── review findings ──────────────────────────────────────────────────────────
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_third_denial_in_the_final_read_counts_even_when_another_thread_is_ending(machine, service):
     service.events = [denial(1), denial(2)]
     service.final_only = [denial(3)]
@@ -734,6 +752,8 @@ def test_a_failed_final_read_is_a_failure_not_a_pass(machine, service):
         agentsh_guard.check_stopped(process, "b")
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_an_unnamed_exec_denial_is_traced_and_not_counted(service):
     service.events = [denial(1, rule=None)]
     process = bare(service)
@@ -1132,6 +1152,8 @@ def harness_run(request, machine, service, tmp_path, monkeypatch, fake):
     return run
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_three_denials_and_a_failing_final_read_are_a_breach_with_spend(harness_run, service):
     service.events = [denial(1), denial(2), denial(3)]
     service.fail_final = True
@@ -1150,6 +1172,8 @@ def test_a_clean_call_with_a_failing_final_read_is_a_failure_that_keeps_its_cost
         assert agent_cc._ledger(harness_run.req).is_file()
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_three_failed_polls_and_a_final_read_with_three_denials_are_a_breach(harness_run, service):
     service.fail_polls = True
     service.final_only = [denial(1), denial(2), denial(3)]
@@ -1189,6 +1213,8 @@ def _final_read_evidence(monkeypatch, service):
     return report
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_non_breach_failure_with_three_denials_becomes_the_breach(harness_run, service, monkeypatch):
     service.final_only = [denial(1), denial(2), denial(3)]
     original = ValueError("the tracer failed")
@@ -1220,6 +1246,8 @@ def test_a_text_breach_with_three_denials_counted_stays_that_breach(harness_run,
     assert stop.value is mine
 
 
+# host_only, downstream: under agentsh it fails with: adw_modules.account.RateLimitStop: Claude moved this account onto usag...
+@pytest.mark.host_only
 def test_the_credits_stop_gives_way_to_three_denials_and_not_to_two(
         machine, service, tmp_path, fake, private_registry):
     fake(_onto_credits(tmp_path))
@@ -1235,6 +1263,8 @@ def test_the_credits_stop_gives_way_to_three_denials_and_not_to_two(
         agent_cc.run(req)
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_late_failed_poll_after_close_does_not_set_failure(machine, service):
     service.poll_delay = 0.4
     process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
@@ -1247,6 +1277,8 @@ def test_a_late_failed_poll_after_close_does_not_set_failure(machine, service):
     agentsh_guard.check_stopped(process, "b")
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_agentsh_refused_with_its_cost_adds_it_to_the_run(factory):
     from adw_modules.data_types import AgentResult
     stop = agentsh_guard.AgentshRefused("the final read failed")
@@ -1269,6 +1301,8 @@ def test_a_pending_refuse_call_when_the_service_fails_is_a_breach_that_keeps_the
 
 # ── ending the session ───────────────────────────────────────────────────────
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['/api/v1/sessions/sess1']
+@pytest.mark.host_only
 def test_at_exit_kills_the_tree_and_sends_one_delete(machine, service):
     process = launch(machine, "pi")
     process._at_exit()
@@ -1277,6 +1311,8 @@ def test_at_exit_kills_the_tree_and_sends_one_delete(machine, service):
     assert service.deletes == ["/api/v1/sessions/sess1"]
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['/api/v1/sessions/sess1']
+@pytest.mark.host_only
 def test_a_system_exit_in_the_final_read_still_deletes_and_returns_at_once(machine, service, monkeypatch):
     process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
     process.wait()
@@ -1292,6 +1328,8 @@ def test_a_system_exit_in_the_final_read_still_deletes_and_returns_at_once(machi
 
 
 @pytest.mark.parametrize("mode", ["nointercept", "nomech", "seccomp", "wrongpolicy"])
+# host_only, downstream: under agentsh it fails with: AssertionError: assert [] == ['/api/v1/sessions/sess1']
+@pytest.mark.host_only
 def test_a_failed_attach_deletes_the_session_it_saw(machine, service, monkeypatch, mode):
     monkeypatch.setenv("FAKE_WRAP", mode)
     with pytest.raises(agentsh_guard.AgentshRefused):
@@ -1452,6 +1490,8 @@ def test_the_push_patterns_equal_the_designs_network_policy():
 
 @pytest.mark.parametrize("body,expected", [(b"null", []), (b'{"events": null}', []), (b"[]", []),
                                            (b'{"events": [{"id": 1}, 3]}', [{"id": 1}])])
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_get_reads_the_bodies_the_service_can_send(service, body, expected):
     service.raw_body = body
     assert bare(service)._get({"limit": 5}) == expected
@@ -1470,6 +1510,8 @@ def test_get_raises_on_an_http_error(service):
         bare(service)._get({"limit": 5})
 
 
+# host_only, downstream: under agentsh it fails with: assert -9 == 0
+@pytest.mark.host_only
 def test_a_null_page_past_the_end_is_not_a_failed_poll(machine, service):
     service.null_past_end = True
     service.events = []
@@ -2056,6 +2098,8 @@ def test_ensure_refuses_without_a_token_before_a_worktree_or_run_row(tmp_path):
                           text=True).stdout.count("\n") == 1
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert ('...
+@pytest.mark.host_only
 def test_claude_code_child_env_under_agentsh(machine, tmp_path, monkeypatch):
     token_file = tmp_path / "token.env"
     token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok-file\n")
@@ -2078,6 +2122,8 @@ def test_claude_code_child_env_under_agentsh(machine, tmp_path, monkeypatch):
         agent_cc.child_env(guard=machine.guard, config_dir=config_dir)
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_claude_agent_gets_the_runs_config_folder_and_refuses_without_a_token(
         machine, service, tmp_path, fake, monkeypatch):
     fake(FIXTURES / "cc_turn1.jsonl")
@@ -2291,6 +2337,8 @@ def test_an_unreadable_folder_refuses(tmp_path):
         (tree / "locked").chmod(0o700)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_path_longer_than_path_max_refuses_with_the_length_message(tmp_path):
     tree = tmp_path / "tree"
     tree.mkdir()
@@ -2570,6 +2618,8 @@ def prune_env(tmp_path, monkeypatch):
     api.server.shutdown()
 
 
+# host_only, downstream: under agentsh it fails with: assert [259200, 2592..., 259200, ...] == [7199, 0]
+@pytest.mark.host_only
 def test_the_prune_keeps_the_last_two_hours_in_several_batches(prune_env, monkeypatch):
     monkeypatch.setattr(prune_env.m, "BATCH", 3)
     prune_env.add(*([3 * DAY] * 7), 2 * 3600 + 1, 2 * 3600 - 1, 0)
@@ -2591,6 +2641,8 @@ def test_the_prune_walks_by_rowid_and_never_deletes_a_recent_row(prune_env, monk
 
 
 @pytest.mark.parametrize("how", ["listed", "dict", "down", "500", "junk", "items", "null_sessions", "empty_object"])
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_prune_deletes_nothing_without_a_clear_empty_session_list(prune_env, how):
     prune_env.add(3 * DAY, 3 * DAY)
     if how == "listed":
@@ -2616,6 +2668,8 @@ def test_the_prune_deletes_nothing_without_a_clear_empty_session_list(prune_env,
         assert "1 active session" in result["skipped"]
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_null_or_empty_session_list_lets_the_prune_run(prune_env):
     prune_env.add(3 * DAY)
     prune_env.api.body = b"null"
@@ -2630,6 +2684,8 @@ def _session_event(db, session, age):
     c.close()
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_session_quiet_for_two_hours_no_longer_stops_the_prune(prune_env):
     """A leftover session, such as one a cut-short probe left, held the prune off for 10 hours on
     2026-11-12. One started and last heard from more than KEEP_SECONDS ago has nothing left to read
@@ -2643,6 +2699,8 @@ def test_a_session_quiet_for_two_hours_no_longer_stops_the_prune(prune_env):
 
 
 @pytest.mark.parametrize("how", ["new", "heard_from", "no_created", "bad_created", "no_id"])
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_session_started_or_heard_from_in_two_hours_still_stops_the_prune(prune_env, how):
     prune_env.add(3 * DAY)
     session = {"id": "S1", "state": "ready", "created_at": utc(NOW - 5 * 3600)}
@@ -2663,6 +2721,8 @@ def test_a_session_started_or_heard_from_in_two_hours_still_stops_the_prune(prun
     assert len(prune_env.ages()) == (3 if how == "heard_from" else 1)
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert (6 == 4)
+@pytest.mark.host_only
 def test_a_session_that_appears_between_batches_stops_the_loop(prune_env, monkeypatch):
     monkeypatch.setattr(prune_env.m, "BATCH", 2)
     prune_env.add(*([3 * DAY] * 6))
@@ -2671,6 +2731,8 @@ def test_a_session_that_appears_between_batches_stops_the_loop(prune_env, monkey
     assert len(prune_env.ages()) == 4 and "active session" in result["skipped"] and result["last_prune"] is None
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert (0 == 0 and 2 == 1)
+@pytest.mark.host_only
 def test_a_prune_is_due_fifty_minutes_after_the_last(prune_env):
     prune_env.add(3 * DAY)
     prune_env.run()
@@ -2728,6 +2790,8 @@ def test_the_rendered_config_caps_the_audit_log():
     assert config["audit"]["rotation"] == {"max_size_mb": 200, "max_backups": 5}
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert ['audit.jsonl...jsonl.4', ...] == ['audit.jsonl...
+@pytest.mark.host_only
 def test_a_due_prune_deletes_only_old_rotated_audit_files(prune_env, tmp_path):
     folder, outside = _old_audit_files(prune_env, tmp_path)
     result = prune_env.run()
@@ -2745,6 +2809,8 @@ def test_a_listed_session_keeps_every_audit_file(prune_env, tmp_path):
     assert sorted(p.name for p in folder.iterdir()) == before and result["skipped"]
 
 
+# host_only, downstream: under agentsh it fails with: assert ([259200] == []
+@pytest.mark.host_only
 def test_a_session_at_the_audit_step_keeps_the_audit_files(prune_env, tmp_path):
     folder, _ = _old_audit_files(prune_env, tmp_path)
     before = sorted(p.name for p in folder.iterdir())
@@ -2773,6 +2839,8 @@ def test_audit_bytes_counts_the_live_log_and_rotated_files(prune_env, tmp_path):
     assert prune_env.run(audit=str(tmp_path / "missing" / "audit.jsonl"))["audit_bytes"] is None
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert 0 == 1
+@pytest.mark.host_only
 def test_an_audit_unlink_error_is_recorded_and_exits_1(prune_env, monkeypatch):
     old = prune_env.touch("audit.jsonl.2", 3 * DAY)
     real = os.unlink
@@ -2789,6 +2857,8 @@ def test_an_audit_unlink_error_is_recorded_and_exits_1(prune_env, monkeypatch):
     assert status["error"].startswith("PermissionError") and set(status) == keys | {"audit_bytes"}
 
 
+# host_only, downstream: under agentsh it fails with: assert (None)
+@pytest.mark.host_only
 def test_a_linked_audit_folder_keeps_every_file_in_its_target(prune_env, tmp_path, monkeypatch):
     target = tmp_path / "target"
     target.mkdir()
@@ -2812,6 +2882,8 @@ def test_a_linked_audit_folder_keeps_every_file_in_its_target(prune_env, tmp_pat
     assert (target / "audit.jsonl.2").exists() and (target / "audit.jsonl").exists()
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert (not True)
+@pytest.mark.host_only
 def test_the_audit_step_deletes_through_the_folder_it_opened(prune_env, tmp_path, monkeypatch):
     prune_env.touch("audit.jsonl.2", 3 * DAY)
     elsewhere = tmp_path / "elsewhere"
@@ -2898,6 +2970,8 @@ def test_check_machine_reads_an_old_status_as_the_store_alone(machine):
     assert agentsh_guard.check_machine(machine.guard) == []
 
 
+# host_only, downstream: under agentsh it fails with: assert 0 == 1
+@pytest.mark.host_only
 def test_analyze_runs_weekly_and_not_sooner(prune_env):
     prune_env.add(0)
     result = prune_env.run()
@@ -2950,6 +3024,8 @@ def test_prune_constants_agree_with_the_guard_and_stay_out_of_every_agent_write(
             assert world.rules.decision(world.rules.first_match(path, op)) == "deny", (path, op)
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_poll_asks_by_session_with_no_type_and_counts_only_named_exec_denials(service):
     service.events = [denial(1), denial(2, "ptrace_file", rule="sssf-default-deny"),
                       denial(3, decision="allow"), denial(4, rule=None),
@@ -3020,6 +3096,8 @@ def test_text_mode_reads_no_status_and_makes_no_note(monkeypatch):
     assert agentsh_guard.start(sandbox.LOCAL, "pi", ["x"], cwd="/w", env={}, guard=LocalGuard(mode="none")) == "p"
 
 
+# host_only, downstream: under agentsh it fails with: assert (not False and False)
+@pytest.mark.host_only
 def test_a_flood_of_events_cannot_hold_back_the_stop_after_three_denials(service, monkeypatch):
     monkeypatch.setattr(agentsh_guard, "PAGE", 5)
     page = [denial(1), denial(2), denial(3)] + [denial(i, "ptrace_file", rule="x", decision="allow") for i in (4, 5)]
@@ -3052,6 +3130,8 @@ def test_store_notes_are_announced_before_the_wrap_starts(machine, service, monk
     assert any("last pruned" in n for n in ended[0]["notes"])
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_failing_note_callback_does_not_refuse(machine, service):
     _write_status(machine, last_prune=utc(time.time() - 4 * 3600))
 
@@ -3073,6 +3153,8 @@ def test_the_forwarder_prints_and_traces_an_agentsh_note():
     assert (payload["polls"], payload["pages"], payload["slowest_poll_seconds"]) == (2, 3, 0.4)
 
 
+# host_only, downstream: under agentsh it fails with: assert (1 >= 1 and 0 >= 1)
+@pytest.mark.host_only
 def test_the_end_of_call_event_has_poll_counts_pages_and_slowest(machine, service):
     service.events = [denial(1, "ptrace_file", rule="x", decision="allow")]
     process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
@@ -3141,6 +3223,8 @@ def test_a_type_that_is_not_a_plain_name_counts_as_unknown(machine, service, mon
     assert "unknown 3" in text and "SECRET-ID" not in text and "/home/x" not in text and "aaaa" not in text
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_close_notes_at_least_the_drops_and_the_execve_drop(machine, service, monkeypatch):
     monkeypatch.setattr(agentsh_guard, "journal_drops",
                         lambda s, u, run=None: ({"ptrace_file": 34, "ptrace_execve": 2}, None))
@@ -3224,6 +3308,8 @@ def test_guard_event_names_only_agentsh_types():
         assert agentsh_guard.guard_event(bad) is False
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_forged_note_and_denials_in_the_stream_give_no_advice_and_no_trace(forged_run):
     forged_run()
     said, events = forged_run.said, forged_run.events
@@ -3250,6 +3336,8 @@ def test_a_rule_event_beside_forged_lines_is_still_checked(forged_run):
 
 
 @pytest.mark.parametrize("kind", ["cc", "pi"])
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_guards_own_note_prints_before_the_agent_starts(kind, machine, service, tmp_path, monkeypatch, fake):
     if kind == "cc":
         fake(FIXTURES / "cc_turn1.jsonl")
@@ -3304,6 +3392,8 @@ def _raise(error):
     (_journal(stderr="SECRET-STDERR", returncode=1), "exited 1"),
     (_raise(FileNotFoundError("journalctl")), "could not run (FileNotFoundError)"),
 ])
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_an_unreadable_journal_a_timeout_and_a_failed_journalctl_each_note_it(machine, service, monkeypatch, run, reason):
     monkeypatch.setattr(agentsh_guard, "journal_drops", lambda s, u: REAL_JOURNAL_DROPS(s, u, run=run))
     process = launch(machine, "pi", cmd=[sys.executable, "-c", "pass"])
@@ -3329,6 +3419,8 @@ def _closed(machine, events):
     return process
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_drops_by_type_reach_the_event_and_the_traced_payload(machine, service, monkeypatch):
     monkeypatch.setattr(agentsh_guard, "journal_drops",
                         lambda s, u, run=None: ({"ptrace_file": 34, "ptrace_execve": 2}, None))
@@ -3377,6 +3469,8 @@ def test_no_drops_gives_an_empty_object(machine, service):
     (_journal(stderr="SECRET-STDERR", returncode=1), "exited 1"),
     (_raise(FileNotFoundError("journalctl")), "could not run (FileNotFoundError)"),
 ])
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_failed_journal_read_gives_null_drops(machine, service, monkeypatch, run, reason):
     monkeypatch.setattr(agentsh_guard, "journal_drops", lambda s, u: REAL_JOURNAL_DROPS(s, u, run=run))
     events = []
@@ -3411,6 +3505,8 @@ def test_the_forwarder_passes_drops_and_tolerates_their_absence():
 FORGED_DROPS = {**FORGED_DENIALS, "drops": {"ptrace_execve": 999}}
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_forged_drops_in_the_stream_adds_no_trace_event(forged_run, monkeypatch):
     monkeypatch.setitem(globals(), "FORGED_DENIALS", FORGED_DROPS)
     forged_run()
@@ -3463,6 +3559,8 @@ def test_a_clean_prune_and_a_not_due_prune_exit_0(prune_env, monkeypatch):
     assert _main(prune_env, monkeypatch) == 0      # 50 minutes have not passed
 
 
+# host_only, downstream: under agentsh it fails with: assert ('OperationalError: old' == 'OperationalError: old'
+@pytest.mark.host_only
 def test_a_skipped_prune_exits_0_even_with_an_old_error(prune_env, monkeypatch):
     _old_status(prune_env, error="OperationalError: old")
     prune_env.api.body = b'[{"id": "s"}]'
@@ -3471,6 +3569,8 @@ def test_a_skipped_prune_exits_0_even_with_an_old_error(prune_env, monkeypatch):
     assert status["error"] == "OperationalError: old" and "active session" in status["skipped"]
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert 0 == 1
+@pytest.mark.host_only
 def test_a_recorded_prune_error_exits_1_and_keeps_the_status_fields(prune_env, monkeypatch):
     keys = _old_status(prune_env)
 
@@ -3662,6 +3762,8 @@ def test_a_keyboard_interrupt_in_the_loop_stops_the_tree(loop_run, monkeypatch, 
     _child_gone_and_quiet(loop_run)
 
 
+# host_only, downstream: under agentsh it fails with: AssertionError: assert False
+@pytest.mark.host_only
 def test_an_error_in_the_watch_setup_stops_the_tree(loop_run, monkeypatch):
     def boom(self, *args, **kwargs):
         raise RuntimeError("watch setup")
@@ -3672,6 +3774,8 @@ def test_an_error_in_the_watch_setup_stops_the_tree(loop_run, monkeypatch):
     _child_gone_and_quiet(loop_run)
 
 
+# host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
+@pytest.mark.host_only
 def test_close_and_on_exit_run_once_after_the_watch_on_a_clean_end(loop_run, monkeypatch):
     monkeypatch.setenv("FAKE_PI_EXIT", "1")
     result = loop_run([json.dumps({"type": "message_end", "message": _turn("stop", "hi")})])
@@ -3679,6 +3783,8 @@ def test_close_and_on_exit_run_once_after_the_watch_on_a_clean_end(loop_run, mon
     assert loop_run.closes == [True] and len(loop_run.exits) == 1
 
 
+# host_only, downstream: under agentsh it fails with: ValueError: the tracer failed
+@pytest.mark.host_only
 def test_close_and_on_exit_run_once_on_a_three_denial_stop(loop_run, service, monkeypatch):
     if loop_run.mode == "none":
         pytest.skip("three denials come from the agentsh service")

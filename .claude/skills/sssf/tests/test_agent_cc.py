@@ -562,6 +562,8 @@ def _refusals(logged):
     return [e.payload for e in logged if e.name == "rule_refused"]
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_bash_read_claude_code_denies_is_a_refusal_and_the_call_goes_on(tmp_path, fake):
     call_id = "toolu_011E3m58bgpqe7LGELGbwmZ2"
     outcome, logged, result = _replay(tmp_path, fake, "d.jsonl", _denied_bash(call_id))
@@ -576,6 +578,8 @@ def test_a_bash_read_claude_code_denies_is_a_refusal_and_the_call_goes_on(tmp_pa
     assert _refusals(by_sssf) == [payload]
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_three_denials_by_claude_code_stop_at_max_refusals(tmp_path, fake):
     ids = ["toolu_den1", "toolu_den2", "toolu_den3"]
     caught = []
@@ -590,6 +594,8 @@ def test_three_denials_by_claude_code_stop_at_max_refusals(tmp_path, fake):
     assert "times for this repo's rule: Never cat .env." in str(caught[0])
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_breach_names_the_built_in_rule_as_sssfs_and_a_repo_rule_as_the_repos(tmp_path):
     forward, _, builtin = _guarded(tmp_path / "a")
     forward(_bash_call("t1"))
@@ -614,6 +620,8 @@ def test_a_breach_names_the_built_in_rule_as_sssfs_and_a_repo_rule_as_the_repos(
     assert stop.value.builtin is False
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_three_denials_under_the_builtin_rule_never_stop_the_run(tmp_path, fake):
     ids = ["toolu_den1", "toolu_den2", "toolu_den3"]
     seen = []
@@ -623,6 +631,8 @@ def test_three_denials_under_the_builtin_rule_never_stop_the_run(tmp_path, fake)
     assert seen == [[0, 0, 0], [0, 0, 0]]
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_denial_for_another_call_does_not_excuse_a_call_that_ran(tmp_path, fake):
     grep_id = "toolu_01BdBmiNqfMBM4JPshZVxodW"
     events = [
@@ -638,6 +648,8 @@ def test_a_denial_for_another_call_does_not_excuse_a_call_that_ran(tmp_path, fak
         _replay(tmp_path, fake, "other.jsonl", events)
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_a_stop_rule_match_stops_the_run_even_when_claude_code_denies_it(tmp_path, fake):
     with pytest.raises(rules.RuleBreach, match="may have run"):
         _replay(tmp_path, fake, "stop.jsonl", _denied_bash("toolu_stop"), agent_rules=[CAT_RULE])

@@ -77,6 +77,8 @@ def repo(tmp_path, source):
     return root
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_update_refreshes_and_confirms(repo):
     stale = repo / ".claude/skills/sssf/cookbooks/install.md"
     stale.write_text("an older skill copy\n")
@@ -89,6 +91,8 @@ def test_update_refreshes_and_confirms(repo):
     assert "git add -A && git commit" in result.stdout
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_update_with_nothing_new_says_so(repo):
     # The install ran from the repo's own copy, which has no skill commit to
     # record. The first update records it, so it is the second that is a no-op.
@@ -100,6 +104,8 @@ def test_update_with_nothing_new_says_so(repo):
     assert "git commit" not in result.stdout
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_update_needs_the_source(repo):
     (repo / ".env").write_text("")
     result = run(repo, "just", "sssf-update")
@@ -107,6 +113,8 @@ def test_update_needs_the_source(repo):
     assert "SSSF_SOURCE" in result.stderr
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_update_refuses_a_dirty_tree(repo):
     (repo / "README.md").write_text("work in progress\n")
     result = run(repo, "just", "sssf-update")
@@ -114,6 +122,8 @@ def test_update_refuses_a_dirty_tree(repo):
     assert "commit or stash" in result.stderr
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_update_refuses_while_a_chain_runs(repo):
     db = repo / "adws/adw_data/sssf.db"
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +135,8 @@ def test_update_refuses_while_a_chain_runs(repo):
     assert "still running" in result.stderr
 
 
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_update_refuses_a_source_off_main(repo, source):
     factory = source.parent.parent.parent
     git(factory, "switch", "-qc", "fix/unmerged")

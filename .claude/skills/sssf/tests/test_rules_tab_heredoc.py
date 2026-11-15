@@ -134,6 +134,8 @@ def test_pis_handler_reads_through_a_backslash_newline_in_a_tab_heredoc(tmp_path
 
 
 @pytest.mark.parametrize("name, command, _expected, runs", ROWS, ids=IDS)
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
 def test_the_table_is_honest_about_what_bash_does(tmp_path, name, command, _expected, runs):
     env, log = with_stubs(tmp_path)
     (tmp_path / ".env").write_text("SECRET\n")

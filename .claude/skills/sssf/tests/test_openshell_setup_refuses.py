@@ -89,6 +89,8 @@ def just_call(how: str, repo: Path) -> list[str]:
 
 @needs_just
 @pytest.mark.parametrize("how", ["direct", "module", "script"])
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_recipe_refuses_inside_a_run(tmp_path, how):
     repo = recipe_repo(tmp_path, module=how == "module")
     bin_dir = standins(tmp_path, RECIPE_TOOLS)
@@ -104,6 +106,8 @@ def test_recipe_refuses_inside_a_run(tmp_path, how):
 
 @needs_just
 @pytest.mark.parametrize("module", [False, True])
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_recipe_gets_past_the_check_without_the_variable(tmp_path, module):
     repo = recipe_repo(tmp_path, module)
     bin_dir = standins(tmp_path, RECIPE_TOOLS)
@@ -122,6 +126,8 @@ def test_recipe_gets_past_the_check_without_the_variable(tmp_path, module):
 
 
 @needs_just
+# host_only, the error names the sandbox: runs a just recipe that writes where agentsh denies.
+@pytest.mark.host_only
 def test_recipe_treats_an_empty_variable_as_unset(tmp_path):
     repo = recipe_repo(tmp_path, module=False)
     bin_dir = standins(tmp_path, RECIPE_TOOLS)

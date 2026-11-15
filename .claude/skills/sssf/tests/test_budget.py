@@ -139,12 +139,16 @@ def test_a_call_that_hits_its_cap_says_so_and_keeps_its_cost(tmp_path, fake):
 
 # ── both caps, in a real run ─────────────────────────────────────────────────
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_execute_passes_the_agents_call_cap(factory):
     run = factory([result(0.1)], max_call_cost=0.75)
     build(run)
     assert factory.calls[0].max_cost == 0.75
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_spent_run_stops_before_the_next_agent(factory):
     run = factory([result(0.1)], max_run_cost=2.0)
     run.add_usage(0, 2.0)
@@ -154,6 +158,8 @@ def test_a_spent_run_stops_before_the_next_agent(factory):
     assert events(run, "budget_stop")[0]["spent"] == 2.0
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_run_cap_is_checked_before_every_send(factory):
     # The first send returns bad JSON and spends past the cap; the correction
     # it would earn must not be sent.
@@ -163,6 +169,8 @@ def test_the_run_cap_is_checked_before_every_send(factory):
     assert len(factory.calls) == 1
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_call_cap_stop_counts_its_cost_and_is_not_retried(factory):
     stop = budget.CallBudgetStop("builder reached max_call_cost", result=result(1.6, text=""))
     run = factory([stop, result(0.1)])
@@ -173,6 +181,8 @@ def test_a_call_cap_stop_counts_its_cost_and_is_not_retried(factory):
     assert events(run, "call_budget_stop")[0]["agent"] == "builder"
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_stop_says_how_to_handle_uncommitted_work(factory):
     run = factory([result(0.1)], max_run_cost=1.0)
     run.add_usage(0, 1.0)
@@ -183,6 +193,8 @@ def test_a_stop_says_how_to_handle_uncommitted_work(factory):
     assert "git diff" in message and "git stash" in message and "git checkout ." in message
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_stop_on_a_clean_tree_does_not_mention_git(factory):
     run = factory([result(0.1)], max_run_cost=1.0)
     run.add_usage(0, 1.0)
@@ -191,6 +203,8 @@ def test_a_stop_on_a_clean_tree_does_not_mention_git(factory):
     assert "git stash" not in str(stop.value)
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_none_turns_the_run_cap_off(factory):
     run = factory([result(0.1)], max_run_cost=None)
     run.add_usage(0, 100.0)
@@ -230,6 +244,8 @@ def live_run(adw_id: str, spent: float, earlier: float = 0.0, pid: int | None = 
                           f"2026-01-01T{at}.000+00:00"))
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_live_runs_stop_together_at_max_live_cost(factory):
     run = factory([result(0.1)])
     live_cap(1.0)
@@ -240,6 +256,8 @@ def test_live_runs_stop_together_at_max_live_cost(factory):
     assert events(run, "live_budget_stop")[0]["cap"] == 1.0
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_this_runs_own_spend_counts_and_is_checked_before_every_send(factory):
     run = factory([result(0.5, text="not json"), result(0.1)])
     live_cap(1.0)
@@ -249,6 +267,8 @@ def test_this_runs_own_spend_counts_and_is_checked_before_every_send(factory):
     assert len(factory.calls) == 1
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_only_each_runs_current_attempt_counts(factory):
     run = factory([result(0.1)])
     live_cap(1.0)
@@ -256,6 +276,8 @@ def test_only_each_runs_current_attempt_counts(factory):
     build(run)
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_dead_run_does_not_count(factory):
     done = subprocess.Popen(["true"])
     done.wait()
@@ -265,6 +287,8 @@ def test_a_dead_run_does_not_count(factory):
     build(run)
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_max_live_cost_is_off_by_default(factory):
     run = factory([result(0.1)])
     live_run("other111", 100.0)
@@ -307,6 +331,8 @@ def spent_ago(adw_id: str, cost: float, hours: float) -> datetime:
     return at
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_finished_runs_in_the_last_24_hours_stop_a_run(factory):
     run = factory([result(0.1)])
     daily_cap(1.0)
@@ -317,6 +343,8 @@ def test_finished_runs_in_the_last_24_hours_stop_a_run(factory):
     assert events(run, "daily_budget_stop")[0]["cap"] == 1.0
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_spend_older_than_24_hours_does_not_count(factory):
     run = factory([result(0.1)])
     daily_cap(1.0)
@@ -324,6 +352,8 @@ def test_spend_older_than_24_hours_does_not_count(factory):
     build(run)
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_stop_says_when_enough_spend_ages_out(factory):
     run = factory([result(0.1)])
     daily_cap(1.0)
@@ -334,6 +364,8 @@ def test_the_stop_says_when_enough_spend_ages_out(factory):
         build(run)
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_this_runs_own_spend_counts_toward_the_day_before_every_send(factory):
     run = factory([result(0.5, text="not json"), result(0.1)])
     daily_cap(1.0)
@@ -343,6 +375,8 @@ def test_this_runs_own_spend_counts_toward_the_day_before_every_send(factory):
     assert len(factory.calls) == 1
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_max_daily_cost_is_off_by_default(factory):
     run = factory([result(0.1)])
     spent_ago("done1111", 100.0, hours=1)
@@ -391,6 +425,8 @@ def register(registry: Path, name: str, root: Path) -> None:
     registry.write_text(json.dumps(data))
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_every_registered_repos_day_stops_a_run(factory, private_registry, tmp_path):
     run = factory([result(0.1)])
     machine_cap(private_registry, 2.0)
@@ -404,6 +440,8 @@ def test_every_registered_repos_day_stops_a_run(factory, private_registry, tmp_p
     assert events(run, "machine_budget_stop")[0]["cap"] == 2.0
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_launching_repo_counts_though_the_registry_lacks_it(factory, private_registry):
     run = factory([result(0.1)])
     machine_cap(private_registry, 1.0)
@@ -412,6 +450,8 @@ def test_the_launching_repo_counts_though_the_registry_lacks_it(factory, private
         build(run)
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_registered_repo_that_cant_be_read_counts_nothing(factory, private_registry, tmp_path):
     run = factory([result(0.1)])
     machine_cap(private_registry, 1.0)
@@ -424,6 +464,8 @@ def test_a_registered_repo_that_cant_be_read_counts_nothing(factory, private_reg
     assert not (tmp_path.parent / "no-such-repo").exists()
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_the_machine_cap_is_off_without_limits_yaml(factory, private_registry, tmp_path):
     run = factory([result(0.1)])
     other_repo(private_registry, tmp_path, "yt", 100.0)
@@ -445,6 +487,8 @@ def test_a_run_records_the_machine_cap_for_the_dashboard(factory, private_regist
     assert events(run, "run_caps")[-1]["machine_daily_cost"] == 30.0
 
 
+# host_only, the error names the sandbox: its guard run reads the git directory or the agentsh service, and agentsh denies it.
+@pytest.mark.host_only
 def test_a_broken_limits_yaml_stops_runs_instead_of_turning_the_cap_off(factory, private_registry):
     run = factory([result(0.1)])
     (private_registry.parent / "limits.yaml").write_text("max_daily_cost: lots\n")

@@ -22,6 +22,10 @@ sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
 import adw_export
 
+# Every test here pushes to a bare repo under tmp_path. agentsh refuses every push, so a run
+# under agentsh leaves this file out with -m 'not pushes'. Verify runs it.
+pytestmark = pytest.mark.pushes
+
 
 def git(*args: str, cwd: Path) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,

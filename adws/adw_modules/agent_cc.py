@@ -29,7 +29,7 @@ forwarder (agents._event_forwarder, via rules.denied) counts that call as
 refused, on a Claude Code stream only, by its `tool_use_id`, and the trace records it from its `tool_result`.
 Keys .env names don't reach the agent (utils.agent_env). Under local_guard: agentsh,
 Claude Code agents run from the run's own CLAUDE_CONFIG_DIR, sessions/<adw_id>/claude-config,
-and sign in with CLAUDE_CODE_OAUTH_TOKEN. Under the text guard, auth stays on the operator's
+and sign in with CLAUDE_CODE_OAUTH_TOKEN. Under local_guard: none, auth stays on the operator's
 subscription login unless SSSF_CLAUDE_AUTH=api_key.
 """
 

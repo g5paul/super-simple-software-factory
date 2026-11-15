@@ -142,13 +142,22 @@ class RepoSettings(BaseModel):
     # Keys from .env that agents still get, besides SSSF_*, OBS_*, CLAUDE_CODE_OAUTH_TOKEN
     # and, for pi, its provider keys (utils.agent_env).
     agent_env: list[str] = Field(default_factory=list)
-    # How a local agent is held to the rules: "text" is SSSF's own command checks alone;
-    # "agentsh" also runs it under the agentsh service (agentsh_guard.py). Not with a VM sandbox.
-    local_guard: Literal["text", "agentsh"] = "text"
+    # The optional layer around the base guards for a local agent: "none" adds nothing;
+    # "agentsh" also runs it under the agentsh service (agentsh_guard.py). "text" is the old
+    # name for "none" and still loads. Not with a VM sandbox.
+    local_guard: Literal["none", "agentsh"] = "none"
     # Commands `local_guard: agentsh` refuses to exec, besides the built-in ones.
     deny_exec: list[DenyExec] = Field(default_factory=list)
     # Hosts (port 443) `local_guard: agentsh` lets agents reach, besides the model hosts and registries.
     network_allow: list[str] = Field(default_factory=list)
+
+    @field_validator("local_guard", mode="before")
+    @classmethod
+    def _old_name(cls, value):
+        # The one alias: the exact string "text" is the old name for "none". Nothing else is mapped.
+        if isinstance(value, str) and value == "text":
+            return "none"
+        return value
 
     @field_validator("network_allow")
     @classmethod

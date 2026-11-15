@@ -89,10 +89,10 @@ s += foot(W, 515, "The text checks read what the agent asks for. agentsh sees wh
 W = 1200
 s = head(W, 640, "Where a run runs")
 cols = [
- (BLUE,  "sandbox: none", "local_guard: text, the default", ["agents run as your user", "on this machine"], ["text checks"], ["nothing"], ["checked-out branch,", "or --worktree"]),
- (RED,   "sandbox: none", "local_guard: agentsh", ["agents run under", "agentsh wrap"], ["text checks", "and agentsh"], ["nothing"], ["checked-out branch,", "or --worktree"]),
- (GREEN, "sandbox: openshell", "a microVM on this machine", ["agents, checks and git", "in the VM"], ["text checks"], ["nothing"], ["its own branch", "and worktree"]),
- (AMBER, "sandbox: vercel or e2b", "a VM in the cloud", ["agents, checks and git", "in the VM"], ["text checks"], ["the code and an", "inference-only token"], ["its own branch", "and worktree"]),
+ (BLUE,  "sandbox: none", "local_guard: none, the default", ["agents run as your user", "on this machine"], ["base guards"], ["nothing"], ["checked-out branch,", "or --worktree"]),
+ (RED,   "sandbox: none", "local_guard: agentsh", ["agents run under", "agentsh wrap"], ["base guards", "+ agentsh"], ["nothing"], ["checked-out branch,", "or --worktree"]),
+ (GREEN, "sandbox: openshell", "a microVM on this machine", ["agents, checks and git", "in the VM"], ["base guards"], ["nothing"], ["its own branch", "and worktree"]),
+ (AMBER, "sandbox: vercel or e2b", "a VM in the cloud", ["agents, checks and git", "in the VM"], ["base guards"], ["the code and an", "inference-only token"], ["its own branch", "and worktree"]),
 ]
 for i, (c, sb, sub, where, guards, leaves, branch) in enumerate(cols):
     x0 = 40 + i*285; w = 265

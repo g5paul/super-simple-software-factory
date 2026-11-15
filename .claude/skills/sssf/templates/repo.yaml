@@ -89,10 +89,11 @@ secret_files: []
 #   agent_env:
 #     - DATABASE_URL
 agent_env: []
-# How local agents are held. `text` is SSSF's own command checks alone. `agentsh`
-# also runs each agent under the agentsh service (needs sandbox: none, a git
+# The optional layer around SSSF's base guards on this machine. `none` adds nothing, so
+# the base guards run alone. `agentsh` also runs each agent under the agentsh service
+# (needs sandbox: none, a git
 # checkout, and the hub install: `uv run --directory <hub> .claude/skills/sssf/scripts/agentsh_install.py
-# --repo <this checkout>` plus its sudo steps).
+# --repo <this checkout>` plus its sudo steps). `text` is the old name for `none` and still works.
 #   local_guard: agentsh
 # With agentsh: commands the policy refuses to exec, and hosts agents may reach on 443.
 #   deny_exec:
@@ -102,6 +103,6 @@ agent_env: []
 #       reason: agents delete through git, not rm -rf
 #   network_allow:
 #     - api.example.com
-local_guard: text
+local_guard: none
 deny_exec: []
 network_allow: []

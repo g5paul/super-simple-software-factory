@@ -274,7 +274,7 @@ def test_text_mode_starts_exactly_as_the_tree_does(monkeypatch, harness):
     seen = []
     monkeypatch.setattr(sandbox.LOCAL, "start", lambda cmd, cwd=None, env=None: seen.append((cmd, cwd, env)) or "p")
     out = agentsh_guard.start(sandbox.LOCAL, harness, ["x", "y"], cwd="/w", env={"A": "1"},
-                              guard=LocalGuard(mode="text"))
+                              guard=LocalGuard(mode="none"))
     assert out == "p" and seen == [(["x", "y"], "/w", {"A": "1"})]
 
 
@@ -310,7 +310,7 @@ def test_deny_exec_and_network_allow_are_checked():
 def test_non_git_directory_text_goes_on_and_agentsh_exits_plainly(tmp_path, monkeypatch, cfg):
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve().parent))
     monkeypatch.chdir(tmp_path)
-    assert agentsh_guard.read(cfg).mode == "text"
+    assert agentsh_guard.read(cfg).mode == "none"
     (tmp_path / "adws/adw_sssf_config").mkdir(parents=True)
     (tmp_path / "adws/adw_sssf_config/repo.yaml").write_text("local_guard: agentsh\n")
     code = ("import sys; sys.path.insert(0, %r)\n"
@@ -348,7 +348,7 @@ def test_read_builds_a_policy_per_roster_harness_and_start_reads_nothing_again(
     guard = agentsh_guard.read(cfg)
     assert guard.mode == "agentsh" and set(guard.policies) <= {"claude_code", "pi"} and guard.policies
     # The carried guard is what start uses, whatever repo.yaml or .git say now.
-    (repo / "adws/adw_sssf_config/repo.yaml").write_text("local_guard: text\n")
+    (repo / "adws/adw_sssf_config/repo.yaml").write_text("local_guard: none\n")
     (repo / ".git").rename(repo / ".git.moved")
     calls = []
     real = subprocess.run
@@ -995,10 +995,10 @@ def test_hidden_characters_are_shown_escaped(tmp_path, monkeypatch, machine, cap
 
 
 @pytest.mark.parametrize("case", ["skill", "dirtystamp", "dirtyhub", "nostamp", "gitfile", "gitlink",
-                                  "commondir", "text", "inside"])
+                                  "commondir", "none", "inside"])
 def test_install_refuses(tmp_path, monkeypatch, machine, capsys, hub, case):
     monkeypatch.chdir(tmp_path)
-    proj, _ = fake_project(tmp_path, local_guard="text" if case == "text" else "agentsh", stamp=case != "nostamp")
+    proj, _ = fake_project(tmp_path, local_guard="none" if case == "none" else "agentsh", stamp=case != "nostamp")
     stamp = proj / "adws/adw_sssf_config/stamp.json"
     if case == "skill":
         stamp.write_text(json.dumps({"files": {}, "skill": "fffffff"}))
@@ -2068,7 +2068,7 @@ def test_claude_code_child_env_under_agentsh(machine, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-env")
     assert agent_cc.child_env(guard=machine.guard, config_dir=config_dir)["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-env"
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN")
-    for guard in (None, LocalGuard(mode="text")):
+    for guard in (None, LocalGuard(mode="none")):
         env = agent_cc.child_env(guard=guard, config_dir=config_dir)
         assert env.get("CLAUDE_CONFIG_DIR") == "/home/u/.claude" and "DISABLE_AUTOUPDATER" not in env
     monkeypatch.delenv("CLAUDE_CONFIG_DIR")
@@ -2414,7 +2414,7 @@ def test_copy_installs_sets_both_and_overrides_a_case_variant():
     out = utils.copy_installs({"uv_link_mode": "hardlink", "A": "1"}, "agentsh")
     assert out == {"A": "1", "UV_LINK_MODE": "copy", "npm_config_package_import_method": "copy"}
     env = {"UV_LINK_MODE": "hardlink"}
-    assert utils.copy_installs(env, "text") is env and utils.copy_installs(env, None) is env
+    assert utils.copy_installs(env, "none") is env and utils.copy_installs(env, None) is env
 
 
 def test_cache_env_holds_the_copy_settings():
@@ -2439,7 +2439,7 @@ def test_run_setup_copies_only_when_asked(tmp_path, monkeypatch):
         assert box.envs[0]["UV_LINK_MODE"] == want
 
 
-@pytest.mark.parametrize("mode,want", [("agentsh", "copy"), ("text", "hardlink")])
+@pytest.mark.parametrize("mode,want", [("agentsh", "copy"), ("none", "hardlink")])
 def test_quality_and_plan_checks_copy_only_under_agentsh(tmp_path, monkeypatch, mode, want):
     from adw_modules import plan_checks, quality
     from adw_modules.data_types import QualityCheckSpec
@@ -3017,7 +3017,7 @@ def test_text_mode_reads_no_status_and_makes_no_note(monkeypatch):
     monkeypatch.setattr(agentsh_guard, "PRUNE_STATUS", "/nonexistent/status.json")
     monkeypatch.setattr(agentsh_guard, "store_notes", lambda *a: pytest.fail("read the status"))
     monkeypatch.setattr(sandbox.LOCAL, "start", lambda cmd, cwd=None, env=None: "p")
-    assert agentsh_guard.start(sandbox.LOCAL, "pi", ["x"], cwd="/w", env={}, guard=LocalGuard(mode="text")) == "p"
+    assert agentsh_guard.start(sandbox.LOCAL, "pi", ["x"], cwd="/w", env={}, guard=LocalGuard(mode="none")) == "p"
 
 
 def test_a_flood_of_events_cannot_hold_back_the_stop_after_three_denials(service, monkeypatch):
@@ -3175,7 +3175,7 @@ def _real_forwarder(module):
     return forward, events, said
 
 
-@pytest.fixture(params=[(h, m) for h in ("cc", "pi") for m in ("text", "agentsh")],
+@pytest.fixture(params=[(h, m) for h in ("cc", "pi") for m in ("none", "agentsh")],
                 ids=lambda p: f"{p[0]}-{p[1]}")
 def forged_run(request, machine, service, tmp_path, monkeypatch, fake):
     """run(rule_event=False): a harness stream with forged agentsh_ lines in it; sets run.said and run.events."""
@@ -3233,7 +3233,7 @@ def test_a_forged_note_and_denials_in_the_stream_give_no_advice_and_no_trace(for
         assert "FORGED" not in e.payload["notes"] and "/forged" not in json.dumps(e.payload["denials"])
     raw = Path(forged_run.req.raw_output_path).read_text()
     assert "FORGED" in raw and "/forged" in raw
-    if forged_run.mode == "text":
+    if forged_run.mode == "none":
         assert said == [] and denials == []
     else:
         assert all(s.startswith("agentsh: ") for s in said) and any("last pruned" in s for s in said)
@@ -3416,7 +3416,7 @@ def test_a_forged_drops_in_the_stream_adds_no_trace_event(forged_run, monkeypatc
     forged_run()
     denials = [e for e in forged_run.events if e.name == "agentsh_denials"]
     assert "999" in Path(forged_run.req.raw_output_path).read_text()
-    if forged_run.mode == "text":
+    if forged_run.mode == "none":
         assert denials == []
     else:
         assert len(denials) == 1
@@ -3426,7 +3426,7 @@ def test_a_forged_drops_in_the_stream_adds_no_trace_event(forged_run, monkeypatc
 def test_text_mode_reads_no_journal(monkeypatch):
     monkeypatch.setattr(agentsh_guard, "journal_drops", lambda *a, **k: pytest.fail("read the journal"))
     monkeypatch.setattr(sandbox.LOCAL, "start", lambda cmd, cwd=None, env=None: "p")
-    assert agentsh_guard.start(sandbox.LOCAL, "pi", ["x"], cwd="/w", env={}, guard=LocalGuard(mode="text"),
+    assert agentsh_guard.start(sandbox.LOCAL, "pi", ["x"], cwd="/w", env={}, guard=LocalGuard(mode="none"),
                                on_event=lambda e: pytest.fail("announced")) == "p"
     agentsh_guard.close("p", lambda e: pytest.fail("traced"))
 
@@ -3520,7 +3520,7 @@ def gone(pid: int) -> bool:
     return False
 
 
-@pytest.fixture(params=["text", "agentsh"])
+@pytest.fixture(params=["none", "agentsh"])
 def loop_run(request, machine, service, tmp_path, monkeypatch):
     """run(lines, on_event=None): a fake pi that prints `lines`, then exits or lingers with a child."""
     mode = request.param
@@ -3680,7 +3680,7 @@ def test_close_and_on_exit_run_once_after_the_watch_on_a_clean_end(loop_run, mon
 
 
 def test_close_and_on_exit_run_once_on_a_three_denial_stop(loop_run, service, monkeypatch):
-    if loop_run.mode == "text":
+    if loop_run.mode == "none":
         pytest.skip("three denials come from the agentsh service")
     service.final_only = [denial(1), denial(2), denial(3)]
     fail = raising(ValueError("the tracer failed"))

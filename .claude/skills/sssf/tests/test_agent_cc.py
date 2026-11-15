@@ -69,7 +69,7 @@ def request(tmp_path, **overrides) -> AgentRequest:
               "raw_output_path": str(tmp_path / "raw_output.jsonl"), "data_root": str(tmp_path),
               "tools": ["read", "bash", "grep", "find", "ls"], "cwd": str(tmp_path)}
     fields.update(overrides)
-    return AgentRequest(local_guard=LocalGuard(mode="text"), **fields)
+    return AgentRequest(local_guard=LocalGuard(mode="none"), **fields)
 
 
 # ── translation of the roster into claude flags ──────────────────────────────

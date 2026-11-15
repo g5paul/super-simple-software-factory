@@ -112,7 +112,7 @@ def request_with(files: list[str], tmp: Path) -> AgentRequest:
     return AgentRequest(prompt="go", system_prompt="", model="anthropic/claude-sonnet-5-5",
                         session_id="f5e2a3a8-0d8e-4b8a-9a43-6c1f3e9b2d10",
                         session_dir=str(tmp / "s"), raw_output_path=str(tmp / "r"), data_root=str(tmp),
-                        secret_files=files, local_guard=LocalGuard(mode="text"))
+                        secret_files=files, local_guard=LocalGuard(mode="none"))
 
 
 def test_claude_code_denies_read_of_each_file_once_with_the_double_slash_form(tmp_path):

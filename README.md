@@ -81,7 +81,7 @@ This pays off when the same ADW runs a hundred times. For a one-off change, prom
 
 The shape matters more than the parts, so take this fork as upstream asked you to take it. The checks, prompts and roster are starters for your repo, and [Make SSSF your own](docs/guide/customize.md) says where each lives.
 
-Some parts serve only this hub, and a fork can delete them. [Strip what you don't need](docs/guide/customize.md#strip-what-you-dont-need) lists the files. The hub's own `adws/adw_sssf_config/repo.yaml` sets `local_guard: agentsh`, which needs an agentsh build that isn't published yet, so set it to `text` in your fork. A repo you install SSSF into starts on `text`.
+Some parts serve only this hub, and a fork can delete them. [Strip what you don't need](docs/guide/customize.md#strip-what-you-dont-need) lists the files. The hub's own `adws/adw_sssf_config/repo.yaml` sets `local_guard: agentsh`, which needs an agentsh build that isn't published yet, so set it to `none` in your fork. A repo you install SSSF into starts on `none`.
 
 ## Credit
 

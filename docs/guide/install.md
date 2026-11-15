@@ -38,7 +38,7 @@ Each kind of run last passed on these dates:
 
 | Kind of run | Last passed |
 |---|---|
-| Claude Code agents on this machine, under `local_guard: text` and `local_guard: agentsh` | 2026-11-09 |
+| Claude Code agents on this machine, under `local_guard: none` and `local_guard: agentsh` | 2026-11-09 |
 | the operator container | 2026-11-05 |
 | Vercel and E2B | 2026-11-05 |
 | OpenShell | 2026-11-08 |
@@ -256,7 +256,7 @@ A Vercel or E2B run uploads the repo's code to that provider. An OpenShell run k
 
 ## Turn on agentsh, optional
 
-Every repo starts on `local_guard: text`: SSSF's base guards, with no local guard around them. The base guards run in every mode, and `local_guard` only picks what wraps them on the host. `local_guard: agentsh` adds agentsh around them. Each agent runs under agentsh, which refuses files, commands and hosts at the system call, and the base guards keep running. [agentsh, on top of the base guards](../concepts.md#agentsh-on-top-of-the-base-guards) says what the base guards and agentsh each cover, and where agentsh is untested. Leave agentsh off unless the repo fits the case that section describes.
+Every repo starts on `local_guard: none`: SSSF's base guards, with no local guard around them. The base guards run in every mode, and `local_guard` only picks what wraps them on the host. `local_guard: agentsh` adds agentsh around them. Each agent runs under agentsh, which refuses files, commands and hosts at the system call, and the base guards keep running. [agentsh, on top of the base guards](../concepts.md#agentsh-on-top-of-the-base-guards) says what the base guards and agentsh each cover, and where agentsh is untested. Leave agentsh off unless the repo fits the case that section describes.
 
 agentsh needs its service, installed as root, with the one build SSSF pins. That build comes from the hub's fork of agentsh, whose patches aren't published yet, so for now agentsh works only where that build is installed.
 

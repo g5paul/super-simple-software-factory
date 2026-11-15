@@ -509,9 +509,9 @@ class Policy(BaseModel):
 
 class LocalGuard(BaseModel):
     """How local agents are held, read once by session.ensure and carried on every request.
-    A request without one refuses to start on a local tree; only mode="text" means text."""
+    A request without one refuses to start on a local tree; only mode="none" means no layer."""
     model_config = {"frozen": True}
-    mode: Literal["text", "agentsh"]
+    mode: Literal["none", "agentsh"]
     root: str = ""                       # the resolved path agents are wrapped at
     policies: dict[str, Policy] = {}     # by harness: "claude", "pi"
     config_template: str = ""            # agentsh_sssf.yaml, read once, for the machine check

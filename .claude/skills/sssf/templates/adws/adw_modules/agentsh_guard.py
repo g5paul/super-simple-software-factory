@@ -61,7 +61,7 @@ GLOB_CHARS = "*?[]{}\\$"
 INSTALL = "uv run --directory <hub> .claude/skills/sssf/scripts/agentsh_install.py --repo <this checkout>"
 # <hub> is the SSSF source checkout on this machine, at this project's skill version.
 FIX = (f"install from the SSSF hub: run `{INSTALL}` and the sudo lines it prints, "
-       "or set `local_guard: text` in adws/adw_sssf_config/repo.yaml")
+       "or set `local_guard: none` in adws/adw_sssf_config/repo.yaml")
 DIFFERS = ("An agent may have changed adws/. Run `git status adws/` and `git diff adws/` (and "
            "`git log --stat -- adws/`, since a run may have committed it), discard any change you "
            "didn't make, then " + FIX)
@@ -463,11 +463,11 @@ def read(cfg) -> LocalGuard:
         settings = repo_settings.load(root)
     except (ValidationError, yaml.YAMLError, ValueError, OSError) as error:
         raise SystemExit(f"{repo_settings.PATH} is invalid: {error}") from None
-    if settings.local_guard == "text":
-        return LocalGuard(mode="text")
+    if settings.local_guard == "none":
+        return LocalGuard(mode="none")
     if not in_repo:
         raise SystemExit("local_guard: agentsh needs a git checkout; this directory is not one. "
-                         f"Run `git init` here or set `local_guard: text` in {repo_settings.PATH}.")
+                         f"Run `git init` here or set `local_guard: none` in {repo_settings.PATH}.")
     common = worktree.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
     refuse_script = str(Path(__file__).resolve().with_name("sssf_refuse.py"))
     try:
@@ -590,7 +590,7 @@ def check_machine(guard: LocalGuard) -> list[str]:
         rendered = render_config(guard.config_template, allowed).encode()
     except Exception as error:    # yaml can hand back any shape, or raise several ways, and nothing else runs here
         raise AgentshRefused(f"agentsh_sssf.yaml can't be rendered ({type(error).__name__}); restore the file from "
-                             "the SSSF skill, or set `local_guard: text` in adws/adw_sssf_config/repo.yaml") from None
+                             "the SSSF skill, or set `local_guard: none` in adws/adw_sssf_config/repo.yaml") from None
     if installed != rendered:
         raise AgentshRefused(f"{CONFIG} differs from what this checkout renders; {DIFFERS}")
     for policy in guard.policies.values():
@@ -664,7 +664,7 @@ def outside_links(trees: list[str]) -> list[tuple[str, str]]:
                     raise _too_long(folder) from None
                 raise AgentshRefused(
                     f"can't read {folder} ({error}), so its files can't be checked for links outside the "
-                    "workspace; no agent is started. Make it readable or remove it, or set local_guard: text "
+                    "workspace; no agent is started. Make it readable or remove it, or set local_guard: none "
                     "in adws/adw_sssf_config/repo.yaml") from None
             for entry in entries:
                 try:
@@ -727,7 +727,7 @@ def check_links(guard: LocalGuard) -> None:
         f"agentsh judges by path and can't see. Files: {'; '.join(named)}{more}. Rebuild: "
         + "; ".join(hints.values())
         + ". See \"Running local agents under agentsh\" in .claude/skills/sssf/references/config.md, "
-        "or set local_guard: text in adws/adw_sssf_config/repo.yaml")
+        "or set local_guard: none in adws/adw_sssf_config/repo.yaml")
 
 
 def check_paths(root: str, env=None) -> None:
@@ -744,7 +744,7 @@ def check_paths(root: str, env=None) -> None:
             raise AgentshRefused(
                 f"the {kind} path {path} holds `{found}`. agentsh puts this path into its rules as raw text, "
                 "where * ? [ ] { } \\ $ are glob syntax, so the rules would also match other folders. Move the "
-                "checkout, or use a home folder, without any of * ? [ ] { } \\ $, or set `local_guard: text` "
+                "checkout, or use a home folder, without any of * ? [ ] { } \\ $, or set `local_guard: none` "
                 "in adws/adw_sssf_config/repo.yaml")
 
 
@@ -1083,7 +1083,7 @@ def start(tree, harness: str, cmd: list[str], *, cwd, env, guard: Optional[Local
     if guard is None:
         raise AgentshRefused("no local_guard reached the launch, so the agent is not started; "
                              "this is a bug in the caller")
-    if guard.mode == "text":
+    if guard.mode == "none":
         return tree.start(cmd, cwd=cwd, env=env)
     notes = check_machine(guard)
     if on_event:

@@ -155,7 +155,7 @@ The hub is built to be cut down. These parts serve only the hub, and you can del
 - `docs/sssf.md`, how the hub runs SSSF on itself;
 - `docs/open.md`, the hub's list of open work.
 
-The hub's own `repo.yaml` sets `local_guard: agentsh`, which needs a build of agentsh that isn't published yet. In your fork, set it to `text`, or every run there refuses to start.
+The hub's own `repo.yaml` sets `local_guard: agentsh`, which needs a build of agentsh that isn't published yet. In your fork, set it to `none`, or every run there refuses to start.
 
 Keep the `agent_rules` in the hub's `repo.yaml` unless you want agents to push. They refuse `git push` and the `gh` commands their pattern lists, such as `gh pr create` and `gh api`.
 

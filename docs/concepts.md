@@ -157,9 +157,9 @@ Each Claude Code agent runs with `--safe-mode`, so it never loads your `CLAUDE.m
 Guard code is the code that limits what an agent can do. It comes in two layers:
 
 - **The base guards** are SSSF's own checks: the `writes` check, the git-directory guard, the command rules, the secret-file checks and the pre-push hook. They run in every run, on the host or in a VM, and no setting turns them off.
-- **The local guard** is an optional layer around the base guards, for runs on the host. `local_guard` in `repo.yaml` picks it. `text`, the default, adds nothing, so the base guards run alone. `agentsh` adds agentsh, as [agentsh, on top of the base guards](#agentsh-on-top-of-the-base-guards) explains. A VM run ignores `local_guard`, because the VM is its outer layer.
+- **The local guard** is an optional layer around the base guards, for runs on the host. `local_guard` in `repo.yaml` picks it. `none`, the default, adds nothing, so the base guards run alone. `agentsh` adds agentsh, as [agentsh, on top of the base guards](#agentsh-on-top-of-the-base-guards) explains. A VM run ignores `local_guard`, because the VM is its outer layer.
 
-`local_guard: text` is named after the base guards' text checks, so it reads as if it switched them on. It doesn't. The base guards are the same under `text` and `agentsh`. Only the layer around them changes.
+`text` is the old name for `none` and still works.
 
 The rest of SSSF gets work done. Guard code is there for the run nobody is watching, so that an agent's mistake costs a failed phase instead of lost work, a leaked key or a stray push.
 
@@ -194,7 +194,7 @@ A run makes four choices. They're separate, apart from the limits below the tabl
 |---|---|---|---|
 | Where the [operator session](#the-operator-session) runs | Claude Code on the host, or the operator container | the host | `container/run.sh` |
 | Where the agents, checks and git run | the host, an OpenShell microVM on it, or a remote VM on Vercel or E2B | the host | `--sandbox <name>` for one run, `sandbox:` in `repo.yaml` for the repo |
-| The local guard: what wraps the base guards on the host | `text`, nothing, so the base guards run alone. `agentsh`, agentsh around them | `text` | `local_guard:` in `repo.yaml` |
+| The local guard: what wraps the base guards on the host | `none`, nothing, so the base guards run alone. `agentsh`, agentsh around them | `none` | `local_guard:` in `repo.yaml` |
 | Which branch the run works on | the checked-out branch, or its own branch and worktree | the checked-out branch | `--worktree`, which every [VM run](#branches-and-worktrees) implies |
 
 The limits:
@@ -216,13 +216,13 @@ The base guards are the same in all four modes. What differs is the layer around
 | `sandbox: openshell` | a microVM on your machine | A real wall. The tree goes in as a git bundle, so `.env`, your home folder and other repos never enter, and the network is closed except the model host. The code stays on your machine. | Needs `/dev/kvm`, and OpenShell marks WSL2 experimental. It's had few runs. The commits that come back are handled on the host by the base guards alone. |
 | `sandbox: vercel` or `e2b` | a VM at the provider | The same wall for your machine: nothing of yours is in the VM. No KVM needed, and several runs can go at once. | The branch is uploaded to the provider. Outbound network is open, so an agent could send the repo or the model token out; git gets no token, so a push fails. Each run uses the provider's free allowance. |
 | `sandbox: none`, `local_guard: agentsh` | agentsh at the system call | File access is deny by default, the network is an allowlist, and pushes are refused at exec and at the proxy. It's fast, with no VM. | No wall: agents share your kernel and your user, so a gap in the policy reaches everything you can. It needs a root install of one patched build that isn't published, tested on one WSL2 machine. It denies loopback, so a tool or test that talks to a local server fails. |
-| `sandbox: none`, `local_guard: text` | none | No setup, any machine, the fastest. The repo, its `.git` and pushes from this repo are protected, whatever the spelling. | Everything in [What the base guards alone leave open](#what-the-base-guards-alone-leave-open). |
+| `sandbox: none`, `local_guard: none` | none | No setup, any machine, the fastest. The repo, its `.git` and pushes from this repo are protected, whatever the spelling. | Everything in [What the base guards alone leave open](#what-the-base-guards-alone-leave-open). |
 
 The remote VM and agentsh protect different things. The remote VM keeps agents away from your machine. agentsh keeps them on your machine but controls the network better.
 
 ### What the base guards alone leave open
 
-The default, `sandbox: none` with `local_guard: text`, guards against an agent's mistakes in the repo. It doesn't hold off an agent set on getting past it, or one steered by text it read, such as an issue or a web page. Agents run as your user, so with the base guards alone:
+The default, `sandbox: none` with `local_guard: none`, guards against an agent's mistakes in the repo. It doesn't hold off an agent set on getting past it, or one steered by text it read, such as an issue or a web page. Agents run as your user, so with the base guards alone:
 
 - **Reads outside the repo are open.** An agent can read what you can, apart from the secret files the checks list: `~/.ssh`, cloud credentials, other repos and your shell history.
 - **Writes outside the repo are open.** The `writes` check and the git-directory guard cover this repo and its `.git`, nothing else.

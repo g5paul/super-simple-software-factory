@@ -24,7 +24,7 @@ No agent may change these paths unless its own `writes` names them:
 
 Implement the work described in `prompt`, guided by `previous_envelope` if present, then emit your `Report` JSON.
 
-## Report
+{{verify_next}}## Report
 
 Respond with ONLY valid JSON matching `BuildOutput` — no prose before or after:
 
@@ -38,3 +38,5 @@ Respond with ONLY valid JSON matching `BuildOutput` — no prose before or after
   "notes_for_next_agent": "<how to verify this work>"
 }
 ```
+
+`status` is `success` or `fail`, and nothing else: any other value, such as `blocked`, is refused. Work you cannot finish is `fail`, with the reason in `summary`.

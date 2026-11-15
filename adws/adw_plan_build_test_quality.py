@@ -14,6 +14,11 @@ needs no judgement — only repairing them does. A failing block does not fail i
 phase: the runner did its job, the code is what failed. The failure becomes an
 envelope and flows back into the builder, and only an exhausted repair loop
 fails the run.
+
+The builder is told, in a slot code writes once before its first call
+(`verify_next`), which commands verify will run after it and that a test the
+sandbox denied on a file the test itself made is not its to fix: verify runs
+them outside the sandbox and decides.
 """
 
 import argparse
@@ -42,9 +47,13 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
                                  gates=gates.PLAN))
 
+    # Once per run, before any builder call: the commands verify will run after it.
+    verify_next = plan_checks.builder_brief(run, plan)
+
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
         previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
+                                     verify_next=verify_next,
                                      gates=[gates.diff_matches_claims]))
     # The first build describes the whole change. A fix or a revision reports
     # only its own repair, so its message must never name the code commit.
@@ -79,6 +88,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                    description=f"Resolve the reported {what} failures")) as ph:
             previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
                                          previous=quality.as_envelope(broken, what),
+                                         verify_next=verify_next,
                                          gates=[gates.diff_matches_claims]))
 
     verified = (quality_result is not None and quality_result.passed

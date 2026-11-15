@@ -15,6 +15,11 @@ so running it needs no judgement — only repairing it does. Failures reach the
 builder as an envelope through `quality.as_envelope`, which is the same door an
 agent's report came through, so the repair loop is unchanged.
 
+The builder is told, in a slot code writes once before its first call
+(`verify_next`), which command the suite runs after it and that a test the
+sandbox denied on a file the test itself made is not its to fix: the suite runs
+outside the sandbox and decides.
+
 A failing suite does NOT fail its phase: the runner did its job, the code is
 what failed. It fails the run, checked at the end, after the bounded fix loop
 has had its chances.
@@ -27,7 +32,7 @@ leaves its work uncommitted, as it always has.
 import argparse
 import sys
 
-from adw_modules import agents, gates, git_helper, quality, session, utils
+from adw_modules import agents, gates, git_helper, plan_checks, quality, session, utils
 from adw_modules.worktree import in_run_worktree
 from adw_modules.data_types import AgentCall, BuildOutput, PhaseParams
 
@@ -50,9 +55,13 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Capture the incoming ask")) as ph:
         ph.log(input=prompt)
 
+    # Once per run, before any builder call: the command verify will run after it.
+    verify_next = plan_checks.builder_brief(run, None, base=quality.run_tests)
+
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the request")) as ph:
         built = previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
+                                             verify_next=verify_next,
                                              gates=[gates.diff_matches_claims]))
 
     test = None
@@ -73,6 +82,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                                "verbatim output")) as ph:
             previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
                                          previous=quality.as_envelope(test, "tests"),
+                                         verify_next=verify_next,
                                          gates=[gates.diff_matches_claims]))
 
     if test is not None and test.passed and in_run_worktree():

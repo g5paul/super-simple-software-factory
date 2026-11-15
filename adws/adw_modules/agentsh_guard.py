@@ -966,15 +966,18 @@ class AgentshProcess:
                 if answered:
                     self.pages += 1
 
-    def _pages(self, start: int, extra: dict) -> list[dict]:
-        out, offset = [], start
+    def _read_all(self) -> None:
+        """Every event of the session from offset 0, each page taken as it arrives. A session can hold
+        millions of events, so holding them all at once cost one run 8.6 GB."""
+        offset = 0
         while True:
-            rows = self._timed_get({"session_id": self.session, **extra, "order": "asc",
-                              "limit": PAGE, "offset": offset})
-            out += rows
+            rows = self._timed_get({"session_id": self.session, "order": "asc",
+                                    "limit": PAGE, "offset": offset})
+            with self._lock:
+                self._take(rows)
             offset += len(rows)
             if len(rows) < PAGE:
-                return out
+                return
 
     def _take(self, rows: list[dict]) -> None:
         for event in rows:
@@ -1046,9 +1049,7 @@ class AgentshProcess:
             return
         try:
             try:
-                rows = self._pages(0, {})
-                with self._lock:
-                    self._take(rows)
+                self._read_all()
             except Exception as error:
                 self.trace_notes.append(f"final event read failed: {type(error).__name__}")
                 self.failure = f"the final read of agentsh events failed ({type(error).__name__})"

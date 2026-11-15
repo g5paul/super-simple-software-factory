@@ -21,6 +21,12 @@ This is open.md's P3 row "Leftovers from guard run 294a3fcf's reviews". Run 294a
 - **Fails closed.** With no configured check, both slots are empty, and the reviewer rules as it does with no verify.
 - **Tests.** One pins each of changes 1 to 4.
 
+## Running the tests under agentsh
+
+agentsh refuses every `git push`, a push to a local path included, and three refusals stop the call. `tests/test_export.py` and `tests/test_install_hook.py` push to bare repos under the test's temp folder, so the builder leaves them out of its own runs: `pytest tests -q --ignore=tests/test_export.py --ignore=tests/test_install_hook.py`. Neither file touches what this change does. The chain's verify phase runs as code, outside agentsh, and runs both. This run's first build, on 2026-11-15, ran them, was refused 51 times, and stopped with only its spec committed.
+
+The same holds for the bypass reviewer and any harness an agent writes. To give a bare repo a commit, fetch into it instead: `git -C <bare> fetch -q <work> main:main`.
+
 ## Out of scope
 
 The agentsh policy and its install, how `planned` finds the commands (only the docs change), and pi-agent-observability's rerun of ef480069.

@@ -184,9 +184,23 @@ test-only one."""
 
 # Copies the checkout to "$D" without naming a secret file: git lists tracked and untracked
 # files, and .gitignore, which ignores .env, keeps the rest out. --ignore-missing-args skips a
-# tracked file the build deleted.
+# tracked file the build deleted. --inplace writes each file under its own name: rsync's temp
+# names, such as `.env.sample.B7QYHM`, look like secret files to agentsh, which refuses them.
 COPY_TO_D = ('git ls-files -z --cached --others --exclude-standard '
-             '| rsync -a --from0 --ignore-missing-args --files-from=- ./ "$D/"')
+             '| rsync -a --inplace --from0 --ignore-missing-args --files-from=- ./ "$D/"')
+
+# The tests an agent runs under agentsh. `pushes` and `host_only`, in the skill's tests/conftest.py,
+# mark the tests that can only fail there. Verify runs as code outside agentsh, with no -m.
+FAST_TESTS = "-m 'not pushes and not host_only'"
+FETCH_NOT_PUSH = "git -C <bare> fetch -q <work> main:main"
+
+UNDER_AGENTSH = f"""You run under agentsh, where some tests can only fail. `pushes` marks the tests
+that run `git push`, which agentsh refuses even to a local path, and `host_only` marks those
+that need something agentsh denies. Run the test files the change touches, from
+`.claude/skills/sssf`, with `{FAST_TESTS}`. A marked test there is yours to read, not to run.
+Leave the whole suite to verify, which runs every test outside agentsh; its result is the one
+that counts. A harness that needs a commit in a bare repo fetches it in,
+`{FETCH_NOT_PUSH}`, and never pushes."""
 
 
 def build_brief(spec: str) -> str:
@@ -198,6 +212,8 @@ To run the suite outside the repo, copy it with
 `D=$(mktemp -d) && {COPY_TO_D}` from the repo root, then run the suite in `$D`. The copy
 holds what git sees, without the files `.gitignore` ignores, so the command never needs to
 name a secret file.
+
+{UNDER_AGENTSH}
 
 Add a test for each case the change fixes. A guard test builds its config from the
 `sssf.config.yaml` SSSF ships, under `.claude/skills/sssf/templates/`, never a
@@ -221,7 +237,9 @@ def review_brief(spec: str, base_label: str, base_sha: str, head_sha: str,
 - round: {round_} of at most {MAX_ROUNDS}
 - the hub suite on head: {suite}
 
-{fix}"""
+{fix}
+
+{UNDER_AGENTSH}"""
 
 
 # ── mechanisms ───────────────────────────────────────────────────────────────

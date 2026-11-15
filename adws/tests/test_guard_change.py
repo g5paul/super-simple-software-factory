@@ -511,7 +511,7 @@ def test_the_build_brief_copy_takes_what_git_sees_and_leaves_ignored_files_out(t
     dest.mkdir()
     git(repo, "init", "-q")
     (repo / ".gitignore").write_text(".env\n")
-    for name in ("kept.txt", "changed.txt", "gone.txt"):
+    for name in ("kept.txt", "changed.txt", "gone.txt", ".env.sample"):
         (repo / name).write_text("old\n")
     (repo / "sub").mkdir()
     (repo / "sub" / "deep.txt").write_text("deep\n")
@@ -524,5 +524,26 @@ def test_the_build_brief_copy_takes_what_git_sees_and_leaves_ignored_files_out(t
     assert "env" not in gc.COPY_TO_D and gc.COPY_TO_D in gc.build_brief("specs/x.md")
     subprocess.run(["bash", "-c", gc.COPY_TO_D], cwd=repo, check=True, env={**os.environ, "D": str(dest)})
     got = sorted(str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file())
-    assert got == [".gitignore", "added.txt", "changed.txt", "kept.txt", "sub/deep.txt"]
+    assert got == [".env.sample", ".gitignore", "added.txt", "changed.txt", "kept.txt", "sub/deep.txt"]
     assert (dest / "changed.txt").read_text() == "new\n"
+
+
+def test_the_copy_writes_each_file_under_its_own_name():
+    # agentsh refuses rsync's temp names for `.env.sample`, so the copy writes in place.
+    assert "--inplace" in gc.COPY_TO_D
+
+
+def test_agents_under_agentsh_run_the_unmarked_tests_and_fetch_instead_of_pushing():
+    briefs = [gc.build_brief("specs/x.md"),
+              gc.review_brief("specs/x.md", "main", "a" * 12, "b" * 12, None, 1, "passed")]
+    for brief in briefs:
+        assert "-m 'not pushes and not host_only'" in brief
+        assert "git -C <bare> fetch -q <work> main:main" in brief
+        assert "Leave the whole suite to verify" in brief
+
+
+def test_verify_runs_the_whole_suite_with_no_marker_expression():
+    from adw_modules import quality
+    source = Path(quality.__file__).read_text()
+    assert '"pytest", "tests", "-q", "-p", "no:cacheprovider"]' in source
+    assert "not host_only" not in source and "not pushes" not in source

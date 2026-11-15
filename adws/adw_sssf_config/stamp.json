@@ -197,7 +197,7 @@
       "source": "adws/adw_modules/quality.py"
     },
     "adws/adw_modules/repo_settings.py": {
-      "sha256": "9d62a9d1cc23da2998d564d1aa6e551f149a7afba3349b95eadc4459878616ab",
+      "sha256": "96ef3c4ccd213592e953ffbc5dbc32650a0ecc524923d6ce77ef24f643679c53",
       "source": "adws/adw_modules/repo_settings.py"
     },
     "adws/adw_modules/rules.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "1b9506e"
+  "skill": "078ac59"
 }

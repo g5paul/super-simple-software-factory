@@ -312,7 +312,7 @@ vercel, last 30 days: 22 runs, 0.81 VM hours
 
 ### Which to pick
 
-None of the VMs is the default. A run with no flag runs on the host. SSSF's guard rules apply in every mode, VM or not. They forbid a push, `gh` writes and billing recipes, and keep secret files and `.env` out. A VM adds a wall the rules can't. A command the rules miss still has no route out of the VM.
+None of the VMs is the default. A run with no flag runs on the host. SSSF's base guards apply in every mode, VM or not. They forbid a push, `gh` writes and billing recipes, and keep secret files and `.env` out. A VM adds a wall the rules can't. A command the rules miss still has no route out of the VM.
 
 - **No sandbox.** The default, for everyday runs. It's the fastest, because there's no VM to make.
 - **`openshell`.** Use it when you want that wall at no cost and the code shouldn't leave the host. For example, a private repo, an unattended run, or a request you don't fully trust. It needs `/dev/kvm`. It's new. Its proof runs so far are three in sssf-sandbox on 2026-11-08, on OpenShell 0.1.7, which marks WSL2 experimental: 700a50bb and 57ed2b49 with Claude Code, and d1c04d1f with pi.
@@ -320,7 +320,7 @@ None of the VMs is the default. A run with no flag runs on the host. SSSF's guar
 
 Whether VM runs can drop the rules against harm outside the repo is still open, after a few weeks of runs.
 
-On the host, a repo can also run its agents under agentsh with `local_guard: agentsh`. The base guards keep running, and agentsh adds to them. Use it when you want file and network limits on runs on the host. It's opt-in and has its own limits. [concepts.md](../concepts.md#where-a-run-runs) sets out all four choices a run makes, and [install.md](install.md#turn-on-agentsh-optional) has the setup.
+On the host, a repo can also add a local guard around the base guards: `local_guard: agentsh` runs its agents under agentsh. The base guards keep running either way; `local_guard: text`, the default, just adds nothing. Use agentsh when you want file and network limits on runs on the host. It's opt-in and has its own limits. [How the four modes compare](../concepts.md#how-the-four-modes-compare) ranks the modes, [What the base guards alone leave open](../concepts.md#what-the-base-guards-alone-leave-open) says what the default doesn't cover, and [install.md](install.md#turn-on-agentsh-optional) has the setup.
 
 To make a VM the repo's default, set `sandbox: vercel`, `sandbox: e2b` or `sandbox: openshell` in `repo.yaml`. Then `--sandbox none` keeps one run on the host. [install.md](install.md#set-up-remote-vms) has the setup.
 

@@ -23,3 +23,17 @@ _Avoid_: change set, PR (for the commits themselves)
 **Export**:
 Making a branch, based on upstream, that holds a feature's product changes and no SSSF files.
 _Avoid_: upstreaming, patch
+
+## Guards
+
+**Base guards**:
+SSSF's own checks on every agent, in every run on the host or in a VM: the writes check, the git-directory guard, the command rules, the secret-file checks and the pre-push hook. No setting turns them off.
+_Avoid_: text guard (for the whole set), local guard
+
+**Local guard**:
+The optional layer around the base guards for runs on the host, chosen by `local_guard`. `text` means none, so the base guards run alone; `agentsh` means agentsh.
+_Avoid_: base guards, sandbox
+
+**Sandbox**:
+Where a run's agents, checks and git run: the host (`none`), a microVM on it (`openshell`), or a remote VM (`vercel`, `e2b`). A VM is the outer layer for its run, in place of a local guard.
+_Avoid_: guard (for a VM)

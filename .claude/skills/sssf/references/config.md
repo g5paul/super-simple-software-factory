@@ -528,7 +528,7 @@ The sandbox's network is closed except for default rules written per coding agen
 | `export_checks` | `[]` | In a fork, the repo's own checks, run in order by `just export` from the root of the branch it builds for upstream, which has no SSSF files and so no `quality.py`. Empty: the export reports "unchecked". See `cookbooks/run_adw.md`, "Send a feature upstream". |
 | `agent_rules` | `[]` | See [Rules for every agent](#rules-for-every-agent-agent_rules). |
 | `secret_files`, `agent_env` | `[]` | See [Secret files](#secret-files-secret_files-and-agent_env). |
-| `local_guard` | `text` | `text` keeps SSSF's base guards alone. `agentsh` keeps them and also runs each local agent under the agentsh service with a generated default-deny policy. It needs `sandbox: none` and a git checkout. See [Running local agents under agentsh](#running-local-agents-under-agentsh-local_guard). |
+| `local_guard` | `text` | The layer around SSSF's base guards on the host; the base guards run under both values. `text` adds nothing. `agentsh` keeps them and also runs each local agent under the agentsh service with a generated default-deny policy. It needs `sandbox: none` and a git checkout. See [Running local agents under agentsh](#running-local-agents-under-agentsh-local_guard). |
 | `deny_exec` | `[]` | Under `local_guard: agentsh`, the commands the policy refuses to exec. Each has `name` (a slug), `command` (a bare name), optional `args` (a Go regex run over all of argv joined by spaces, `argv[0]` included) and a `reason`. |
 | `network_allow` | `[]` | Under `local_guard: agentsh`, the bare host names agents may reach on port 443, such as `api.example.com` or `*.example.com`. |
 

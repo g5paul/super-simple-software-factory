@@ -395,7 +395,7 @@ class AgentCall(BaseModel):
     session: str = ""
     # What SSSF's own verify phase found, for a reviewer: written by the chain's
     # code through plan_checks.verify_brief, never from an agent's envelope.
-    # "" = no verify ran before this call.
+    # "" = no verify ran before this call, or it ran no configured check.
     host_verify: str = ""
     # For a builder call that a host verify follows: the commands verify will
     # run, written by the chain's code through plan_checks.builder_brief, never

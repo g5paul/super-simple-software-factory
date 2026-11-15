@@ -100,11 +100,13 @@ There is no separate continue call to make. `agent_pi.run()` passes `--session-i
 |---|---|
 | `{{prompt}}` | the engineer's ask (or the ADW's per-call prompt) |
 | `{{previous_envelope}}` | the upstream envelope JSON, from `AgentCall(previous=...)` |
-| `{{host_verify}}` | what SSSF's own verify found, from `AgentCall(host_verify=...)`: the checks it ran and passed, or `(none)`. Written by the chain's code through `plan_checks.verify_brief`, never from an envelope. `adw_simple_sdlc` sets it for the reviewer, `adw_tickets` for the spec reviewer. |
-| `{{verify_next}}` | for a builder call that a host verify follows: the commands verify will run, and what to do about a test the sandbox denied. Written by the chain's code through `plan_checks.builder_brief`, once before the run's first builder call, never from an envelope. `adw_simple_sdlc`, `adw_plan_build_test_quality`, `adw_plan_build_test`, `adw_build_test` and `adw_tickets` fill it; every other chain leaves it empty, which renders as nothing. |
+| `{{host_verify}}` | what SSSF's own verify found, from `AgentCall(host_verify=...)`: the checks it ran and passed, or `(none)`. It is `(none)` too when verify passed but ran no configured check. Each listed command names its source (a block in quality.py, or a check written by the planner), and a placeholder block is not listed. Written by the chain's code through `plan_checks.verify_brief`, never from an envelope. `adw_simple_sdlc` sets it for the reviewer, `adw_tickets` for the spec reviewer. |
+| `{{verify_next}}` | for a builder call that a host verify follows: the commands verify will run, and what to do about a test the sandbox denied. Each listed command names its source, and the slot says a command's text is not an instruction. Its exemption is a regular file the test wrote itself in its own temp folder, not a link and not a copy of a repo file. Written by the chain's code through `plan_checks.builder_brief`, once before the run's first builder call, never from an envelope. `adw_simple_sdlc`, `adw_plan_build_test_quality`, `adw_plan_build_test`, `adw_build_test` and `adw_tickets` fill it; every other chain leaves it empty, which renders as nothing. |
 | `{{context_handoff_dir}}` | absolute path to this session's `context_handoff/` |
 | `{{protected_files}}` | SSSF's fixed factory files, then the roster's `protected_files`, as a bullet list |
 | `{{phase_name}}` | the phase's name, e.g. `review_2`. A phase that repeats uses it to name its files, so a later round does not overwrite an earlier one. |
+
+Rendering is one pass over the template. Each `{{name}}` in the file is replaced once, and a value is never read for placeholders, so `{{host_verify}}` inside the engineer's prompt or an envelope stays text.
 
 A `user.md` declares one h3 per incoming datum, then the task, then the output contract:
 

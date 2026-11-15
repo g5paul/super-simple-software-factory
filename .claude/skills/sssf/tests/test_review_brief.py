@@ -126,8 +126,9 @@ def test_simple_sdlc_review_brief_carries_verifys_result_and_checks(seen, monkey
     assert adw_simple_sdlc.main("add slugify", config=str(SHIPPED)) == 0
     host = seen["review_1"]["host_verify"]
     assert host.startswith("`verify_1` passed.")
-    assert '- test: "bun test apps extension shared"' in host
-    assert "- build: not configured, so nothing ran" in host
+    assert '- `test`, a block in quality.py: "bun test apps extension shared"' in host
+    assert "not configured" not in host
+    assert not [line for line in host.splitlines() if line.startswith("- ") and "`build`" in line]
     assert "revised" not in host
     assert "### host_verify\n\n" + host in brief(seen, "review_1")
 
@@ -179,7 +180,7 @@ def test_the_spec_reviewer_gets_verifys_result_and_the_standards_reviewer_does_n
     assert adw_tickets.main(FOLDER, config=str(SHIPPED)) == 0
     host = seen["review_spec"]["host_verify"]
     assert host.startswith("`t01_verify` passed.")
-    assert '- test: "bun test apps extension shared"' in host
+    assert '- `test`, a block in quality.py: "bun test apps extension shared"' in host
     assert seen["review_standards"]["host_verify"] == "(none)"
     assert "host_verify" not in brief(seen, "review_standards")
 

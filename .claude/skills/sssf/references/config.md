@@ -512,7 +512,7 @@ The sandbox's network is closed except for default rules written per coding agen
 
 ## Repo settings in `repo.yaml`
 
-`adws/adw_sssf_config/repo.yaml` holds the rules a repo keeps whatever roster runs, and every clone follows it. `repo_settings.py` rejects an unknown key, so a misspelled one fails the run.
+`adws/adw_sssf_config/repo.yaml` holds the rules a repo keeps whatever roster runs, and every clone follows it. `repo_settings.py` rejects an unknown key, so a misspelled one fails the run. It also refuses a file whose top level isn't a mapping: a list, a string, a number or a boolean, `[]`, `false`, `0` and `''` included. A missing file, an empty one, one with only comments, and an explicit `null` or `~` all give the defaults.
 
 | Key | Default | Meaning |
 |---|---|---|

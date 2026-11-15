@@ -175,9 +175,17 @@ class RepoSettings(BaseModel):
 
 
 def load(root: Path) -> RepoSettings:
+    """This repo's settings. A missing file gives the defaults, and so does one whose
+    document is empty: no content, only comments, or null. Any other top level than a
+    mapping refuses. `[]`, `false`, `0` and `''` must never load as "no settings"."""
     path = root / PATH
     data = yaml.safe_load(path.read_text()) if path.is_file() else None
-    return RepoSettings.model_validate(data or {})
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: the top level must be a mapping of settings "
+                         f"(`key: value` lines), not a {type(data).__name__}")
+    return RepoSettings.model_validate(data)
 
 
 def merge_ff_only(root: Path) -> bool:

@@ -49,6 +49,15 @@ The root fault is older than 0c741413. `_git` returning `""` on failure, which t
 
 Run the test files the change touches, from `.claude/skills/sssf`, with `-m 'not pushes and not host_only'`, and leave the whole suite to verify. `test_config_md_documents_the_scenario` reads `docs/guide/run.md` from the repo root, so run it from a full checkout.
 
+## Tests that agentsh refuses
+
+Run 41342dd9 planned this brief, and its spec passed review on the second round: `specs/41342dd9_git-fail-closed_v2.md` on branch `sssf/41342dd9`. Start from that spec. Its build was stopped on 2026-11-16 after agentsh refused 204 commands by rule `argv_truncated`.
+
+The bar's long-name and 2 MB cases make SSSF's own git start with an argument list past agentsh's limits, 128 KiB per argument and 2 MiB in all (`docs/designs/agentsh-local-sandbox.md`, "Long arguments are refused"). Under agentsh each such start is refused, and each refusal counts toward the three-refusal stop. So:
+- Mark each test that starts a command past those limits `host_only`, with a comment saying it passes only outside agentsh because of `argv_truncated`. Verify runs outside agentsh with no `-m`, so it runs them, and its result is the one that counts.
+- Never run those tests in an agent's own run, not even once to see them fail. Run the touched files with `-m 'not pushes and not host_only'`, as before.
+- Where a test only needs SSSF's git to fail to start, make it fail by raising the `OSError` in place of starting git, as 41342dd9's `test_when_sssfs_own_git_cant_start_the_snapshot_raises` does, so it runs under agentsh too.
+
 ## Out of scope
 
 - The rest of the P2 Medium row: the gitignored-file deletion, the index reset and the engineer's edits during the call.

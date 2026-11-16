@@ -9,6 +9,21 @@ This finishes the rollback briefs `specs/tasks/guard-failed-call-rollback.md`, `
 
 The engineer's earlier decision holds. When a file git reads as config couldn't be put back, SSSF runs no git and says the tree may still hold the agent's writes.
 
+## The engineer picked option A
+
+Run 2c4e2faa planned this brief and stopped at its first revision, on 2026-11-16, for a decision. With a byte-rewriting filter, such as git-lfs or git-crypt, "no filter program runs" and "the rollback puts back the same file contents as `main`" can't both hold. Its spec, `specs/2c4e2faa_rollback-no-programs_v2.md` in `adws/adw_data/worktrees/2c4e2faa`, sets out options A and B. The engineer picked **A** on 2026-11-16: filters off, and `checkout` writes what git stores. B would let one `.gitattributes` line shield any protected file.
+
+Start from that spec. Its design, its four exceptions to the bar and its "Must never" list stand. Exceptions 1 and 2 are no longer open: they're the decided cost of A, and a reviewer files a finding that matches them as meeting the bar. When the engineer chose, no repo on this machine configured a filter, and neither git-lfs nor git-crypt was installed.
+
+**Document the scenario for SSSF's users.** The engineer asked for this explicitly. `config.md`'s "Write permissions" gets a short subsection for a repo that uses a byte-rewriting filter. It says, in the reader's terms:
+- that SSSF's rollback runs no filter, and why: the filter program could be one the agent rewrote;
+- the two effects in such a repo, with an example for git-lfs. A rolled-back filtered file holds its pointer or ciphertext, not its contents. A filtered file the agent touched without changing it, outside its `writes`, stops the run and is rewritten the same way;
+- how to recover: `git lfs checkout <path>`, or delete the file and run `git checkout HEAD -- <path>`, and the git-crypt equivalent;
+- that an agent's write to a filtered file is still rolled back, never kept;
+- the other two exceptions, replace refs and grafts, and partial clones, in one line each.
+
+`docs/guide/` gets a one-line pointer to that subsection wherever it covers what a failed run leaves behind.
+
 ## The approach: no program runs during SSSF's own git
 
 af243d43's report shows the root cause. When SSSF rolls back, `git diff`, `status`, `ls-files` and `hash-object` run a configured clean filter, and `git checkout` runs its smudge filter. If a filter points at a program the agent can write, the agent's code runs in the chain's process. That covers a tracked `scripts/clean.sh`, `.git/filt` and anything under a hooks folder. It happens on `main`'s success path today, and 101cc8b's failure path reaches it too.
@@ -36,7 +51,8 @@ SSSF already turns some programs off for its git commands: `_SAFE` sets `core.fs
   - The grafts case reports cleanly.
 - **A planted config still runs nothing.** A filter in `.git/config` or a linked `~/.gitconfig` that couldn't be put back never runs, on either path.
 - **Each neutralized key has a test.** Plant a marker program behind it, run the rollback, and the marker doesn't exist.
-- **Nothing else changes.** When the git directory is clean, or was put back, and no filter is configured, the tree, commits, trace events and exception are as on `main`. With a filter configured, the rollback puts back the same file contents as `main` does.
+- **Nothing else changes.** When the git directory is clean, or was put back, and no filter is configured, the tree, commits, trace events and exception are as on `main`. With a filter that leaves bytes alone, the rollback puts back the same file contents as `main` does. With a byte-rewriting filter, the spec's exceptions 1 and 2 apply, and a test pins each.
+- **The scenario is documented.** A test checks that `config.md`'s subsection names git-lfs, the stored form, both recovery commands and that the agent's write is still rolled back.
 
 ## Running the tests
 

@@ -24,6 +24,18 @@ Start from that spec. Its design, its four exceptions to the bar and its "Must n
 
 `docs/guide/` gets a one-line pointer to that subsection wherever it covers what a failed run leaves behind.
 
+## The engineer picked: never recurse into submodules
+
+Run a2bb494c planned from 2c4e2faa's spec and stopped at spec review 2, on 2026-11-16. Its spec is `specs/a2bb494c_rollback-no-programs_v2.md` in `adws/adw_data/worktrees/a2bb494c`, and the review is `adws/adw_data/sessions/a2bb494c/context_handoff/spec_review_2.md`. Start from that spec rather than 2c4e2faa's.
+
+The review found that the walk for submodule filter names reads the index, which the agent controls. With `submodule.recurse=true`, an agent that runs `git rm --cached sub` and plants a smudge filter in `.git/modules/sub/config` gets that filter run by the rollback's `checkout HEAD -- sub`.
+
+The engineer picked the reviewer's second fix on 2026-11-16. **SSSF's own git never recurses into a submodule.** Every git command the rollback runs gets `-c submodule.recurse=false`, plus `--no-recurse-submodules` where the command takes it. The submodule config walk then isn't needed to keep a filter from running. Drop it, unless the spec shows something else still needs it. `submodule.recurse` goes in the key table.
+
+- **The decided cost:** the rollback puts back the superproject's gitlink but doesn't move the submodule's own checkout. That differs from `main` only where the engineer set `submodule.recurse=true`. It's an exception to the bar, and a reviewer files a matching finding as meeting it. When the engineer chose, `submodule.recurse` wasn't set on this machine, and no repo running SSSF had submodules.
+- **The docs:** `config.md`'s new subsection covers submodules too. SSSF doesn't recurse into them during a rollback, so after one a submodule's checkout may not match the gitlink, and `git submodule update` brings it back.
+- **The bar:** the reviewer's reproduction becomes a test, with no marker on either path. Another test shows a rolled-back gitlink in the superproject, and the submodule's checkout left where it was.
+
 ## The approach: no program runs during SSSF's own git
 
 af243d43's report shows the root cause. When SSSF rolls back, `git diff`, `status`, `ls-files` and `hash-object` run a configured clean filter, and `git checkout` runs its smudge filter. If a filter points at a program the agent can write, the agent's code runs in the chain's process. That covers a tracked `scripts/clean.sh`, `.git/filt` and anything under a hooks folder. It happens on `main`'s success path today, and 101cc8b's failure path reaches it too.

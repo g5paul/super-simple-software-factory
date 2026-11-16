@@ -66,3 +66,25 @@ def test_the_console_line_says_not_configured(tmp_path):
     quality._run(QualityCheckSpec(name="build", area="backend", operation="build",
                                   argv=quality._placeholder("build")), run)
     assert notes[-1].startswith("quality build: not configured")
+
+
+def test_a_check_that_times_out_reports_exit_124_with_its_output(tmp_path):
+    """subprocess gives a timed-out process's output as bytes even with
+    text=True, so `_run` raised TypeError and crashed the verify phase of
+    guard run 0ece22a5 (2026-11-16) instead of reporting the timeout."""
+    from types import SimpleNamespace
+    from adw_modules.data_types import QualityCheckSpec
+    notes = []
+    run = SimpleNamespace(adw_id="a", repo_root=tmp_path, context_handoff_dir=tmp_path, data_root=tmp_path,
+                          phases=[SimpleNamespace(seq=1, phase_id="p")],
+                          tracer=SimpleNamespace(event=lambda e: None),
+                          console=SimpleNamespace(note=notes.append))
+    result = quality._run(QualityCheckSpec(
+        name="test", area="backend", operation="build", timeout_seconds=1,
+        argv=["python3", "-c", "import sys,time; print('before the hang', flush=True); "
+                               "print('on stderr', file=sys.stderr, flush=True); time.sleep(30)"]), run)
+    assert result.returncode == 124 and not result.passed
+    assert "before the hang" in result.output_tail
+    assert "on stderr" in result.output_tail
+    assert "Timed out after 1s." in result.output_tail
+    assert notes[-1].startswith("quality test: failed (exit 124")

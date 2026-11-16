@@ -60,6 +60,13 @@ def _check_dir(run, name: str) -> Path:
     return path
 
 
+def _text(output) -> str:
+    """A process's captured output as text, from bytes, str or None."""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", "replace")
+    return output or ""
+
+
 def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
     phase = run.phases[-1]
     output_dir = _check_dir(run, spec.name)
@@ -79,9 +86,10 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
         stdout = completed.stdout
         stderr = completed.stderr
     except subprocess.TimeoutExpired as error:
+        # subprocess gives a timed-out process's output as bytes, even with text=True.
         returncode = 124
-        stdout = error.stdout or ""
-        stderr = (error.stderr or "") + f"\nTimed out after {spec.timeout_seconds}s."
+        stdout = _text(error.stdout)
+        stderr = _text(error.stderr) + f"\nTimed out after {spec.timeout_seconds}s."
     except OSError as error:
         # A missing binary lands here as exit 127 with the real message — no
         # pre-flight probe needed, and none wanted.

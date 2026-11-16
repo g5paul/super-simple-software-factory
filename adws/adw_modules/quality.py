@@ -60,6 +60,13 @@ def _check_dir(run, name: str) -> Path:
     return path
 
 
+def _text(output) -> str:
+    """A process's captured output as text, from bytes, str or None."""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", "replace")
+    return output or ""
+
+
 def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
     phase = run.phases[-1]
     output_dir = _check_dir(run, spec.name)
@@ -79,9 +86,10 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
         stdout = completed.stdout
         stderr = completed.stderr
     except subprocess.TimeoutExpired as error:
+        # subprocess gives a timed-out process's output as bytes, even with text=True.
         returncode = 124
-        stdout = error.stdout or ""
-        stderr = (error.stderr or "") + f"\nTimed out after {spec.timeout_seconds}s."
+        stdout = _text(error.stdout)
+        stderr = _text(error.stderr) + f"\nTimed out after {spec.timeout_seconds}s."
     except OSError as error:
         # A missing binary lands here as exit 127 with the real message — no
         # pre-flight probe needed, and none wanted.
@@ -139,12 +147,13 @@ def test(run) -> QualityCheckResult:
         area="backend",
         operation="build",
         # The hub suite, the command each test file's docstring gives, run from
-        # the skill folder. It took about 8 minutes on 2026-11-11 (2,067 tests).
+        # the skill folder. It took 550 to 589 s from 2026-11-14 to 16 (about
+        # 2,800 tests) and passed 600 s on 2026-11-16, so the cap is 1200 s.
         argv=["uv", "run", "--directory", ".claude/skills/sssf",
               "--with", "pytest", "--with", "pydantic", "--with", "pyyaml",
               "--with", "python-dotenv", "--with", "rich",
               "pytest", "tests", "-q", "-p", "no:cacheprovider"],
-        timeout_seconds=600,
+        timeout_seconds=1200,
     ), run)
 
 

@@ -58,6 +58,10 @@ The bar's long-name and 2 MB cases make SSSF's own git start with an argument li
 - Never run those tests in an agent's own run, not even once to see them fail. Run the touched files with `-m 'not pushes and not host_only'`, as before.
 - Where a test only needs SSSF's git to fail to start, make it fail by raising the `OSError` in place of starting git, as 41342dd9's `test_when_sssfs_own_git_cant_start_the_snapshot_raises` does, so it runs under agentsh too.
 
+## Run 0ece22a5
+
+Run 0ece22a5 planned from this brief with the note above. Its spec, `specs/0ece22a5_git-fail-closed.md` on branch `sssf/0ece22a5`, passed review on the first round, and its build passed. Its verify phase then crashed in `quality.py` on a timed-out suite, a bug in the chain since fixed (79db9df), with the hub suite's cap raised to 1200 s. Start from that spec, and from its built code, left uncommitted in `adws/adw_data/worktrees/0ece22a5` (`git -C adws/adw_data/worktrees/0ece22a5 status` lists it). Check that code against the spec before relying on it.
+
 ## Out of scope
 
 - The rest of the P2 Medium row: the gitignored-file deletion, the index reset and the engineer's edits during the call.

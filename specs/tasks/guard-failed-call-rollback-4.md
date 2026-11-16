@@ -19,7 +19,7 @@ Start from that spec. Its design, its four exceptions to the bar and its "Must n
 - that SSSF's rollback runs no filter, and why: the filter program could be one the agent rewrote;
 - the two effects in such a repo, with an example for git-lfs. A rolled-back filtered file holds its pointer or ciphertext, not its contents. A filtered file the agent touched without changing it, outside its `writes`, stops the run and is rewritten the same way;
 - how to recover: `git lfs checkout <path>`, or delete the file and run `git checkout HEAD -- <path>`, and the git-crypt equivalent;
-- that an agent's write to a filtered file is still rolled back, never kept;
+- that an agent's write to a filtered file is rolled back, except in the case the next section's last decision names, which the doc states truthfully;
 - the other two exceptions, replace refs and grafts, and partial clones, in one line each.
 
 `docs/guide/` gets a one-line pointer to that subsection wherever it covers what a failed run leaves behind.
@@ -35,6 +35,17 @@ The engineer picked the reviewer's second fix on 2026-11-16. **SSSF's own git ne
 - **The decided cost:** the rollback puts back the superproject's gitlink but doesn't move the submodule's own checkout. That differs from `main` only where the engineer set `submodule.recurse=true`. It's an exception to the bar, and a reviewer files a matching finding as meeting it. When the engineer chose, `submodule.recurse` wasn't set on this machine, and no repo running SSSF had submodules.
 - **The docs:** `config.md`'s new subsection covers submodules too. SSSF doesn't recurse into them during a rollback, so after one a submodule's checkout may not match the gitlink, and `git submodule update` brings it back.
 - **The bar:** the reviewer's reproduction becomes a test, with no marker on either path. Another test shows a rolled-back gitlink in the superproject, and the submodule's checkout left where it was.
+
+## The engineer accepted the kept write for a stat-dirty filtered file, for now
+
+Run 688e89a1 planned from a2bb494c's spec and stopped at spec review 2, on 2026-11-16. Its spec is `specs/688e89a1_rollback-no-programs_v2.md` in `adws/adw_data/worktrees/688e89a1`, and its reviews are in `adws/adw_data/sessions/688e89a1/context_handoff/`. Start from that spec. Its submodule design, the walk its probes showed is still needed, and the review's non-blocking notes all stand.
+
+The review found that exception 2's stat-dirty clause reaches further than it reads. With filters off, a filtered file that git sees as stat-dirty is in the baseline as already changed, so an agent's write to it is named and left, where `main` rolls it back. Every filtered file in a checkout made within the last second is stat-dirty, and the worktree a `--worktree` run makes is such a checkout. So in a git-lfs or git-crypt repo, a `--worktree` run keeps an agent's write to most filtered files, protected ones included.
+
+The engineer picked the review's option (b) on 2026-11-16:
+- **Accept it for now,** as a decided exception to the bar. A reviewer files a matching finding as meeting it. It needs a byte-rewriting filter; when the engineer chose, no repo on this machine had one and git-lfs wasn't installed.
+- **Say it truthfully.** `config.md`'s subsection says that in a repo with a byte-rewriting filter, an agent's write to a filtered file the index sees as changed is named in the stop and left as-is, not rolled back. It adds that this covers most filtered files in a `--worktree` run, and how to check: `git status` and `git diff` on the named paths. 688e89a1's v2 doc text and its doc test, which checks for `left as-is` and `--worktree`, stand.
+- **Fix it later.** The fix is a refresh of the index with filters on when SSSF makes the worktree, before any agent runs. It's out of scope here and has its own row in `docs/open.md`. Leave `worktree.py`'s git as 688e89a1's spec has it.
 
 ## The approach: no program runs during SSSF's own git
 
@@ -64,7 +75,7 @@ SSSF already turns some programs off for its git commands: `_SAFE` sets `core.fs
 - **A planted config still runs nothing.** A filter in `.git/config` or a linked `~/.gitconfig` that couldn't be put back never runs, on either path.
 - **Each neutralized key has a test.** Plant a marker program behind it, run the rollback, and the marker doesn't exist.
 - **Nothing else changes.** When the git directory is clean, or was put back, and no filter is configured, the tree, commits, trace events and exception are as on `main`. With a filter that leaves bytes alone, the rollback puts back the same file contents as `main` does. With a byte-rewriting filter, the spec's exceptions 1 and 2 apply, and a test pins each.
-- **The scenario is documented.** A test checks that `config.md`'s subsection names git-lfs, the stored form, both recovery commands and that the agent's write is still rolled back.
+- **The scenario is documented.** A test checks that `config.md`'s subsection names git-lfs, the stored form, both recovery commands, `git submodule update`, and the kept-write case with `left as-is` and `--worktree`.
 
 ## Running the tests
 

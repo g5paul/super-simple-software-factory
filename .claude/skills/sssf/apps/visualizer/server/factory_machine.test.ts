@@ -83,17 +83,19 @@ test("leftovers: a running pytest makes the row ok, and no leftovers is ok", () 
   expect(none.processes).toBeUndefined();
 });
 
-test("the agentsh store: 10 GiB ok, 16 amber, 26 red, both null amber", () => {
+test("the agentsh store: 9 GiB ok, 12 amber, 15 red, both null amber", () => {
   const level = (store: number | null, audit: number | null) =>
     pruneRows({ store_bytes: store, audit_bytes: audit, last_prune: hoursAgo(1), last_analyze: null, last_run: null }, NOW)[0].level;
-  expect(level(8 * GIB, 2 * GIB)).toBe("ok");
-  expect(level(10 * GIB, 6 * GIB)).toBe("amber");
-  expect(level(20 * GIB, 6 * GIB)).toBe("red");
+  expect(level(8 * GIB, 1 * GIB)).toBe("ok");
+  expect(level(10 * GIB, 2 * GIB)).toBe("amber");
+  expect(level(14 * GIB, 1 * GIB)).toBe("red");
+  // The hub's agentsh stopped answering polls with 17.2 GB in the store and 1.1 GB of audit log (2026-11-16).
+  expect(level(17_152_638_976, 1_133_752_464)).toBe("red");
   expect(level(null, null)).toBe("amber");
 });
 
 test("the agentsh store's next step is config.md's: move events.db aside", () => {
-  const row = pruneRows({ store_bytes: 10 * GIB, audit_bytes: 6 * GIB, last_prune: hoursAgo(1), last_analyze: null, last_run: null }, NOW)[0];
+  const row = pruneRows({ store_bytes: 10 * GIB, audit_bytes: 2 * GIB, last_prune: hoursAgo(1), last_analyze: null, last_run: null }, NOW)[0];
   expect(row.level).toBe("amber");
   expect(row.next).toContain("stop agentsh");
   expect(row.next).toContain("/var/lib/agentsh/events.db");

@@ -570,8 +570,9 @@ trusts stat data as git does. The index compare needs `python3` where the work
 tree is, as the submodule digest does. A file an agent stages under a folder
 that was untracked before the call, such as your own nested repo, is unstaged
 and left on disk, and the run stops naming it. An agent that stages its own
-write isn't stopped. The plan commit commits only the planner's `writes` paths,
-whatever else is staged, and holds both halves of a rename.
+write isn't stopped. The plan commit commits the planner's `writes` paths and
+leaves out what else is staged, and it holds both halves of a rename. A forged
+cache-tree is the exception: see the known limits below.
 
 Narrow `tools` by role, not by reflex. An agent that must produce a `context_handoff/` file needs `write`, or it falls back on a `bash` heredoc. Withhold `edit` and `write` only where the restriction is the guarantee. For example, a reviewer that can't edit can't quietly fix what it was asked to report.
 
@@ -835,6 +836,9 @@ More known limits, each with what still applies:
 
 - Once an agent stages anything inside your untracked nested repo, git lists your other files there as untracked, and the rollback deletes them. Open on `main` too; see `docs/open.md`.
 - When the index half of the snapshot fails (`python3` missing, no temp folder outside the tree, or git can't read a tree of `HEAD` the cached diff needs, such as a deleted tree object of a folder the agent staged in), the run stops with `GitFailed` and the agent's other writes are kept as written, not rolled back. Left open for your decision; fixing it means rolling back what `diff HEAD` found before raising.
+- A planner that leaves every index entry as `HEAD` has it but points the index's cache-tree at a tree it wrote can put any path into the plan commit. The after-call check rightly finds no staged change, and the plan commit takes the forged tree. The next full commit puts the path back, but between the two `HEAD` holds the agent's version. Open on `main` too; see `docs/open.md`.
+- An index whose entries are out of order survives the rollback, so the next commit can take an agent's file and drop tracked ones. Open on `main` too; see `docs/open.md`.
+- When an agent stages index entries named after files in the git directory, such as `.git/config` or `.git/hooks/pre-push`, the rollback deletes those files after the git-directory guard has put them back. Open on `main` too; see `docs/open.md`.
 - A link whose target ends in a newline is read without it, so an agent's staged link to the same target without the newline isn't seen. It needs such a link in `HEAD`.
 - `GIT_CONFIG_COUNT` with an alias, and `git send-pack`, reach exec without the word `push` where the rule looks. The network rules refuse GitHub.
 - Any alias value naming `push`, in any case, is denied, such as `git -c 'alias.p=!f(){ git push; }; f' p`. The alias pattern's `.*push` also reaches past the alias value into later arguments. So an alias whose value only mentions push, such as `git -c alias.ci='commit -m push' ci`, is denied. So is a command after an alias option that names push anywhere, such as `git -c alias.st=status log --grep=push`. It fails closed, and each denial counts toward the three-refusal stop.

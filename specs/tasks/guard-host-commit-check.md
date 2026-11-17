@@ -1,6 +1,6 @@
 # Check a VM run's commits on the host before they land
 
-The engineer asked for this check on 2026-11-17, after the backlog was sorted by where each hole reaches ([openshell-sandbox.md](../../docs/designs/openshell-sandbox.md), decision 14). Run it with `--worktree` and `--base main`, on the hub's own config, after guard run ea9dc12f's index fix is merged or set aside. `sandbox_remote.py` isn't on CLAUDE.md's guard list, but it decides what lands on the engineer's branch, so the change goes through this chain.
+The engineer asked for this check on 2026-11-17, after the backlog was sorted by where each hole reaches ([openshell-sandbox.md](../../docs/designs/openshell-sandbox.md), decision 14). Run it with `--worktree` and `--base main`, on the hub's own config. Guard run ea9dc12f's index fix was merged on 2026-11-17 as 696b7ec. `sandbox_remote.py` isn't on CLAUDE.md's guard list, but it decides what lands on the engineer's branch, so the change goes through this chain.
 
 ## The hole
 
@@ -11,6 +11,12 @@ So anything an agent gets into a commit in the VM lands on the host branch, and 
 - a change `git replace` or a graft hid from the in-VM check;
 - what a planted hook or filter changes in the chain's own commit (`docs/open.md`'s P2 row on `commit_all`);
 - an agent commit the VM's `undo_commits` failed to undo before `close()` brought it back.
+
+The `bypass-reviewer` subagent found two more on 2026-11-17, reviewing ea9dc12f. Both are open on `main` and in local mode, and both get past the in-call check that run added:
+- **A forged cache-tree in the plan commit.** The planner leaves every index entry as `HEAD` has it, then points the index's cache-tree nodes for `adws` and `adws/adw_modules` at trees it wrote that hold its own `permissions.py`. The in-call check rightly finds no staged change. `commit_all("plan", ["specs/"])` then commits `M adws/adw_modules/permissions.py` with the agent's content. The next full commit puts it back, but between the two `HEAD` holds it.
+- **An unsorted index.** The agent hand-writes `.git/index` with a new `adws/zz.py`, or its own `permissions.py`, as the first entry, out of order. The in-call check stops the run but doesn't repair the index, and the next `commit_all("build")` commits the agent's file and deletes 17 tracked files.
+
+The probes are in `adws/adw_data/sessions/ea9dc12f/bypass_probes/`: `harness/scenarios.py` holds each candidate (`c4_inverse_forged_tree_plan_commit`, `c2_unsorted_new_protected_then_build`, `c2_unsorted_P_replaced_then_build`, `c2_gitdir_entries_real_guard`), and `results/` their outcomes on base and head.
 
 Each of these has been fixed, or is being fixed, one at a time inside the VM. The host never looks.
 
@@ -24,7 +30,8 @@ Each of these has been fixed, or is being fixed, one at a time inside the VM. Th
 2. **A refusal keeps the branch where it was.** If any commit fails, the host branch stays at `synced`, the bundle is kept as `sandbox-refused.bundle` in the run's session folder, and the run stops with a `PermissionBreach` naming each commit and path. A trace event records it. In `close()`, a refusal on the failure path is reported the way `_roll_back_failed` reports, and the original exception still wins.
 3. **The uncommitted patch says what it holds.** `close()` saves the VM's uncommitted work as `sandbox-uncommitted.patch`, never applied. When it touches a path no agent of the run may write, the console note names those paths, so the engineer sees them before applying it.
 4. **The same check after the chain's commit in local mode.** Under `sandbox: none`, after each `commit_all`, the same function judges the commit it made, with the repo's git under the same settings, and on a refusal resets the branch to the commit before and stops the run. This closes the index and cache-tree class in local mode too, since the commit's tree is what lands. The spec says what an agent that controls the local `.git` can still do to that read (alternates, a planted config the git directory guard didn't put back) and says it in `config.md`.
-5. **Docs.** `config.md`'s "Write permissions" says the host checks every commit a VM run brings back, and every commit the chain makes locally, against the agents' `writes`. `docs/designs/remote-sandboxes.md` gets a line at its "As built" section.
+5. **The rollback never deletes in the git directory.** The same review found that when an agent stages index entries named `.git/config`, `.git/hooks/pre-push` or `.git/sssf-private-names`, `_roll_back` in `permissions.py` reports them "unstaged and deleted" and removes the engineer's real files, after the git-directory guard put them back. Make `_roll_back` unstage such an entry and never delete a path under `.git/`, in any case or spelling git treats as the git directory. That narrows an existing branch; it isn't a new mode. It's local-mode only under decision 14, but it touches the same module, so it rides with this run.
+6. **Docs.** `config.md`'s "Write permissions" says the host checks every commit a VM run brings back, and every commit the chain makes locally, against the agents' `writes`. `docs/designs/remote-sandboxes.md` gets a line at its "As built" section.
 
 ## The engineer's decisions
 
@@ -39,6 +46,8 @@ These came from the hub session, so they were put to the engineer before the run
 - **Each route lands nothing.** With a VM stand-in from `tests/test_sandbox_remote.py`, an agent that gets a protected path into a commit by each route above, on the success and the failure path, leaves the host branch at `synced`, the run stopped naming the path, and the bundle kept.
 - **Bundle shape.** A bundle with a merge commit, a second root, a prerequisite other than `synced`, or a head that isn't a descendant of `synced` is refused before any commit is read.
 - **Hidden in git's internals.** A replace ref, a graft and a forged cache-tree in the VM's `.git` change nothing on the host: the host reads the commit's real tree.
+- **The review's two holes.** `c4_inverse_forged_tree_plan_commit` and both `c2_unsorted_*` candidates, in local mode and through a VM stand-in: the commit that takes the agent's file is refused, the branch is back at the commit before (local) or at `synced` (VM), and the run stops naming the path.
+- **The git directory.** `c2_gitdir_entries_real_guard`, with the real guard: `.git/config`, `.git/hooks/pre-push` and `.git/sssf-private-names` are the engineer's after the call, on both paths, and the protected write is rolled back.
 - **Local mode.** The index and cache-tree cases from `-2`'s bar, with the in-call check stubbed to see nothing, are refused by the commit check, and the branch is back at the commit before.
 - **No false stop.** Every existing VM test and every chain's normal commits pass as on `main`: a plan commit of `specs/`, a builder's commit inside its `writes`, the documenter's, the session files the chain writes.
 - **Nothing else changes.** When every commit passes, the host branch, the trace events apart from the new one, and the saved patch are as on `main`.

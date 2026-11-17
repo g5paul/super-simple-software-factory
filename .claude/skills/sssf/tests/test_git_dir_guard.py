@@ -2329,3 +2329,52 @@ def test_the_envelope_write_replaces_a_link_an_agent_left(tmp_path):
     assert victim.read_text() == "keep"
     assert not (session / name / "envelope.json").is_symlink()
     assert '"status": "success"' in (session / name / "envelope.json").read_text()
+
+
+# --- _roll_back never deletes inside the git directory -------------------------
+
+
+@pytest.mark.parametrize("spelling", [".git", ".GIT", "git~1", ".git.", ".git::$DATA", ".g‌it"])
+def test_in_git_dir_knows_each_spelling(spelling):
+    assert permissions._in_git_dir(f"{spelling}/config") and permissions._in_git_dir(f"a/{spelling}")
+
+
+def test_a_staged_new_git_config_is_never_deleted_and_the_engineers_file_kept(repo):
+    config = repo / ".git" / "config"
+    mine = config.read_bytes()
+    run = SimpleNamespace(repo_root=repo)
+    for kind in ("A:-", "A:abc", "?:abc"):
+        out = permissions._roll_back(run, ".git/config", {}, {".git/config": kind})
+        assert out in (permissions.GIT_DIR_KEPT, "could not unstage"), out
+        assert "deleted" not in out
+        assert config.read_bytes() == mine
+    hook = repo / ".git" / "hooks" / "pre-push"
+    hook.write_text("#!/bin/sh\n")
+    out = permissions._roll_back(run, ".git/hooks/pre-push", {}, {".git/hooks/pre-push": "?:abc"})
+    assert hook.read_text() == "#!/bin/sh\n" and "deleted" not in out
+
+
+def test_a_git_dir_outcome_counts_as_put_back():
+    assert permissions.GIT_DIR_KEPT.startswith("unstaged")
+
+
+@pytest.mark.parametrize("name", ["git~1", ".git.", ".GIT", ".git ", ".g‌it"])
+def test_a_lookalike_of_dot_git_is_deleted_like_any_protected_file(repo, name):
+    """Only a real git directory is kept: a folder merely spelled like `.git` is an
+    ordinary path, so a new file in it under `adws/` is deleted (it was kept once)."""
+    run = guarded(repo)
+    tree = permissions.snapshot(run)
+    (repo / "adws" / name).mkdir(parents=True)
+    (repo / "adws" / name / "evil.py").write_text("x\n")
+    with pytest.raises(permissions.PermissionBreach, match="evil.py") as caught:
+        permissions.enforce(run, None, builder(), tree)
+    assert not (repo / "adws" / name / "evil.py").exists()
+    assert caught.value.left == []
+
+
+def test_a_really_git_path_is_kept_and_its_outcome_is_not_a_deletion(repo):
+    run = guarded(repo)
+    out = permissions._roll_back(run, "adws/.git/x", {}, {"adws/.git/x": "?:abc"})
+    assert "deleted" not in out
+    assert permissions._is_git_dir_here(run, "adws/.git/x")
+    assert not permissions._is_git_dir_here(run, "adws/git~1/x")

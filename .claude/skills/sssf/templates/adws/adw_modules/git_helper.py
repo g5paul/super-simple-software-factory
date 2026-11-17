@@ -51,13 +51,19 @@ def repo_root() -> Path:
     return Path.cwd().resolve()
 
 
-def commit_all(message: str, only: list[str] | None = None) -> str:
+def commit_all(message: str, only: list[str] | None = None, *, run=None, wrote=()) -> str:
     """Stage the working tree, or just the `only` paths, and commit it. Returns
     the new short sha. With `only`, other changes stay in the tree for a later
     commit. With `only`, the commit holds those paths and nothing else that is
     staged (`commit --only`), and what is staged elsewhere stays staged.
     A rename inside `only` is committed as both halves, the delete and the add
-    (`--no-renames`)."""
+    (`--no-renames`).
+
+    The commit is judged against the agents' `writes` (permissions.judge_commits).
+    In a VM the sandbox's `commit` brings the commit back and judges it before the
+    host branch moves. Locally, with a `run`, a refused commit is undone (the tree
+    is kept) and PermissionBreach is raised. `wrote` names paths the chain itself
+    wrote into this commit. With `run=None` nothing is checked."""
     if not is_repo():
         raise RuntimeError(
             "not a git repository — a commit phase needs one. Run `git init` in the "
@@ -72,7 +78,23 @@ def commit_all(message: str, only: list[str] | None = None) -> str:
         raise RuntimeError("nothing to commit — the preceding phases changed no files")
     # `commit --only` refuses a pathspec git knows nothing about (an empty or
     # fully ignored folder), so it gets the staged files, not the raw `only`.
-    _git("commit", "-m", message, *(["--only", "--", *staged] if only else []))
+    argv = ["commit", "-m", message, *(["--only", "--", *staged] if only else [])]
+    box = sandbox.current()
+    if box is sandbox.LOCAL:
+        try:
+            before = _git("rev-parse", "--verify", "-q", "HEAD")
+        except RuntimeError:
+            before = ""                 # no commit yet: this one is the root, nothing to judge it against
+        _git(*argv)
+        if run is not None and before:
+            from . import permissions
+            permissions.check_local_commit(run, before, only=only, wrote=wrote)
+    elif hasattr(box, "commit"):
+        result = box.commit(["git", "-c", "core.fsmonitor=", *argv], only=only, wrote=wrote)
+        if result.returncode != 0:
+            raise RuntimeError(f"git {' '.join(argv)} failed: {result.stderr.strip()}")
+    else:
+        _git(*argv)
     return _git("rev-parse", "--short", "HEAD")
 
 

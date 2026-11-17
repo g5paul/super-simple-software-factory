@@ -338,6 +338,11 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         tree_before = permissions.snapshot(run)
         head_before = permissions.head(run)
         git_before = permissions.guard_git_dir(run)
+        ran = getattr(run, "ran", None)
+        if ran is None:
+            ran = run.ran = []
+        if agent not in ran:
+            ran.append(agent)
 
         result = send(user_text)
         envelope, attempt = _parse_with_retries(run, phase, call, result, send)

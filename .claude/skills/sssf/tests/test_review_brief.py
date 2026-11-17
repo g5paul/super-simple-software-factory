@@ -68,6 +68,7 @@ def seen(tmp_path, monkeypatch):
     def execute(run, phase, call):
         name, owner = phase.params.name, phase.params.owner
         calls[name] = agents.prompt_variables(run, phase, call)
+        run.ran.append(agents.resolve(run.cfg, owner))   # as agents.execute does
         prompt_engineering = agents.resolve(run.cfg, owner).prompt_engineering
         calls[name]["user_md"] = prompt_engineering.user
         calls[name]["system_md"] = prompt_engineering.system

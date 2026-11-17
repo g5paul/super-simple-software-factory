@@ -14,7 +14,9 @@ both sides. Each command goes through `run` or `start` below:
   agent whose events obs should get (`relay_obs`) gets an obs relay of its own
   for the call, on the VM's loopback (obs_relay.py, sssf_obs_relay.cjs).
 - After each `git commit`, the new commits come back to the host branch as a
-  git bundle, so the host keeps them if the VM dies.
+  git bundle, so the host keeps them if the VM dies. The host judges every commit
+  first (permissions.judge_commits) from objects its own `git bundle unbundle`
+  hashed; a refused bundle lands nothing and is kept as sandbox-refused.bundle.
 - At the end, uncommitted work is saved as a patch in the run's folder, not
   applied, and the VM is deleted.
 
@@ -185,6 +187,26 @@ def _host_git(*args: str, cwd: Path) -> str:
     if done.returncode != 0:
         raise SandboxFailed(f"git {' '.join(args)} failed on the host: {done.stderr.strip()}")
     return done.stdout.strip()
+
+
+def _bundle_head(data: bytes, synced: str) -> str:
+    """The head sha in a bundle's header, after checking its shape: version 2 or 3,
+    no `@filter`, one prerequisite and it is `synced`, one `HEAD` ref. Anything
+    else raises SandboxFailed. The VM's own answer for HEAD is never used."""
+    from . import permissions
+    head = data.split(b"\n\n", 1)[0].decode("utf-8", "replace").split("\n")
+    if not head or head[0] not in ("# v2 git bundle", "# v3 git bundle"):
+        raise SandboxFailed("the VM's bundle has no v2 or v3 bundle header")
+    needs = [line[1:].split(" ", 1)[0] for line in head[1:] if line.startswith("-")]
+    refs = [line for line in head[1:] if line and line[0] not in "-@"]
+    if any(line.startswith("@filter") for line in head[1:]):
+        raise SandboxFailed("the VM's bundle holds a filter, which the host won't unpack")
+    if needs != [synced] or len(refs) != 1 or not refs[0].endswith(" HEAD"):
+        raise SandboxFailed("the VM's bundle is not one HEAD on top of the last sync")
+    tip = refs[0].split(" ", 1)[0]
+    if not permissions._SHA.match(tip):
+        raise SandboxFailed("the VM's bundle head is not a commit id")
+    return tip
 
 
 def _host_python(tree: Path, problems: list[str] | None = None) -> str:
@@ -564,15 +586,26 @@ class Remote:
         self.synced = self._must("git", ["rev-parse", "HEAD"], cwd=str(self.tree)).strip()
         bundle.unlink()
 
-    def close(self) -> None:
-        """Bring back what the run made, then delete the VM. Never raises."""
+    def close(self, stop: bool = False) -> None:
+        """Bring back what the run made, then delete the VM.
+
+        Raises only PermissionBreach, and only with `stop=True` (`Run.finish`): the
+        VM's commits were refused. The VM is deleted first either way. The `atexit`
+        call tells the engineer instead of raising."""
+        from . import permissions
         if self.sandbox is None:
             return
         patch = ""
+        breach = None
         for relay in list(self._relays):    # a call the runner left before its wait()
             self._close_relay(relay)
         try:
             self.commits_out()
+        except permissions.PermissionBreach as error:
+            breach = error
+        except Exception as error:
+            self._log("sandbox_error", {"vm": self.vm, "error": str(error)[-500:]})
+        try:
             done = self._call(
                 self.sandbox.run_process, "sh", ["-c", "git add -A && git diff --cached --binary HEAD"],
                 cwd=str(self.tree), capture_output=True)
@@ -597,12 +630,58 @@ class Remote:
                                   **self._end(seconds)})
         if patch:
             self.run_.console.note(f"uncommitted work from the VM is saved, not applied: {patch}")
+            self._patch_note(patch)
         self.sandbox = None
+        if breach is not None:
+            if stop:
+                raise breach
+            tell = getattr(self.run_.console, "advise", self.run_.console.note)
+            tell(f"The VM's commits were refused and did not land: {breach}")
+
+    def _patch_note(self, patch: str) -> None:
+        """Name the paths in the saved patch that no agent may write, or that are
+        inside the git directory. Applies nothing."""
+        from . import permissions
+        cfg = getattr(self.run_, "cfg", None)
+        if cfg is None:
+            return
+        try:
+            done = subprocess.run([*permissions._REF_READ, "apply", "--numstat", "-z", patch],
+                                  cwd=self.tree, capture_output=True)
+            if done.returncode != 0:
+                raise ValueError(done.stderr)
+            words = done.stdout.decode("utf-8", "surrogateescape").split("\0")
+            paths, i = [], 0
+            while i < len(words):
+                head = words[i].split("\t", 2)
+                if len(head) == 3 and head[2] == "":       # a rename: both paths follow
+                    paths += words[i + 1:i + 3]
+                    i += 3
+                else:
+                    paths += head[2:3]
+                    i += 1
+        except Exception:
+            self.run_.console.note("couldn't list the paths in the VM's patch: read it before "
+                                   "you apply it")
+            return
+        bad = [p for p in dict.fromkeys(paths) if p and (
+            permissions._in_git_dir(p)
+            or not any(permissions.permitted(p, a, cfg) for a in cfg.agents))]
+        if bad:
+            shown = ", ".join(permissions._said_line(p) for p in bad[:20])
+            more = f" and {len(bad) - 20} more" if len(bad) > 20 else ""
+            self.run_.console.note(
+                f"the patch holds paths no agent may write, read it before you apply it: "
+                f"{shown}{more}")
 
     # --- the Sandbox protocol -----------------------------------------------
 
     def run(self, command, *, cwd=None, env=None, timeout=None,
             shell: bool = False, text: bool = True) -> subprocess.CompletedProcess:
+        return self._run(command, cwd=cwd, env=env, timeout=timeout, shell=shell, text=text)
+
+    def _run(self, command, *, cwd=None, env=None, timeout=None, shell: bool = False,
+             text: bool = True, sync=None) -> subprocess.CompletedProcess:
         argv = ["sh", "-c", command] if shell else ([command] if isinstance(command, str) else list(command))
         self._refresh(timeout or COMMAND_SECONDS)
         started = time.monotonic()
@@ -613,7 +692,7 @@ class Remote:
         if timeout and done.returncode != 0 and time.monotonic() - started >= timeout - 1:
             raise subprocess.TimeoutExpired(command, timeout, output=out, stderr=err)
         if done.returncode == 0 and _git_verb(argv) == "commit":
-            self.commits_out()
+            (sync or self.commits_out)()
         if not text:
             out, err = out.encode(), err.encode()
         return subprocess.CompletedProcess(command, done.returncode, out, err)
@@ -792,21 +871,59 @@ class Remote:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    def commits_out(self) -> None:
-        """Fast-forward the host branch to the VM's, through a bundle of the new commits."""
+    def commits_out(self, only=None, wrote=()) -> None:
+        """Fast-forward the host branch to the VM's, through a bundle of the new commits.
+
+        The host judges every commit first (permissions.judge_commits), reading
+        only objects its own `git bundle unbundle` hashed. A refused bundle lands
+        nothing: it is kept as sandbox-refused.bundle and PermissionBreach is raised."""
+        from . import permissions
         head = self._must("git", ["rev-parse", "HEAD"], cwd=str(self.tree)).strip()
         if head == self.synced:
             return
         packed = self._must("sh", ["-c", f"git bundle create -q - {self.synced}..HEAD | base64 -w0"],
                             cwd=str(self.tree))
+        data = base64.b64decode(packed)
         bundle = self.run_.session_dir / "sandbox-out.bundle"
-        session_files.write(bundle, base64.b64decode(packed), self.run_.data_root)
-        _host_git("fetch", "-q", str(bundle), "HEAD", cwd=self.tree)
-        _host_git("merge", "-q", "--ff-only", "FETCH_HEAD", cwd=self.tree)
+        session_files.write(bundle, data, self.run_.data_root)
+        tip, refused, text = "", [], ""
+        try:
+            tip = _bundle_head(data, self.synced)
+            _host_git("bundle", "unbundle", str(bundle), cwd=self.tree)
+            cfg = getattr(self.run_, "cfg", None)
+            if cfg is None:
+                raise permissions.GitFailed("the run has no config to judge the VM's commits by")
+            try:
+                inside = Path(self.run_.session_dir).resolve().relative_to(self.tree.resolve()).as_posix()
+            except ValueError:
+                inside = ""
+            refused = permissions.judge_commits(
+                self.tree, self.synced, tip, cfg, getattr(self.run_, "ran", []), only=only,
+                session=inside, wrote=list(wrote))
+        except (permissions.PermissionBreach, SandboxFailed) as error:
+            refused, text = [(tip or head, ["unreadable"])], str(error)
+        if refused:
+            kept = self.run_.session_dir / "sandbox-refused.bundle"
+            session_files.write(kept, data, self.run_.data_root)
+            bundle.unlink(missing_ok=True)
+            shown = text or permissions.refusal_text(refused)
+            self._log("sandbox_commits_refused",
+                      {"vm": self.vm, "synced": self.synced[:12], "head": (tip or head)[:12],
+                       "refused": [[c, p] for c, p in refused], "bundle": str(kept)}, type="error")
+            raise permissions.PermissionBreach(
+                f"The VM's commits were refused and did not land (the host branch is still at "
+                f"{self.synced[:12]}); the bundle is kept at {kept}:\n{shown}")
+        _host_git("merge", "-q", "--ff-only", tip, cwd=self.tree)
         bundle.unlink()
-        count = _host_git("rev-list", "--count", f"{self.synced}..{head}", cwd=self.tree)
-        self._log("sandbox_commits", {"vm": self.vm, "count": int(count), "head": head[:12]})
-        self.synced = head
+        count = _host_git("rev-list", "--count", f"{self.synced}..{tip}", cwd=self.tree)
+        self._log("sandbox_commits", {"vm": self.vm, "count": int(count), "head": tip[:12]})
+        self.synced = tip
+        if only is None and hasattr(self.run_, "ran"):
+            self.run_.ran.clear()
+
+    def commit(self, argv, *, only=None, wrote=()) -> subprocess.CompletedProcess:
+        """Run a `git commit` in the VM and judge what comes back with `only` and `wrote`."""
+        return self._run(argv, sync=lambda: self.commits_out(only, wrote))
 
     # --- helpers ------------------------------------------------------------
 
@@ -905,7 +1022,7 @@ class Remote:
             raise out["error"]
         return out.get("value")
 
-    def _log(self, name: str, payload: dict) -> None:
+    def _log(self, name: str, payload: dict, type: str = "log") -> None:
         from .data_types import EventRecord
-        self.run_.tracer.event(EventRecord(adw_id=self.run_.adw_id, phase_id="", type="log",
+        self.run_.tracer.event(EventRecord(adw_id=self.run_.adw_id, phase_id="", type=type,
                                            name=name, payload={**payload, "host": socket.gethostname()}))

@@ -107,14 +107,17 @@ def test_switching_branches_stops_the_run(run):
     assert git("rev-parse", "--abbrev-ref", "HEAD") == "elsewhere"   # nothing was undone
 
 
-def test_the_first_commit_in_an_empty_repo_is_undone(tmp_path, monkeypatch):
+def test_a_first_commit_in_an_empty_repo_is_not_undone_and_stops_the_run(tmp_path, monkeypatch):
+    """SSSF refuses an agent in a repo with no commit, so an empty `before` sha
+    only reaches the undo if the history was removed; it fails closed."""
     monkeypatch.chdir(tmp_path)
     git("init", "-qb", "main")
     run = SimpleNamespace(repo_root=tmp_path)
     before = permissions.head(run)
     commit(run, "src/app.py")
-    assert len(permissions.undo_commits(run, before)) == 1
-    assert git("status", "--porcelain") == "?? src/"
+    with pytest.raises(permissions.GitFailed, match="merge-base"):
+        permissions.undo_commits(run, before)
+    assert git("rev-parse", "-q", "--verify", "HEAD")               # the commit is still there
 
 
 def test_a_reset_past_the_start_stops_the_run(run):

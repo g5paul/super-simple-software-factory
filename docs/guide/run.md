@@ -120,8 +120,10 @@ In this run, a stray file in the worktree stopped the merge:
 
 ```console
 $ just merge c95d4481
-merge c95d4481: run c95d4481's worktree (adws/adw_data/worktrees/c95d4481) has uncommitted changes: STRAY.txt. The merge takes only sssf/c95d4481's commits and then removes the worktree, so they'd be lost. Commit them there (`git -C adws/adw_data/worktrees/c95d4481 add -A && git -C adws/adw_data/worktrees/c95d4481 commit`) and merge again, or `just discard c95d4481` to drop the run.
+merge c95d4481: run c95d4481's worktree (adws/adw_data/worktrees/c95d4481) has uncommitted changes: STRAY.txt. The merge takes only sssf/c95d4481's commits and then removes the worktree, so they'd be lost. Check `git -C adws/adw_data/worktrees/c95d4481 status` first for anything the run didn't make: a failed agent call can leave files behind. Then commit them there (`git -C adws/adw_data/worktrees/c95d4481 add -A && git -C adws/adw_data/worktrees/c95d4481 commit`) and merge again, or `just discard c95d4481` to drop the run.
 ```
+
+If your repo uses git-lfs, git-crypt or submodules, read "Repos that use git-lfs, git-crypt, another filter, or submodules" in `.claude/skills/sssf/references/config.md` (under "Write permissions"): a rollback leaves filtered files in their stored form.
 
 The other recipes for a worktree run:
 

@@ -412,7 +412,9 @@ def _merge(cfg: SSSFConfig, adw_id: str, ff_only: bool) -> str:
         raise WorktreeError(
             f"run {adw_id}'s worktree ({path}) has uncommitted changes: {shown}. The merge "
             f"takes only {branch}'s commits and then removes the worktree, so they'd be lost. "
-            f"Commit them there (`git -C {path} add -A && git -C {path} commit`) and merge "
+            f"Check `git -C {path} status` first for anything the run didn't make: a failed "
+            f"agent call can leave files behind. Then commit them there "
+            f"(`git -C {path} add -A && git -C {path} commit`) and merge "
             f"again, or `{just(f'discard {adw_id}')}` to drop the run.")
     fast_forward = git("merge-base", "--is-ancestor", "HEAD", branch, cwd=root,
                        check=False).returncode == 0
@@ -495,6 +497,13 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
     old = git("rev-parse", "--short", "HEAD", cwd=path).stdout.strip()
     if git("merge-base", "--is-ancestor", launch, "HEAD", cwd=path, check=False).returncode == 0:
         return f"{branch} is already on top of {launch}; nothing to rebase. `{just(f'merge {adw_id}')}` lands it."
+    try:
+        settings = repo_settings.load(root)
+    except Exception as failed:
+        raise WorktreeError(
+            f"{root / repo_settings.PATH} doesn't load, so nothing was rebased and {branch} is "
+            f"still at {old}: {failed}\n"
+            f"Fix the file and run `{just(f'rebase {adw_id}')}` again.") from failed
     result = git("rebase", launch, cwd=path, check=False)
     if result.returncode != 0:
         git("rebase", "--abort", cwd=path, check=False)
@@ -508,7 +517,6 @@ def _rebase(cfg: SSSFConfig, adw_id: str) -> str:
             f"To land it, merge it by hand, or `{just(f'discard {adw_id}')}` and run the request again.")
     new = git("rev-parse", "--short", "HEAD", cwd=path).stdout.strip()
     # The rebase may bring in a changed lockfile, so set the worktree up again.
-    settings = repo_settings.load(root)
     why = (_with_environment(record, lambda: run_setup(
         settings.worktree_setup, path, settings.worktree_setup_timeout,
         Path(cfg.defaults.data_root) / "sessions" / adw_id / "context_handoff" / "rebase_setup",

@@ -547,9 +547,9 @@ def test_a_call_in_a_turn_pi_ended_in_error_is_not_held_for_exit(stop):
 @pytest.mark.host_only
 def test_execute_stops_when_the_agent_dies_with_a_refuse_call_pending(tmp_path, monkeypatch, dies):
     from adw_modules.data_types import AgentResult
-    from test_secret_files import make_repo, shipped_config
+    from test_secret_files import git_init, make_repo, shipped_config
     cfg = shipped_config()
-    root = make_repo(tmp_path / "repo")
+    root = git_init(make_repo(tmp_path / "repo"))
     monkeypatch.chdir(root)
     data = yaml.safe_load((SKILL / "templates" / "repo.yaml").read_text()) or {}
     data["agent_rules"] = [{"rule": "Never run `git push`.", "forbid": [r"\bgit\s+push\b"],

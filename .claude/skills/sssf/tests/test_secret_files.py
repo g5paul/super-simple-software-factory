@@ -50,6 +50,18 @@ def make_repo(root: Path) -> Path:
     return root
 
 
+def git_init(root: Path) -> Path:
+    """Make `root` a git repo with one commit: SSSF's snapshot fails closed
+    outside one, so a test that runs agents.execute needs a real repo."""
+    import os, subprocess
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+    for args in (["init", "-qb", "main"], ["commit", "-q", "--allow-empty", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True)
+    return root
+
+
 def find(root: Path, **kw) -> list[str]:
     settings = shipped_settings(secret_files=["config/*.json"])
     return secret_files.find([root], settings.secret_files,
@@ -146,7 +158,10 @@ def test_command_denies_a_weird_and_an_ordinary_path_one_rule_each(tmp_path):
 def stamped_repo(tmp: Path) -> Path:
     """A git repo stamped by the shipped installer: default roster, shipped config."""
     subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
-    done = subprocess.run([sys.executable, str(SKILL / "scripts" / "install.py")], cwd=tmp,
+    # SSSF refuses an agent in a repo with no commit, so give the repo a first one.
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com",
+                    "commit", "-q", "--allow-empty", "-m", "init"], cwd=tmp, check=True)
+    done =subprocess.run([sys.executable, str(SKILL / "scripts" / "install.py")], cwd=tmp,
                           capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stdout + done.stderr
     return tmp
@@ -281,7 +296,7 @@ def test_the_refuse_extension_is_the_last_pi_extension_without_refuse_rules(tmp_
 @pytest.mark.host_only
 def test_execute_marks_only_the_built_in_rule_in_the_requests_refuse_rules(tmp_path, monkeypatch):
     cfg = shipped_config()
-    root = make_repo(tmp_path / "repo")
+    root = git_init(make_repo(tmp_path / "repo"))
     monkeypatch.chdir(root)
     push = {"rule": "Never run `git push`.", "forbid": [r"\bgit\s+push\b"], "on_match": "refuse"}
     twin = {"rule": secret_files.RULE_TEXT, "forbid": [r"\bcat\s+\.env\b"], "on_match": "refuse"}

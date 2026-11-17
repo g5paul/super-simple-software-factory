@@ -328,6 +328,9 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         return result
 
     git_before = None
+    tree_before = None      # None: the call failed before the baseline was taken
+    head_before = None
+    settled = False         # the success path's undo and rollback ran to their end
     try:
         # What the tree looked like before this agent got its hands on it. Every
         # send in this phase — first prompt, JSON retries, gate corrections — is
@@ -380,9 +383,12 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         # wrote somewhere it was not allowed to.
         # An agent's own commit would hide its changes from enforce, so it is
         # undone first and its changes go back in the tree, unstaged.
-        # All three checks run, whatever the first finds: a git-directory
-        # breach must not skip the commit undo or the rollback, or an agent
-        # could touch .git to keep its other changes.
+        # A git-directory breach that was put back still gets the commit undo
+        # and the rollback, so touching .git shields nothing. So does one that
+        # left only something git reads as no config (hooks/, info/): SSSF's git
+        # runs no hook and the run still stops, naming it. A git config file
+        # that could not be put back gets no git at all: git would run what
+        # the agent left in it.
         # The ref check (a commit moved onto another ref) runs inside enforce,
         # after the git-directory restore and the commit undo.
         try:
@@ -391,18 +397,28 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                 permissions.restore_git_dir(run, git_before)
             except permissions.PermissionBreach as found:
                 git_breach = found
-            except Exception as failed:     # any guard error still gets undo and enforce
+            except Exception as failed:     # a crash is handled below, by whether the directory is back
                 git_breach = permissions.PermissionBreach(
                     f"Could not check or put back the git directory and git config: {failed!r}. "
-                    "Check them by hand before the next git command in this repo.")
+                    "Check them by hand before the next git command in this repo. "
+                    "The tree may still hold the agent's writes. Check `git status` and "
+                    "`git log` by hand.")
+                _note(run, str(git_breach), advise=True)
+            if not _git_dir_back(git_before):
+                nothing = ("The git config could not be put back, so SSSF ran no git command: "
+                           "none of the agent's commits was undone and nothing was rolled back. "
+                           "The tree may still hold the agent's writes. Check `git status` and "
+                           "`git log` by hand before the next run, commit or `just`.")
+                run.console.advise(nothing)
+                raise permissions.PermissionBreach(f"{git_breach}\n{nothing}" if git_breach else nothing)
             try:
                 undone = permissions.undo_commits(run, head_before)
                 if undone:
-                    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                                 type="log", name="agent_committed",
-                                                 payload={"agent": agent.name, "undone": undone}))
-                    run.console.note(f"{agent.name} committed {len(undone)} time(s) itself "
-                                     f"({', '.join(undone)}). Undid the commits and kept the changes.")
+                    _trace(run, EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                            type="log", name="agent_committed",
+                                            payload={"agent": agent.name, "undone": undone}))
+                    _note(run, f"{agent.name} committed {len(undone)} time(s) itself "
+                               f"({', '.join(undone)}). Undid the commits and kept the changes.")
                 touched = permissions.enforce(run, phase, agent, tree_before, head_before)
             except permissions.PermissionBreach as found:
                 if git_breach:
@@ -416,12 +432,14 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             if git_breach:
                 raise git_breach
         except permissions.PermissionBreach as breach:
+            settled = True
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="error", name="permission_breach",
                                          payload={"agent": agent.name, "error": str(breach),
                                                   "writes": agent.writes,
                                                   "protected_files": permissions.protected(run.cfg)}))
             raise
+        settled = True
         if touched:
             run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
                                          type="log", name="paths_touched",
@@ -439,22 +457,35 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                                      type="handoff", name=agent.name,
                                      payload={"artifacts": envelope.artifacts,
                                               "summary": envelope.summary}))
-    except BaseException:
-        # A failed agent may still have planted a hook. Put the git directory
-        # back, so nothing it left there runs on the engineer's next commit.
+    except BaseException as original:
+        # A failed call is put back like a finished one: first the git directory
+        # (a planted hook must not run on the engineer's next commit), then the
+        # agent's commits and its unauthorized writes, then the spend event.
+        failed_restore = None
         try:
             put_back = permissions.restore_git_dir(run, git_before, breach=False)
             if put_back:
-                run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                             type="error", name="git_dir_restored",
-                                             payload={"agent": agent.name, "paths": put_back}))
+                _trace(run, EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                        type="error", name="git_dir_restored",
+                                        payload={"agent": agent.name, "paths": put_back}))
         except Exception as failed:
             # The restore itself failed. Say so loudly: the engineer's next git
             # command in this repo could run what the agent left.
-            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
-                                         type="error", name="git_dir_restore_failed",
-                                         payload={"agent": agent.name, "error": str(failed)}))
-            run.console.note(str(failed))
+            failed_restore = failed
+            _trace(run, EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                    type="error", name="git_dir_restore_failed",
+                                    payload={"agent": agent.name, "error": str(failed)}))
+            _note(run, str(failed))
+        # Decided by the guard alone: a trace failure after a good restore isn't a
+        # failed restore. Not back covers a restore that crashed, was interrupted
+        # (the success path's check had started and never finished), or left a
+        # git config file as the agent changed it.
+        git_dir_failed = None if _git_dir_back(git_before) else (
+            failed_restore or permissions.PermissionBreach(
+                "the check that puts it back did not finish, or did not put everything back"))
+        if tree_before is not None and not settled:
+            _roll_back_failed(run, phase, agent, tree_before, head_before, original,
+                              git_dir_failed)
         # A failed phase spent too. The caps and the dashboard total agent_end
         # events, so without one here its spend would vanish from both.
         if spent.total_tokens or spent.total_cost:
@@ -481,6 +512,121 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 
 
 # ── internals ────────────────────────────────────────────────────────────────
+
+def _git_dir_back(guard) -> bool:
+    """Whether every git config file is known to be as it was before the agent ran.
+    True with no guard (no git directory was saved), or once restore_git_dir
+    finished and found or put every watched config path back, or git reads the
+    same config bytes through every config path even though a folder on the way
+    moved and was linked back (the breach still names it). A hooks folder or
+    an ignore file left changed doesn't count: SSSF's git runs no hook. False
+    while a restore has not finished, was interrupted, crashed, or could not put
+    a config path back: git would then run what the agent left in it."""
+    return not guard or guard.get("restored") is True
+
+
+def _trace(run, record) -> None:
+    """Write a trace event; a failing trace never replaces the rollback or the
+    original exception."""
+    try:
+        run.tracer.event(record)
+    except Exception as failed:
+        _note(run, f"SSSF could not write the trace event {record.name!r}: {failed!r}")
+
+
+def _note(run, text: str, *, advise: bool = False) -> None:
+    """Tell the engineer, never raising."""
+    try:
+        (run.console.advise if advise else run.console.note)(text)
+    except Exception:
+        pass
+
+
+def _roll_back_failed(run, phase: Phase, agent: AgentConfig, tree_before, head_before, original,
+                      git_dir_failed: BaseException | None = None) -> None:
+    """A failed call gets the same undo and rollback a finished one gets.
+    The original exception is the one the caller sees: this never raises.
+    With `git_dir_failed`, a git config file could not be put back, so no git
+    runs here: it would run what the agent left in it.
+    The note says "rolled back" only when `enforce` reports every breached path
+    put back and no ref left moved (`breach.left == []`, not `breach.refs_left`).
+    Otherwise it names what wasn't put back (everything, for a breach with no
+    list) and says the tree may still hold the agent's writes."""
+    undone: list = []
+    found = ""
+    breach_seen = None
+    try:
+        if git_dir_failed is not None:
+            raise permissions.PermissionBreach(
+                f"git config could not be put back ({git_dir_failed}), so no git "
+                "command was run to undo the agent's commits or writes")
+        if head_before is not None:
+            undone = permissions.undo_commits(run, head_before)
+        try:
+            permissions.enforce(run, phase, agent, tree_before, head_before)
+        except permissions.GitFailed:
+            raise                       # enforce couldn't read the tree: nothing was rolled back
+        except permissions.PermissionBreach as breach:
+            found = str(breach)         # enforce rolled back, then named each path
+            breach_seen = breach
+    except BaseException as failed:
+        # On purpose BaseException: a second Ctrl-C during the rollback lands
+        # here, is reported as a failed rollback, and the original exception
+        # is the one re-raised by execute.
+        kind = type(original).__name__
+        detail = str(failed) if isinstance(failed, permissions.PermissionBreach) else repr(failed)
+        message = (f"{agent.name}'s call failed ({kind}), and SSSF could not undo its commits "
+                   f"or roll back its writes: {detail.rstrip('. ')}. The tree may still hold the agent's "
+                   "writes. Check `git status` and `git log` by hand before the next run, "
+                   "commit or `just`.")
+        if undone:
+            message += f" Commits already undone: {', '.join(undone)}."
+        try:
+            run.console.advise(message)
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="error", name="failed_call_rollback_failed",
+                                         payload={"agent": agent.name, "failed_with": kind,
+                                                  "undone": undone, "error": message}))
+        except BaseException:
+            pass
+        failed.__context__ = original.__cause__ or original.__context__
+        original.__cause__ = failed
+        return
+    if not undone and not found:
+        return
+    kind = type(original).__name__
+    undid = f"undid {len(undone)} commit(s) ({', '.join(undone)})" if undone else ""
+    complete = breach_seen is None or (breach_seen.left == [] and not breach_seen.refs_left)
+    if complete:
+        parts = ([undid] if undid else []) + (["rolled back its unauthorized writes"] if found else [])
+        note = f"{agent.name}'s call failed ({kind}); SSSF " + " and ".join(parts) + "."
+    else:
+        left = breach_seen.left
+        what = ("everything the agent wrote" if left is None else
+                ", ".join(left[:5]) + (f" and {len(left) - 5} more" if len(left) > 5 else ""))
+        if breach_seen.refs_left:
+            what = ("the commits on other refs named below" if not left else
+                    what + " and the commits on other refs named below")
+        note = (f"{agent.name}'s call failed ({kind}); SSSF " + (f"{undid}, but " if undid else "")
+                + f"could not put back {what}. The tree may still hold the agent's writes. "
+                "Check `git status` and `git log` by hand before the next run, commit or `just`.")
+    try:
+        run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                     type="error", name="failed_call_rollback",
+                                     payload={"agent": agent.name, "failed_with": kind,
+                                              "undone": undone, "error": found,
+                                              "writes": agent.writes,
+                                              "protected_files": permissions.protected(run.cfg)}))
+        run.console.note(note)
+        if found:
+            run.console.advise(found)
+    except BaseException as failed:
+        # Reporting must never replace the original exception, a second Ctrl-C
+        # included. Chained the way the first branch does.
+        failed.__context__ = original.__cause__ or original.__context__
+        original.__cause__ = failed
+        return
+
 
 def _as_report(result) -> GateReport:
     """Accept a GateReport, or a legacy gate that returned a violations list."""

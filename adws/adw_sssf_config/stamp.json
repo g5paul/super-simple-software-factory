@@ -129,7 +129,7 @@
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
-      "sha256": "bfe4881253d6d5bbac753b46f25e8b4649cc54fbd6e8abbef279ca66c3646601",
+      "sha256": "59900101a6b34577279af8295c37fc116096ed1230adb739a84b0eb20350625c",
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
@@ -173,11 +173,11 @@
       "source": "adws/adw_modules/obs_relay.py"
     },
     "adws/adw_modules/permissions.py": {
-      "sha256": "1f3d5cde35e469f3d32a84e9cb0f8a46c4d5b028d3481841c954df7672c20773",
+      "sha256": "e3d38b0890c3fd361e201d1d79bd8d868377d03b110af56f65d3e959646c4eaa",
       "source": "adws/adw_modules/permissions.py"
     },
     "adws/adw_modules/plan_checks.py": {
-      "sha256": "29d5f16ec1e3ecf30f96db9422f4370aa20d4834927dc2435c224a95db94dc31",
+      "sha256": "27ee0cd6bf74aa93d063ab7686e3f964b00dd4c8eaaf952a1a42b61fb514ef45",
       "source": "adws/adw_modules/plan_checks.py"
     },
     "adws/adw_modules/prices.json": {
@@ -193,7 +193,7 @@
       "source": "adws/adw_modules/prompts.py"
     },
     "adws/adw_modules/quality.py": {
-      "sha256": "656515dc05af8481a570194bc38f529080bfd1059d954f17cb8baf74fd1bf50f",
+      "sha256": "5155a5fe25856def485a5d6c643cacb9a0307264fd3dd264cb7da077b239a7c0",
       "source": "adws/adw_modules/quality.py"
     },
     "adws/adw_modules/repo_settings.py": {
@@ -209,7 +209,7 @@
       "source": "adws/adw_modules/runner.py"
     },
     "adws/adw_modules/sandbox.py": {
-      "sha256": "207522b0c7cd0f2db2257b5dd1f35a2ca69c43a9db0ef219a9207c45fc7114c5",
+      "sha256": "88aa14d631908efd72db699c7a212c2e0a46bd39bbb4262a8bcdd9f4830047c6",
       "source": "adws/adw_modules/sandbox.py"
     },
     "adws/adw_modules/sandbox_e2b.py": {
@@ -277,7 +277,7 @@
       "source": "adws/adw_modules/utils.py"
     },
     "adws/adw_modules/worktree.py": {
-      "sha256": "5ab9d6d5c5db5229976774a71632eb1d4ea9ffefe993ffc9ec8cd71eeb0c662e",
+      "sha256": "45ec88b986d754b22c200bce5f5f551d52a25d652cf6030ed68801d450edb141",
       "source": "adws/adw_modules/worktree.py"
     },
     "adws/adw_plan.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "078ac59"
+  "skill": "39fdb09"
 }

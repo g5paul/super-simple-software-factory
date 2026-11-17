@@ -124,3 +124,13 @@ def test_the_planner_is_told_why_and_its_rewritten_check_is_kept():
                                                SimpleNamespace(text=json.dumps(bad)), send)
     assert attempt == 2 and plan.checks == good["checks"]
     assert len(sent) == 1 and "before the build is committed" in sent[0]
+
+
+def test_a_check_that_times_out_is_reported_with_its_output(tmp_path, monkeypatch):
+    """subprocess gives a timed-out process's output as bytes even with
+    text=True, and the f-string wrote it to the builder as `b'...'`."""
+    monkeypatch.setattr(plan_checks, "TIMEOUT_SECONDS", 1)
+    result = plan_checks.verify(fake_run(tmp_path), plan("echo before-the-hang; sleep 30"), base=green)
+    assert not result.passed
+    assert any("before-the-hang\n" in f and "Timed out after 1s." in f for f in result.failures)
+    assert not any("b'" in f for f in result.failures)

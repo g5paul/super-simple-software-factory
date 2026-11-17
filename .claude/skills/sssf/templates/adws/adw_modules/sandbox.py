@@ -70,6 +70,15 @@ class LocalProcess:
         rules.stop_tree(self.pid)
 
 
+def _kill_group(proc: subprocess.Popen) -> None:
+    """Kill the process group `proc` leads, and so everything it started."""
+    import signal
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 class Local:
     """The tree is a checkout on this machine. A relative path or a missing
     cwd means this process's working directory, as with subprocess."""
@@ -78,8 +87,31 @@ class Local:
 
     def run(self, command: Command, *, cwd=None, env=None, timeout=None,
             shell: bool = False, text: bool = True) -> subprocess.CompletedProcess:
-        return subprocess.run(command, cwd=cwd, env=env, timeout=timeout, shell=shell,
-                              capture_output=True, text=text)
+        if timeout is None:
+            return subprocess.run(command, cwd=cwd, env=env, shell=shell,
+                                  capture_output=True, text=text)
+        # With a timeout, the command gets its own process group, and a timeout
+        # or an interrupt kills the whole group. subprocess.run kills only the
+        # process it started, so a check run as `uv run pytest` left pytest
+        # running: one hung for 4.5 hours after guard run 0ece22a5's verify.
+        # stdin is DEVNULL, since a process outside the terminal's session
+        # can't read it anyway.
+        with subprocess.Popen(command, cwd=cwd, env=env, shell=shell, text=text,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, start_new_session=True) as proc:
+            try:
+                out, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _kill_group(proc)
+                try:
+                    out, err = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:   # something left the group with the pipes
+                    out, err = None, None
+                raise subprocess.TimeoutExpired(command, timeout, output=out, stderr=err) from None
+            except BaseException:
+                _kill_group(proc)
+                raise
+        return subprocess.CompletedProcess(command, proc.returncode, out, err)
 
     def start(self, command: list[str], *, cwd=None, env=None) -> LocalProcess:
         # stdin is DEVNULL: an agent's prompt travels in argv, and an inherited

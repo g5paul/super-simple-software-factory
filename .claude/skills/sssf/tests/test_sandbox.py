@@ -154,3 +154,33 @@ def test_a_stop_in_a_vm_says_the_work_is_saved_as_a_patch(repo, monkeypatch):
     monkeypatch.setattr(sandbox, "_current", Recording())
     help_text = budget.uncommitted_help(run)
     assert "sandbox-uncommitted.patch" in help_text and "git stash" not in help_text
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A zombie has exited; only its parent hasn't reaped it yet.
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+    except OSError:
+        return False
+
+
+def test_a_timed_out_command_leaves_nothing_it_started_running(tmp_path):
+    """subprocess.run kills only the process it started, so a check run as
+    `uv run pytest` left pytest running after its timeout. One from guard run
+    0ece22a5's verify hung for 4.5 hours (2026-11-16)."""
+    pidfile = tmp_path / "child.pid"
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        sandbox.LOCAL.run(["sh", "-c", f"echo started; sleep 300 & echo $! > {pidfile}; wait"],
+                          timeout=1)
+    child = int(pidfile.read_text())
+    for _ in range(50):
+        if not _alive(child):
+            break
+        time.sleep(0.1)
+    assert not _alive(child)
+    out = raised.value.stdout or ""
+    assert "started" in (out.decode() if isinstance(out, bytes) else out)

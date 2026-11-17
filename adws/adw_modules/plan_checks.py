@@ -44,7 +44,9 @@ def _run(run, index: int, command: str) -> QualityCheckResult:
         returncode, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as error:
         returncode = 124
-        out = f"{error.stdout or ''}{error.stderr or ''}\nTimed out after {TIMEOUT_SECONDS}s."
+        # Its output can come back as bytes even with text=True.
+        out = (f"{quality._text(error.stdout)}{quality._text(error.stderr)}"
+               f"\nTimed out after {TIMEOUT_SECONDS}s.")
     duration = time.monotonic() - clock
     session_files.write(log, f"$ {command}\nexit: {returncode}\nduration_seconds: {duration:.3f}\n\n{out}\n",
                         run.data_root)

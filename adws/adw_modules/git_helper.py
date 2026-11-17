@@ -54,15 +54,25 @@ def repo_root() -> Path:
 def commit_all(message: str, only: list[str] | None = None) -> str:
     """Stage the working tree, or just the `only` paths, and commit it. Returns
     the new short sha. With `only`, other changes stay in the tree for a later
-    commit."""
+    commit. With `only`, the commit holds those paths and nothing else that is
+    staged (`commit --only`), and what is staged elsewhere stays staged.
+    A rename inside `only` is committed as both halves, the delete and the add
+    (`--no-renames`)."""
     if not is_repo():
         raise RuntimeError(
             "not a git repository — a commit phase needs one. Run `git init` in the "
             "repo root (and make a first commit) before running an ADW that commits.")
-    _git("add", "-A", *(["--", *only] if only else []))
-    if not _git("diff", "--cached", "--name-only"):
+    scope = ["--", *only] if only else []
+    _git("add", "-A", *scope)
+    # --no-renames: a rename is listed as both its halves, so a plan commit that
+    # holds `git mv a b` also holds the delete of `a`, never only the add of `b`.
+    staged = [n for n in _git("diff", "--cached", "--no-renames", "--name-only", "-z",
+                              *scope).split("\0") if n]
+    if not staged:
         raise RuntimeError("nothing to commit — the preceding phases changed no files")
-    _git("commit", "-m", message)
+    # `commit --only` refuses a pathspec git knows nothing about (an empty or
+    # fully ignored folder), so it gets the staged files, not the raw `only`.
+    _git("commit", "-m", message, *(["--only", "--", *staged] if only else []))
     return _git("rev-parse", "--short", "HEAD")
 
 

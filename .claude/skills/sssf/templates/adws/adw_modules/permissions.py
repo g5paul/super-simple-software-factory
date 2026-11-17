@@ -24,7 +24,9 @@ The change-set is read without renames (a rename is a delete and an add), with
 -z (names are never quoted), with the paths an index flag hides from `git diff`
 (skip-worktree, assume-unchanged), and with a content hash for each changed,
 untracked or flagged path, so a rewrite of a file that was already dirty
-registers. Gitignored paths are never seen.
+registers. Gitignored paths are never seen. The index is read against HEAD as
+well: staged content the work tree doesn't show counts as a change and is put back
+to HEAD's.
 
 A breach is NOT a gate violation. Gates are for work an agent can be asked to
 redo; a breach cannot be corrected by re-prompting, because the write already
@@ -56,6 +58,7 @@ roster can't drop them.
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import shlex
@@ -112,7 +115,8 @@ _GIT_ENV = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "GIT_GRAFT_FILE
             "LC_ALL=C")
 
 
-def _gitargv(args: list[str], *, off=(), literal: bool = True, hooks: bool = False) -> list[str]:
+def _gitargv(args: list[str], *, off=(), literal: bool = True, hooks: bool = False,
+             index: str = "") -> list[str]:
     # --literal-pathspecs: a path an agent made, such as `.claude/*` or
     # `app/[id]/page.tsx`, names that file only, never every file it matches.
     # check-ignore takes paths, not pathspecs, and refuses the option.
@@ -121,13 +125,17 @@ def _gitargv(args: list[str], *, off=(), literal: bool = True, hooks: bool = Fal
     # always have (`env LC_ALL=C git ...`; tests pin that shape).
     env = (("env", "LC_ALL=C") if hooks else
            (*_GIT_ENV, "GIT_PAGER=cat", "SSSF_GIT_EMPTY=", "SSSF_GIT_FALSE=false"))
+    if index:
+        # The one command that reads an index SSSF built itself (`_INDEX`).
+        env = (*env, f"GIT_INDEX_FILE={index}")
     return [*env, "git", "--no-pager", "--no-replace-objects", *_SAFE,
             *([] if hooks else _NO_HOOKS),
             "-c", "advice.graftFileDeprecated=false", "-c", "submodule.recurse=false",
             *off, *(["--literal-pathspecs"] if literal else []), *args]
 
 
-def _try_git(args: list[str], cwd, off=(), hooks: bool = False, literal: bool = True):
+def _try_git(args: list[str], cwd, off=(), hooks: bool = False, literal: bool = True,
+             index: str = ""):
     """Run SSSF's own git and return `(code, out, err)`, decoded.
 
     A command that can't be started (an `OSError` such as E2BIG, or anything
@@ -136,7 +144,8 @@ def _try_git(args: list[str], cwd, off=(), hooks: bool = False, literal: bool = 
     """
     try:
         done = sandbox.current().run(
-            _gitargv(args, off=off, hooks=hooks, literal=literal), cwd=cwd, text=False)
+            _gitargv(args, off=off, hooks=hooks, literal=literal, index=index),
+            cwd=cwd, text=False)
     except Exception as error:
         return None, "", str(error)
 
@@ -157,13 +166,14 @@ def _shown(args: list[str]) -> str:
     return line if len(line) <= GIT_ARGS_SHOWN else line[:GIT_ARGS_SHOWN - len(SAID_CUT)] + SAID_CUT
 
 
-def _git(args: list[str], cwd, off=(), hooks: bool = False, answers=(), literal: bool = True) -> str:
+def _git(args: list[str], cwd, off=(), hooks: bool = False, answers=(), literal: bool = True,
+         index: str = "") -> str:
     """stdout of SSSF's own git on exit 0, "" when the exit code is in `answers`
     (an exit code that is git's answer, such as 1 for "not set"), else a breach.
 
     A failing git is never an empty answer: SSSF couldn't tell what changed.
     """
-    code, out, err = _try_git(args, cwd, off=off, hooks=hooks, literal=literal)
+    code, out, err = _try_git(args, cwd, off=off, hooks=hooks, literal=literal, index=index)
     if code == 0:
         return out
     if code is not None and code in answers:
@@ -241,6 +251,104 @@ _CONTENT = """for p in "$@"; do
 done
 """
 _CHUNK = 256
+
+# Prints one NUL-terminated field per path argument: `x` for a regular file (not a
+# link) whose owner execute character in `ls -ld` is x or s, `-` for anything else.
+# Read for a staged mode only, never from the index's own stat data.
+_EXEC = """for p in "$@"; do
+  if [ -f "$p" ] && [ ! -L "$p" ]; then
+    case "$(LC_ALL=C ls -ld -- "$p")" in
+      -??[xs]*) printf "x\\0" ;;
+      *) printf -- "-\\0" ;;
+    esac
+  else printf -- "-\\0"; fi
+done
+"""
+
+
+def _ask(script: str, root, paths: list[str]) -> list[str]:
+    """One NUL-terminated answer per path from `script`, run in chunks through the
+    current sandbox. A command that fails, or prints the wrong number of fields,
+    raises GitFailed: a loop that fails on both sides would read as no change."""
+    found: list[str] = []
+    for i in range(0, len(paths), _CHUNK):
+        chunk = paths[i:i + _CHUNK]
+        try:
+            done = sandbox.current().run(["sh", "-c", script, "sh", *chunk], cwd=root, text=False)
+            out = done.stdout
+            out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+            answers = _fields(out)
+            failure = (f"it exited {done.returncode}" if done.returncode != 0
+                       else "it printed the wrong number of fields" if len(answers) != len(chunk)
+                       else "")
+        except Exception as error:
+            failure = f"couldn't start: {_said_line(str(error))}"
+        if failure:
+            # One file's hash-object failing is not this: that file is `F` with an
+            # empty hash, an answer.
+            raise GitFailed(
+                f"SSSF's own file-hash command failed ({failure}). SSSF can't tell what changed "
+                "in the tree, so it stopped. The tree may hold writes no check saw; fix what "
+                "the shell reports, then check git status.")
+        found.extend(answers)
+    return found
+
+
+def _blob_id(data: bytes, width: int) -> str:
+    """Git's blob id of `data`: sha1 for a 40-character id, sha256 for 64."""
+    import hashlib
+    h = hashlib.sha256() if width == 64 else hashlib.sha1()
+    h.update(b"blob %d\0" % len(data) + data)
+    return h.hexdigest()
+
+
+def _staged_hidden(path: str, rec: tuple[str, str, str, str], c: str, first: dict,
+                   flagged: bool, executable: str, kept: str = "",
+                   symlinks: bool = True) -> bool:
+    """True when `git add <path>` on the current work tree would NOT stage the
+    entry the index holds. `rec` is (status, old mode, new mode, new id) of the
+    `diff --cached HEAD` record; `c` the path's `_CONTENT` answer; `first` the
+    `diff HEAD` records' (new mode, new id); `executable` the `_EXEC` answer.
+    `symlinks` is `core.symlinks`: only when it is false does `git add` keep a
+    plain file's bytes under a link mode HEAD already holds."""
+    status, old, mode, ident = rec
+    if status == "D":
+        return c != "-"
+    if status not in ("A", "M", "T"):
+        return True
+    if mode == "160000":
+        return flagged or first.get(path) != ("160000", ident)
+    if mode == "120000":
+        # Only under core.symlinks=false does `git add` of a link HEAD already
+        # holds store the plain file's bytes under the link mode.
+        if not symlinks and old == "120000" and c == "F" + ident:
+            return False
+        return not (c.startswith("L") and
+                    _blob_id(c[1:].encode("utf-8", "surrogateescape"), len(ident)) == ident)
+    if mode in ("100644", "100755"):
+        if c != "F" + ident:
+            return True
+        # core.fileMode=false: `git add` keeps the index mode, so a mode the
+        # engineer already staged before the call (`kept`) is not the agent's.
+        return not (mode == old or mode == kept
+                    or (mode == "100755") == (executable == "x"))
+    return True
+
+
+def _staged_token(value: str) -> str:
+    """The `staged-…` kind of a snapshot value, or an empty string."""
+    for kind in value.partition(":")[0].split(","):
+        if kind.startswith("staged-"):
+            return kind
+    return ""
+
+
+def _without_staged(value: str) -> str | None:
+    """The value without its `staged-…` kind; None when no kind is left."""
+    kind, _, content = value.partition(":")
+    parts = [k for k in kind.split(",") if not k.startswith("staged-")]
+    return f"{','.join(parts)}:{content}" if parts else None
+
 
 # Run as `python3 -I -c`, where the work tree is: for each gitlink path argument,
 # prints two NUL-terminated fields, a sha256 in hex of every file under it and
@@ -377,6 +485,164 @@ def _digests(root, paths: list[str]) -> dict[str, tuple[str, str]]:
     return found
 
 
+# Builds a version 2 index from `ls-files -s -z`'s own records (its argv is the
+# arguments) and prints its path. Nothing of `.git/index` but those records is
+# used: not a flag, not stat data, not the cache-tree, which the agent can forge.
+# The TREE extension is computed here from the entries, so git reads the trees of
+# only the folders that really differ from HEAD; a folder holding an unmerged
+# entry, and its ancestors, are written invalid. No object is read.
+_INDEX = r"""import hashlib, os, struct, subprocess, sys, tempfile
+argv = sys.argv[1:]
+prefix = argv[:argv.index("ls-files")]
+
+
+def run(a):
+    try:
+        return subprocess.check_output(a, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        sys.exit(1)
+
+
+info = run(prefix + ["rev-parse", "--show-toplevel", "--absolute-git-dir",
+                     "--show-object-format"]).decode("utf-8", "surrogateescape").split("\n")
+if len(info) < 3:
+    sys.exit(1)
+hasher = hashlib.sha256 if info[2].strip() == "sha256" else hashlib.sha1
+size = hasher().digest_size
+records = run(argv).split(b"\0")
+if records and records[-1] == b"":
+    records.pop()
+
+
+class Node:
+    def __init__(self):
+        self.files, self.dirs, self.count, self.bad = [], {}, 0, False
+
+
+root = Node()
+body = []
+for record in records:
+    meta, _, name = record.partition(b"\t")
+    mode, ident, stage = meta.split(b" ")
+    raw = bytes.fromhex(ident.decode())
+    if len(raw) != size or not name:
+        sys.exit(1)
+    stage = int(stage)
+    fixed = struct.pack(">10I", 0, 0, 0, 0, 0, 0, int(mode, 8), 0, 0, 0) + raw
+    fixed += struct.pack(">H", stage << 12 | min(len(name), 0xFFF)) + name
+    body.append(fixed + b"\0" * (8 - len(fixed) % 8))
+    parts = name.split(b"/")
+    node = root
+    if stage:
+        root.bad = True
+    else:
+        root.count += 1
+    for part in parts[:-1]:
+        node = node.dirs.setdefault(part, Node())
+        if stage:
+            node.bad = True
+        else:
+            node.count += 1
+    if not stage:
+        node.files.append((parts[-1], mode.lstrip(b"0"), raw))
+
+
+def tree_id(node):
+    items = [(n, m, r) for n, m, r in node.files]
+    items += [(n, b"40000", node.dirs[n].ident) for n in node.dirs]
+    items.sort(key=lambda i: i[0] + (b"/" if i[1] == b"40000" else b""))
+    data = b"".join(m + b" " + n + b"\0" + r for n, m, r in items)
+    return hasher(b"tree %d\0" % len(data) + data).digest()
+
+
+def finish(top):
+    # No recursion: an agent can stage a path thousands of folders deep.
+    order, stack = [], [top]
+    while stack:
+        node = stack.pop()
+        order.append(node)
+        stack.extend(node.dirs.values())
+    for node in reversed(order):
+        node.ident = tree_id(node)
+
+
+def extension(top):
+    out, stack = [], [(top, b"")]
+    while stack:
+        node, name = stack.pop()
+        out.append(name + b"\0")
+        if node.bad:
+            out.append(b"-1 %d\n" % len(node.dirs))
+        else:
+            out.append(b"%d %d\n" % (node.count, len(node.dirs)) + node.ident)
+        stack.extend((node.dirs[c], c) for c in sorted(node.dirs, reverse=True))
+    return b"".join(out)
+
+
+finish(root)
+payload = extension(root)
+data = b"DIRC" + struct.pack(">II", 2, len(records)) + b"".join(body)
+data += b"TREE" + struct.pack(">I", len(payload)) + payload
+data += hasher(data).digest()
+
+
+def inside(path, folder):
+    path, folder = os.path.realpath(path), os.path.realpath(folder)
+    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
+
+
+for where in (None, "/tmp", "/var/tmp"):
+    try:
+        made = tempfile.mkdtemp(dir=where)
+    except OSError:
+        continue
+    if inside(made, info[0]) or inside(made, info[1]):
+        os.rmdir(made)
+        continue
+    with open(os.path.join(made, "index"), "wb") as out:
+        out.write(data)
+    sys.stdout.write(os.path.join(made, "index"))
+    sys.exit(0)
+sys.exit(1)
+"""
+
+
+def _failed_index(failure: str) -> GitFailed:
+    return GitFailed(
+        f"SSSF's index rebuild failed ({failure}). SSSF compares the index with HEAD through an "
+        "index it builds from the entries with `python3`, run where the work tree is, and can't "
+        "tell what is staged without it, so it stopped. Make `python3` available there (in the "
+        "sandbox image, for a sandbox run) and a temp folder outside the work tree, then run "
+        "again. The tree may hold writes no check saw; check git status.")
+
+
+def _built_index(root, argv: list[str]) -> str:
+    """The path of an index SSSF built from `argv`'s `ls-files -s` records.
+
+    A `python3 -I -c` command through the current sandbox, so the file is made
+    where git runs. A command that can't start, exits non-zero or prints a path
+    that isn't absolute raises GitFailed."""
+    try:
+        done = sandbox.current().run(["python3", "-I", "-c", _INDEX, *argv], cwd=root, text=False)
+        out = done.stdout
+        out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+        failure = (f"it exited {done.returncode}" if done.returncode != 0
+                   else "it printed no absolute path" if not out.startswith("/") else "")
+    except Exception as error:
+        failure = f"couldn't start: {_said_line(str(error))}"
+    if failure:
+        raise _failed_index(failure)
+    return out
+
+
+def _drop_index(root, path: str) -> None:
+    """Remove the folder a built index is in; best effort."""
+    try:
+        sandbox.current().run(["rm", "-rf", "--", os.path.dirname(path)], cwd=root, text=False)
+    except Exception:
+        pass
+
+
 
 
 def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
@@ -388,6 +654,17 @@ def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
     several are joined with commas, for example `D,?` for a file taken out of
     the index and written again. The content is the file's blob hash, so any
     rewrite of an already-dirty or untracked file registers.
+
+    The index is compared with HEAD too (`diff --cached HEAD`). A staged entry
+    that `git add <path>` on the current work tree would not make (other bytes,
+    other mode, a path taken out of the index while the file is on disk, a gitlink
+    the submodule's HEAD doesn't match) adds the kind `staged-<status>-<mode>-<id>`,
+    before `sub`. SSSF hashes the file itself, so no index flag or stat field
+    decides it. An entry the work tree shows adds nothing: values are as without it.
+    The cached diff reads an index SSSF rebuilds from `ls-files -s` (`_INDEX`),
+    with a cache-tree it computes, so a forged cache-tree or stat field hides no
+    entry and git reads the tree of only a folder that really differs. An
+    intent-to-add entry (`git add -N`) reads as a staged empty file there.
 
     Renames show as a delete and an add. Names are never quoted (-z). Flagged
     paths show by content. Gitignored paths never appear. The session runtime
@@ -430,6 +707,7 @@ def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
                          "--no-ext-diff", "--no-textconv", "--raw", "--no-abbrev", "-z"],
                         root, off))
     head_gitlinks: list[str] = []
+    first: dict[str, tuple[str, str]] = {}      # path -> (new mode, new id) of `diff HEAD`
     bad_diff = len(diff) % 2 != 0
     for record, path in zip(diff[::2], diff[1::2]):
         words = record.split()
@@ -437,8 +715,32 @@ def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
             bad_diff = True
             break
         add(path, words[4])
+        first[path] = (words[1], words[3])
         if words[0] == ":160000" and path not in head_gitlinks:
             head_gitlinks.append(path)
+    # The entries as the index holds them: path, mode, id and stage, whatever its
+    # cache-tree or stat data say. They feed the gitlink list and the index SSSF
+    # rebuilds for the cached diff.
+    ls_args = ["ls-files", "--no-recurse-submodules", "-s", "-z"]
+    entries = _fields(_git(ls_args, root, off))
+    # The index against HEAD, parsed the same way: what is staged, whatever the
+    # work tree shows. It reads an index SSSF built from the entries above, with a
+    # cache-tree SSSF computed, so a forged cache-tree or stat field hides nothing.
+    built = _built_index(root, _gitargv(ls_args, off=off))
+    try:
+        cached = _fields(_git(["diff", "--cached", "HEAD", "--ignore-submodules=dirty",
+                               "--no-renames", "--no-ext-diff", "--no-textconv", "--raw",
+                               "--no-abbrev", "-z"], root, off, index=built))
+    finally:
+        _drop_index(root, built)
+    staged: dict[str, tuple[str, str, str, str]] = {}
+    bad_diff = bad_diff or len(cached) % 2 != 0
+    for record, path in zip(cached[::2], cached[1::2]):
+        words = record.split()
+        if len(words) != 5 or not record.startswith(":"):
+            bad_diff = True
+            break
+        staged[path] = (words[4], words[0][1:], words[1], words[3])
     if bad_diff:
         raise GitFailed(
             "SSSF's own git diff printed a record it couldn't read. SSSF can't tell what "
@@ -457,7 +759,7 @@ def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
     # other path. The snapshot reads no tree the diff didn't. A gitlink only in
     # HEAD is in the diff, as D or T. Added last, so its kind ends in `sub`.
     gitlinks: list[str] = []
-    for record in _fields(_git(["ls-files", "--no-recurse-submodules", "-s", "-z"], root, off)):
+    for record in entries:
         meta, _, path = record.partition("\t")
         if meta.startswith("160000 ") and path and path not in gitlinks:
             gitlinks.append(path)
@@ -467,29 +769,10 @@ def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
     for path in gitlinks:
         add(path, "sub")
 
-    contents: dict[str, str] = {}
-    paths = list(kinds)
-    for i in range(0, len(paths), _CHUNK):
-        chunk = paths[i:i + _CHUNK]
-        try:
-            done = sandbox.current().run(["sh", "-c", _CONTENT, "sh", *chunk], cwd=root, text=False)
-            out = done.stdout
-            out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
-            answers = _fields(out)
-            failure = (f"it exited {done.returncode}" if done.returncode != 0
-                       else "it printed the wrong number of fields" if len(answers) != len(chunk)
-                       else "")
-        except Exception as error:
-            failure = f"couldn't start: {_said_line(str(error))}"
-        if failure:
-            # A loop that fails on both sides would read as "no change" for the
-            # chunk, so it stops the snapshot. One file's hash-object failing is
-            # not this: that file is `F` with an empty hash, an answer.
-            raise GitFailed(
-                f"SSSF's own file-hash command failed ({failure}). SSSF can't tell what changed "
-                "in the tree, so it stopped. The tree may hold writes no check saw; fix what "
-                "the shell reports, then check git status.")
-        contents.update(zip(chunk, answers))
+    # A staged path is hashed with the rest, so the index is compared with the
+    # bytes SSSF takes itself, never with git's own "unchanged" answer.
+    paths = list(kinds) + [p for p in staged if p not in kinds]
+    contents: dict[str, str] = dict(zip(paths, _ask(_CONTENT, root, paths)))
     # A gitlink that is a folder gets the digest of the files under it. Any other
     # content (missing, a file, a link) stays as it is. With `before`, only a
     # gitlink that was there before the call is digested: a new one is a changed
@@ -500,6 +783,28 @@ def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
         nonce = secrets.token_hex(8)
         for path, (digest, unread) in _digests(root, folders).items():
             contents[path] = (f"D@unread:{nonce}:{unread}" if unread else f"D@{digest}")
+    # A staged entry `git add` on the work tree wouldn't make is hidden: one
+    # `staged-<status>-<mode>-<id>` kind, before `sub`. The disk execute bit is read
+    # only for a content match whose staged mode differs from HEAD's.
+    need = [p for p, (status, old, mode, ident) in staged.items()
+            if status in ("A", "M", "T") and mode in ("100644", "100755") and mode != old
+            and contents[p] == "F" + ident]
+    execs = dict(zip(need, _ask(_EXEC, root, need))) if need else {}
+    # core.symlinks (git's default is true), read only when a staged link is judged.
+    symlinks = True
+    if any(rec[2] == "120000" for rec in staged.values()):
+        symlinks = _git(["config", "--type=bool", "--get", "core.symlinks"], root, off,
+                        answers=(1,), literal=False).strip() != "false"
+    for path, rec in staged.items():
+        flagged = any(k.startswith("flag-") for k in kinds.get(path, "").split(","))
+        was = _staged_token((before or {}).get(path, "")).split("-")
+        kept = was[2] if len(was) == 4 else ""
+        if _staged_hidden(path, rec, contents[path], first, flagged, execs.get(path, ""), kept,
+                          symlinks):
+            parts = kinds[path].split(",") if path in kinds else []
+            parts.insert(len(parts) - 1 if parts and parts[-1] == "sub" else len(parts),
+                         f"staged-{rec[0]}-{rec[2]}-{rec[3]}")
+            kinds[path] = ",".join(parts)
     return {path: f"{kind}:{contents[path]}" for path, kind in kinds.items()}
 
 
@@ -1647,8 +1952,11 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str], of
     the same harm this module exists to prevent, committed by the cleanup
     instead of the agent.
 
-    A path untracked alone (kind `?`) is deleted. A staged-new path is
-    unstaged, then deleted only if git says it isn't ignored. Anything in HEAD
+    A path untracked alone (kind `?`) is deleted. A staged-new path (`A`, or a
+    hidden `staged-A-…` entry, flags cleared first) is
+    unstaged, then deleted only if git says it isn't ignored; with nothing on
+    disk it is only unstaged. A path that was already changed before the call is
+    left as-is, with a note when its staged entry changed. Anything in HEAD
     (including `D,?`, a file taken out of the index and written again) has its
     index flags cleared and is restored from HEAD, index and tree both.
 
@@ -1664,11 +1972,19 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str], of
         # Already dirty beforehand. If it is gone from the diff now, the agent
         # reverted an engineer's uncommitted work and the content is not ours
         # to reconstruct — say so loudly rather than pretend it was handled.
-        return "REVERTED-BY-AGENT (uncommitted work lost, cannot restore)" \
-            if path not in after else \
-            "left as-is (it was already changed, untracked or flagged before the call, so it may hold your work)"
-    kind = after.get(path, "").partition(":")[0]
+        if path not in after:
+            return "REVERTED-BY-AGENT (uncommitted work lost, cannot restore)"
+        said = ("left as-is (it was already changed, untracked or flagged before the call, "
+                "so it may hold your work)")
+        if _staged_token(after[path]) != _staged_token(before[path]):
+            said += (" Its staged entry changed during the call: check "
+                     f"`git diff --cached -- {shlex.quote(path)}`; `git restore --staged -- "
+                     f"{shlex.quote(path)}` drops what is staged.")
+        return said
+    kind, _, content = after.get(path, "").partition(":")
     parts = kind.split(",")
+    flagged = any(p.startswith("flag-") for p in parts)
+    staged_new = any(p.startswith("staged-A-") for p in parts)
     box = sandbox.current()
 
     def delete() -> str:
@@ -1679,10 +1995,21 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str], of
             return f"could not delete ({error})"
     if kind == "?":
         return delete()
-    if parts[0] == "A" and not any(p.startswith("flag-") for p in parts):
+    if staged_new or (parts[0] == "A" and not flagged):
+        if flagged:
+            # `git rm --cached` exits 1 on a skip-worktree entry.
+            for flag in ("--no-skip-worktree", "--no-assume-unchanged"):
+                _try_git(["update-index", "-q", flag, "--", path], run.repo_root, off)
         code, _, err = _try_git(["rm", "-q", "--cached", "--force", "--", path], run.repo_root, off)
         if code != 0:
             return "could not unstage" if code is not None else f"could not unstage ({_said_line(err)})"
+        if staged_new and content == "-":
+            return "unstaged"
+        if staged_new and any(b.endswith("/") and path.startswith(b) for b in before):
+            # Inside a folder that was untracked before the call (a nested repo):
+            # the file may be the engineer's, so it is never deleted.
+            return ("unstaged; left on disk because its folder was untracked before the "
+                    "call, so it may be yours; check it by hand")
         ignored, _, err = _try_git(["check-ignore", "-q", "--no-index", "--", path],
                                    run.repo_root, off, literal=False)
         if ignored not in (0, 1):
@@ -1919,7 +2246,16 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
     Without it, only the tree is checked.
     """
     after = snapshot(run, before)
-    touched = changed_paths(before, after)
+    # A hidden staged entry that only went away is no finding: nothing is hidden
+    # any more and the work-tree check judges the rest.
+    compare: dict[str, str] = {}
+    for p, v in before.items():
+        if _staged_token(v) and not _staged_token(after.get(p, "")):
+            v = _without_staged(v)
+            if v is None:
+                continue
+        compare[p] = v
+    touched = changed_paths(compare, after)
     breaches = [p for p in touched if not permitted(p, agent, run.cfg)]
     # Listed after the snapshot, from the index the rollback reads, only when
     # there is something to roll back.
@@ -1955,5 +2291,5 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
         message += "\n" + moved
     raise PermissionBreach(
         message, left=[p for p, o in outcomes.items()
-                       if o not in ("rolled back", "deleted", "unstaged and deleted")],
+                       if o not in ("rolled back", "deleted", "unstaged and deleted", "unstaged")],
         refs_left=bool(moved))

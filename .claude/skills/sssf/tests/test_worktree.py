@@ -533,3 +533,32 @@ def test_an_empty_trace_db_reads_as_no_runs(repo, requested):
     assert (place is not None) == requested
     assert worktree.recorded(str(db), "nope") is None
     finish(tracer, "e1")
+
+
+def test_a_rebase_with_a_repo_yaml_that_does_not_load_changes_nothing(repo, monkeypatch):
+    rechecked = []
+    monkeypatch.setattr(worktree, "_recheck", lambda *a: rechecked.append(a) or True)
+    cfg = two_from_one_tip(repo, "two\n", "new\n")
+    before = git("rev-parse", "sssf/wt000021", cwd=repo)
+    settings = repo / "adws/adw_sssf_config/repo.yaml"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text("[]\n")
+    with pytest.raises(worktree.WorktreeError, match="nothing was rebased"):
+        worktree.rebase(cfg, "wt000021")
+    assert git("rev-parse", "sssf/wt000021", cwd=repo) == before
+    path = repo / "adws/adw_data/worktrees/wt000021"
+    assert git("status", "--porcelain", cwd=path) == ""
+    assert rechecked == []
+
+
+def test_the_merge_refusal_says_to_check_the_status_before_committing_by_hand(repo):
+    cfg, _, tracer = start("wt000020")
+    Path("new.txt").write_text("the run's work\n")
+    finish(tracer, "wt000020")
+    os.chdir(repo)
+    with pytest.raises(worktree.WorktreeError, match="uncommitted") as refused:
+        worktree.merge(cfg, "wt000020")
+    text = str(refused.value)
+    path = repo / "adws/adw_data/worktrees/wt000020"
+    assert f"git -C {path} status" in text and f"git -C {path} add -A" in text
+    assert text.index(f"git -C {path} status") < text.index(f"git -C {path} add -A")

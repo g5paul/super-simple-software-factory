@@ -43,7 +43,8 @@ An agent can also move a ref other than HEAD: `git commit-tree` and
 afterwards through `ref_moves()`. A ref other than the run's own branch that
 gained commits changing a path the agent is barred from, or any change under
 `refs/replace/`, stops the run. The check only reads: nothing is moved back,
-deleted or fetched, and no hook, filter or external diff runs. It can't tell
+deleted or fetched, and no hook, filter, fsmonitor, pager or external diff runs, in
+the repo or in a submodule (the snapshot, undo and rollback git work the same way). It can't tell
 the agent's commit from the engineer's.
 
 Two keys drive it, both in sssf.config.yaml:
@@ -56,6 +57,8 @@ roster can't drop them.
 from __future__ import annotations
 
 import re
+import secrets
+import shlex
 from pathlib import Path
 
 from . import sandbox
@@ -63,30 +66,160 @@ from .data_types import AgentConfig, SSSFConfig
 
 
 class PermissionBreach(RuntimeError):
-    """An agent modified a path it was not permitted to modify."""
+    """An agent modified a path it was not permitted to modify.
+
+    `enforce` sets `left` (the breached paths it didn't put back; `None` when no
+    rollback list came with the breach) and `refs_left` (a ref still moved)."""
+
+    def __init__(self, message: str = "", *, left: list[str] | None = None,
+                 refs_left: bool = False):
+        super().__init__(message)
+        self.left = left
+        self.refs_left = refs_left
 
 
-# SSSF's own git here (snapshots, the commit undo, the rollback) never runs an
-# fsmonitor, and its writes never run a hook: neither is needed, and either
-# could be one the agent planted. On the command line, which no config file or
-# GIT_CONFIG_PARAMETERS overrides.
+class GitFailed(PermissionBreach):
+    """SSSF's own git (or its file-hash loop) failed, so it can't tell what changed.
+    Not a named-paths breach: nothing was rolled back, and the tree may still
+    hold the agent's writes."""
+
+
+# SSSF's own git here (snapshots, the commit undo, the rollback) runs no program
+# the agent could have planted, on every command, reads and writes alike:
+#   * no hook (core.hooksPath=/dev/null), no fsmonitor (empty: "false" runs
+#     `false` before git 2.36), no pager, no external diff or textconv;
+#   * no filter driver: `_filters_off` names every filter in the repo's config,
+#     and each is turned off by --config-env. No git child starts in a submodule
+#     (`diff HEAD --ignore-submodules=dirty`), so a
+#     submodule's config is never read and never an argument. An edit inside a
+#     submodule is seen by hashing its files with `python3` (`_DIGEST`), which
+#     reads no git config;
+#   * no grafts, no replace refs, no lazy fetch (GIT_ALLOW_PROTOCOL= is the lock
+#     on git 2.43; GIT_NO_LAZY_FETCH arrived later);
+#   * no recursion into a submodule (submodule.recurse=false).
+# On the command line and in the environment, which no config file overrides.
+# Never read by these commands, so left alone: core.editor, sequence.editor (no
+# commit, rebase, tag or merge runs); gpg.* and log.showSignature (no commit,
+# tag, log or verify); merge.<driver>.driver, merge.tool (checkout and a mixed
+# reset merge no content); alias.* (SSSF names builtins); gc.auto and
+# maintenance.auto (only commit, merge, fetch, rebase, am start them);
+# core.alternateRefsCommand, uploadpack.packObjectsHook (fetch and server only);
+# fetch.recurseSubmodules, push.recurseSubmodules, submodule.<name>.update (no
+# fetch, push or `submodule update` runs).
 _SAFE = ["-c", "core.fsmonitor="]     # empty: off on every git; "false" runs `false` before 2.36
 _NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
+_GIT_ENV = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "GIT_GRAFT_FILE=/dev/null",
+            "LC_ALL=C")
 
-def _gitargv(args: list[str], *, writes: bool = False, literal: bool = True) -> list[str]:
+
+def _gitargv(args: list[str], *, off=(), literal: bool = True, hooks: bool = False) -> list[str]:
     # --literal-pathspecs: a path an agent made, such as `.claude/*` or
     # `app/[id]/page.tsx`, names that file only, never every file it matches.
     # check-ignore takes paths, not pathspecs, and refuses the option.
-    return ["git", *_SAFE, *(["--literal-pathspecs"] if literal else []),
-            *(_NO_HOOKS if writes else []), *args]
+    # hooks=True is `_watched`'s own reads of the engineer's config before the
+    # agent runs: they read no object, so they take only the locale, as they
+    # always have (`env LC_ALL=C git ...`; tests pin that shape).
+    env = (("env", "LC_ALL=C") if hooks else
+           (*_GIT_ENV, "GIT_PAGER=cat", "SSSF_GIT_EMPTY=", "SSSF_GIT_FALSE=false"))
+    return [*env, "git", "--no-pager", "--no-replace-objects", *_SAFE,
+            *([] if hooks else _NO_HOOKS),
+            "-c", "advice.graftFileDeprecated=false", "-c", "submodule.recurse=false",
+            *off, *(["--literal-pathspecs"] if literal else []), *args]
 
 
-def _git(args: list[str], cwd) -> str:
-    result = sandbox.current().run(_gitargv(args), cwd=cwd, text=False)
-    if result.returncode != 0:
+def _try_git(args: list[str], cwd, off=(), hooks: bool = False, literal: bool = True):
+    """Run SSSF's own git and return `(code, out, err)`, decoded.
+
+    A command that can't be started (an `OSError` such as E2BIG, or anything
+    else the sandbox raises) gives `code=None` and the exception's text as `err`.
+    `KeyboardInterrupt` and `SystemExit` pass through.
+    """
+    try:
+        done = sandbox.current().run(
+            _gitargv(args, off=off, hooks=hooks, literal=literal), cwd=cwd, text=False)
+    except Exception as error:
+        return None, "", str(error)
+
+    def text(value) -> str:
+        if isinstance(value, bytes):
+            return value.decode("utf-8", "surrogateescape")
+        return value or ""
+    return done.returncode, text(done.stdout), text(done.stderr)
+
+
+GIT_ARGS_SHOWN = 120
+
+
+def _shown(args: list[str]) -> str:
+    """The git arguments as a breach names them: no --config-env list, control
+    characters made visible, cut to a fixed length (a path can be the agent's)."""
+    line = _said_line(" ".join(args))
+    return line if len(line) <= GIT_ARGS_SHOWN else line[:GIT_ARGS_SHOWN - len(SAID_CUT)] + SAID_CUT
+
+
+def _git(args: list[str], cwd, off=(), hooks: bool = False, answers=(), literal: bool = True) -> str:
+    """stdout of SSSF's own git on exit 0, "" when the exit code is in `answers`
+    (an exit code that is git's answer, such as 1 for "not set"), else a breach.
+
+    A failing git is never an empty answer: SSSF couldn't tell what changed.
+    """
+    code, out, err = _try_git(args, cwd, off=off, hooks=hooks, literal=literal)
+    if code == 0:
+        return out
+    if code is not None and code in answers:
         return ""
-    out = result.stdout
-    return out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else out
+    raise _git_failed(args, code, err)
+
+
+def _git_failed(args: list[str], code, err: str) -> PermissionBreach:
+    said = f"couldn't start: {_said_line(err)}" if code is None else _said(err, code).strip()
+    return GitFailed(
+        f"SSSF's own git command failed: git {_shown(args)} ({said}). SSSF can't tell what "
+        "changed in the tree, so it stopped. The tree may hold writes no check saw; fix what "
+        "git reports, then check git status.")
+
+
+def _no_commit() -> PermissionBreach:
+    return GitFailed(
+        "HEAD has no commit (a new repo with no commit, or an orphan or unborn branch), so SSSF "
+        "has no HEAD to snapshot the tree against and can't guard an agent's writes. SSSF runs "
+        "no agent there. Make a first commit, with `git commit --allow-empty -m init` or a real "
+        "one (or switch to a branch that has commits), then run again.")
+
+
+def _filters_off(cwd) -> list[str]:
+    """Arguments that turn off every filter driver git could run, in the repo at
+    `cwd`.
+
+    SSSF's git starts no child inside a submodule (`diff HEAD` is given
+    --ignore-submodules=dirty; edits there are seen by `_DIGEST`'s file reads),
+    so no submodule's config is read, and none of its names becomes an argument:
+    a name in a config the agent wrote can't make the argument list agent-sized.
+    Only the one config `git config --list` reads at the repo root is listed,
+    the empty filter name included (git runs `[filter ""]` too).
+
+    Reads key names only, through git (`config --list --name-only -z`); no
+    config value is scanned. A git that can't list them raises PermissionBreach.
+    """
+    names: list[str] = []
+    code, out, err = _try_git(["config", "--list", "--name-only", "-z"], cwd, literal=False)
+    if code != 0:
+        said = f"couldn't start: {_said_line(err)}" if code is None else _said(err, code)
+        raise GitFailed(
+            f"SSSF couldn't list git's filter drivers (git config --list --name-only: {said}), so it ran "
+            "no further git command. The tree may still hold the agent's writes.")
+    for key in _fields(out):
+        if key.startswith("filter.") and key.rsplit(".", 1)[-1] in ("clean", "smudge", "process", "required"):
+            name = key[len("filter."):key.rindex(".")]
+            if name not in names:
+                names.append(name)
+    off: list[str] = []
+    for name in names:
+        off += [f"--config-env=filter.{name}.clean=SSSF_GIT_EMPTY",
+                f"--config-env=filter.{name}.smudge=SSSF_GIT_EMPTY",
+                f"--config-env=filter.{name}.process=SSSF_GIT_EMPTY",
+                f"--config-env=filter.{name}.required=SSSF_GIT_FALSE"]
+    return off
 
 
 def _fields(text: str) -> list[str]:
@@ -102,15 +235,151 @@ def _fields(text: str) -> list[str]:
 # runs), D for a directory (a gitlink, a nested repo), - for a missing path.
 _CONTENT = """for p in "$@"; do
   if [ -L "$p" ]; then printf "L%s\\0" "$(readlink "$p")"
-  elif [ -f "$p" ]; then printf "F%s\\0" "$(git -c core.fsmonitor= hash-object --no-filters -- "$p" 2>/dev/null)"
+  elif [ -f "$p" ]; then printf "F%s\\0" "$(env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.hooksPath=/dev/null -c submodule.recurse=false hash-object --no-filters -- "$p" 2>/dev/null)"
   elif [ -d "$p" ]; then printf "D\\0"
   else printf -- "-\\0"; fi
 done
 """
 _CHUNK = 256
 
+# Run as `python3 -I -c`, where the work tree is: for each gitlink path argument,
+# prints two NUL-terminated fields, a sha256 in hex of every file under it and
+# the first path under it (relative to it) it couldn't read, empty when it read
+# everything. A regular file counts by its relative path, its owner execute bit
+# and its bytes; a symlink by its path and target, never followed; anything else
+# that isn't a folder by its path and type, never opened. `.git` entries at any
+# depth are skipped. Reads no ignore rule and runs no git, so no submodule config
+# is read. An OSError is remembered and the walk goes on.
+_DIGEST = r"""import hashlib, os, stat, sys
+D = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+out = sys.stdout.buffer
+for top in sys.argv[1:]:
+    h = hashlib.sha256()
+    bad = []
+    def note(rel):
+        if not bad:
+            bad.append(rel)
+    def rec(dfd, rel):
+        try:
+            names = sorted(os.listdir(dfd))
+        except OSError:
+            note(rel or ".")
+            return
+        for n in names:
+            if n == ".git":
+                continue
+            r = rel + "/" + n if rel else n
+            p = os.fsencode(r)
+            try:
+                m = os.stat(n, dir_fd=dfd, follow_symlinks=False).st_mode
+            except OSError:
+                note(r)
+                continue
+            if stat.S_ISDIR(m):
+                try:
+                    sub = os.open(n, D, dir_fd=dfd)
+                except OSError:
+                    note(r)
+                    continue
+                try:
+                    rec(sub, r)
+                except (OSError, RecursionError):
+                    note(r)
+                finally:
+                    os.close(sub)
+            elif stat.S_ISLNK(m):
+                try:
+                    t = os.fsencode(os.readlink(n, dir_fd=dfd))
+                except OSError:
+                    note(r)
+                    continue
+                h.update(b"L\0" + p + b"\0" + t + b"\0")
+            elif stat.S_ISREG(m):
+                try:
+                    f = os.open(n, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+                except OSError:
+                    note(r)
+                    continue
+                try:
+                    st = os.fstat(f)
+                    if not stat.S_ISREG(st.st_mode):
+                        h.update(b"O\0" + p + b"\0")
+                        continue
+                    fh = hashlib.sha256()
+                    while True:
+                        b = os.read(f, 1 << 20)
+                        if not b:
+                            break
+                        fh.update(b)
+                except OSError:
+                    note(r)
+                    continue
+                finally:
+                    os.close(f)
+                x = b"x" if st.st_mode & stat.S_IXUSR else b"-"
+                h.update(b"F\0" + p + b"\0" + x + fh.hexdigest().encode() + b"\0")
+            else:
+                h.update(b"O\0" + p + b"\0" + str(stat.S_IFMT(m)).encode() + b"\0")
+    try:
+        top_fd = os.open(top, D)
+    except OSError:
+        note(".")
+    else:
+        try:
+            rec(top_fd, "")
+        except Exception:
+            note(".")
+        finally:
+            os.close(top_fd)
+    out.write(h.hexdigest().encode() + b"\0" + (os.fsencode(bad[0]) if bad else b"") + b"\0")
+out.flush()
+"""
 
-def snapshot(run) -> dict[str, str]:
+
+def _failed_digest(failure: str) -> GitFailed:
+    return GitFailed(
+        f"SSSF's submodule digest command failed ({failure}). SSSF hashes the files under each "
+        "submodule with `python3`, run where the work tree is, and can't tell what changed under "
+        "a submodule without it, so it stopped. Make `python3` available there (in the sandbox "
+        "image, for a sandbox run), then run again. The tree may hold writes no check saw; "
+        "check git status.")
+
+
+def _digests(root, paths: list[str]) -> dict[str, tuple[str, str]]:
+    """`path -> (digest, first unread path)` for each gitlink folder in `paths`.
+
+    The only way the digest runs: a `python3 -I -c` command through the current
+    sandbox, so it reads the files where the work tree is. `-I` keeps the repo
+    root (the `cwd`), where the agent could leave a `hashlib.py`, off the import
+    path. A command that can't start, exits non-zero or prints the wrong number
+    of fields raises GitFailed: a digest that can't run on either side would read
+    as no change."""
+    found: dict[str, tuple[str, str]] = {}
+    for i in range(0, len(paths), _CHUNK):
+        chunk = paths[i:i + _CHUNK]
+        try:
+            done = sandbox.current().run(["python3", "-I", "-c", _DIGEST, *chunk],
+                                         cwd=root, text=False)
+            out = done.stdout
+            out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
+            fields = out.split("\0")
+            if fields and fields[-1] == "":
+                fields.pop()
+            failure = (f"it exited {done.returncode}" if done.returncode != 0
+                       else "it printed the wrong number of fields"
+                       if len(fields) != 2 * len(chunk) else "")
+        except Exception as error:
+            failure = f"couldn't start: {_said_line(str(error))}"
+        if failure:
+            raise _failed_digest(failure)
+        for path, digest, unread in zip(chunk, fields[::2], fields[1::2]):
+            found[path] = (digest, unread)
+    return found
+
+
+
+
+def snapshot(run, before: dict[str, str] | None = None) -> dict[str, str]:
     """Fingerprint every path the working tree currently differs on.
 
     Each value is `kind:content`. The kind is git's status for the path
@@ -125,45 +394,113 @@ def snapshot(run) -> dict[str, str]:
     is normally gitignored, but `always_writable` grants it anyway, so a
     missing gitignore line is safe. Only changed, untracked and flagged paths
     are hashed.
+
+    Every gitlink is listed, with kind `sub` last (`M,sub` when moved). The list
+    comes from the index and from the old modes of the diff against HEAD; the
+    snapshot reads no tree the diff didn't. Its content is `D@<digest>` of every
+    file under it, tracked or not, taken by `python3` where the work tree is
+    (`_digests`); a file it couldn't read gives `D@unread:<nonce>:<path>`, never
+    equal to another snapshot's. No git runs inside a submodule. `python3`
+    starts only when a gitlink that is a folder was there before the call (the
+    `before` snapshot, when given), or for the before snapshot itself.
     """
     root = run.repo_root
     kinds: dict[str, str] = {}
+    # Listed here, every time: the list must come from the index this snapshot's
+    # commands read, never from before a command that changed it.
+    off = _filters_off(root)
 
     def add(path: str, kind: str) -> None:
         kinds[path] = f"{kinds[path]},{kind}" if path in kinds else kind
 
-    diff = _fields(_git(["diff", "HEAD", "--no-renames", "--no-ext-diff", "--no-textconv",
-                         "--name-status", "-z"], root))
-    for status, path in zip(diff[::2], diff[1::2]):
-        add(path, status)
-    for path in _fields(_git(["ls-files", "--others", "--exclude-standard", "-z"], root)):
+    # No commit (exit 1, nothing printed) is a refusal: there is no HEAD to
+    # snapshot the tree against. Any other failure stops the snapshot too.
+    # --ignore-submodules=dirty: git compares a gitlink with the submodule's HEAD
+    # in-process and starts no `git status` child inside the submodule, so a
+    # submodule's config (the agent can write it) never runs. A moved gitlink
+    # still shows, `ignore = all` notwithstanding. An edit inside the submodule's
+    # own work tree is seen by reading its files (`_DIGEST`), with no git there
+    # (see references/config.md).
+    if not _git(["rev-parse", "-q", "--verify", "HEAD"], root, off, answers=(1,)).strip():
+        raise _no_commit()
+    # --raw --no-abbrev: each record is `:<old mode> <new mode> <old id> <new id>
+    # <status>`, then the path. It reads the objects `--name-status` read, and the
+    # old mode names a gitlink that was in HEAD.
+    diff = _fields(_git(["diff", "HEAD", "--ignore-submodules=dirty", "--no-renames",
+                         "--no-ext-diff", "--no-textconv", "--raw", "--no-abbrev", "-z"],
+                        root, off))
+    head_gitlinks: list[str] = []
+    bad_diff = len(diff) % 2 != 0
+    for record, path in zip(diff[::2], diff[1::2]):
+        words = record.split()
+        if len(words) != 5 or not record.startswith(":"):
+            bad_diff = True
+            break
+        add(path, words[4])
+        if words[0] == ":160000" and path not in head_gitlinks:
+            head_gitlinks.append(path)
+    if bad_diff:
+        raise GitFailed(
+            "SSSF's own git diff printed a record it couldn't read. SSSF can't tell what "
+            "changed in the tree, so it stopped. The tree may hold writes no check saw; "
+            "check git status.")
+    for path in _fields(_git(["ls-files", "--no-recurse-submodules", "--others",
+                              "--exclude-standard", "-z"], root, off)):
         add(path, "?")
-    for record in _fields(_git(["ls-files", "-v", "-z"], root)):
+    for record in _fields(_git(["ls-files", "--no-recurse-submodules", "-v", "-z"], root, off)):
         tag, _, path = record.partition(" ")
         if tag and tag != "H" and path:
             add(path, f"flag-{tag}")
 
-    fingerprints: dict[str, str] = {}
+    # Every gitlink (a 160000 entry in the index, or the old mode of the diff
+    # against HEAD) is in every snapshot, so a change under it compares like any
+    # other path. The snapshot reads no tree the diff didn't. A gitlink only in
+    # HEAD is in the diff, as D or T. Added last, so its kind ends in `sub`.
+    gitlinks: list[str] = []
+    for record in _fields(_git(["ls-files", "--no-recurse-submodules", "-s", "-z"], root, off)):
+        meta, _, path = record.partition("\t")
+        if meta.startswith("160000 ") and path and path not in gitlinks:
+            gitlinks.append(path)
+    for path in head_gitlinks:
+        if path not in gitlinks:
+            gitlinks.append(path)
+    for path in gitlinks:
+        add(path, "sub")
+
+    contents: dict[str, str] = {}
     paths = list(kinds)
     for i in range(0, len(paths), _CHUNK):
         chunk = paths[i:i + _CHUNK]
-        contents: list[str] | None = None
         try:
             done = sandbox.current().run(["sh", "-c", _CONTENT, "sh", *chunk], cwd=root, text=False)
             out = done.stdout
             out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
-            contents = _fields(out)
-        except Exception:
-            contents = None
-        if contents is None or len(contents) != len(chunk):
-            # A broken sandbox, not something the agent controls. If this fails
-            # both before and after the call, a rewrite of an already-dirty or
-            # untracked file in the chunk looks the same on both sides and isn't
-            # seen. Appearing, vanishing and a status change still are.
-            contents = ["?"] * len(chunk)
-        for path, content in zip(chunk, contents):
-            fingerprints[path] = f"{kinds[path]}:{content}"
-    return fingerprints
+            answers = _fields(out)
+            failure = (f"it exited {done.returncode}" if done.returncode != 0
+                       else "it printed the wrong number of fields" if len(answers) != len(chunk)
+                       else "")
+        except Exception as error:
+            failure = f"couldn't start: {_said_line(str(error))}"
+        if failure:
+            # A loop that fails on both sides would read as "no change" for the
+            # chunk, so it stops the snapshot. One file's hash-object failing is
+            # not this: that file is `F` with an empty hash, an answer.
+            raise GitFailed(
+                f"SSSF's own file-hash command failed ({failure}). SSSF can't tell what changed "
+                "in the tree, so it stopped. The tree may hold writes no check saw; fix what "
+                "the shell reports, then check git status.")
+        contents.update(zip(chunk, answers))
+    # A gitlink that is a folder gets the digest of the files under it. Any other
+    # content (missing, a file, a link) stays as it is. With `before`, only a
+    # gitlink that was there before the call is digested: a new one is a changed
+    # path whatever is in it, and needs no python3.
+    folders = [p for p in gitlinks if contents[p] == "D"
+               and (before is None or "sub" in before.get(p, "").partition(":")[0].split(","))]
+    if folders:
+        nonce = secrets.token_hex(8)
+        for path, (digest, unread) in _digests(root, folders).items():
+            contents[path] = (f"D@unread:{nonce}:{unread}" if unread else f"D@{digest}")
+    return {path: f"{kind}:{contents[path]}" for path, kind in kinds.items()}
 
 
 REFS_UNREAD = "(refs unread)"
@@ -186,7 +523,8 @@ REF_SPEC_NOT = ("claude.md", "claude.local.md", "agents.md")
 # prints whenever the graft file opens) and a fixed locale.
 _REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "GIT_GRAFT_FILE=/dev/null",
              "LC_ALL=C", "git", "-c", "core.fsmonitor=", "-c", "core.commitGraph=false",
-             "-c", "advice.graftFileDeprecated=false", "--no-replace-objects")
+             "-c", "advice.graftFileDeprecated=false", "-c", "submodule.recurse=false",
+             "--no-replace-objects")
 # Per commit, a `:<old mode> <new mode> <old sha> <new sha> <status>` field and a
 # NUL-terminated path for each change, then one empty field. A path is never
 # empty, so the empty field ends a commit's list. The words are, per
@@ -199,7 +537,7 @@ _REF_READ = ("env", "GIT_ALLOW_PROTOCOL=", "GIT_NO_LAZY_FETCH=1", "GIT_GRAFT_FIL
 # about 50 KB at worst, whatever a commit holds. --raw reads no blob; it gives
 # the modes, so a link or an executable file isn't taken for a spec file.
 # diff-tree, not log: log honours log.showSignature and can run gpg.program.
-_COMMIT_PATHS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false --no-replace-objects diff-tree -r --raw -z --no-renames --no-ext-diff --no-textconv "$@"; }
+_COMMIT_PATHS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false -c submodule.recurse=false --no-replace-objects diff-tree -r --raw -z --no-renames --no-ext-diff --no-textconv "$@"; }
 while [ $# -gt 0 ]; do
   c=$1; shift
   if [ "$1" = . ]; then
@@ -219,7 +557,7 @@ done
 # ? for an object that can't be read as a commit. rev-list --parents honours
 # .git/shallow and shows a commit listed there without its parents, so only this
 # tells a root from one that is disguised as one.
-_COMMIT_ROOTS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false --no-replace-objects "$@"; }
+_COMMIT_ROOTS = """g() { env GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_GRAFT_FILE=/dev/null LC_ALL=C git -c core.fsmonitor= -c core.commitGraph=false -c advice.graftFileDeprecated=false -c submodule.recurse=false --no-replace-objects "$@"; }
 for c in "$@"; do
   g cat-file commit "$c" 2>/dev/null | {
     IFS= read -r t; IFS= read -r p
@@ -232,9 +570,14 @@ done
 """
 
 
-def _head(run) -> dict[str, str]:
-    return {"sha": _git(["rev-parse", "-q", "--verify", "HEAD"], run.repo_root).strip(),
-            "branch": _git(["symbolic-ref", "-q", "HEAD"], run.repo_root).strip()}
+def _head(run, off=()) -> dict[str, str]:
+    # Exit 1 is git's answer: a detached HEAD, or (after the call) a branch ref the
+    # agent deleted. Both read as an empty value, so undo_commits can stop on a
+    # deleted ref instead of failing here. Anything else fails.
+    return {"sha": _git(["rev-parse", "-q", "--verify", "HEAD"], run.repo_root, off,
+                        answers=(1,)).strip(),
+            "branch": _git(["symbolic-ref", "-q", "HEAD"], run.repo_root, off,
+                           answers=(1,)).strip()}
 
 
 def _refs(run) -> str:
@@ -270,35 +613,39 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
     restores a clean path from HEAD. Raises PermissionBreach when HEAD
     moved somewhere a reset can't safely
     bring back: onto another branch, or to a commit that doesn't descend from
-    where it was.
+    where it was. A branch ref the agent deleted reads as an empty sha, and
+    `merge-base` fails on it, so GitFailed stops the run with nothing undone.
+    snapshot() refuses a repo with no commit, so `before` always holds a sha.
     """
-    after = _head(run)
+    off = _filters_off(run.repo_root)   # once: the index these commands read
+    after = _head(run, off)             # read once, before any reset
     if (after["sha"], after["branch"]) == (before["sha"], before["branch"]):
         return []
     if after["branch"] != before["branch"]:
         raise PermissionBreach(
             f"The agent switched HEAD from {before['branch'] or 'a detached HEAD'} to "
             f"{after['branch'] or 'a detached HEAD'}. Nothing was undone; switch back by hand.")
-    if before["sha"]:
-        descends = sandbox.current().run(
-            _gitargv(["merge-base", "--is-ancestor", before["sha"], after["sha"]]),
-            cwd=run.repo_root).returncode == 0
-        if not descends:
-            raise PermissionBreach(
-                f"The agent moved HEAD from {before['sha'][:7]} to {after['sha'][:7]}, "
-                "which doesn't descend from it (a reset or rebase). Nothing was undone.")
-        shas = _git(["rev-list", "--abbrev-commit", f"{before['sha']}..{after['sha']}"],
-                    run.repo_root).split()
-        undo = _gitargv(["reset", "-q", before["sha"]], writes=True)
-    else:
-        shas = _git(["rev-list", "--abbrev-commit", after["sha"]], run.repo_root).split()
-        undo = _gitargv(["update-ref", "-d", "HEAD"], writes=True)
-    failed = sandbox.current().run(undo, cwd=run.repo_root).returncode != 0
-    if not failed and not before["sha"]:
-        failed = sandbox.current().run(_gitargv(["rm", "-rq", "--cached", "."], writes=True),
-                                       cwd=run.repo_root).returncode != 0
-    if failed:
-        raise PermissionBreach(f"The agent made commits {', '.join(shas)}, and undoing them failed.")
+    # Exit 1 is the answer "doesn't descend"; any other non-zero is a failure.
+    # An empty sha (the agent deleted the branch ref) makes this exit 128, so the
+    # run stops with GitFailed before any reset.
+    ask = ["merge-base", "--is-ancestor", before["sha"], after["sha"]]
+    code, _, err = _try_git(ask, run.repo_root, off)
+    if code not in (0, 1):
+        raise _git_failed(ask, code, err)
+    descends = code == 0
+    if not descends:
+        raise PermissionBreach(
+            f"The agent moved HEAD from {before['sha'][:7]} to {after['sha'][:7]}, "
+            "which doesn't descend from it (a reset or rebase). Nothing was undone.")
+    shas = _git(["rev-list", "--abbrev-commit", f"{before['sha']}..{after['sha']}"],
+                run.repo_root, off).split()
+    undo = ["reset", "-q", "--no-recurse-submodules", before["sha"]]
+    code, _, err = _try_git(undo, run.repo_root, off)
+    if code != 0:
+        said = f"couldn't start: {_said_line(err)}" if code is None else _said(err, code).strip()
+        raise PermissionBreach(
+            f"The agent made commits {', '.join(shas)}, and undoing them failed "
+            f"(git {_shown(undo)}: {said}).")
     return shas
 
 
@@ -327,6 +674,8 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
 # change too.
 #
 # info/refs is left out: git gc and repack rewrite it, and it runs nothing.
+# Which of these git reads as config, and which not (GIT_NOT_CONFIG), decides
+# whether a path left changed stops all git (config) or only the run (other).
 GIT_WATCHED = ("hooks", "info/exclude", "info/attributes", "info/sparse-checkout",
                "info/grafts", "config", "config.worktree", "commondir",
                "sssf-private-names")
@@ -475,7 +824,24 @@ def _sh(script: str, *args: str, timeout: float | None = None):
 
 
 def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
-    """Every path the guard covers.
+    """The first three values of `_watched_all`."""
+    return _watched_all(run)[:3]
+
+
+# Watched names git doesn't read as config: hooks are off on every command, the
+# ignore, attributes and sparse-checkout files start no program, info/grafts is
+# ignored through GIT_GRAFT_FILE, and git never reads sssf-private-names.
+GIT_NOT_CONFIG = ("hooks", "info/exclude", "info/attributes", "info/sparse-checkout",
+                  "info/grafts", "sssf-private-names")
+
+
+def _watched_all(run) -> tuple[list[str], list[str], dict[str, str], list[str], list[str]]:
+    """Every path the guard covers, and which of them git reads as config.
+
+    The last two values are the resolved config paths and the config walked
+    forms (see `guard_git_dir`).
+
+    Every path the guard covers.
 
     The repo's git directories (the shared one and a worktree's own) and a
     worktree's `.git` file. Every config file git loads here, by `git config
@@ -506,9 +872,13 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     hooks would be watched.
     """
     root = str(run.repo_root).rstrip("/")
+    # These git commands run before the agent, on the engineer's config, and
+    # name the hooks folder to watch, so they pass hooks=True: under
+    # core.hooksPath=/dev/null the real folder would go unwatched. None writes
+    # the index or a ref, so no hook can fire.
     found = sandbox.current().run(
-        ["env", "LC_ALL=C", *_gitargv(["rev-parse", "--path-format=absolute",
-                                       "--git-common-dir", "--git-dir"])],
+        _gitargv(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
+                 hooks=True),
         cwd=root, text=False)
     out, err = found.stdout, found.stderr
     out = out.decode("utf-8", "surrogateescape") if isinstance(out, bytes) else (out or "")
@@ -517,7 +887,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     if found.returncode != 0 or not dirs:
         dot_git = _sh('[ -e "$1" ] || [ -L "$1" ]', f"{root}/.git").returncode == 0
         if not dot_git and err.lstrip().startswith(NOT_A_REPO):
-            return [], [], {}
+            return [], [], {}, [], []
         raise PermissionBreach(_unreadable(err, found.returncode))
     paths = [f"{d}/{name}" for d in dirs for name in GIT_WATCHED]
     kind: dict[str, str] = {}
@@ -537,7 +907,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
             return f"{home[0]}/{path[2:]}"
         return path if path.startswith("/") else f"{beside.rsplit('/', 1)[0]}/{path}"
 
-    listed = sandbox.current().run(_gitargv(["config", "--list", "--show-origin", "-z"]),
+    listed = sandbox.current().run(_gitargv(["config", "--list", "--show-origin", "-z"], hooks=True),
                                    cwd=root, text=False).stdout
     if isinstance(listed, bytes):     # a Latin-1 name in a config must not stop the run
         listed = listed.decode("utf-8", "surrogateescape")
@@ -559,7 +929,7 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
             named.setdefault(paths[-1], (key, source))
             mark(paths[-1], "config")
     named_hooks = sandbox.current().run(
-        _gitargv(["rev-parse", "--path-format=absolute", "--git-path", "hooks"]),
+        _gitargv(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], hooks=True),
         cwd=root, text=False)
     if named_hooks.returncode != 0:
         err = named_hooks.stderr
@@ -583,7 +953,8 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
     # parent is resolved with cd -P where it exists, lexically where it doesn't,
     # except that a path with `..` that doesn't resolve refuses the run.
     import posixpath
-    hooks_value = _git(["config", "core.hooksPath"], root).strip()
+    # Exit 1 is git's answer "not set"; any other non-zero is a failure.
+    hooks_value = _git(["config", "core.hooksPath"], root, hooks=True, answers=(1,)).strip()
     if hooks_value:
         logical.append(absolute(hooks_value, f"{root}/x"))
     paths = [p for p in dict.fromkeys(paths)
@@ -629,9 +1000,22 @@ def _watched(run) -> tuple[list[str], list[str], dict[str, str]]:
         if p in kind and not within(r):
             if kinds.get(r) != "config":
                 kinds[r] = kind[p]
+    # Which paths git reads as config. A path is "other" when it is
+    # <dir>/<name> for a GIT_NOT_CONFIG name, the hooks folder git names, or
+    # marked "lines", and isn't marked "config". Config wins when a path is in
+    # both groups.
+    other_written = {f"{d}/{name}" for d in dirs for name in GIT_NOT_CONFIG}
+    if hooks.startswith("/"):
+        other_written.add(hooks)
+    other_written |= {p for p, k in kind.items() if k == "lines"}
+    config_written = [p for p in paths if not (p in other_written and kind.get(p) != "config")]
+    config_real = list(dict.fromkeys(r for p, r in zip(paths, resolved) if p in config_written))
+    config_walked = list(dict.fromkeys(
+        [f"{root}/.git"] + config_written
+        + ["/" + posixpath.normpath(p).lstrip("/") for p in [f"{root}/.git", *config_written]]))
     resolved = list(dict.fromkeys(resolved))
     kinds = {r: k for r, k in kinds.items() if r in resolved}
-    return walked, resolved, kinds
+    return walked, resolved, kinds, config_real, config_walked
 
 
 def _pack(paths: list[str], *, follow: bool) -> str | None:
@@ -672,7 +1056,19 @@ def _differs(guard: dict) -> list[str] | None:
     moved = _moved(guard)
     if moved is None:
         return None
-    # A follow pack over the cap is never compared; only the plain packs are.
+    # Resolving every prefix (_moved) fully covers a parent swapped under a
+    # link with a relative target. A directory on the way that no longer
+    # resolves is reported too.
+    found = moved + [p for p in guard["paths"] if p not in moved
+                     and p in _members_differ(guard, plain, followed)]
+    return found + ([TOO_LARGE] if followed is None else [])
+
+
+def _members_differ(guard: dict, plain: str, followed: str | None) -> list[str]:
+    """The paths of `guard` whose members, in the packs taken now, differ from the
+    saved ones. Shared by `_differs` and `_config_reads_same`, so the two compare
+    the same way. A follow pack over the cap is never compared; only the plain
+    packs are."""
     now = (_members(plain),) + (() if followed is None else (_members(followed),))
     then = (_members(guard["plain"]), _members(guard["followed"]))
 
@@ -680,12 +1076,39 @@ def _differs(guard: dict) -> list[str] | None:
         rel = path.lstrip("/")
         return {k: v for k, v in members.items() if k == rel or k.startswith(rel + "/")}
 
-    # Resolving every prefix (_moved) fully covers a parent swapped under a
-    # link with a relative target. A directory on the way that no longer
-    # resolves is reported too.
-    found = moved + [p for p in guard["paths"] if p not in moved
-                     and any(under(a, p) != under(b, p) for a, b in zip(now, then))]
-    return found + ([TOO_LARGE] if followed is None else [])
+    return [p for p in guard["paths"]
+            if any(under(a, p) != under(b, p) for a, b in zip(now, then))]
+
+
+def _config_reads_same(run, guard: dict) -> bool:
+    """Whether git reads the same config bytes through every config path as it
+    did before the agent ran, even if a folder on the way moved and was linked
+    back. False when a pack failed or is over the cap, when the prefixes can't be
+    walked, when one now resolves nowhere, or when one now resolves into the work
+    tree (outside `.git`), where a later agent may write."""
+    config = {**guard, **guard["config"]}
+    plain, followed = _pack(config["paths"], follow=False), _pack(config["paths"], follow=True)
+    if plain is None or followed is None:
+        return False
+    if _members_differ(config, plain, followed):
+        return False
+    moved = _moved(config)
+    if moved is None:
+        return False
+    if not moved:
+        return True
+    now = _where(config.get("walked", []))
+    real = _sh(_REAL, str(run.repo_root)).stdout.split("\0")[0]
+    if now is None or not real:
+        return False
+    for q in moved:
+        there = now.get(q, ["", "-"])[0]
+        if not there:
+            return False
+        if (there == real or there.startswith(real + "/")) and not (
+                there == real + "/.git" or there.startswith(real + "/.git/")):
+            return False
+    return True
 
 
 def guard_git_dir(run) -> dict | None:
@@ -693,7 +1116,7 @@ def guard_git_dir(run) -> dict | None:
     None only when the repo root has no .git and git says it isn't a repo; a
     repo whose config git can't read, or whose hooks directory git can't name,
     raises PermissionBreach."""
-    walked, paths, kinds = _watched(run)
+    walked, paths, kinds, config_paths, config_walked = _watched_all(run)
     if not paths:
         return None
     plain = _pack(paths, follow=False)
@@ -710,11 +1133,22 @@ def guard_git_dir(run) -> dict | None:
             "~/.gitconfig or an included config file, points at a large file or tree. "
             "Point it at something smaller, or replace it with the file it stands for, "
             "then run again.")
-    where = _where(walked)
+    # One call (a test pins that): every prefix of the config forms is also a
+    # prefix of `walked`, so the config copy shares the same table.
+    where = _where(list(dict.fromkeys(walked + config_walked)))
+    if where is not None:
+        prefixes = {"/".join(w.split("/")[:i]) for w in config_walked
+                    for i in range(2, len(w.split("/")) + 1)}
+        config_where = {k: v for k, v in where.items() if k in prefixes}
+    else:
+        config_where = {}
     if where is None:
         raise PermissionBreach("Could not resolve the git paths to watch, so the agent did not run.")
+    # "config": the paths git reads as config, compared alone when the whole set
+    # can't be put back (see restore_git_dir).
     return {"walked": walked, "where": where, "paths": paths, "plain": plain,
-            "followed": followed, "kinds": kinds, "done": False}
+            "followed": followed, "kinds": kinds, "done": False,
+            "config": {"paths": config_paths, "walked": config_walked, "where": config_where}}
 
 
 def git_dir_changed(guard: dict | None) -> bool:
@@ -777,7 +1211,7 @@ def _entries(source: str, path: str):
     from collections import Counter
     try:
         done = _sh(_KEYS, source, path, str(KEYS_SECONDS), timeout=KEYS_SECONDS + 5)
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, OSError):
         return None
     if done.returncode != 0:
         return None
@@ -893,7 +1327,11 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
     PermissionBreach after the restore; without it, as on an agent that
     already failed, it only restores, and raises only if that failed. For a
     shared config file outside the repo the breach lists the keys that
-    changed, and never a value.
+    changed, and never a value. After a call, `guard["restored"]` is True only
+    when git reads the same config bytes through every config path, even if a
+    folder on the way moved and was linked back (a hooks
+    folder or an ignore file left changed doesn't count: SSSF's git runs no
+    hook); a call that crashed or was interrupted leaves it unset.
     """
     if not guard or guard["done"]:
         return []
@@ -958,6 +1396,16 @@ def restore_git_dir(run, guard: dict | None, *, breach: bool = True) -> list[str
         restored = left == []
         details = {} if left is None else {p: d for p, d in details.items() if p not in left}
         changed += [p for p in (left or []) if p not in changed]
+    # Read by agents.execute: no git runs unless this is True. Only a file git
+    # reads as config must be back. Anything else left changed (hooks/, info/)
+    # is rolled back around, since SSSF's git runs no hook and ignores grafts;
+    # the breach below still names it. On the config paths alone, by the bytes
+    # git reads: a folder moved and linked back with the same bytes counts as put
+    # back, though the breach below still names the moved path.
+    try:
+        guard["restored"] = restored or _config_reads_same(run, guard)
+    except Exception:
+        guard["restored"] = False
     root = str(run.repo_root).rstrip("/") + "/"
     shown = [p[len(root):] if p.startswith(root) else p for p in changed]
     if changed and (breach or not restored):
@@ -1151,7 +1599,46 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
     return agent.writes is None          # None = unrestricted, [] = no repo writes
 
 
-def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) -> str:
+IN_SUBMODULE = ("SSSF can't roll back inside a submodule, so the files under it may hold the "
+                "agent's writes.")
+
+
+def _roll_back_gitlink(run, path: str, before: dict[str, str], after: dict[str, str], off=()) -> str:
+    """The outcome for a breach on a gitlink path.
+
+    Clean before the call (kind exactly `sub`): the superproject's index entry is
+    put back from HEAD, which touches no file under the submodule. Any other
+    kind before: no git runs, since the path may hold the engineer's work."""
+    shown = shlex.quote(path)
+    gitfile = shlex.quote(path + "/.git")
+    check = (f"Before you run git there, check that `{gitfile}` still points into this repo's "
+             f"git directory: `cat {gitfile}` should print one `gitdir:` line, ending in "
+             "`modules/<name>` under that directory (normally `.git/modules/<name>`, with the "
+             "submodule's name from `.gitmodules`). If it prints anything else, or `.git` is "
+             "now a folder, git there would run a config the agent chose, so put the line "
+             f"back first. Then check with `git -C {shown} status` and `git -C {shown} diff`")
+    was = before.get(path, "").partition(":")[0]
+    unread = ""
+    content = after.get(path, "").partition(":")[2]
+    if "unread:" in content:
+        # D@unread:<nonce>:<relative path>
+        where = content.split(":", 2)[2] if content.count(":") >= 2 else ""
+        unread = f" SSSF couldn't read {where or '.'} under it, so it counts as changed."
+    if path in before and was != "sub":
+        return (f"left as-is (it was already changed before the call, so it may hold your work). "
+                f"{IN_SUBMODULE} {check}.{unread}")
+    failed = ""
+    if path in before:
+        for flag in ("--no-skip-worktree", "--no-assume-unchanged"):
+            _try_git(["update-index", "-q", flag, "--", path], run.repo_root, off)
+        code, _, _ = _try_git(["checkout", "--no-recurse-submodules", "HEAD", "--", path],
+                              run.repo_root, off)
+        if code != 0:
+            failed = "could not reset its index entry; "
+    return f"{failed}NOT rolled back: {IN_SUBMODULE} {check}.{unread}"
+
+
+def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str], off=()) -> str:
     """Undo one unauthorized change. Returns a word describing what happened.
 
     Only changes the agent INTRODUCED are undone. A path that was already dirty,
@@ -1164,7 +1651,15 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
     unstaged, then deleted only if git says it isn't ignored. Anything in HEAD
     (including `D,?`, a file taken out of the index and written again) has its
     index flags cleared and is restored from HEAD, index and tree both.
+
+    A gitlink (kind `sub`) is never "rolled back": SSSF runs no git inside a
+    submodule, so what the agent wrote under it stays, and the outcome says so.
     """
+    # A gitlink the agent made (not in `before`) is a new staged path: unstaged
+    # below, as before, with nothing under it touched.
+    if path in before and "sub" in (before[path].partition(":")[0].split(",")
+                                    + after.get(path, "").partition(":")[0].split(",")):
+        return _roll_back_gitlink(run, path, before, after, off)
     if path in before:
         # Already dirty beforehand. If it is gone from the diff now, the agent
         # reverted an engineer's uncommitted work and the content is not ours
@@ -1185,11 +1680,16 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
     if kind == "?":
         return delete()
     if parts[0] == "A" and not any(p.startswith("flag-") for p in parts):
-        if box.run(_gitargv(["rm", "-q", "--cached", "--force", "--", path], writes=True),
-                   cwd=run.repo_root).returncode != 0:
-            return "could not unstage"
-        ignored = box.run(_gitargv(["check-ignore", "-q", "--no-index", "--", path], literal=False),
-                          cwd=run.repo_root).returncode
+        code, _, err = _try_git(["rm", "-q", "--cached", "--force", "--", path], run.repo_root, off)
+        if code != 0:
+            return "could not unstage" if code is not None else f"could not unstage ({_said_line(err)})"
+        ignored, _, err = _try_git(["check-ignore", "-q", "--no-index", "--", path],
+                                   run.repo_root, off, literal=False)
+        if ignored not in (0, 1):
+            # Not an answer: reading it as "is gitignored" would keep the file.
+            said = _said_line(err) if ignored is None else _said(err, ignored).strip()
+            return ("unstaged; couldn't ask git whether it is gitignored "
+                    f"({said}), so left on disk; check it by hand")
         if ignored == 1:
             done = delete()
             return "unstaged and deleted" if done == "deleted" else f"unstaged; {done}"
@@ -1198,10 +1698,14 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str]) ->
     # The path may no longer be in the index, so their status is ignored. One
     # flag per call: git applies only the last of two given together.
     for flag in ("--no-skip-worktree", "--no-assume-unchanged"):
-        box.run(_gitargv(["update-index", "-q", flag, "--", path], writes=True),
-                cwd=run.repo_root)
-    result = box.run(_gitargv(["checkout", "HEAD", "--", path], writes=True), cwd=run.repo_root)
-    return "rolled back" if result.returncode == 0 else "could not roll back"
+        code, _, err = _try_git(["update-index", "-q", flag, "--", path], run.repo_root, off)
+        if code is None:
+            return f"could not roll back ({_said_line(err)})"
+    code, _, err = _try_git(["checkout", "--no-recurse-submodules", "HEAD", "--", path],
+                            run.repo_root, off)
+    if code is None:
+        return f"could not roll back ({_said_line(err)})"
+    return "rolled back" if code == 0 else "could not roll back"
 
 
 def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
@@ -1414,10 +1918,13 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
     added to a tree breach if there is one. Refs are only reported, never moved.
     Without it, only the tree is checked.
     """
-    after = snapshot(run)
+    after = snapshot(run, before)
     touched = changed_paths(before, after)
     breaches = [p for p in touched if not permitted(p, agent, run.cfg)]
-    outcomes = {p: _roll_back(run, p, before, after) for p in breaches}
+    # Listed after the snapshot, from the index the rollback reads, only when
+    # there is something to roll back.
+    off = _filters_off(run.repo_root) if breaches else []
+    outcomes = {p: _roll_back(run, p, before, after, off) for p in breaches}
     moved = ref_moves(run, agent, head_before) if head_before else ""
     if not breaches and not moved:
         return touched
@@ -1434,9 +1941,19 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
                  else f"barred from {protected(run.cfg)}")
         detail = "\n".join(f"  - {p} — {outcome}" for p, outcome in outcomes.items())
         message = f"{agent.name} is {scope} but modified {len(breaches)} path(s):\n{detail}"
+        if off and any(o == "rolled back" or o.startswith("left as-is") for o in outcomes.values()):
+            message += (
+                "\nSSSF's git ran no filter program, so a rolled-back file under a filter holds "
+                "what git stores for it: delete it and run `git checkout HEAD -- <path>` to get "
+                "the filtered form. A file under a filter that git hadn't recorded as unchanged "
+                "before the call counts as already changed and was left; check it with "
+                "`git diff -- <path>` (see config.md).")
     if kept:
         message += ("\nIts other changes are left uncommitted and unreviewed:\n"
                     + "\n".join(f"  - {p}" for p in kept))
     if breaches and moved:
         message += "\n" + moved
-    raise PermissionBreach(message)
+    raise PermissionBreach(
+        message, left=[p for p, o in outcomes.items()
+                       if o not in ("rolled back", "deleted", "unstaged and deleted")],
+        refs_left=bool(moved))

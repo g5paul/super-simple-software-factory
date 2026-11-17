@@ -159,6 +159,27 @@ does three things:
    the same harm this module exists to prevent.
 3. It fails the phase and names every path with what happened to it.
 
+SSSF runs no agent in a repo with no commit, because there is no `HEAD` to
+snapshot the tree against. Make a first commit before the run;
+`git commit --allow-empty -m init` will do. The same goes for a repo that has
+commits but whose `HEAD` is on an unborn branch (`git checkout --orphan`, a `HEAD` on a branch that doesn't
+exist yet, or a `git worktree add --orphan` worktree): the
+refusal reads the same, and the way out is a first commit on that branch or a
+switch to a branch with history. If the agent deletes its branch ref, checks
+out an orphan or another branch, detaches `HEAD` or rewinds it during a call,
+the run stops with nothing undone or rolled back, and the agent's writes stay
+in the tree; check `git status` by hand.
+
+The rollback runs when an agent call fails too, by any route, an interrupt
+included. It undoes the agent's commits and rolls back the same unauthorized
+changes. Changes inside `writes` stay, and the original stop stays the run's
+error. A `failed_call_rollback` trace event names each path and commit, and the
+console says when the tree may still hold the agent's writes. It says SSSF
+rolled back the writes only when every path was put back and every commit
+undone, and otherwise names what it couldn't put back. A chain process
+killed outright runs no Python, so check `git status` after a run that died
+without a stop message.
+
 The git directory is outside every agent's `writes`, and outside the
 change-set too, since `git status` never shows it. So it gets its own check.
 Before each agent, SSSF saves `hooks/`, `info/`, `config`, `config.worktree`,
@@ -177,9 +198,71 @@ commands, `git config --global core.hooksPath` points every commit at the
 agent's hooks, and a line in `info/exclude` would hide a new file from the
 change-set. Emptying or deleting `sssf-private-names` would turn off the
 pre-push hook's private-names check for your next push, and one the agent
-creates is a change too. A breach here doesn't skip the other checks. An agent's own commit
-is still undone and its other writes still rolled back, and the breach names
-both. An agent that fails is put back the same way. SSSF also records
+creates is a change too. A breach here that was put back doesn't skip the other
+checks. An agent's own commit is still undone and its other writes still rolled
+back, and the breach names both. An agent that fails is put back the same way.
+
+SSSF's own git for the snapshot, the commit undo and the rollback runs no hook,
+fsmonitor, filter program, diff program or pager, in the repo or in a
+submodule. It ignores grafts and replace refs, fetches nothing, and never
+recurses into a submodule: it starts no git process inside one, so a submodule's
+own config never runs. That includes your own hooks: a `post-index-change`
+hook no longer runs on SSSF's reads.
+
+A config folder the agent moved and linked back, with the same bytes through
+every config path, is named as not put back, but SSSF still undoes the commit and
+rolls the writes back, since git reads the same config. One whose bytes changed,
+or that now sits in the work tree, counts as below.
+
+The limit left is a file git reads as config (`.git/config`, an included file,
+`~/.gitconfig`) that can't be put back. Then SSSF runs no git command at all,
+on a call that succeeded or failed, because git would run what the agent left
+there. It undoes no commit and rolls nothing back, stops the run, and says the
+tree may still hold the agent's writes. Check `git status` and `git log` by
+hand. Anything else left changed (`hooks/`, `info/`) is rolled back around, and
+the run stops naming it. A changed ignore or attributes file that couldn't be
+put back (`info/exclude`, `info/attributes`, `info/sparse-checkout`, your
+`core.excludesFile` or `core.attributesFile` file) starts no program, but git
+still reads it during the rollback: a new file it hides can stay, and a
+rolled-back file can come back with other line endings. When the stop names one
+of those paths, fix it, then check `git status` by hand. "Put back" means the
+paths the check watches, so the limits this part lists, a submodule's git
+directory and the rest, apply here too: SSSF's git still reads those files.
+Programs they name are off; other keys take effect.
+
+The rollback has limits on both paths, which live in `permissions.py`:
+
+- Your own edits made while the call runs aren't told apart from the agent's.
+- A file the engineer had gitignored is deleted if the agent un-ignores it.
+- Undoing an agent's commit resets the index, so a partly staged file loses its
+  staged version.
+- When SSSF's own git fails (a corrupted `.git/index`, a command that can't
+  start), it is never read as "no change". Before the agent the call doesn't
+  start; after it the run stops naming the command and git's error, and says the
+  tree may still hold the agent's writes, which SSSF couldn't check or roll back.
+  Fix what git reports, then check `git status`. A git object the agent deleted
+  is one such failure, and SSSF's snapshot reads no object beyond the ones
+  `git diff HEAD` reads.
+- An agent can rewrite a submodule's `.git` file to point at another git
+  directory. SSSF's check skips every `.git` entry, so it doesn't see that, and
+  git run in the submodule afterwards reads a config the agent chose. Check
+  `cat <path>/.git` against `.git/modules/<name>` before you run git there.
+  SSSF's own diff of the superproject follows that file to read the submodule's
+  commit; it runs no program from the git directory it finds.
+- A file under a nested `.git` inside a submodule, such as
+  `vendor/lib/x/.git/hooks/post-checkout`, isn't seen.
+- A staged change inside a submodule isn't seen. An agent can write a file
+  there, stage it with `git -C <path> add` and put the file back;
+  `git -C <path> rm --cached` and a staged `chmod +x` pass the same way. The call
+  isn't stopped, and your next commit in the submodule takes what the agent
+  staged. To check, first see that `<path>/.git` still points at
+  `.git/modules/<name>` (`cat <path>/.git`), then run
+  `git -C <path> diff --cached`.
+- SSSF finds `git`, `python3`, `sh`, `env` and `tar` on `PATH`. An agent that
+  puts its own `git` or `python3` in a folder first on `PATH`, such as a venv's
+  `bin`, has SSSF run it.
+
+SSSF also records
 where every directory on the way to one of these paths resolves, walking the
 path as git and the kernel do, `..` included. So it notices a symlink on the
 way that now points somewhere else, such as a symlinked `~/.config`, `HOME`
@@ -480,6 +563,72 @@ already-dirty file counts. A refused change to a file that was clean is restored
 from `HEAD`, while one that was already dirty is left as it is.
 
 Narrow `tools` by role, not by reflex. An agent that must produce a `context_handoff/` file needs `write`, or it falls back on a `bash` heredoc. Withhold `edit` and `write` only where the restriction is the guarantee. For example, a reviewer that can't edit can't quietly fix what it was asked to report.
+
+### Repos that use git-lfs, git-crypt, another filter, or submodules
+
+SSSF's rollback runs no filter program, because the filter named in your git
+config could be one the agent rewrote. Two effects follow:
+
+- A rolled-back file under a filter holds what git stores for it: the
+  pointer (git-lfs) or the ciphertext (git-crypt), not its contents. A filtered
+  file the agent touched without changing it, outside its `writes`, stops the run
+  and is rewritten the same way.
+- To recover, run `git lfs checkout <path>`, or delete the file and run
+  `git checkout HEAD -- <path>`. For git-crypt, with the repo unlocked, delete
+  the file and run `git checkout HEAD -- <path>`.
+
+An agent's write to a filtered file is rolled back, with one case: in a repo
+with a byte-rewriting filter, an agent's write to a filtered file the index sees
+as changed is named in the stop and left as-is, not rolled back. SSSF can't tell
+such a file from one holding your own uncommitted work without running the
+filter. That happens when the file was touched since git last recorded it, or
+the checkout was made moments ago, which covers most filtered files in a
+`--worktree` run, protected files included. You see `left as-is` beside the
+path. Run `git status` and `git diff` on the named paths, then
+`git checkout HEAD -- <path>` to drop a write that isn't yours.
+
+The stop can also name a filtered file as `REVERTED-BY-AGENT` when nothing was
+lost. In a repo with a byte-rewriting filter, a file the index saw as changed
+leaves the diff when the agent only refreshed the index, as `git status` does.
+SSSF can't tell that from an agent that reverted your work or forged the index
+without running the filter, so it stops. Run `git diff -- <path>` and
+`git status`: if the file holds what you expect, nothing was lost, and you can
+run again.
+
+Submodules: SSSF doesn't recurse into them during a rollback, even with
+`submodule.recurse=true`. It puts the superproject's entry back and leaves the
+submodule's own checkout where it was, so afterwards the checkout may not match
+and `git status` shows the submodule as modified. `git submodule update` brings
+it back; run it before the next commit.
+
+The write check sees a submodule by its commit and by its files. SSSF hashes
+every file under each submodule, before and after each agent call, with
+`python3` run where the work tree is, and no git runs there. Any change stops an
+agent whose `writes` doesn't cover the submodule's path. SSSF can't roll it back,
+since that needs git to run inside the submodule, under a config the agent can
+write. The run stops and says so; first check that `<path>/.git` still points
+into this repo's git directory (`cat <path>/.git`, against
+`.git/modules/<name>`), and only then look with `git -C <path> status` and
+`git -C <path> diff`. A changed submodule commit is seen too, and
+`ignore = all` in `.gitmodules` (or `diff.ignoreSubmodules=all`) no longer hides
+it. What this costs and doesn't see:
+
+- Each snapshot reads every byte under every submodule, about a second per
+  gigabyte from a warm cache. A repo with no submodule pays nothing.
+- Ignored and untracked files under a submodule count, such as `__pycache__`, so
+  a read-only agent that runs its tests there stops. An index-only change inside
+  the submodule isn't seen (see the limits above, "A staged change inside a
+  submodule"), and neither is its git directory.
+- A file SSSF can't read under a submodule counts as changed, and so does a
+  folder chain under it too deep to walk: it counts as unread, not as a crash.
+- A repo with a submodule needs `python3` where the work tree is: in the sandbox
+  image for a sandbox run. Without it no agent runs, and the run stops with a
+  message saying so. A submodule the agent adds during a call needs none: it's
+  rolled back as a new path.
+
+SSSF's git ignores replace refs and `info/grafts`. In a partial clone it fetches
+nothing, so a rollback that needs a missing object fails for that path and
+names it.
 
 ### Extension tools must be named explicitly
 

@@ -425,7 +425,8 @@ def failing(monkeypatch, sub: str, how: str, nth: int = 1, needle: str = ""):
         return next((a for a in argv[argv.index("git"):] if a in subs), "") if "git" in argv else ""
 
     def run(argv, **kw):
-        if which(argv) == sub and needle in " ".join(argv):
+        # The index rebuild's python3 carries the ls-files argv it runs itself.
+        if argv[:1] != ["python3"] and which(argv) == sub and needle in " ".join(argv):
             seen[0] += 1
             if seen[0] == nth:
                 if how == "oserror":
@@ -825,7 +826,7 @@ def test_a_repo_with_no_gitlink_has_no_sub_kind_and_starts_no_python(tmp_path, m
         permissions.sandbox.use(real)
     assert not any(":sub" in v.partition(":")[0] or "sub" in v.partition(":")[0].split(",")
                    for v in snap.values())
-    assert not any(argv[:1] == ["python3"] for argv in seen)
+    assert not any(argv[:1] == ["python3"] and permissions._DIGEST in argv for argv in seen)
 
 
 def digest(tmp_path: Path, *names: str) -> dict:
@@ -898,7 +899,7 @@ def fake_box(real, mode: str, canned: str = "c" * 64):
 
         def run(self, argv, *a, **k):
             seen.append((list(argv), k.get("cwd")))
-            if argv[:1] == ["python3"]:
+            if argv[:1] == ["python3"] and permissions._DIGEST in argv:
                 if mode == "raise":
                     raise FileNotFoundError("python3")
                 if mode == "127":
@@ -923,7 +924,7 @@ def test_the_digest_runs_through_the_current_sandbox(tmp_path, mode):
         snap = permissions.snapshot(run_for(repo))
     finally:
         permissions.sandbox.use(real)
-    argv, cwd = next((a, c) for a, c in seen if a[:1] == ["python3"])
+    argv, cwd = next((a, c) for a, c in seen if a[:1] == ["python3"] and permissions._DIGEST in a)
     assert argv[:4] == ["python3", "-I", "-c", permissions._DIGEST] and argv[4:] == ["sub"]
     assert str(cwd) == str(repo)
     if mode == "canned":
@@ -977,7 +978,9 @@ def test_a_rewritten_submodule_gitfile_runs_nothing_of_the_agents(tmp_path, mark
 def test_change_three_left_no_mechanism():
     import inspect
     source = inspect.getsource(permissions)
-    for word in ("_filtered", "_contents", "read-tree", "GIT_INDEX_FILE", "check-attr",
+    # GIT_INDEX_FILE is not here: the cached diff reads an index SSSF builds from
+    # the entries (`_INDEX`), the accepted cache-tree fix of guard run ea9dc12f.
+    for word in ("_filtered", "_contents", "read-tree", "check-attr",
                  '"mktemp", "-d"'):
         assert word not in source, word
     body = inspect.getsource(permissions.enforce)

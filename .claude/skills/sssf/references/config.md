@@ -560,7 +560,18 @@ path isn't checked.
 How the check sees a change: a rename counts as a delete and an add; index flags
 (`skip-worktree`, `assume-unchanged`) don't hide a change; a rewrite of an
 already-dirty file counts. A refused change to a file that was clean is restored
-from `HEAD`, while one that was already dirty is left as it is.
+from `HEAD`, while one that was already dirty is left as it is. The check
+compares the index with `HEAD` as well as the work tree: staged content the work
+tree doesn't show (a blob or mode only the index holds, a path taken out of the
+index) counts as a change and is put back to `HEAD`'s. The index is compared
+with `HEAD` entry by entry, through an index SSSF rebuilds from the entries, so
+no index flag, stat data or cache-tree is trusted for it; the work-tree compare
+trusts stat data as git does. The index compare needs `python3` where the work
+tree is, as the submodule digest does. A file an agent stages under a folder
+that was untracked before the call, such as your own nested repo, is unstaged
+and left on disk, and the run stops naming it. An agent that stages its own
+write isn't stopped. The plan commit commits only the planner's `writes` paths,
+whatever else is staged, and holds both halves of a rename.
 
 Narrow `tools` by role, not by reflex. An agent that must produce a `context_handoff/` file needs `write`, or it falls back on a `bash` heredoc. Withhold `edit` and `write` only where the restriction is the guarantee. For example, a reviewer that can't edit can't quietly fix what it was asked to report.
 
@@ -594,6 +605,15 @@ SSSF can't tell that from an agent that reverted your work or forged the index
 without running the filter, so it stops. Run `git diff -- <path>` and
 `git status`: if the file holds what you expect, nothing was lost, and you can
 run again.
+
+A staged file whose stored blob differs from its bytes is a decided exception.
+Under a byte-rewriting filter, or a line-ending conversion that rewrites the
+file, `git add` stores other bytes than the file holds, and SSSF hashes the file
+with no filter and no conversion. So an agent's `git add` or `git add -A` over
+your dirty file of that kind, outside its `writes` or protected, stops the run
+with the path named and left as-is, and a note that its staged entry changed.
+Nothing is lost. Check `git diff --cached -- <path>`; `git restore --staged --
+<path>` drops what is staged.
 
 Submodules: SSSF doesn't recurse into them during a rollback, even with
 `submodule.recurse=true`. It puts the superproject's entry back and leaves the
@@ -813,6 +833,9 @@ The install refuses to run from a copy of the skill inside the project it instal
 
 More known limits, each with what still applies:
 
+- Once an agent stages anything inside your untracked nested repo, git lists your other files there as untracked, and the rollback deletes them. Open on `main` too; see `docs/open.md`.
+- When the index half of the snapshot fails (`python3` missing, no temp folder outside the tree, or git can't read a tree of `HEAD` the cached diff needs, such as a deleted tree object of a folder the agent staged in), the run stops with `GitFailed` and the agent's other writes are kept as written, not rolled back. Left open for your decision; fixing it means rolling back what `diff HEAD` found before raising.
+- A link whose target ends in a newline is read without it, so an agent's staged link to the same target without the newline isn't seen. It needs such a link in `HEAD`.
 - `GIT_CONFIG_COUNT` with an alias, and `git send-pack`, reach exec without the word `push` where the rule looks. The network rules refuse GitHub.
 - Any alias value naming `push`, in any case, is denied, such as `git -c 'alias.p=!f(){ git push; }; f' p`. The alias pattern's `.*push` also reaches past the alias value into later arguments. So an alias whose value only mentions push, such as `git -c alias.ci='commit -m push' ci`, is denied. So is a command after an alias option that names push anywhere, such as `git -c alias.st=status log --grep=push`. It fails closed, and each denial counts toward the three-refusal stop.
 - The alias pattern reads the text, so it misses a quoted or escaped alias value that git joins before running it, such as `git -c 'alias.p=pu"sh"' p`. It also misses a verb git autocorrects with `help.autocorrect`, such as `git -c help.autocorrect=immediate puhs`, and an alias in a repo-local config the agent owns, such as `git -C /tmp/r p`. The network rules refuse GitHub.

@@ -923,7 +923,7 @@ def test_a_box_without_python3_runs_no_agent_in_a_repo_with_a_submodule(world):
             return getattr(real, name)
 
         def run(self, argv, *a, **k):
-            if argv[:1] == ["python3"]:
+            if argv[:1] == ["python3"] and permissions._DIGEST in argv:
                 raise FileNotFoundError("python3")
             return real.run(argv, *a, **k)
     status = git(world.repo, "status", "--porcelain")
@@ -1239,7 +1239,11 @@ def broken_python3(world, monkeypatch) -> Path:
     bin_dir = world.tmp / "nopy"
     bin_dir.mkdir()
     script = bin_dir / "python3"
-    script.write_text(f"#!/bin/sh\ntouch {world.marker}\nexit 127\n")
+    # Fails only the submodule digest (its script starts with `import hashlib, os, stat`);
+    # the index rebuild, which every snapshot runs, gets the real python3.
+    real = shutil.which("python3")
+    script.write_text(f'#!/bin/sh\ncase "$3" in "import hashlib, os, stat"*) touch {world.marker}; '
+                      f'exit 127;; esac\nexec {real} "$@"\n')
     script.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     return bin_dir
@@ -1286,7 +1290,7 @@ def test_only_the_gitlinks_from_before_the_call_are_digested(world):
             return getattr(real, name)
 
         def run(self, argv, *a, **k):
-            if argv[:1] == ["python3"]:
+            if argv[:1] == ["python3"] and permissions._DIGEST in argv:
                 digests.append(list(argv))
             return real.run(argv, *a, **k)
     permissions.sandbox.use(Recording())
@@ -1365,3 +1369,286 @@ def test_a_breach_with_no_list_is_not_called_rolled_back(world, monkeypatch):
     monkeypatch.setattr(permissions, "enforce", enforce)
     stops(world, False, lambda w: None)
     assert_unfinished_note(world, "everything the agent wrote")
+
+
+# ── a change staged only in the index ─────────────────────────────────────────
+
+def stage_blob(world, path: str, text: str = "evil\n", mode: str = "100644") -> None:
+    ident = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=text, cwd=world.repo,
+                           check=True, capture_output=True, text=True).stdout.strip()
+    git(world.repo, "update-index", "--add", "--cacheinfo", f"{mode},{ident},{path}")
+
+
+def route_staged_then_restored(w):
+    write(w, PERMS, "evil\n")
+    git(w.repo, "add", PERMS)
+    write(w, PERMS, "v0\n")
+
+
+def route_staged_cacheinfo(w):
+    stage_blob(w, PERMS)
+
+
+def route_staged_new_no_file(w):
+    stage_blob(w, "adws/adw_modules/new_rule.py")
+
+
+def route_staged_chmod(w):
+    git(w.repo, "update-index", "--chmod=+x", PERMS)
+
+
+def route_staged_rm_cached(w):
+    git(w.repo, "rm", "-q", "--cached", PERMS)
+
+
+@pytest.mark.parametrize("ok", [True, False])
+@pytest.mark.parametrize("route", [route_staged_then_restored, route_staged_cacheinfo,
+                                   route_staged_new_no_file, route_staged_chmod,
+                                   route_staged_rm_cached])
+def test_a_change_staged_only_in_the_index_stops_the_call_and_is_put_back(world, ok, route):
+    stops(world, ok, route)
+    git(world.repo, "diff", "--cached", "HEAD", "--quiet")
+    git(world.repo, "diff", "HEAD", "--quiet")
+    assert not (world.repo / "adws/adw_modules/new_rule.py").exists()
+    assert git(world.repo, "ls-files", "adws/adw_modules/new_rule.py") == ""
+    assert git(world.repo, "rev-parse", "HEAD") == world.base
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_an_engineers_staged_entry_survives_a_call_that_doesnt_touch_it(world, ok):
+    write(world, "src/app.py", "staged\n")
+    git(world.repo, "add", "src/app.py")
+    write(world, "src/app.py", "staged and more\n")
+    staged = git(world.repo, "ls-files", "-s", "src/app.py")
+    if ok:
+        turns(world, lambda w: write(w, "specs/plan.md", "plan\n"), [OK])
+        world.execute()
+    else:
+        turns(world, lambda w: write(w, "specs/plan.md", "plan\n"), ["no json"])
+        with pytest.raises(RuntimeError):
+            world.execute()
+    assert git(world.repo, "ls-files", "-s", "src/app.py") == staged
+    assert (world.repo / "src/app.py").read_text() == "staged and more\n"
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_an_agent_commit_is_undone_and_passes_with_an_engineers_partly_staged_file(world, ok):
+    write(world, "src/app.py", "staged\n")
+    git(world.repo, "add", "src/app.py")
+    write(world, "src/app.py", "staged and more\n")
+
+    def plant(w):
+        write(w, "specs/plan.md", "plan\n")
+        git(w.repo, "add", "specs/plan.md")
+        git(w.repo, "commit", "-qm", "agent")
+    turns(world, plant, [OK] if ok else ["no json"])
+    if ok:
+        world.execute()
+    else:
+        with pytest.raises(RuntimeError):
+            world.execute()
+    assert git(world.repo, "rev-parse", "HEAD") == world.base
+    assert (world.repo / "src/app.py").read_text() == "staged and more\n"
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_git_add_over_an_engineer_moved_submodule_passes(world, ok):
+    lib = vendor_lib(world)
+    git(lib, "commit", "-q", "--allow-empty", "-m", "engineer moved the gitlink")
+    turns(world, lambda w: git(w.repo, "add", "-A"), [OK] if ok else ["no json"])
+    if ok:
+        world.execute()
+    else:
+        with pytest.raises(RuntimeError) as caught:
+            world.execute()
+        assert not isinstance(caught.value, permissions.PermissionBreach)
+
+
+@pytest.mark.parametrize("how", ["plain", "skip-worktree", "forged"])
+@pytest.mark.parametrize("ok", [True, False])
+def test_a_gitlink_id_staged_while_the_submodule_stays_put_is_seen(world, ok, how):
+    vendor_lib(world)
+    other = "1" * 40
+
+    def plant(w):
+        git(w.repo, "update-index", "--cacheinfo", f"160000,{other},vendor/lib")
+        if how == "skip-worktree":
+            git(w.repo, "update-index", "--skip-worktree", "vendor/lib")
+        if how == "forged":
+            forge_index(w.repo, "vendor/lib")
+    caught = stops(world, ok, plant)
+    if ok:
+        assert "vendor/lib" in str(caught)
+    assert other not in git(world.repo, "ls-files", "-s", "vendor/lib")
+
+
+def test_git_add_over_a_filtered_dirty_file_stops_the_run_the_decided_exception(world):
+    """Decided exception 1: `git add` stores the filter's bytes, which SSSF can't
+    tell from a blob the agent chose, so the engineer's dirty file is named."""
+    write(world, ".gitattributes", "doc.txt filter=up\n")
+    git(world.repo, "config", "filter.up.clean", "tr a-z A-Z")
+    git(world.repo, "config", "filter.up.smudge", "tr A-Z a-z")
+    write(world, "doc.txt", "hello\n")
+    git(world.repo, "add", "-A")
+    git(world.repo, "commit", "-qm", "doc")
+    write(world, "doc.txt", "hello again\n")
+    turns(world, lambda w: git(w.repo, "add", "-A"), [OK])
+    with pytest.raises(permissions.PermissionBreach) as caught:
+        world.execute()
+    assert "doc.txt — left as-is" in str(caught.value)
+    assert "git restore --staged -- doc.txt" in str(caught.value)
+    assert (world.repo / "doc.txt").read_text() == "hello again\n"
+
+
+def test_the_plan_commit_holds_only_its_own_paths(world):
+    write(world, PERMS, "evil\n")
+    git(world.repo, "add", PERMS)
+    write(world, PERMS, "v0\n")
+    write(world, "specs/x.md", "plan\n")
+    git_helper.commit_all("plan", ["specs/"])
+    assert git(world.repo, "show", "--name-only", "--format=", "HEAD").split() == ["specs/x.md"]
+    assert git(world.repo, "show", f"HEAD:{PERMS}") == "v0"
+    with pytest.raises(RuntimeError, match="nothing to commit"):
+        git_helper.commit_all("plan again", ["specs/"])
+
+
+def test_the_plan_commit_accepts_an_empty_folder_in_its_paths(world):
+    (world.repo / "notes").mkdir()
+    write(world, "specs/x.md", "plan\n")
+    git_helper.commit_all("plan", ["specs/", "notes/"])
+    assert git(world.repo, "show", "--name-only", "--format=", "HEAD").split() == ["specs/x.md"]
+
+
+# ── a forged cache-tree (guard run ea9dc12f) ──────────────────────────────────
+
+def forge_cache_tree(repo: Path, rel: str, blob: str) -> None:
+    """What an agent can do with the permissions it has: rewrite one index entry's
+    object id to `blob`, keeping its stat bytes and the TREE extension. Every
+    tracked file is aged an hour first, so no entry is racy, and the cache-tree is
+    valid (`read-tree HEAD`), so git reads neither the entry nor the tree: both
+    `diff --cached HEAD` and `diff HEAD` say nothing changed."""
+    import hashlib
+    import struct
+    import time
+    old = time.time() - 3600
+    for name in git(repo, "ls-files").splitlines():
+        os.utime(repo / name, (old, old), follow_symlinks=False)
+    git(repo, "read-tree", "HEAD")
+    git(repo, "update-index", "-q", "--refresh")
+    index = repo / ".git" / "index"
+    data = bytearray(index.read_bytes())
+    count = struct.unpack(">I", data[8:12])[0]
+    pos, found = 12, False
+    for _ in range(count):
+        flags = struct.unpack(">H", data[pos + 60:pos + 62])[0]
+        end = data.index(b"\0", pos + 62)
+        name = bytes(data[pos + 62:end]).decode()
+        if name == rel:
+            data[pos + 40:pos + 60] = bytes.fromhex(blob)
+            found = True
+        pos += (((end - pos) + 8) // 8) * 8
+    assert found, rel
+    assert bytes(data[pos:pos + 4]) == b"TREE", "the cache-tree must stay"
+    data[-20:] = hashlib.sha1(bytes(data[:-20])).digest()
+    tmp = index.with_name("index.forge")
+    tmp.write_bytes(bytes(data))
+    os.replace(tmp, index)
+    for args in (("diff", "--cached", "HEAD", "--quiet"), ("diff", "HEAD", "--quiet")):
+        assert subprocess.run(["git", *args], cwd=repo).returncode == 0, args
+
+
+def forged_blob(repo: Path) -> str:
+    return subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=repo, input="evil\n",
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
+CACHE_TREE_CASES = [("reviewer", "adws/adw_data/prompt_engineering/reviewer/system.md"),
+                    ("planner", "src/fixtures/system.md"),
+                    ("builder", ".claude/settings.json")]
+
+
+def commit_file(world, path: str) -> None:
+    write(world, path, "v0\n")
+    git(world.repo, "add", "-A")
+    git(world.repo, "commit", "-qm", f"add {path}")
+
+
+@pytest.mark.parametrize("ok", [True, False])
+@pytest.mark.parametrize("owner,path", CACHE_TREE_CASES)
+def test_a_forged_cache_tree_cant_hide_a_staged_protected_blob(world, owner, path, ok):
+    commit_file(world, path)
+    world.phase.params.owner = owner
+    caught = stops(world, ok, lambda w: forge_cache_tree(w.repo, path, forged_blob(w.repo)))
+    if ok:
+        assert path in str(caught)
+    for args in (("diff", "--cached", "HEAD", "--quiet", "--", path),
+                 ("diff", "HEAD", "--quiet", "--", path)):
+        assert subprocess.run(["git", *args], cwd=world.repo).returncode == 0, args
+    assert git(world.repo, "ls-files", "-s", "--", path).split()[1] == \
+        git(world.repo, "rev-parse", f"HEAD:{path}")
+
+
+def test_the_build_commit_never_holds_a_forged_blob(world):
+    path = ".claude/settings.json"
+    commit_file(world, path)
+    world.phase.params.owner = "builder"
+    forged = forged_blob(world.repo)
+    stops(world, True, lambda w: forge_cache_tree(w.repo, path, forged))
+    write(world, "src/app.py", "edited\n")
+    git_helper.commit_all("build")
+    assert git(world.repo, "rev-parse", f"HEAD:{path}") != forged
+
+
+def test_a_forged_cache_tree_with_a_deleted_tree_object_is_still_named_and_rolled_back(world):
+    deep_commit(world)
+    path = PERMS
+    forged = forged_blob(world.repo)
+
+    def plant(w):
+        forge_cache_tree(w.repo, path, forged)
+        oid = git(w.repo, "rev-parse", "HEAD:deep/a")
+        loose = w.repo / ".git" / "objects" / oid[:2] / oid[2:]
+        os.chmod(loose, 0o644)
+        os.remove(loose)
+    caught = stops(world, True, plant)
+    assert not isinstance(caught, permissions.GitFailed)
+    assert path in str(caught)
+    assert git(world.repo, "ls-files", "-s", "--", path).split()[1] == \
+        git(world.repo, "rev-parse", f"HEAD:{path}")
+
+
+def test_the_plan_commit_holds_both_halves_of_a_git_mv(world):
+    write(world, "specs/old.md", "one\ntwo\nthree\n")
+    git(world.repo, "add", "-A")
+    git(world.repo, "commit", "-qm", "old")
+    git(world.repo, "mv", "specs/old.md", "specs/new.md")
+    git_helper.commit_all("plan", ["specs/"])
+    assert git(world.repo, "show", "--name-status", "--no-renames", "--format=", "HEAD") \
+        .split() == ["A", "specs/new.md", "D", "specs/old.md"]
+    assert subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=world.repo).returncode == 0
+
+
+def test_the_plan_commit_holds_both_halves_of_a_delete_and_a_near_copy(world):
+    write(world, "specs/old.md", "one\ntwo\nthree\nfour\n")
+    git(world.repo, "add", "-A")
+    git(world.repo, "commit", "-qm", "old")
+    (world.repo / "specs" / "old.md").unlink()
+    write(world, "specs/old_v2.md", "one\ntwo\nthree\nfour\nfive\n")
+    git_helper.commit_all("plan", ["specs/"])
+    assert git(world.repo, "show", "--name-status", "--no-renames", "--format=", "HEAD") \
+        .split() == ["D", "specs/old.md", "A", "specs/old_v2.md"]
+    assert subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=world.repo).returncode == 0
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_an_entry_staged_a_thousand_folders_deep_cant_stop_the_rollback(world, ok):
+    """`_INDEX` builds its tree without recursion, so a path deeper than Python's
+    frame limit doesn't turn the rollback into a GitFailed stop."""
+    def plant(w):
+        write(w, PERMS, "evil\n")
+        empty = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"      # the empty blob
+        deep = "d/" * 1100 + "f"
+        git(w.repo, "update-index", "--add", "--cacheinfo", f"100644,{empty},{deep}")
+    caught = stops(world, ok, plant)
+    assert not isinstance(caught, permissions.GitFailed)
+    assert (world.repo / PERMS).read_text() == "v0\n"

@@ -899,7 +899,8 @@ class Remote:
                 inside = ""
             refused = permissions.judge_commits(
                 self.tree, self.synced, tip, cfg, getattr(self.run_, "ran", []), only=only,
-                session=inside, wrote=list(wrote))
+                session=inside, wrote=list(wrote),
+                taken=list(getattr(self.run_, "taken", ())))
         except (permissions.PermissionBreach, SandboxFailed) as error:
             refused, text = [(tip or head, ["unreadable"])], str(error)
         if refused:
@@ -918,8 +919,7 @@ class Remote:
         count = _host_git("rev-list", "--count", f"{self.synced}..{tip}", cwd=self.tree)
         self._log("sandbox_commits", {"vm": self.vm, "count": int(count), "head": tip[:12]})
         self.synced = tip
-        if only is None and hasattr(self.run_, "ran"):
-            self.run_.ran.clear()
+        permissions.commit_passed(self.run_, only)
 
     def commit(self, argv, *, only=None, wrote=()) -> subprocess.CompletedProcess:
         """Run a `git commit` in the VM and judge what comes back with `only` and `wrote`."""

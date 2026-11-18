@@ -48,6 +48,9 @@ class Run:
         self.engineer = engineer
         self.local_guard = None     # session.ensure fills it; agents.send carries it
         self.ran: list = []         # agents that ran since the last full commit that passed
+        # (agent, entry) pairs: an `only` commit passed, ending that agent's grant inside
+        # that entry. Cleared with `ran` when a full commit passes.
+        self.taken: list = []
         self.carried = ""           # the tree of work already in a local tree at start
         self.phases: list[Phase] = []
         self.tokens = 0

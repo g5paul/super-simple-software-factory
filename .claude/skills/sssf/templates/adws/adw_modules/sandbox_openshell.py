@@ -5,7 +5,7 @@ calls sandbox_remote makes, which follow Vercel's.
 There is no SDK: every call is an `openshell` command. There is no session cap.
 The image comes from scripts/openshell_image.py (`just openshell-setup`); it
 bakes in one folder, shared by the repo and its worktrees, owned by the sandbox
-user. The image also holds the repo's Python (`image_python`): uv installs it at
+user. The image holds node, uv, Claude Code, pi and bun (pinned, from npm). It also holds the repo's Python (`image_python`): uv installs it at
 build time, because the sandbox can't download one. The tag covers both, so a
 changed Python needs `just openshell-setup`. Denials from the sandbox's network policy go in the trace as
 `sandbox_denied` events.
@@ -52,6 +52,7 @@ CLI = "openshell"
 SANDBOX_USER = "ubuntu"
 BASE_IMAGE = "nvcr.io/nvidia/base/ubuntu:24.04"
 NODE = "24.11.1"
+BUN = "1.4.4"   # from npm, so the package spec pins it and npm checks the tarball
 PYTHON_DIR = "/usr/local/share/uv/python"   # under /usr, which the policy reads
 PYTHON_BIN = "/usr/local/bin"               # on PATH, so uv finds python3.<minor>
 NODE_EXE = "/usr/local/bin/node"
@@ -151,8 +152,9 @@ def containerfile(folder: Path, python: str | None = None) -> str:
         *install,
         "RUN npm install -g @anthropic-ai/claude-code",
         f"RUN npm install -g @earendil-works/pi-coding-agent@{sandbox_remote.PI_VERSION}",
+        f"RUN npm install -g bun@{BUN}",
         f"RUN mkdir -p {q} && chown -R {SANDBOX_USER}:{SANDBOX_USER} {q}",
-        "RUN node --version && uv --version && claude --version && pi --version"
+        "RUN node --version && uv --version && claude --version && pi --version && bun --version"
         ' && v=$(rg --version) && echo "$v" | head -1 && fdfind --version && git --version' + find,
         "",
     ])

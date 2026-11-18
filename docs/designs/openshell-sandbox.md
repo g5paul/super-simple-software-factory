@@ -74,6 +74,15 @@ Run 2026-11-07 on the microVM driver, in a sandbox from the host-path image, dri
 
 So nothing in the design changes, and the build can start at step 2.
 
+Run 2026-11-18 by the engineer's session for run 459e0656, in throwaway sandboxes from an SSSF image, each deleted after:
+
+| Check | Result |
+|---|---|
+| A big upload | A 22 MB file from a fresh `mktemp -d` folder, sent with `--no-git-ignore` to a missing `/tmp` path, landed as a regular file at exactly that path with the same SHA-256, owned by `ubuntu` with mode 644. The sandbox user removed it |
+| stdout | `exec` returned 1 MiB, 4 MiB plus one byte, 16 MiB and 64 MiB of `yes` output whole, so the way out needs no `download`. `/dev/zero` is closed to commands in the sandbox |
+| A host key in the CLI's env | With dummy `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` exported to `create --no-auto-providers`, `upload` and `exec`, neither reached the sandbox's env, PID 1's env, or any file under `/tmp`, `/home` or `/etc`, and no provider was made |
+| The telemetry setting | Claude Code's env-vars page says `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` turns off auto-updates, telemetry, error reporting, `/feedback`, release notes, PR badge checks, availability checks and feature-flag fetching, with nothing on model calls or sign-in. Whether it ends the `datadoghq.com` denials shows on the first real run |
+
 `sandbox_openshell.py` limits what an agent can do, so it's guard code. It goes through the guard-change chain, and `CLAUDE.md`'s list of guard files gains it.
 
 ## As built

@@ -40,7 +40,7 @@ Extend `adws/adw_modules/` with new low-level logic.
 | `sandbox.py` | where a run's tree lives; every process and file read SSSF does in it goes through `current()` |
 | `sandbox_remote.py` | a run's tree in a remote VM, with a clone of the run's branch at the host worktree's path |
 | `sandbox_vercel.py`, `sandbox_e2b.py` | make, refresh and delete a Vercel Sandbox or E2B VM for `sandbox_remote.py` |
-| `sandbox_usage.py` | what remote VM runs have used of each provider's free allowance, from `sandbox_end` events |
+| `sandbox_usage.py` | what remote VM runs have used of each provider's free allowance, from `sandbox_end` log rows |
 | `obs_relay.py`, `sssf_obs_relay.cjs` | the host and VM sides of the relay that carries a pi agent's obs events out of a VM |
 | `tickets.py` | reads a feature folder written by `to-spec` and `to-tickets` for `adw_tickets.py` |
 | `trial.py` | trials: one request, several rosters, a panel's verdict, the best one merged |

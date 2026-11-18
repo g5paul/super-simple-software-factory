@@ -312,7 +312,7 @@ vercel, last 30 days: 22 runs, 0.81 VM hours
   active CPU   0.037 h     0.7% of 5 h
 ```
 
-`--sandbox openshell` does the same in an OpenShell microVM on the host, free and with no API key, with Claude Code and pi agents. Its network is closed except `api.anthropic.com` for Claude Code, `api.openai.com` for pi, and read-only package registries. Each refused connection shows as a `sandbox_denied` event. Run `just openshell-setup` once first.
+`--sandbox openshell` does the same in an OpenShell microVM on the host, free and with no API key, with Claude Code and pi agents. Its network is closed except `api.anthropic.com` for Claude Code, `api.openai.com` for pi, and read-only package registries. Each refused connection shows as a `sandbox_denied` log row. Run `just openshell-setup` once first.
 
 ### Which to pick
 

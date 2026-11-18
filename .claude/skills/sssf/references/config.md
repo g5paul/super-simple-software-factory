@@ -155,15 +155,17 @@ to `specs/old.md` after the plan commit is refused. An agent that runs again bef
 that full commit does not get the ended part back, so a chain that has the planner
 revise a spec after the plan commit is refused. The grant outside `only` stays
 whatever the agent, so an agent with no `writes` list that ran before the plan commit
-can still put any unprotected path in the next full commit. A plan commit that doesn't
-move the branch ends no grant: in a VM run, a hook that undoes the commit leaves the
-planner's grant in place.
+can still put any unprotected path in the next full commit. In a VM run, a commit that
+exits 0 and leaves the VM's branch where it was stops the run (`sandbox_commit_not_landed`),
+for a plan commit and a full one.
 
 A protected path is matched in any case and in the spellings a case-insensitive disk
 takes for it (Unicode case and normalization, ignorable code points, trailing dots and
 spaces, `:stream`, `\`), and a name shaped like an 8.3 short name (`CLAUDE~1`,
 `notes~1.txt`) counts as any protected name in its place. `writes` entries are matched
-exactly, so `writes: [justfile]` does not unlock `Justfile`, and a repo whose recipe
+exactly, so `writes: [justfile]` does not unlock `Justfile`. A path with a component over
+255 code points, measured between `/`, `\` and `:`, is refused for every agent whatever its
+`writes`, since no Linux, macOS or Windows disk takes such a name. A repo whose recipe
 file is spelled `Justfile` cannot unlock it. A file named like an 8.3 alias is
 protected wherever a protected entry has a component in that position. A glob entry's
 8.3 name, and a filesystem that folds further than Unicode's canonical caseless match,
@@ -880,6 +882,8 @@ Limits that remain:
 The install refuses to run from a copy of the skill inside the project it installs for, so the SSSF hub installs its own policy from a separate clone of itself. See `docs/designs/agentsh-local-sandbox.md` in the SSSF hub.
 
 More known limits, each with what still applies:
+
+- The host's commit check still costs time in proportion to the paths a VM sends: no cap on paths per commit or on a path's total length. A plain `run` of `git commit`, not `Remote.commit`, keeps the early return for a commit that doesn't land. A VM that answers `git rev-parse HEAD` falsely gets the bundle that follows judged. A `git commit --dry-run`, or any `git commit` that exits 0 without making a commit, through `Remote.commit` stops the run.
 
 - Once an agent stages anything inside your untracked nested repo, git lists your other files there as untracked, and the rollback deletes them. Open on `main` too; see `docs/open.md`.
 - When the index half of the snapshot fails (`python3` missing, no temp folder outside the tree, or git can't read a tree of `HEAD` the cached diff needs, such as a deleted tree object of a folder the agent staged in), the run stops with `GitFailed` and the agent's other writes are kept as written, not rolled back. Left open for your decision; fixing it means rolling back what `diff HEAD` found before raising.

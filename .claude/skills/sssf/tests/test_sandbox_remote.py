@@ -1528,3 +1528,113 @@ def test_a_vm_commit_of_a_protected_path_in_another_spelling_is_refused(jbox, na
     with pytest.raises(permissions.PermissionBreach):
         _vm_commit(jbox, name, "evil\n")
     assert _host_head(jbox) == before and jbox.synced == before
+
+
+# --- a long name, and a commit that doesn't land, stop the run -----------------
+
+
+def _vm_git(box, *args, stdin=None):
+    return subprocess.run(["git", *args], cwd=box.vm_tree, check=True, capture_output=True,
+                          input=stdin).stdout
+
+
+@pytest.mark.parametrize("marks", [4000, 20000, 200000])
+def test_a_vm_long_name_is_refused_fast_and_never_folded(jbox, monkeypatch, marks):
+    from adw_modules import permissions
+    seen: list[int] = []
+    real = permissions._fold_part
+    monkeypatch.setattr(permissions, "_fold_part", lambda p: (seen.append(max(len(x) for x in p.split(":"))), real(p))[1])
+    before = _host_head(jbox)
+    blob = _vm_git(jbox, "hash-object", "-w", "a.txt").decode().strip()
+    name = "src" + "́" * (marks // 2) + "̖" * (marks // 2) + ".py"
+    listing = _vm_git(jbox, "ls-tree", "HEAD").decode() + f"100644 blob {blob}\t{name}\n"
+    tree = _vm_git(jbox, "mktree", stdin=listing.encode()).decode().strip()
+    c = _vm_git(jbox, "commit-tree", tree, "-p", "HEAD", "-m", "long").decode().strip()
+    _vm_git(jbox, "update-ref", "HEAD", c)
+    _vm_git(jbox, "reset", "-q")
+    start = time.perf_counter()
+    with pytest.raises(permissions.PermissionBreach):
+        jbox.commit(["git", "commit", "--allow-empty", "-qm", "build"])
+    assert time.perf_counter() - start < 1
+    assert _host_head(jbox) == before and jbox.synced == before
+    assert (jbox.run_.session_dir / "sandbox-refused.bundle").exists()
+    assert max(seen, default=0) <= permissions.NAME_MAX
+
+
+UNDO_ACTIONS = ["git reset -q --soft HEAD~1", "git reset -q --hard HEAD~1",
+                "git checkout -q --detach HEAD~1"]
+
+
+def _undo_hook(jbox, action: str = UNDO_ACTIONS[0]):
+    hook = jbox.vm_tree / ".git" / "hooks" / "post-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f'#!/bin/sh\n{action}\nrm -f "$0"\n')
+    hook.chmod(0o755)
+
+
+def test_a_hook_that_undoes_two_commits_stops_the_run_below_synced(jbox):
+    from adw_modules import permissions
+    planner = next(a for a in jbox.run_.cfg.agents if a.name == "planner")
+    _vm_commit(jbox, "b.txt")
+    before = _host_head(jbox)
+    assert before == jbox.synced
+    jbox.run_.ran[:] = [planner]
+    _undo_hook(jbox, "git reset -q --soft HEAD~2")
+    (jbox.vm_tree / "specs").mkdir(exist_ok=True)
+    (jbox.vm_tree / "specs" / "old.md").write_text("plan\n")
+    jbox.run(["git", "add", "-A"])
+    # Run, not read: the empty bundle is caught in commits_out and becomes a refusal.
+    with pytest.raises(permissions.PermissionBreach, match="not one HEAD on top"):
+        jbox.commit(["git", "commit", "-qm", "plan"], only=["specs/"])
+    assert _host_head(jbox) == before == jbox.synced
+    assert getattr(jbox.run_, "taken", []) == []
+    assert not (jbox.host_tree / "specs" / "old.md").exists()
+
+
+@pytest.mark.parametrize("action", UNDO_ACTIONS)
+def test_a_plan_commit_that_does_not_land_stops_the_run(jbox, action):
+    from adw_modules import permissions
+    planner = next(a for a in jbox.run_.cfg.agents if a.name == "planner")
+    jbox.run_.ran[:] = [planner]
+    _undo_hook(jbox, action)
+    before = _host_head(jbox)
+    (jbox.vm_tree / "specs").mkdir(exist_ok=True)
+    (jbox.vm_tree / "specs" / "old.md").write_text("plan\n")
+    jbox.run(["git", "add", "-A"])
+    with pytest.raises(permissions.PermissionBreach, match="didn't land"):
+        jbox.commit(["git", "commit", "-qm", "plan"], only=["specs/"])
+    names = [n for n, _ in jbox.events]
+    assert _host_head(jbox) == before == jbox.synced
+    assert "sandbox_commit_not_landed" in names and "sandbox_commits" not in names
+    assert getattr(jbox.run_, "taken", []) == [] and jbox.run_.ran == [planner]
+    assert not (jbox.host_tree / "specs" / "old.md").exists()
+    jbox.close()
+    assert not (jbox.host_tree / "specs" / "old.md").exists()
+    assert _host_head(jbox) == before
+
+
+def test_a_full_commit_that_does_not_land_stops_the_run(jbox):
+    from adw_modules import permissions
+    ran = list(jbox.run_.ran)
+    _undo_hook(jbox)
+    before = _host_head(jbox)
+    (jbox.vm_tree / "app2.py").write_text("x = 1\n")
+    jbox.run(["git", "add", "-A"])
+    with pytest.raises(permissions.PermissionBreach, match="didn't land"):
+        jbox.commit(["git", "commit", "-qm", "build"])
+    assert _host_head(jbox) == before and jbox.run_.ran == ran
+    assert "sandbox_commit_not_landed" in [n for n, _ in jbox.events]
+
+
+def test_a_plain_run_of_a_commit_that_does_not_land_is_passed_over(jbox):
+    _undo_hook(jbox)
+    (jbox.vm_tree / "app2.py").write_text("x = 1\n")
+    jbox.run(["git", "add", "-A"])
+    assert jbox.run(["git", "commit", "-qm", "build"]).returncode == 0
+    assert "sandbox_commit_not_landed" not in [n for n, _ in jbox.events]
+
+
+def test_close_after_a_passing_commit_logs_no_new_event(jbox):
+    _vm_commit(jbox, "b.txt")
+    jbox.close()
+    assert "sandbox_commit_not_landed" not in [n for n, _ in jbox.events]

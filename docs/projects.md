@@ -20,7 +20,7 @@ This page lists only the projects the engineer chose to name in public. Unlisted
 - **Records.** A separate private repo, `sssf-private`, records an unlisted project's install. This repo never does.
 - **Names.** In this repo's files and commit messages, an unlisted project is "an unlisted project". That covers the fixes it turns up. Their tests and comments describe the bug without naming the project.
 - **The push check.** Each unlisted name goes in the hub clone's `.git/sssf-private-names`. The pre-push hook refuses a push whose messages or added lines name one ([secret-scan.md](secret-scan.md)).
-- **VMs.** An install that's private on GitHub also keeps `sandbox: none`, so its code goes to a remote VM only when the engineer asks.
+- **VMs.** An install gets `sandbox: openshell` when the machine can run it, and `sandbox: none` otherwise. A repo that's private on GitHub goes to a remote VM only when the engineer asks.
 
 ## Open SSSF issues by project
 

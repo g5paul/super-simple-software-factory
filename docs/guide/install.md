@@ -252,7 +252,7 @@ For a free OpenShell microVM on the host instead, run `just openshell-setup`. It
    just e2b-template
    ```
 
-A Vercel or E2B run uploads the repo's code to that provider. An OpenShell run keeps the code on the host. Keep a private repo on `sandbox: none`, the default, or `sandbox: openshell` in `adws/adw_sssf_config/repo.yaml`, and use a remote VM only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [In a VM](run.md#in-a-vm) shows an example run.
+A Vercel or E2B run uploads the repo's code to that provider. An OpenShell run keeps the code on the host. The shipped default is `sandbox: none`. The install recommends `sandbox: openshell` in `adws/adw_sssf_config/repo.yaml` for any repo, private or public, when your machine has `/dev/kvm` access and OpenShell and Podman on `PATH`. Use a remote VM for a private repo only when you mean to. `just sandbox-usage` shows what VM runs used of each provider's free allowance. [In a VM](run.md#in-a-vm) shows an example run.
 
 ## Turn on agentsh, optional
 

@@ -24,7 +24,7 @@ From [the test](../research/openshell.md#the-test) on 2026-11-07, on this WSL2 m
 
 ### Decided by the engineer
 
-Decisions 1 to 5 were proposed here and accepted as written on 2026-11-07, and 14 on 2026-11-08.
+Decisions 1 to 5 were proposed here and accepted as written on 2026-11-07, 14 on 2026-11-08, and 15 on 2026-11-18.
 
 
 1. **Who runs the gateway.** The gateway is one long-lived process per machine. The engineer runs it as a systemd user service, the way OpenShell's own package does, set up once by a `just openshell-setup` recipe with telemetry off. A run checks `openshell status` before it starts and stops with a plain message if the gateway is down. The other way, SSSF starting a gateway per run, costs about a second each time and makes two runs at once fight over the port.
@@ -38,6 +38,8 @@ Decisions 1 to 5 were proposed here and accepted as written on 2026-11-07, and 1
     - **Reachable only by a local agent** (`--sandbox none`) writing a file outside the repo's tree that the host later runs or reads. The spec names these as local-mode limits, and `docs/open.md` records them. They don't block.
 
     Every rule still applies in every mode, as decision 2 says. The point is where the fixing goes: to the VM's edge and the host code that handles what comes back. Local mode is for supervised work. The repos on Claude Code rosters default to `sandbox: openshell`, starting with sssf-sandbox, a project and an unlisted project, so decision 2 gets its weeks of runs.
+
+15. **The default sandbox** (2026-11-18). The engineer picked `sandbox: openshell` as the default for their own repos, private ones included, each switched by its own session: OpenShell uploads nothing, so the reason private repos kept `sandbox: none`, that a VM uploads their code, holds only for Vercel and E2B. The shipped `repo.yaml` keeps `sandbox: none`, since a fresh clone usually lacks `/dev/kvm` access, OpenShell and Podman, OpenShell has run only on one WSL2 machine, and SSSF never runs the `sudo` that `/dev/kvm` needs. Instead the install recommends `sandbox: openshell` for any repo when `/dev/kvm` is readable and writable, `openshell`, `openshell-gateway` and `podman` are on `PATH`, and every pi agent is on an `openai/` model, then runs `just openshell-setup`. Both rosters run under OpenShell. pi's last proof step, a run in a real project, is still open ([open.md](../open.md)).
 
 ### Settled by the test and the code
 

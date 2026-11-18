@@ -1017,8 +1017,10 @@ def test_config_md_documents_the_scenario():
                  "git status", "git diff"):
         assert word in part, word
     assert "never kept" not in part
-    run_md = (SKILL.parent.parent.parent / "docs" / "guide" / "run.md").read_text()
-    assert "git-lfs" in run_md and "config.md" in run_md
+    hub = SKILL.parent.parent.parent
+    if (hub / "adws" / "adw_guard_change.py").is_file():  # the guide ships with the hub, not an install
+        run_md = (hub / "docs" / "guide" / "run.md").read_text()
+        assert "git-lfs" in run_md and "config.md" in run_md
     # -5: a failing git is never "no change"; no git child starts in a submodule
     flat = " ".join(part.split())
     assert "never read as \"no change\"" in flat and "may still hold the agent's writes" in flat

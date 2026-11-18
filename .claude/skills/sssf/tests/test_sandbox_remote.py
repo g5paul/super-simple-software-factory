@@ -1483,3 +1483,48 @@ def test_a_clean_commit_changes_nothing_else(jbox):
     assert set(commits) >= {"vm", "count", "head"} and commits["count"] == 1
     assert not (jbox.run_.session_dir / "sandbox-refused.bundle").exists()
     assert jbox.run_.ran == []
+
+
+def _plan_commit_in_vm(jbox):
+    from adw_modules import agents
+    planner = next(a for a in jbox.run_.cfg.agents if a.name == "planner")
+    jbox.run_.ran[:] = [planner]
+    (jbox.vm_tree / "specs").mkdir(exist_ok=True)
+    (jbox.vm_tree / "specs" / "old.md").write_text("plan\n")
+    jbox.run(["git", "add", "-A"])
+    assert jbox.commit(["git", "commit", "-qm", "plan"], only=["specs/"]).returncode == 0
+    jbox.run_.ran.append(next(a for a in jbox.run_.cfg.agents if a.name == "builder"))
+
+
+def test_a_vm_builder_change_to_a_plan_committed_spec_is_refused(jbox):
+    from adw_modules import permissions
+    _plan_commit_in_vm(jbox)
+    before = _host_head(jbox)
+    assert before == jbox.synced
+    (jbox.vm_tree / "specs" / "old.md").write_text("changed\n")
+    jbox.run(["git", "add", "-A"])
+    with pytest.raises(permissions.PermissionBreach, match="specs/old.md"):
+        jbox.commit(["git", "commit", "-qm", "build"])
+    assert _host_head(jbox) == before and jbox.synced == before
+    assert (jbox.run_.session_dir / "sandbox-refused.bundle").exists()
+
+
+def test_a_full_vm_commit_that_passes_empties_ran_and_taken(jbox):
+    _plan_commit_in_vm(jbox)
+    assert jbox.run_.taken
+    (jbox.vm_tree / "app2.py").write_text("x = 1\n")
+    jbox.run(["git", "add", "-A"])
+    assert jbox.commit(["git", "commit", "-qm", "build"]).returncode == 0
+    assert jbox.run_.ran == [] and jbox.run_.taken == []
+    assert [n for n, _ in jbox.events].count("sandbox_commits") == 2
+
+
+@pytest.mark.parametrize("name", ["JUSTFILE", "ADWS/adw_x.py", ".CLAUDE/settings.json",
+                                  "juſtfile", "just‌file", "just­file", "justfile.",
+                                  "justfile::$DATA", "adws\\x.py", "CLAUDE~1/settings.json"])
+def test_a_vm_commit_of_a_protected_path_in_another_spelling_is_refused(jbox, name):
+    from adw_modules import permissions
+    before = _host_head(jbox)
+    with pytest.raises(permissions.PermissionBreach):
+        _vm_commit(jbox, name, "evil\n")
+    assert _host_head(jbox) == before and jbox.synced == before

@@ -148,10 +148,22 @@ local commit is undone, with the work tree kept. Either way the run stops with a
 A plan commit (`commit_all` with `only`) is limited to the `only` entries, and a path
 in it must be one an agent that ran may write. The host can't name the planner, so
 `only` stands in for "only the planner": with the shipped rosters that is the planner.
-`run.ran` is cleared after a full commit passes, never after an `only` commit, since
-the planner's other work stays in the tree. So the builder's commit is judged with
-the planner's `writes` too, and a builder change to `specs/` passes this check (the
-in-call check still stops it).
+An `only` commit that passes ends the grant of the agents that ran before it, for
+the paths inside its `only` entries; what they may write elsewhere stays until the
+next full commit passes, which clears `run.ran` and `run.taken`. So a builder change
+to `specs/old.md` after the plan commit is refused. An agent that runs again before
+that full commit does not get the ended part back, so a chain that has the planner
+revise a spec after the plan commit is refused.
+
+A protected path is matched in any case and in the spellings a case-insensitive disk
+takes for it (Unicode case and normalization, ignorable code points, trailing dots and
+spaces, `:stream`, `\`), and a name shaped like an 8.3 short name (`CLAUDE~1`,
+`notes~1.txt`) counts as any protected name in its place. `writes` entries are matched
+exactly, so `writes: [justfile]` does not unlock `Justfile`, and a repo whose recipe
+file is spelled `Justfile` cannot unlock it. A file named like an 8.3 alias is
+protected wherever a protected entry has a component in that position. A glob entry's
+8.3 name, and a filesystem that folds further than Unicode's canonical caseless match,
+are not covered.
 
 The local read turns off replace refs, grafts, hooks, external diff and textconv and
 reads commits raw. It cannot stop an object the agent wrote into the object store

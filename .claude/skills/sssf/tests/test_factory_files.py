@@ -213,3 +213,107 @@ def test_the_runtime_is_kept_even_when_not_gitignored(tree):
     (tree.repo_root / path).write_text("report\n")
     assert permissions.enforce(tree, None, reviewer, before) == [path]
     assert (tree.repo_root / path).exists()
+
+
+# --- protected paths are matched in every spelling a checkout takes for them ---
+
+SPELLED = [
+    "JUSTFILE", "ADWS/adw_x.py", ".CLAUDE/settings.json", "SPECS/old.md", "glossary.md",
+    "juſtfile", ".githooKs/pre-commit", ".pı/x.json",
+    "just‌file", "just­file", "justfile.", "justfile ", "adws./x.py", "adws /x.py",
+    "justfile::$DATA", "adws::$INDEX_ALLOCATION/x.py", "adws\\x.py",
+    "CLAUDE~1/settings.json", "PI~1/x.json", "MCP~1.JSO", "GITHOO~1/pre-commit",
+    "SSSF~1.JUS", "LOCAL~1.JUS", "CL1A2B~1/settings.json", "JUSTFI~1",
+]
+
+
+@pytest.mark.parametrize("path", SPELLED)
+def test_every_spelling_is_refused_for_the_builder_the_documenter_and_an_open_agent(path):
+    cfg = load("sssf.config.yaml")
+    for agent in (named(cfg, "builder"), named(cfg, "documenter"),
+                  named(cfg, "builder").model_copy(update={"writes": None})):
+        assert not permissions.permitted(path, agent, cfg), (agent.name, path)
+
+
+def test_nfc_and_nfd_of_a_protected_entry_are_the_same():
+    cfg = load("sssf.config.yaml")
+    cfg = cfg.model_copy(deep=True)
+    cfg.defaults.protected_files = [*cfg.defaults.protected_files, "docs/café/"]
+    builder = named(cfg, "builder")
+    assert not permissions.permitted("docs/café/x.md", builder, cfg)
+    assert not permissions.permitted("docs/café/x.md", builder, cfg)
+
+
+@pytest.mark.parametrize("path", ["src/JUSTFILE", "justfiles", "adwsx/a.py", "docs/just~1",
+                                  "src/a~1.py", "notes~", "README.md", "src/app.py"])
+def test_other_names_are_not_folded_into_a_protected_one(path):
+    cfg = load("sssf.config.yaml")
+    assert permissions.permitted(path, named(cfg, "builder"), cfg)
+
+
+def _baseline_permitted(path, agent, cfg):
+    """`permitted()` as it was: protected entries matched exactly."""
+    m, n = permissions._matches, permissions._names
+    if any(m(path, p) for p in permissions.always_writable(cfg)):
+        return True
+    writes = agent.writes or []
+    fixed = [p for p in permissions.factory_files(cfg) if m(path, p) or m(path + "/", p)]
+    if fixed and not any(m(path, w) and n(w, g) for w in writes for g in fixed):
+        return False
+    guards = [p for p in cfg.defaults.protected_files if m(path, p)]
+    if guards:
+        return any(m(path, w) and n(w, g) for w in writes for g in guards)
+    if any(m(path, w) for w in writes):
+        return True
+    return agent.writes is None
+
+
+def test_the_head_passes_nothing_the_baseline_refuses():
+    ordinary = ["src/app.py", "README.md", "docs/a.md", "tests/t.py", "specs/new.md", "notes.txt"]
+    exact = ["justfile", "adws/adw_x.py", ".claude/settings.json", "specs/old.md", "GLOSSARY.md",
+             ".mcp.json", "sssf.just", "local.just", ".githooks/pre-commit", "docs/projects.md"]
+    for roster in ROSTERS:
+        cfg = load(roster)
+        agents_ = list(cfg.agents) + [
+            named(cfg, "builder").model_copy(update={"writes": None}),
+            named(cfg, "builder").model_copy(update={"writes": ["**", "justfile", "adws/", "specs/"]})]
+        for agent in agents_:
+            for path in SPELLED + exact + ordinary:
+                old, new = _baseline_permitted(path, agent, cfg), permissions.permitted(path, agent, cfg)
+                assert not (new and not old), (roster, agent.name, path)
+                if path in exact + ordinary:
+                    assert new == old, (roster, agent.name, path)
+
+
+def test_a_writes_entry_for_justfile_does_not_unlock_another_case():
+    cfg = load("sssf.config.yaml")
+    agent = named(cfg, "builder").model_copy(update={"writes": ["justfile"]})
+    assert permissions.permitted("justfile", agent, cfg)
+    assert not permissions.permitted("JUSTFILE", agent, cfg)
+
+
+def test_the_ignored_set_holds_the_hfs_ones():
+    assert permissions._HFS_IGNORED <= permissions._IGNORED
+
+
+def test_the_fold_loses_nothing_against_plain_case_folding():
+    import sys
+    import unicodedata
+    groups: dict[str, list[str]] = {}
+    for cp in range(sys.maxunicode + 1):
+        if 0xD800 <= cp <= 0xDFFF:
+            continue
+        c = chr(cp)
+        key = unicodedata.normalize("NFD", unicodedata.normalize("NFD", c).casefold())
+        groups.setdefault(key, []).append(c)
+    for members in groups.values():
+        folded = {permissions._fold_part(c) for c in members} - {""}
+        assert len(folded) <= 1, members
+
+
+@pytest.mark.parametrize("path", ["docs/x~1/b.md", "docs/*./b.md", "docs/* /b.md", "docs/x/b.md"])
+def test_a_folded_match_never_unlocks_through_a_glob_folder_entry(path):
+    cfg = load("sssf.config.yaml").model_copy(deep=True)
+    cfg.defaults.protected_files = [*cfg.defaults.protected_files, "docs/*/", "**/b.md"]
+    agent = named(cfg, "builder").model_copy(update={"writes": ["docs/*/b.md"]})
+    assert not permissions.permitted(path, agent, cfg)

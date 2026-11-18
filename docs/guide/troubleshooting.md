@@ -111,6 +111,13 @@ The message names the file and what's missing. [tickets.md](../../.claude/skills
 
 **A VM run stopped with work in it.** SSSF saves the run's uncommitted work in `adws/adw_data/sessions/<adw_id>/sandbox-uncommitted.patch` and doesn't apply it. Read the patch. If you want the work, `git apply` the patch in the run's worktree.
 
+**A run stopped because its commits were refused.** A VM run says "The VM's commits were refused and did not land"; a local run says a commit "holds paths no agent that ran may write". Each names the commit and the path, and nothing reached your branch.
+
+- **A VM run** leaves your branch where it was and keeps the commits in `adws/adw_data/sessions/<adw_id>/sandbox-refused.bundle`. To read them, run `git fetch <that bundle>` and `git show FETCH_HEAD`.
+- **A local run** undoes the commit and leaves its files in your work tree. Before you resume, put each named path back with `git checkout HEAD -- <path>`, unless you made that change yourself: a resumed run takes the tree as it finds it, and its next commit would carry the agent's file.
+
+If the path should be allowed, add it to that agent's `writes` in the roster.
+
 ## Updates
 
 **`just sssf-update` refuses.** The update won't run in any of these cases:

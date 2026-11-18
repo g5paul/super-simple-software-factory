@@ -131,6 +131,7 @@ Each run keeps its raw record in `adws/adw_data/sessions/<adw_id>/`:
 | `context_handoff/` | what agents wrote for the next one: the plan, scout notes, reviews, quality logs |
 | `agent_map.json` | which agent session each name maps to, so `--adw-id` can continue them |
 | `sandbox-uncommitted.patch` | a VM run's uncommitted work, when it stopped early |
+| `sandbox-refused.bundle` | a VM run's commits the host refused, kept for you to read |
 
 The trace mirrors these files, so losing `sssf.db` loses nothing you can't rebuild.
 

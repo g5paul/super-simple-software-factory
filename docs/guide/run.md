@@ -300,6 +300,8 @@ merged sssf/3cf4cea1 into master (fast-forward), now at a63d4bc; removed its wor
 
 The VMs lived 85 and 117 seconds, and each was deleted at the end of its run. The second merge conflicted on `CHANGELOG.md`, and the engineer merged it by hand, as in [Two runs at once](#two-runs-at-once).
 
+Before a VM run's commits reach your branch, the host reads each one with its own git and checks every path against the `writes` of the agents that ran. A commit that touches a path none of them may write lands nothing: your branch stays where it was, the run stops naming the commit and the path, and the bundle is kept as `adws/adw_data/sessions/<adw_id>/sandbox-refused.bundle`. A local run gets the same check after each of the chain's commits, and a refused commit is undone with your work tree kept.
+
 If a VM run stops, SSSF saves its uncommitted work from the VM to `adws/adw_data/sessions/<adw_id>/sandbox-uncommitted.patch` and doesn't apply it. `just sandbox-usage` shows what VM runs have used of each provider's free allowance:
 
 ```console

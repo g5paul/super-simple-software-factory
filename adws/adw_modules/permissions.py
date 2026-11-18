@@ -49,6 +49,17 @@ deleted or fetched, and no hook, filter, fsmonitor, pager or external diff runs,
 the repo or in a submodule (the snapshot, undo and rollback git work the same way). It can't tell
 the agent's commit from the engineer's.
 
+The chain's own commits are judged too. `check_local_commit()` runs after
+`commit_all` in local mode, and `Remote.commits_out` runs `judge_commits()` on
+what a VM run brings back before the host branch moves. Each commit is diffed
+against its parent by the host's own git (no replace ref, graft, hook or
+external diff), and a path passes when an agent that ran may write it, or it is
+under the session folder, or the chain wrote it (`wrote`), or it is exactly
+what was already in the tree when the run began (`carried_tree`). A merge, a
+root, or a head that doesn't descend from the last sync is refused outright. A
+refused local commit is undone with the tree kept; a refused VM bundle lands
+nothing. A path with a `.git` component never passes.
+
 Two keys drive it, both in sssf.config.yaml:
     defaults.protected_files   paths no agent may touch unless it names them itself
 SSSF's fixed `FACTORY_FILES` are checked on top of `protected_files`, and a
@@ -62,10 +73,13 @@ import os
 import re
 import secrets
 import shlex
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from . import sandbox
-from .data_types import AgentConfig, SSSFConfig
+from .data_types import AgentConfig, EventRecord, SSSFConfig
 
 
 class PermissionBreach(RuntimeError):
@@ -873,6 +887,182 @@ for c in "$@"; do
   }
 done
 """
+
+
+COMMITS_MAX = 256
+_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
+_ZERO = re.compile(r"0+\Z")
+
+
+def _host_read(repo, args: list[str], env: dict | None = None) -> bytes:
+    """stdout of one read-only git in `repo`, run on the host with `subprocess`
+    (never through `sandbox.current()`, which is the VM). A failure is GitFailed."""
+    argv = [*_REF_READ, *args]
+    try:
+        done = subprocess.run(argv, cwd=repo, capture_output=True,
+                              env={**os.environ, **(env or {})})
+    except Exception as error:
+        raise GitFailed(f"SSSF's commit check couldn't start git {_shown(args)}: "
+                        f"{_said_line(str(error))}") from error
+    if done.returncode != 0:
+        err = done.stderr.decode("utf-8", "surrogateescape")
+        raise GitFailed(f"SSSF's commit check: git {_shown(args)} failed "
+                        f"({_said_line(err) or done.returncode}).")
+    return done.stdout
+
+
+def carried_tree(repo) -> str:
+    """The tree `git add -A` would commit in `repo` right now, built in a fresh
+    index of SSSF's own (never `.git/index`, whose cache-tree an earlier process
+    could have forged), or "" when any step fails."""
+    folder = tempfile.mkdtemp(prefix="sssf-carried-")
+    try:
+        env = {"GIT_INDEX_FILE": str(Path(folder) / "index")}
+        tail = ["-c", "core.hooksPath=/dev/null"]
+        for step in (["read-tree", "HEAD"], ["add", "-A"], ["write-tree"]):
+            out = _host_read(repo, [*tail, *step], env)
+        return out.decode("utf-8", "surrogateescape").strip()
+    except Exception:
+        return ""
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _commit_parents(repo, sha: str) -> list[str]:
+    raw = _host_read(repo, ["cat-file", "commit", sha]).decode("utf-8", "surrogateescape")
+    parents = []
+    for line in raw.split("\n"):
+        if not line:
+            break
+        if line.startswith("parent "):
+            parents.append(line[len("parent "):].strip())
+    return parents
+
+
+def _diff_paths(repo, parent: str, commit: str) -> list[tuple[str, str, str, str]]:
+    """`(path, status, new mode, new sha)` for every change from `parent` to `commit`."""
+    raw = _host_read(repo, ["diff-tree", "-r", "--raw", "-z", "--no-renames", "--no-ext-diff",
+                            "--no-textconv", parent, commit]).decode("utf-8", "surrogateescape")
+    fields = raw.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2:
+        raise GitFailed("SSSF's commit check couldn't read git's diff-tree output.")
+    found = []
+    for meta, path in zip(fields[0::2], fields[1::2]):
+        words = meta.lstrip(":").split(" ")
+        if len(words) != 5 or not path:
+            raise GitFailed("SSSF's commit check couldn't read git's diff-tree output.")
+        found.append((path, words[4][:1], words[1], words[3]))
+    return found
+
+
+def _in_carried(repo, carried: str, path: str, status: str, mode: str, sha: str) -> bool:
+    out = _host_read(repo, ["--literal-pathspecs", "ls-tree", "-z", carried, "--", path])
+    entry = out.decode("utf-8", "surrogateescape").split("\0")[0]
+    if not entry:
+        return status == "D"
+    head, _, name = entry.partition("\t")
+    words = head.split(" ")
+    return name == path and status != "D" and len(words) == 3 and (words[0], words[2]) == (mode, sha)
+
+
+def judge_commits(repo, base: str, tip: str, cfg: SSSFConfig, agents, *, only=None,
+                  session: str = "", wrote=(), carried: str = "") -> list[tuple[str, list[str]]]:
+    """Judge every commit from `base` (exclusive) to `tip`, by host git alone.
+
+    Returns `(commit, refused paths or one shape reason)` pairs, `[]` when all pass.
+    A git failure raises GitFailed, which callers treat as a refusal. A shape
+    refusal (a merge, a root, more than 256 commits, a tip that doesn't descend
+    from `base`) comes before any diff is read."""
+    for sha in (base, tip):
+        if not _SHA.match(sha or ""):
+            return [(tip or "?", ["not a commit id"])]
+    walked: list[str] = []
+    sha = tip
+    while sha != base:
+        if len(walked) >= COMMITS_MAX:
+            return [(sha, [f"more than {COMMITS_MAX} commits"])]
+        parents = _commit_parents(repo, sha)
+        if len(parents) > 1:
+            return [(sha, ["a merge"])]
+        if not parents:
+            return [(sha, ["a root: the head does not descend from the last sync"])]
+        walked.append(sha)
+        sha = parents[0]
+    walked.reverse()
+    refused: list[tuple[str, list[str]]] = []
+    for commit in walked:
+        parent = _commit_parents(repo, commit)[0]
+        bad = []
+        for path, status, mode, new in _diff_paths(repo, parent, commit):
+            ok = not _in_git_dir(path)
+            if ok and only is not None:
+                ok = any(path == e or (e.endswith("/") and path.startswith(e)) for e in only)
+            if ok:
+                ok = (any(permitted(path, a, cfg) for a in agents)
+                      or bool(session and (path == session.rstrip("/")
+                                           or path.startswith(session.rstrip("/") + "/")))
+                      or path in wrote
+                      or bool(carried and _in_carried(repo, carried, path, status, mode, new)))
+            if not ok:
+                bad.append(path)
+        if bad:
+            refused.append((commit, bad))
+    return refused
+
+
+def refusal_text(refused: list[tuple[str, list[str]]]) -> str:
+    lines = []
+    for sha, paths in refused[:REF_COMMITS_SHOWN]:
+        for path in paths[:REF_PATHS_SHOWN]:
+            lines.append(f"  - {_said_line(f'{sha[:12]} {path}')}")
+        if len(paths) > REF_PATHS_SHOWN:
+            lines.append(f"  - {sha[:12]}: and {len(paths) - REF_PATHS_SHOWN} more")
+    if len(refused) > REF_COMMITS_SHOWN:
+        lines.append(f"  - and {len(refused) - REF_COMMITS_SHOWN} more commit(s)")
+    return "\n".join(lines)
+
+
+def check_local_commit(run, before: str, *, only=None, wrote=()) -> None:
+    """Judge the commit(s) the chain just made in the local tree, `before`..HEAD.
+
+    On a refusal the branch goes back to `before` with the tree kept, and a
+    PermissionBreach says so. On a pass with `only` None, `run.ran` is cleared."""
+    tip = ""
+    try:
+        tip = _git(["rev-parse", "HEAD"], run.repo_root).strip()
+        folder = ""
+        try:
+            folder = Path(run.session_dir).resolve().relative_to(Path(run.repo_root).resolve()).as_posix()
+        except ValueError:
+            pass
+        refused = judge_commits(run.repo_root, before, tip, run.cfg, getattr(run, "ran", []),
+                                only=only, session=folder, wrote=list(wrote),
+                                carried=getattr(run, "carried", ""))
+        text = refusal_text(refused)
+    except GitFailed as error:
+        refused, text = [(tip or "?", ["unreadable"])], str(error)
+    if not refused:
+        if only is None and hasattr(run, "ran"):
+            run.ran.clear()
+        return
+    reset = ""
+    try:
+        _git(["update-ref", "HEAD", before, tip], run.repo_root)
+        code, _, _ = _try_git(["reset", "-q", "--no-recurse-submodules", before], run.repo_root,
+                              _filters_off(run.repo_root))
+        if code != 0:
+            reset = " The index reset failed: run `git reset` to rebuild it."
+    except GitFailed as error:
+        reset = f" Putting the branch back failed too ({_said_line(str(error))}); HEAD is at {tip[:12]}."
+    run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id="", type="error",
+                                 name="commit_refused",
+                                 payload={"before": before, "head": tip,
+                                          "refused": [[c, p] for c, p in refused]}))
+    raise PermissionBreach(
+        "A commit the chain just made holds paths no agent that ran may write, so the branch is "
+        f"back at {before[:12]} and the tree is kept as it was:\n{text}{reset}")
 
 
 def _head(run, off=()) -> dict[str, str]:
@@ -1904,6 +2094,37 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
     return agent.writes is None          # None = unrestricted, [] = no repo writes
 
 
+GIT_DIR_KEPT = "unstaged; nothing on disk touched, since the path is inside the git directory"
+_HFS_IGNORED = {*range(0x200C, 0x2010), *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF}
+
+
+def _in_git_dir(path: str) -> bool:
+    """True when any `/` component of `path` is one git treats as `.git`: any case,
+    with HFS-ignored code points dropped, and NTFS's `:stream`, trailing dots and
+    spaces, and `git~1` short name."""
+    for part in path.split("/"):
+        name = "".join(c for c in part.lower() if ord(c) not in _HFS_IGNORED)
+        for form in (name, name.split(":", 1)[0].rstrip(". ")):
+            if form in (".git", "git~1"):
+                return True
+    return False
+
+
+def _is_git_dir_here(run, path: str, off=()) -> bool:
+    """True when `path` really names a file in a git directory on this disk: a
+    component exactly `.git`, or `.git` in any case when core.ignorecase is true.
+    The broad `_in_git_dir` also matches `git~1`, `.git.` and the like, which are
+    ordinary names here, so the rollback must still delete them. It only refuses
+    in the commit check."""
+    parts = path.split("/")
+    if ".git" in parts:
+        return True
+    if not any(p.lower() == ".git" for p in parts):
+        return False
+    code, out, _ = _try_git(["config", "--type=bool", "core.ignorecase"], run.repo_root, off)
+    return code == 0 and out.strip() == "true"
+
+
 IN_SUBMODULE = ("SSSF can't roll back inside a submodule, so the files under it may hold the "
                 "agent's writes.")
 
@@ -1952,6 +2173,9 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str], of
     the same harm this module exists to prevent, committed by the cleanup
     instead of the agent.
 
+    A path with a component that is exactly `.git` (any case when core.ignorecase
+    is true; `_is_git_dir_here`) is only unstaged: nothing on
+    disk is deleted or checked out, since it is inside the git directory.
     A path untracked alone (kind `?`) is deleted. A staged-new path (`A`, or a
     hidden `staged-A-…` entry, flags cleared first) is
     unstaged, then deleted only if git says it isn't ignored; with nothing on
@@ -1987,12 +2211,26 @@ def _roll_back(run, path: str, before: dict[str, str], after: dict[str, str], of
     staged_new = any(p.startswith("staged-A-") for p in parts)
     box = sandbox.current()
 
+    in_git = _is_git_dir_here(run, path, off)
+
     def delete() -> str:
+        if in_git:
+            return "left on disk (inside the git directory)"
         try:
             box.remove(Path(run.repo_root) / path)
             return "deleted"
         except OSError as error:
             return f"could not delete ({error})"
+    if in_git:
+        # A path git reads as inside the git directory is the engineer's file there
+        # (`.git/config`, a hook), never the agent's to have SSSF delete or check out.
+        for flag in ("--no-skip-worktree", "--no-assume-unchanged"):
+            _try_git(["update-index", "-q", flag, "--", path], run.repo_root, off)
+        code, _, _ = _try_git(["rm", "-q", "--cached", "--force", "--", path], run.repo_root, off)
+        if code != 0:
+            code, _, _ = _try_git(["update-index", "--force-remove", "--", path],
+                                  run.repo_root, off)
+        return GIT_DIR_KEPT if code == 0 else "could not unstage"
     if kind == "?":
         return delete()
     if staged_new or (parts[0] == "A" and not flagged):
@@ -2291,5 +2529,6 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
         message += "\n" + moved
     raise PermissionBreach(
         message, left=[p for p, o in outcomes.items()
-                       if o not in ("rolled back", "deleted", "unstaged and deleted", "unstaged")],
+                       if o not in ("rolled back", "deleted", "unstaged and deleted", "unstaged",
+                                    GIT_DIR_KEPT)],
         refs_left=bool(moved))

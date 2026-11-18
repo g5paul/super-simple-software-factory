@@ -187,6 +187,11 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
             _open_sandbox(run, place, provider, sandbox_name)
         if not place["resumed"] or provider:
             worktree.set_up(run)
+    # Work already in a local tree when the process starts (the engineer's edits, a
+    # resumed run's earlier work) may be committed as it is: the commit check
+    # passes a path holding exactly this tree's mode and blob.
+    if sandbox.current() is sandbox.LOCAL and worktree.dirty(Path(run.repo_root)):
+        run.carried = permissions.carried_tree(run.repo_root)
     return run
 
 

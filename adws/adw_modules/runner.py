@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import agents, git_helper, session_files
+from . import agents, git_helper, permissions, sandbox, session_files
 from .console import Console
 from .data_types import AgentCall, EnvelopeBase, EventRecord, Phase, PhaseParams
 from .utils import ensure_dir, now_iso
@@ -47,6 +47,8 @@ class Run:
         self.console = Console(tracer, adw_id)
         self.engineer = engineer
         self.local_guard = None     # session.ensure fills it; agents.send carries it
+        self.ran: list = []         # agents that ran since the last full commit that passed
+        self.carried = ""           # the tree of work already in a local tree at start
         self.phases: list[Phase] = []
         self.tokens = 0
         self.cost = 0.0
@@ -131,6 +133,15 @@ class Run:
         now settles the db, the banner, and the exit code together, so the three
         cannot disagree.
         """
+        box = sandbox.current()
+        if box is not sandbox.LOCAL and hasattr(box, "close"):
+            # Bring the VM's last commits back and judge them now, so a refusal
+            # reaches the db, the banner and the exit code together.
+            try:
+                box.close(stop=True)
+            except permissions.PermissionBreach as error:
+                self.console.advise(str(error))
+                accepted, reason = False, str(error)
         phases_ok = bool(self.phases) and all(p.status == "success" for p in self.phases)
         ok = phases_ok and accepted
         if phases_ok and not accepted:

@@ -90,7 +90,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                    description="Commit the green work to the run's branch, "
                                                "which is all `just merge` lands")) as ph:
             message = built.commit_message or f"sssf({run.adw_id}): {built.summary}"
-            ph.log(sha=git_helper.commit_all(message), message=message)
+            ph.log(sha=git_helper.commit_all(message, run=run), message=message)
 
     return run.finish(accepted=test is not None and test.passed,
                       reason=f"the suite still failed after {MAX_FIX_LOOPS - 1} fix attempt(s)")

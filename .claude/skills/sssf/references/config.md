@@ -153,7 +153,11 @@ the paths inside its `only` entries; what they may write elsewhere stays until t
 next full commit passes, which clears `run.ran` and `run.taken`. So a builder change
 to `specs/old.md` after the plan commit is refused. An agent that runs again before
 that full commit does not get the ended part back, so a chain that has the planner
-revise a spec after the plan commit is refused.
+revise a spec after the plan commit is refused. The grant outside `only` stays
+whatever the agent, so an agent with no `writes` list that ran before the plan commit
+can still put any unprotected path in the next full commit. A plan commit that doesn't
+move the branch ends no grant: in a VM run, a hook that undoes the commit leaves the
+planner's grant in place.
 
 A protected path is matched in any case and in the spellings a case-insensitive disk
 takes for it (Unicode case and normalization, ignorable code points, trailing dots and
@@ -163,7 +167,7 @@ exactly, so `writes: [justfile]` does not unlock `Justfile`, and a repo whose re
 file is spelled `Justfile` cannot unlock it. A file named like an 8.3 alias is
 protected wherever a protected entry has a component in that position. A glob entry's
 8.3 name, and a filesystem that folds further than Unicode's canonical caseless match,
-are not covered.
+are not covered. `.justfile`, which `just` also reads, is not protected.
 
 The local read turns off replace refs, grafts, hooks, external diff and textconv and
 reads commits raw. It cannot stop an object the agent wrote into the object store

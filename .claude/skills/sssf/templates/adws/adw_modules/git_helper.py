@@ -63,7 +63,8 @@ def commit_all(message: str, only: list[str] | None = None, *, run=None, wrote=(
     In a VM the sandbox's `commit` brings the commit back and judges it before the
     host branch moves. Locally, with a `run`, a refused commit is undone (the tree
     is kept) and PermissionBreach is raised. `wrote` names paths the chain itself
-    wrote into this commit. With `run=None` nothing is checked."""
+    wrote into this commit. With `run=None` nothing is checked. A passing `only`
+    commit ends the agents' grant inside its entries until the next full commit."""
     if not is_repo():
         raise RuntimeError(
             "not a git repository — a commit phase needs one. Run `git init` in the "

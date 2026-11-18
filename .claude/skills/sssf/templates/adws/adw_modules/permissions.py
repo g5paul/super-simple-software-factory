@@ -56,7 +56,11 @@ against its parent by the host's own git (no replace ref, graft, hook or
 external diff), and a path passes when an agent that ran may write it, or it is
 under the session folder, or the chain wrote it (`wrote`), or it is exactly
 what was already in the tree when the run began (`carried_tree`). A merge, a
-root, or a head that doesn't descend from the last sync is refused outright. A
+root, or a head that doesn't descend from the last sync is refused outright. An
+`only` commit that passes ends the grant of the agents that ran before it, inside
+its entries, until the next full commit passes (`run.taken`); an agent that runs
+again does not get it back. A protected path is matched in every spelling a
+case-insensitive checkout takes for it (see `_folds_to`). A
 refused local commit is undone with the tree kept; a refused VM bundle lands
 nothing. A path with a `.git` component never passes.
 
@@ -76,6 +80,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from . import sandbox
@@ -967,8 +972,33 @@ def _in_carried(repo, carried: str, path: str, status: str, mode: str, sha: str)
     return name == path and status != "D" and len(words) == 3 and (words[0], words[2]) == (mode, sha)
 
 
+def _inside(path: str, entries) -> bool:
+    """True when `path` is an entry, or under an entry that ends in `/`. Literal."""
+    return any(path == e or (e.endswith("/") and path.startswith(e)) for e in entries)
+
+
+def commit_passed(run, only) -> None:
+    """Record that a commit passed. A full commit (`only` None) clears `run.ran`
+    and `run.taken`. An `only` commit ends each agent's grant inside its entries:
+    `(agent, entry)` pairs go into `run.taken`, until the next full commit."""
+    if not hasattr(run, "ran"):
+        return
+    if only is None:
+        run.ran.clear()
+        if hasattr(run, "taken"):
+            run.taken.clear()
+        return
+    if not hasattr(run, "taken"):
+        run.taken = []
+    for a in list(run.ran):
+        for e in only:
+            if (a, e) not in run.taken:
+                run.taken.append((a, e))
+
+
 def judge_commits(repo, base: str, tip: str, cfg: SSSFConfig, agents, *, only=None,
-                  session: str = "", wrote=(), carried: str = "") -> list[tuple[str, list[str]]]:
+                  session: str = "", wrote=(), carried: str = "",
+                  taken=()) -> list[tuple[str, list[str]]]:
     """Judge every commit from `base` (exclusive) to `tip`, by host git alone.
 
     Returns `(commit, refused paths or one shape reason)` pairs, `[]` when all pass.
@@ -998,9 +1028,11 @@ def judge_commits(repo, base: str, tip: str, cfg: SSSFConfig, agents, *, only=No
         for path, status, mode, new in _diff_paths(repo, parent, commit):
             ok = not _in_git_dir(path)
             if ok and only is not None:
-                ok = any(path == e or (e.endswith("/") and path.startswith(e)) for e in only)
+                ok = _inside(path, only)
             if ok:
-                ok = (any(permitted(path, a, cfg) for a in agents)
+                ok = (any(permitted(path, a, cfg)
+                          and not _inside(path, [e for t, e in taken if t == a])
+                          for a in agents)
                       or bool(session and (path == session.rstrip("/")
                                            or path.startswith(session.rstrip("/") + "/")))
                       or path in wrote
@@ -1028,7 +1060,9 @@ def check_local_commit(run, before: str, *, only=None, wrote=()) -> None:
     """Judge the commit(s) the chain just made in the local tree, `before`..HEAD.
 
     On a refusal the branch goes back to `before` with the tree kept, and a
-    PermissionBreach says so. On a pass with `only` None, `run.ran` is cleared."""
+    PermissionBreach says so. On a pass with `only` None, `run.ran` and `run.taken`
+    are cleared; with `only`, each agent that ran has its grant inside those
+    entries ended (`run.taken`) until the next full commit passes."""
     tip = ""
     try:
         tip = _git(["rev-parse", "HEAD"], run.repo_root).strip()
@@ -1039,13 +1073,13 @@ def check_local_commit(run, before: str, *, only=None, wrote=()) -> None:
             pass
         refused = judge_commits(run.repo_root, before, tip, run.cfg, getattr(run, "ran", []),
                                 only=only, session=folder, wrote=list(wrote),
-                                carried=getattr(run, "carried", ""))
+                                carried=getattr(run, "carried", ""),
+                                taken=list(getattr(run, "taken", ())))
         text = refusal_text(refused)
     except GitFailed as error:
         refused, text = [(tip or "?", ["unreadable"])], str(error)
     if not refused:
-        if only is None and hasattr(run, "ran"):
-            run.ran.clear()
+        commit_passed(run, only)
         return
     reset = ""
     try:
@@ -1971,7 +2005,8 @@ def _matches(path: str, pattern: str) -> bool:
     return path == pattern
 
 
-# SSSF's own files, protected whatever the roster says. Only an agent's own
+# SSSF's own files (matched in any spelling a checkout takes for them),
+# protected whatever the roster says. Only an agent's own
 # `writes`, naming one, unlocks it. FACTORY_DATA is relative to data_dir.
 #   .claude/    the skill, agents, hooks and settings Claude Code loads
 #   .pi/        pi's extensions and settings
@@ -2074,21 +2109,30 @@ def _names(entry: str, protected: str) -> bool:
 
 
 def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
-    """Session runtime first, then what is protected, then the agent's own list."""
+    """Session runtime first, then what is protected, then the agent's own list.
+    Protected paths are matched in any case and in the spellings a case-insensitive
+    checkout takes for them; the always-writable and `writes` matches stay exact."""
     if any(_matches(path, p) for p in always_writable(cfg)):
         return True
     writes = agent.writes or []
     # SSSF's own files, whatever the roster says. A separate check: it can only
     # refuse, so the roster check below still decides everything it did before.
     # `path + "/"` so a bare `.pi` or `.githooks` (a link, a file) is inside its folder.
-    fixed = [p for p in factory_files(cfg) if _matches(path, p) or _matches(path + "/", p)]
-    if fixed and not any(_matches(path, w) and _names(w, g) for w in writes for g in fixed):
+    # Also in any spelling a case-insensitive checkout takes for them (_folds_to);
+    # only the refusing side folds, so no path passes that passed before.
+    # A folded match only marks the path protected; a `writes` entry unlocks it
+    # through the entries the path matches exactly, as before the fold.
+    exact_fixed = [p for p in factory_files(cfg) if _matches(path, p) or _matches(path + "/", p)]
+    folded_fixed = [p for p in factory_files(cfg) if _folds_to(path, p, bare=True)]
+    if (exact_fixed or folded_fixed) and not any(
+            _matches(path, w) and _names(w, g) for w in writes for g in exact_fixed):
         return False
-    guards = [p for p in cfg.defaults.protected_files if _matches(path, p)]
-    if guards:
+    exact = [p for p in cfg.defaults.protected_files if _matches(path, p)]
+    folded = [p for p in cfg.defaults.protected_files if _folds_to(path, p)]
+    if exact or folded:
         # Naming a protected path is what unlocks it. The documenter's `**/*.md`
         # reaches every Markdown file, but must not reach a spec on record.
-        return any(_matches(path, w) and _names(w, g) for w in writes for g in guards)
+        return any(_matches(path, w) and _names(w, g) for w in writes for g in exact)
     if any(_matches(path, w) for w in writes):
         return True
     return agent.writes is None          # None = unrestricted, [] = no repo writes
@@ -2096,6 +2140,51 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
 
 GIT_DIR_KEPT = "unstaged; nothing on disk touched, since the path is inside the git directory"
 _HFS_IGNORED = {*range(0x200C, 0x2010), *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF}
+
+# Unicode's Default_Ignorable_Code_Point (from memory, not re-read): a Linux
+# casefold folder may compare names with these dropped. A superset of _HFS_IGNORED.
+_IGNORED = {0x00AD, 0x034F, 0x061C, *range(0x115F, 0x1161), *range(0x17B4, 0x17B6),
+            *range(0x180B, 0x1810), *range(0x200B, 0x2010), *range(0x202A, 0x202F),
+            *range(0x2060, 0x2070), 0x3164, *range(0xFE00, 0xFE10), 0xFEFF, 0xFFA0,
+            *range(0xFFF0, 0xFFF9), *range(0x1BCA0, 0x1BCA4), *range(0x1D173, 0x1D17B),
+            *range(0xE0000, 0xE1000)}
+# The shape of an NTFS 8.3 alias (`CLAUDE~1`, `NOTES~1.TXT`, the hash form), on a folded name.
+_SHORT = re.compile(r"[^.~]{1,6}~[0-9]+(?:\.[^.]{0,3})?")
+
+
+def _fold_part(part: str) -> str:
+    """One path component in the form every case-insensitive spelling shares:
+    NFD, ignorable code points dropped, upper then casefold, NFD again, cut at
+    the first `:` (an NTFS stream), trailing dots and spaces dropped."""
+    text = unicodedata.normalize("NFD", part)
+    text = "".join(c for c in text if ord(c) not in _IGNORED)
+    text = unicodedata.normalize("NFD", text.upper().casefold())
+    return text.split(":", 1)[0].rstrip(". ")
+
+
+def _fold(path: str) -> list[str]:
+    """The folded components of `path`; `\\` is a separator, empty results go."""
+    return [f for f in (_fold_part(p) for p in path.replace("\\", "/").split("/")) if f]
+
+
+def _folds_to(path: str, entry: str, *, bare: bool = False) -> bool:
+    """True when `path` is `entry`, or inside it, in any spelling a case-insensitive
+    checkout takes for it. Only the refusing side uses this. A glob entry that is
+    not a folder is matched on the folded strings; otherwise component by component,
+    where a component shaped like an 8.3 alias counts as any entry component.
+    `bare` takes a path with as many components as a folder entry as inside it."""
+    want = _fold(entry)
+    have = _fold(path)
+    if not want:
+        return False
+    if ("*" in entry or "?" in entry) and not entry.endswith("/"):
+        return _glob("/".join(want)).fullmatch("/".join(have)) is not None
+    if entry.endswith("/"):
+        if len(have) < len(want) + (0 if bare else 1):
+            return False
+    elif len(have) != len(want):
+        return False
+    return all(h == w or _SHORT.fullmatch(h) is not None for h, w in zip(have, want))
 
 
 def _in_git_dir(path: str) -> bool:

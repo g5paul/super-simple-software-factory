@@ -231,3 +231,124 @@ def test_every_commit_all_call_in_the_chains_passes_run():
         calls += [(path.name, m) for m in re.findall(r"commit_all\([^\n]*", path.read_text())]
     assert len(calls) == 6
     assert [name for name, call in calls if "run=run" not in call] == []
+
+
+# --- the planner's grant ends inside an `only` commit; spellings are folded ----
+
+
+def _plan_then_builder(repo, cfg):
+    run = local_run(repo, cfg, [named(cfg, "planner")])
+    (repo / "specs").mkdir()
+    (repo / "specs" / "old.md").write_text("plan\n")
+    git_helper.commit_all("plan", ["specs/"], run=run)
+    return run
+
+
+def test_a_builder_change_to_a_plan_committed_spec_is_refused_locally(repo, cfg):
+    run = _plan_then_builder(repo, cfg)
+    before = git(repo, "rev-parse", "HEAD")
+    run.ran.append(named(cfg, "builder"))
+    (repo / "specs" / "old.md").write_text("changed\n")
+    with pytest.raises(permissions.PermissionBreach, match="specs/old.md"):
+        git_helper.commit_all("build", run=run)
+    assert git(repo, "rev-parse", "HEAD") == before
+
+
+def test_a_builder_alone_cannot_change_a_spec(repo, cfg):
+    run = local_run(repo, cfg, [named(cfg, "builder")])
+    (repo / "specs").mkdir()
+    (repo / "specs" / "old.md").write_text("x\n")
+    with pytest.raises(permissions.PermissionBreach, match="specs/old.md"):
+        git_helper.commit_all("build", run=run)
+
+
+def test_the_grant_outside_only_holds_until_the_full_commit(repo, cfg):
+    cfg = cfg.model_copy(deep=True)
+    planner = named(cfg, "planner")
+    planner.writes = ["specs/", "docs/plans/"]
+    run = local_run(repo, cfg, [planner])
+    (repo / "specs").mkdir()
+    (repo / "specs" / "a.md").write_text("a\n")
+    (repo / "docs" / "plans").mkdir(parents=True)
+    (repo / "docs" / "plans" / "x.md").write_text("x\n")
+    git_helper.commit_all("plan", ["specs/"], run=run)
+    git_helper.commit_all("rest", run=run)
+    assert run.ran == [] and run.taken == []
+
+
+def test_each_only_entry_is_judged_without_the_agents_before_its_commit(repo, cfg):
+    cfg = cfg.model_copy(deep=True)
+    a, b, c = (named(cfg, n).model_copy(deep=True) for n in ("planner", "planner", "planner"))
+    a.name, b.name, c.name = "A", "B", "C"
+    a.writes, b.writes, c.writes = ["specs/", "docs/plans/"], ["specs/", "docs/plans/"], ["docs/x/"]
+    run = local_run(repo, cfg, [a])
+    (repo / "specs").mkdir()
+    (repo / "specs" / "s.md").write_text("s\n")
+    git_helper.commit_all("one", ["specs/"], run=run)
+    run.ran.append(b)
+    (repo / "docs" / "plans").mkdir(parents=True)
+    (repo / "docs" / "plans" / "p.md").write_text("p\n")
+    git_helper.commit_all("two", ["docs/plans/"], run=run)
+    run.ran.append(c)
+    assert run.taken == [(a, "specs/"), (a, "docs/plans/"), (b, "docs/plans/")]
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "specs/s.md", "again\n")
+    assert permissions.judge_commits(repo, base, git(repo, "rev-parse", "HEAD"), cfg, [a, b, c],
+                                     taken=run.taken) == []          # B still holds specs/
+    bad = commit(repo, "docs/plans/p.md", "again\n")
+    assert permissions.judge_commits(repo, base, git(repo, "rev-parse", "HEAD"), cfg, [a, b, c],
+                                     taken=run.taken) == [(bad, ["docs/plans/p.md"])]
+
+
+def test_a_planner_that_runs_again_is_refused_until_a_full_commit_passes(repo, cfg):
+    run = _plan_then_builder(repo, cfg)
+    (repo / "specs" / "x_v2.md").write_text("v2\n")
+    run.ran.append(named(cfg, "planner"))
+    with pytest.raises(permissions.PermissionBreach, match="x_v2.md"):
+        git_helper.commit_all("plan2", ["specs/"], run=run)
+    (repo / "specs" / "x_v2.md").unlink()
+    (repo / "app.py").write_text("a = 9\n")
+    run.ran.append(named(cfg, "builder"))
+    git_helper.commit_all("build", run=run)
+    assert run.ran == [] and run.taken == []
+    run.ran.append(named(cfg, "planner"))
+    (repo / "specs" / "y.md").write_text("y\n")
+    git_helper.commit_all("plan3", ["specs/"], run=run)
+
+
+def test_commit_passed_copes_with_a_run_without_taken_or_ran():
+    run = SimpleNamespace(ran=["a"])
+    permissions.commit_passed(run, ["specs/"])
+    assert run.taken == [("a", "specs/")]
+    permissions.commit_passed(run, ["specs/"])
+    assert run.taken == [("a", "specs/")]
+    permissions.commit_passed(run, None)
+    assert run.ran == [] and run.taken == []
+    bare = SimpleNamespace(ran=["a"])
+    permissions.commit_passed(bare, None)
+    assert bare.ran == [] and not hasattr(bare, "taken")
+    permissions.commit_passed(SimpleNamespace(), ["specs/"])
+
+
+SPELLINGS = [
+    "JUSTFILE", "ADWS/adw_x.py", ".CLAUDE/settings.json", "SPECS/old.md", "glossary.md",
+    "juſtfile", ".githooKs/pre-commit", ".pı/x.json",
+    "just‌file", "just­file", "justfile.", "justfile ", "adws./x.py", "adws /x.py",
+    "justfile::$DATA", "adws::$INDEX_ALLOCATION/x.py", "adws\\x.py",
+    "CLAUDE~1/settings.json", "PI~1/x.json", "MCP~1.JSO", "GITHOO~1/pre-commit",
+    "SSSF~1.JUS", "LOCAL~1.JUS", "CL1A2B~1/settings.json", "JUSTFI~1",
+]
+
+
+@pytest.mark.parametrize("name", SPELLINGS)
+def test_a_protected_path_in_another_spelling_is_refused_by_the_host_check(repo, cfg, name):
+    base = git(repo, "rev-parse", "HEAD")
+    bad = commit(repo, name)
+    assert judge(repo, base, cfg) == [(bad, [name])]
+
+
+@pytest.mark.parametrize("name", ["justfile", "adws/adw_x.py", ".claude/settings.json", "specs/old.md"])
+def test_the_exact_name_is_refused_as_before(repo, cfg, name):
+    base = git(repo, "rev-parse", "HEAD")
+    bad = commit(repo, name, "y\n")
+    assert judge(repo, base, cfg) == [(bad, [name])]

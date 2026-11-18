@@ -17,6 +17,8 @@ both sides. Each command goes through `run` or `start` below:
   git bundle, so the host keeps them if the VM dies. The host judges every commit
   first (permissions.judge_commits) from objects its own `git bundle unbundle`
   hashed; a refused bundle lands nothing and is kept as sandbox-refused.bundle.
+  A `git commit` run by `commit()` that exits 0 and leaves the VM's HEAD at the
+  last sync stops the run (sandbox_commit_not_landed).
 - At the end, uncommitted work is saved as a patch in the run's folder, not
   applied, and the VM is deleted.
 
@@ -871,8 +873,11 @@ class Remote:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    def commits_out(self, only=None, wrote=()) -> None:
+    def commits_out(self, only=None, wrote=(), *, must_move: bool = False) -> None:
         """Fast-forward the host branch to the VM's, through a bundle of the new commits.
+
+        With `must_move` (only `commit` sets it), a VM whose HEAD is still at the
+        last sync stops the run: a `git commit` that exited 0 didn't land.
 
         The host judges every commit first (permissions.judge_commits), reading
         only objects its own `git bundle unbundle` hashed. A refused bundle lands
@@ -880,7 +885,15 @@ class Remote:
         from . import permissions
         head = self._must("git", ["rev-parse", "HEAD"], cwd=str(self.tree)).strip()
         if head == self.synced:
-            return
+            if not must_move:
+                return
+            self._log("sandbox_commit_not_landed",
+                      {"vm": self.vm, "synced": self.synced[:12],
+                       "only": list(only) if only else None}, type="error")
+            raise permissions.PermissionBreach(
+                f"`git commit` exited 0 in the VM but its HEAD is still at the last sync "
+                f"({self.synced[:12]}), so the commit didn't land and the run stops; the host "
+                f"branch is still at {self.synced[:12]}.")
         packed = self._must("sh", ["-c", f"git bundle create -q - {self.synced}..HEAD | base64 -w0"],
                             cwd=str(self.tree))
         data = base64.b64decode(packed)
@@ -922,8 +935,9 @@ class Remote:
         permissions.commit_passed(self.run_, only)
 
     def commit(self, argv, *, only=None, wrote=()) -> subprocess.CompletedProcess:
-        """Run a `git commit` in the VM and judge what comes back with `only` and `wrote`."""
-        return self._run(argv, sync=lambda: self.commits_out(only, wrote))
+        """Run a `git commit` in the VM and judge what comes back with `only` and `wrote`.
+        A commit that exits 0 and doesn't move the VM's HEAD is refused."""
+        return self._run(argv, sync=lambda: self.commits_out(only, wrote, must_move=True))
 
     # --- helpers ------------------------------------------------------------
 

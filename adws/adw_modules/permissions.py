@@ -62,7 +62,8 @@ its entries, until the next full commit passes (`run.taken`); an agent that runs
 again does not get it back. A protected path is matched in every spelling a
 case-insensitive checkout takes for it (see `_folds_to`). A
 refused local commit is undone with the tree kept; a refused VM bundle lands
-nothing. A path with a `.git` component never passes.
+nothing. A path with a `.git` component never passes, and neither does one with a
+component over 255 code points.
 
 Two keys drive it, both in sssf.config.yaml:
     defaults.protected_files   paths no agent may touch unless it names them itself
@@ -1026,7 +1027,7 @@ def judge_commits(repo, base: str, tip: str, cfg: SSSFConfig, agents, *, only=No
         parent = _commit_parents(repo, commit)[0]
         bad = []
         for path, status, mode, new in _diff_paths(repo, parent, commit):
-            ok = not _in_git_dir(path)
+            ok = not _in_git_dir(path) and not _too_long(path)
             if ok and only is not None:
                 ok = _inside(path, only)
             if ok:
@@ -2111,7 +2112,11 @@ def _names(entry: str, protected: str) -> bool:
 def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig) -> bool:
     """Session runtime first, then what is protected, then the agent's own list.
     Protected paths are matched in any case and in the spellings a case-insensitive
-    checkout takes for them; the always-writable and `writes` matches stay exact."""
+    checkout takes for them; the always-writable and `writes` matches stay exact.
+    A path with a component no disk takes (over NAME_MAX) is refused for every
+    agent, before any fold."""
+    if _too_long(path):
+        return False
     if any(_matches(path, p) for p in always_writable(cfg)):
         return True
     writes = agent.writes or []
@@ -2152,8 +2157,22 @@ _IGNORED = {0x00AD, 0x034F, 0x061C, *range(0x115F, 0x1161), *range(0x17B4, 0x17B
 _SHORT = re.compile(r"[^.~]{1,6}~[0-9]+(?:\.[^.]{0,3})?")
 
 
+# The longest name a disk takes, in code points: Linux 255 bytes (NAME_MAX in
+# limits.h); APFS 255 characters, HFS+ and NTFS 255 UTF-16 units (not re-read).
+NAME_MAX = 255
+
+
+def _too_long(path: str) -> bool:
+    """True when any piece of `path` between `/`, `\\` and `:` is over NAME_MAX
+    code points. `\\` separates on Windows and `:` starts an NTFS stream."""
+    return any(len(piece) > NAME_MAX for piece in re.split(r"[/\\:]", path))
+
+
 def _fold_part(part: str) -> str:
-    """One path component in the form every case-insensitive spelling shares:
+    """In a part `permitted()` passes here, no run between `:` is over NAME_MAX
+    code points, so the cost is linear in the part's length.
+
+    One path component in the form every case-insensitive spelling shares:
     NFD, ignorable code points dropped, upper then casefold, NFD again, cut at
     the first `:` (an NTFS stream), trailing dots and spaces dropped."""
     text = unicodedata.normalize("NFD", part)

@@ -131,6 +131,34 @@ An agent's own `tools` list wins. An agent that omits the key inherits `defaults
 
 ## Write permissions, `writes` and `protected_files`
 
+The host checks every commit against the agents' `writes` before it counts. A VM
+run's commits come back as a bundle, and the host's own git unpacks it and judges
+each commit (merges, a second root, a head that doesn't descend from the last sync
+and more than 256 commits are refused). In local mode the chain's own commit is
+judged right after `commit_all`. A path passes when an agent that ran since the
+last full commit may write it, or it is under the run's session folder, or the chain
+wrote it itself (the ticket file `mark_done` changes), or, locally, it holds exactly
+the mode and blob that was already in the tree when the run began (the engineer's
+uncommitted edits, a resumed run's earlier work). A path with a `.git` component
+never passes. A refused VM bundle lands nothing: the host branch stays where it was
+and the bundle is kept as `sandbox-refused.bundle` in the run's folder. A refused
+local commit is undone, with the work tree kept. Either way the run stops with a
+`PermissionBreach` naming each commit and path.
+
+A plan commit (`commit_all` with `only`) is limited to the `only` entries, and a path
+in it must be one an agent that ran may write. The host can't name the planner, so
+`only` stands in for "only the planner": with the shipped rosters that is the planner.
+`run.ran` is cleared after a full commit passes, never after an `only` commit.
+
+The local read turns off replace refs, grafts, hooks, external diff and textconv and
+reads commits raw. It cannot stop an object the agent wrote into the object store
+that serves other content under an id, a planted hook the chain's own `git commit`
+runs before the check, or an agent that kills the chain before the check. A VM run
+has none of these limits, but it can't stop a change inside the agents' `writes`.
+The host's fast-forward merge runs your own `post-merge` hook and checkout filters
+on content that passed. The note after a VM run names the paths in the saved patch
+that no agent may write, so read the patch before you apply it. A pre-commit hook of your own that stages a protected file is refused too: the check judges the commit, not who staged the path.
+
 `tools` cannot express a safety boundary, because two of the tools are general
 purpose. `bash` runs anything, including `git checkout`, which discards an
 engineer's uncommitted work. `write` reaches any path, not only the one report
@@ -572,7 +600,7 @@ that was untracked before the call, such as your own nested repo, is unstaged
 and left on disk, and the run stops naming it. An agent that stages its own
 write isn't stopped. The plan commit commits the planner's `writes` paths and
 leaves out what else is staged, and it holds both halves of a rename. A forged
-cache-tree is the exception: see the known limits below.
+cache-tree or an unsorted index is caught by the commit check (below).
 
 Narrow `tools` by role, not by reflex. An agent that must produce a `context_handoff/` file needs `write`, or it falls back on a `bash` heredoc. Withhold `edit` and `write` only where the restriction is the guarantee. For example, a reviewer that can't edit can't quietly fix what it was asked to report.
 
@@ -836,9 +864,7 @@ More known limits, each with what still applies:
 
 - Once an agent stages anything inside your untracked nested repo, git lists your other files there as untracked, and the rollback deletes them. Open on `main` too; see `docs/open.md`.
 - When the index half of the snapshot fails (`python3` missing, no temp folder outside the tree, or git can't read a tree of `HEAD` the cached diff needs, such as a deleted tree object of a folder the agent staged in), the run stops with `GitFailed` and the agent's other writes are kept as written, not rolled back. Left open for your decision; fixing it means rolling back what `diff HEAD` found before raising.
-- A planner that leaves every index entry as `HEAD` has it but points the index's cache-tree at a tree it wrote can put any path into the plan commit. The after-call check rightly finds no staged change, and the plan commit takes the forged tree. The next full commit puts the path back, but between the two `HEAD` holds the agent's version. Open on `main` too; see `docs/open.md`.
-- An index whose entries are out of order survives the rollback, so the next commit can take an agent's file and drop tracked ones. Open on `main` too; see `docs/open.md`.
-- When an agent stages index entries named after files in the git directory, such as `.git/config` or `.git/hooks/pre-push`, the rollback deletes those files after the git-directory guard has put them back. Open on `main` too; see `docs/open.md`.
+- A planner that points the index's cache-tree at a tree it wrote, or leaves the index unsorted, can still have the plan commit take a path it may not write. The commit check refuses that commit (`judge_commits` reads the commit's own tree against its parent, never the index), puts the branch back and keeps the tree. What stays is the local read's limits: an object the agent wrote in the object store that serves other content under an id, a planted hook the chain's own `git commit` runs before the check, and an agent that kills the chain first.
 - A link whose target ends in a newline is read without it, so an agent's staged link to the same target without the newline isn't seen. It needs such a link in `HEAD`.
 - `GIT_CONFIG_COUNT` with an alias, and `git send-pack`, reach exec without the word `push` where the rule looks. The network rules refuse GitHub.
 - Any alias value naming `push`, in any case, is denied, such as `git -c 'alias.p=!f(){ git push; }; f' p`. The alias pattern's `.*push` also reaches past the alias value into later arguments. So an alias whose value only mentions push, such as `git -c alias.ci='commit -m push' ci`, is denied. So is a command after an alias option that names push anywhere, such as `git -c alias.st=status log --grep=push`. It fails closed, and each denial counts toward the three-refusal stop.

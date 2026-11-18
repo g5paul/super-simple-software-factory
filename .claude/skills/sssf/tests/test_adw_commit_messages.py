@@ -22,7 +22,7 @@ import pytest
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import agents, quality
+from adw_modules import agents, permissions, quality
 from adw_modules.data_types import (BuildOutput, DocumentOutput, PlanOutput,
                                     QualityResult, ReviewOutput, SSSFConfig)
 
@@ -46,6 +46,10 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(agents, "load_config", lambda path=None: SSSFConfig())
     monkeypatch.setattr(agents, "validate", lambda cfg, required: None)
     monkeypatch.setattr(agents, "execute", fake_execute)
+    # These tests pin commit messages and what each commit holds. Their stand-in
+    # agents never go through agents.execute, so run.ran stays empty and the
+    # commit check would refuse every path; it has its own tests (test_commit_check.py).
+    monkeypatch.setattr(permissions, "check_local_commit", lambda *a, **k: None)
     return tmp_path
 
 

@@ -980,7 +980,9 @@ def test_change_three_left_no_mechanism():
     source = inspect.getsource(permissions)
     # GIT_INDEX_FILE is not here: the cached diff reads an index SSSF builds from
     # the entries (`_INDEX`), the accepted cache-tree fix of guard run ea9dc12f.
-    for word in ("_filtered", "_contents", "read-tree", "check-attr",
+    # read-tree is not here either: `carried_tree` builds a fresh index with it for
+    # the commit check, never for the rollback.
+    for word in ("_filtered", "_contents", "check-attr",
                  '"mktemp", "-d"'):
         assert word not in source, word
     body = inspect.getsource(permissions.enforce)

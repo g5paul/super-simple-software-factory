@@ -131,10 +131,10 @@ def feature_sssf_changes(feature_slug: str) -> str:
 
 
 def build_feature(run, folder: str) -> int:
-    def commit(ph, subject: str, body: str = "", step: str = "") -> None:
+    def commit(ph, subject: str, body: str = "", step: str = "", wrote=()) -> None:
         trailers = f"SSSF-Feature: {feature.slug}" + (f"\nSSSF-Step: {step}" if step else "")
         message = "\n\n".join(part for part in (subject, body, trailers) if part)
-        ph.log(sha=git_helper.commit_all(message), message=subject)
+        ph.log(sha=git_helper.commit_all(message, run=run, wrote=wrote), message=subject)
 
     def record(ph, result) -> None:
         ph.log(passed=result.passed, checks=result.tally(),
@@ -218,7 +218,8 @@ def build_feature(run, folder: str) -> int:
                                    description=f"Mark ticket {ticket.number} done and land it "
                                                f"on its own")) as ph:
             tickets.mark_done(ticket)
-            commit(ph, f"{ticket.number}: {ticket.title}", build.commit_message)
+            commit(ph, f"{ticket.number}: {ticket.title}", build.commit_message,
+                   wrote=[ticket.path])
         host_verify = plan_checks.verify_brief(result, f"{n}_verify")
 
     # SSSF's own files are not the feature's work. Updating SSSF on the feature

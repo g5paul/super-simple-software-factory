@@ -318,7 +318,7 @@ def _make_box(provider, tmp_path, monkeypatch, cfg=None, token=True):
     run = types.SimpleNamespace(
         adw_id="abc", context_handoff_dir=handoff, session_dir=session, data_root=host / "data",
         tracer=types.SimpleNamespace(event=lambda e: events.append((e.name, e.payload))),
-        console=types.SimpleNamespace(note=lambda text: None))
+        console=types.SimpleNamespace(note=lambda text: None), ran=[])
     if cfg is not None:
         run.cfg = cfg
     b = module.Box(run, "sssf/abc", "repo")
@@ -331,6 +331,16 @@ def box(request, tmp_path, monkeypatch):
     b = _make_box(request.param, tmp_path, monkeypatch)
     b.open()
     return b
+
+
+@pytest.fixture
+def jbox(box):
+    """An open box whose host judges the VM's commits against the shipped roster,
+    as a run does, with the shipped builder as the agent that ran."""
+    from adw_modules import agents
+    box.run_.cfg = agents.load_config(str(SKILL / "templates" / "sssf.config.yaml"))
+    box.run_.ran.append(next(a for a in box.run_.cfg.agents if a.name == "builder"))
+    return box
 
 
 def test_open_clones_the_branch_and_the_handoff_folder_at_the_host_paths(box):
@@ -402,7 +412,7 @@ def test_an_agent_writes_the_handoff_folder_and_the_host_gets_it_back(box):
     assert (box.handoff / "build.md").read_text() == "done\n"
 
 
-def test_a_commit_in_the_vm_lands_on_the_host_branch_with_the_same_sha(box):
+def test_a_commit_in_the_vm_lands_on_the_host_branch_with_the_same_sha(box, jbox):
     (box.vm_tree / "b.txt").write_text("b\n")
     box.run(["git", "add", "-A"])
     assert box.run(["git", "commit", "-qm", "b"]).returncode == 0
@@ -710,7 +720,7 @@ def test_a_newer_major_is_noted_and_an_older_minimum_refused():
     assert notes == ["pi 2.0.1 is a newer major than SSSF has run on (1.x); the run goes on"]
 
 
-def test_a_commit_with_git_options_still_lands_on_the_host(box):
+def test_a_commit_with_git_options_still_lands_on_the_host(box, jbox):
     """Twelfth review: git_helper's commit carries `-c core.fsmonitor=` before
     `commit`, and the exact-argv match missed it, so commits came back only
     at close."""
@@ -1367,3 +1377,109 @@ def test_a_roster_with_a_claude_agent_needs_the_token_file(tokenless, kinds):
     with pytest.raises(SandboxFailed, match="token"):
         b.open()
     assert b.sandbox is None and b.raw.calls == []
+
+
+# --- the host judges the VM's commits before the branch moves -----------------
+
+
+def _vm_commit(box, name: str, text: str = "x\n", *, through_box: bool = True):
+    (box.vm_tree / name).parent.mkdir(parents=True, exist_ok=True)
+    (box.vm_tree / name).write_text(text)
+    box.run(["git", "add", "-A"])
+    argv = ["git", "commit", "-qm", f"change {name}"]
+    if through_box:
+        return box.run(argv)
+    return subprocess.run(argv, cwd=box.vm_tree, check=True, capture_output=True)
+
+
+def _host_head(jbox) -> str:
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=jbox.host_tree,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def test_a_vm_commit_of_a_protected_path_lands_nothing_and_keeps_the_bundle(jbox):
+    from adw_modules import permissions
+    before = _host_head(jbox)
+    with pytest.raises(permissions.PermissionBreach, match="justfile"):
+        _vm_commit(jbox, "justfile", "evil:\n")
+    assert _host_head(jbox) == before and jbox.synced == before
+    session = jbox.run_.session_dir
+    assert (session / "sandbox-refused.bundle").exists()
+    assert not (session / "sandbox-out.bundle").exists()
+    assert "sandbox_commits_refused" in dict(jbox.events) and "sandbox_commits" not in dict(jbox.events)
+
+
+def test_close_with_stop_raises_after_the_vm_is_deleted_and_plain_close_tells(jbox):
+    from adw_modules import permissions
+    _vm_commit(jbox, "justfile", "evil:\n", through_box=False)
+    told = []
+    jbox.run_.console.advise = told.append
+    jbox.close()
+    assert jbox.fake.destroyed and "sandbox_end" in dict(jbox.events)
+    assert told and "refused and did not land" in told[0]
+    assert _host_head(jbox) == jbox.synced
+
+
+def test_close_with_stop_raises_the_refusal(jbox):
+    from adw_modules import permissions
+    _vm_commit(jbox, "justfile", "evil:\n", through_box=False)
+    with pytest.raises(permissions.PermissionBreach, match="justfile"):
+        jbox.close(stop=True)
+    assert jbox.fake.destroyed and "sandbox_end" in dict(jbox.events)
+
+
+def test_commit_with_only_refuses_a_path_outside_it_and_wrote_lets_one_through(jbox):
+    from adw_modules import permissions
+    (jbox.vm_tree / "b.txt").write_text("b\n")
+    jbox.run(["git", "add", "-A"])
+    with pytest.raises(permissions.PermissionBreach, match="b.txt"):
+        jbox.commit(["git", "commit", "-qm", "b"], only=["specs/"])
+    assert jbox.synced == _host_head(jbox)
+    assert (jbox.run_.session_dir / "sandbox-refused.bundle").exists()
+
+
+def test_a_commit_the_chain_wrote_passes_through_wrote(jbox):
+    (jbox.vm_tree / "justfile").write_text("mark:\n")
+    jbox.run(["git", "add", "-A"])
+    assert jbox.commit(["git", "commit", "-qm", "mark"], wrote=["justfile"]).returncode == 0
+    assert _host_head(jbox) == jbox.synced
+
+
+@pytest.mark.parametrize("header, why", [
+    (b"# v1 git bundle\n", "header"),
+    (b"# v3 git bundle\n@filter=blob:none\n-{s} x\n{t} HEAD\n\n", "filter"),
+    (b"# v2 git bundle\n-{o} x\n{t} HEAD\n\n", "prerequisite"),
+    (b"# v2 git bundle\n-{s} x\n-{o} y\n{t} HEAD\n\n", "prerequisite"),
+    (b"# v2 git bundle\n-{s} x\n{t} HEAD\n{t} refs/heads/x\n\n", "HEAD"),
+    (b"# v2 git bundle\n-{s} x\n{t} refs/heads/x\n\n", "HEAD"),
+])
+def test_a_bundle_of_the_wrong_shape_is_refused(header, why):
+    from adw_modules import sandbox_remote
+    from adw_modules.sandbox import SandboxFailed
+    s, t, o = "a" * 40, "b" * 40, "c" * 40
+    data = header.replace(b"{s}", s.encode()).replace(b"{t}", t.encode()).replace(b"{o}", o.encode())
+    with pytest.raises(SandboxFailed):
+        sandbox_remote._bundle_head(data + b"PACK", s)
+
+
+def test_a_good_bundle_header_gives_its_head():
+    from adw_modules import sandbox_remote
+    s, t = "a" * 40, "b" * 40
+    assert sandbox_remote._bundle_head(
+        f"# v2 git bundle\n-{s} msg\n{t} HEAD\n\nPACK".encode(), s) == t
+
+
+def test_the_patch_note_names_paths_no_agent_may_write_even_through_a_rename(jbox):
+    notes = []
+    jbox.run_.console.note = notes.append
+    subprocess.run(["git", "mv", "a.txt", "justfile"], cwd=jbox.vm_tree, check=True)
+    jbox.close()
+    assert any("justfile" in n and "no agent may write" in n for n in notes)
+
+
+def test_a_clean_commit_changes_nothing_else(jbox):
+    _vm_commit(jbox, "b.txt")
+    commits = dict(jbox.events)["sandbox_commits"]
+    assert set(commits) >= {"vm", "count", "head"} and commits["count"] == 1
+    assert not (jbox.run_.session_dir / "sandbox-refused.bundle").exists()
+    assert jbox.run_.ran == []

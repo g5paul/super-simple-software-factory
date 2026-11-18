@@ -31,18 +31,50 @@ from adw_modules import sandbox_remote  # noqa: E402
 from adw_modules.sandbox_remote import Remote  # noqa: E402
 
 FAKE = '''#!{python}
-import base64, json, os, subprocess, sys, time
+import base64, hashlib, json, os, shutil, subprocess, sys, time
 argv = sys.argv[1:]
 data = sys.stdin.buffer.read() if argv[:2] == ["sandbox", "exec"] else b""
+# FAKE_OPENSHELL_MAP: "from=to" pairs, one per line. The fake's VM is the host, so
+# these give the VM its own root for the paths a test names. Unset: no change.
+pairs = [p.split("=", 1) for p in os.environ.get("FAKE_OPENSHELL_MAP", "").splitlines() if p]
+def vm(text):
+    for old, new in pairs:
+        if old in text:
+            return text.replace(old, new)
+    return text
+entry = {{"argv": argv, "stdin": base64.b64encode(data).decode() if len(data) <= 65536 else "",
+          "stdin_len": len(data)}}
+if argv[:2] == ["sandbox", "upload"]:
+    rest = [a for a in argv[2:] if not a.startswith("--")]
+    local, dest = rest[1], rest[2]
+    folder = os.path.dirname(local)
+    entry["upload"] = {{"local": local, "dest": dest, "symlink": os.path.islink(local),
+                       "listing": sorted(os.listdir(folder)), "size": os.path.getsize(local),
+                       "sha256": hashlib.sha256(open(local, "rb").read()).hexdigest()}}
 with open(os.environ["FAKE_OPENSHELL_LOG"], "a") as f:
-    f.write(json.dumps({{"argv": argv, "stdin": base64.b64encode(data).decode()}}) + "\\n")
+    f.write(json.dumps(entry) + "\\n")
 code = int(os.environ.get("FAKE_OPENSHELL_CODE", "0"))
+if argv[:2] == ["sandbox", "upload"]:
+    if "--no-git-ignore" not in argv and subprocess.run(
+            ["git", "-C", os.path.dirname(local), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True).returncode == 0:
+        sys.stderr.write("error: .gitignore filtering selected no files\\n")
+        sys.exit(1)
+    target = vm(dest)
+    if os.path.isdir(target) or target.endswith("/"):
+        target = os.path.join(target, os.path.basename(local))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    shutil.copyfile(local, target)
+    sys.exit(code)
 if argv[:2] == ["sandbox", "exec"]:
     if os.environ.get("FAKE_OPENSHELL_MODE") == "down":
         sys.stderr.write("error: gateway unreachable\\n")
         sys.exit(1)
-    cmd = argv[argv.index("--") + 1:]
-    cwd = argv[argv.index("--workdir") + 1] if "--workdir" in argv else None
+    if len(data) > 4 * 1024 * 1024:
+        sys.stderr.write("error: piped stdin exceeds the 4 MiB limit; use `sandbox upload` for larger input\\n")
+        sys.exit(1)
+    cmd = [vm(w) for w in argv[argv.index("--") + 1:]]
+    cwd = vm(argv[argv.index("--workdir") + 1]) if "--workdir" in argv else None
     sys.exit(subprocess.run(cmd, input=data, cwd=cwd).returncode)
 if argv[:2] == ["sandbox", "list"]:
     print(os.environ.get("FAKE_OPENSHELL_NAMES", ""))
@@ -627,3 +659,168 @@ def test_the_image_check_fails_when_rg_is_missing(tmp_path, rg):
         assert "rg first line" in done.stdout and "rg second line" not in done.stdout
     else:
         assert done.returncode != 0 and not ran_fd.exists()
+
+
+# --- big inputs go by upload; the key check judges what reaches the VM ---------
+
+import getpass  # noqa: E402
+import hashlib  # noqa: E402
+
+
+def _git(*args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture(scope="module")
+def big_repo(tmp_path_factory):
+    """A git repo holding a 22 MB random file, committed on the branch sssf/abc."""
+    repo = tmp_path_factory.mktemp("bigrepo")
+    _git("init", "-q", "-b", "sssf/abc", cwd=repo)
+    _git("config", "user.name", "T", cwd=repo)
+    _git("config", "user.email", "t@example.com", cwd=repo)
+    (repo / "big.bin").write_bytes(os.urandom(22 * 1024 * 1024))
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "big", cwd=repo)
+    return repo
+
+
+def _vm_box(cli, tmp_path, monkeypatch, big_repo):
+    """An OpenShell box on a copy of the big repo, whose VM root is tmp_path/vm."""
+    repo, run, events = layout(tmp_path, monkeypatch)
+    shutil.rmtree(repo)
+    shutil.copytree(big_repo, repo, symlinks=True)
+    run.context_handoff_dir.mkdir(parents=True)
+    vmroot = tmp_path / "vm"
+    (vmroot / "tmp").mkdir(parents=True)
+    monkeypatch.setenv("FAKE_OPENSHELL_MAP", f"{repo}={vmroot}/repo\n/tmp/sssf-in={vmroot}/tmp/sssf-in")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(osh.OpenShell, "owner", getpass.getuser())
+    monkeypatch.setattr(sandbox_remote, "_host_python", lambda tree, problems: "")
+    monkeypatch.setattr(osh.OpenShell, "_create", lambda self: osh._VM("sb"))
+    monkeypatch.setattr(osh.OpenShell, "_check_tools", lambda self: None)
+    run.cfg = roster("pi")
+    monkeypatch.chdir(repo)
+    box = osh.OpenShell(run, "sssf/abc", "p")
+    box.tree = repo / "wt"      # empty in the VM, as a run's worktree is before the clone
+    box.tree.mkdir()
+    return box, repo, run, vmroot
+
+
+def _sha(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _uploads(cli):
+    return [c for c in cli() if "upload" in c]
+
+
+def test_big_bundle_clones_by_upload(cli, tmp_path, monkeypatch, big_repo):
+    box, repo, run, vmroot = _vm_box(cli, tmp_path, monkeypatch, big_repo)
+    box.open()
+    ups = _uploads(cli)
+    assert len(ups) == 1
+    up = ups[0]["upload"]
+    assert up["size"] > osh.STDIN_LIMIT
+    assert _sha(vmroot / "tmp" / "sssf-in.bundle") == up["sha256"]
+    assert not list((vmroot / "tmp").glob("sssf-in-*"))
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout
+    vm_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=vmroot / "repo" / "wt", capture_output=True, text=True).stdout
+    assert head == vm_head != ""
+
+
+def test_stdin_limit_fails_like_openshell(cli, tmp_path, monkeypatch, big_repo):
+    box, repo, run, vmroot = _vm_box(cli, tmp_path, monkeypatch, big_repo)
+    monkeypatch.setattr(osh, "STDIN_MAX", 1 << 30)
+    # `_call` turns the adapter's error into an OSError, which `open` doesn't wrap.
+    with pytest.raises((sandbox.SandboxFailed, OSError), match="piped stdin exceeds the 4 MiB limit"):
+        box.open()
+    assert _uploads(cli) == []
+
+
+def test_big_handoff_goes_in_and_comes_back(cli, tmp_path, monkeypatch, big_repo):
+    box, repo, run, vmroot = _vm_box(cli, tmp_path, monkeypatch, big_repo)
+    box.sandbox, box.vm = osh._VM("sb"), "sb"
+    host_file = run.context_handoff_dir / "in.bin"
+    host_file.write_bytes(os.urandom(5 * 1024 * 1024))
+    vm_handoff = vmroot / "repo" / run.context_handoff_dir.relative_to(repo)
+    vm_handoff.mkdir(parents=True)
+    box.handoff_in()
+    assert (vm_handoff / "in.bin").read_bytes() == host_file.read_bytes()
+    assert len(_uploads(cli)) == 1
+    made = os.urandom(5 * 1024 * 1024)
+    (vm_handoff / "out.bin").write_bytes(made)
+    box.handoff_out()
+    assert (run.context_handoff_dir / "out.bin").read_bytes() == made
+
+
+@pytest.mark.parametrize("plant", ["file", "symlink"])
+def test_staged_upload_holds_only_the_input(cli, tmp_path, monkeypatch, big_repo, plant):
+    box, repo, run, vmroot = _vm_box(cli, tmp_path, monkeypatch, big_repo)
+    planted = run.session_dir / "sandbox-in.bundle"
+    decoy = tmp_path / "decoy.bin"
+    decoy.write_bytes(b"DECOY-BYTES" * 1000)
+    if plant == "file":
+        planted.write_bytes(b"PLANTED-BYTES" * 1000)
+    else:
+        planted.symlink_to(decoy)
+    box.open()
+    ups = _uploads(cli)
+    assert len(ups) == 1
+    up, argv = ups[0]["upload"], ups[0]["argv"]
+    local = Path(up["local"])
+    for folder in (repo, run.session_dir, run.data_root):
+        assert folder not in local.parents
+    assert not up["symlink"] and up["listing"] == ["input"]
+    assert "--no-git-ignore" in argv
+    assert not local.parent.exists()
+    vm_bundle = (vmroot / "tmp" / "sssf-in.bundle").read_bytes()
+    assert hashlib.sha256(vm_bundle).hexdigest() == up["sha256"]
+    assert b"PLANTED-BYTES" not in vm_bundle and b"DECOY-BYTES" not in vm_bundle
+
+
+def test_small_input_stays_on_the_pipe(cli):
+    done = osh._VM("sb").run_process("cat", input=b"abc")
+    assert done.stdout == "abc"
+    assert _uploads(cli) == []
+    argv = cli()[0]["argv"]
+    assert argv[-2:] == ["input", "cat"]
+
+
+def test_nonessential_traffic_is_off_for_claude_only(cli, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "0")
+    values, _ = _started_env(cli, tmp_path, monkeypatch,
+                             {"SSSF_X": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "0"})
+    assert values["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+    Path(os.environ["FAKE_OPENSHELL_LOG"]).unlink()     # the next frame is the only one
+    values, _ = _started_env(cli, tmp_path / "pi", monkeypatch, {"SSSF_PI_TOKEN": "chatgpt-access"})
+    assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" not in values
+    assert Remote.cc_env == {}
+
+
+def test_key_reaches_only_when_the_vm_would_get_it(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    run.cfg = roster("pi")
+    made = []
+    monkeypatch.setattr(sandbox_remote, "TOKEN_FILE", tmp_path / "token.env")
+    (tmp_path / "token.env").write_text("CLAUDE_CODE_OAUTH_TOKEN=t\n")
+    monkeypatch.setattr(osh.OpenShell, "_create", lambda self: made.append(1) or osh._VM("sb"))
+    for name in ("_clone", "handoff_in", "_check_tools"):
+        monkeypatch.setattr(osh.OpenShell, name, lambda self, *a, **k: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    osh.OpenShell(run, "sssf/abc", "p").open()
+    assert made == [1]
+    monkeypatch.setattr(sandbox_remote, "PASSED", (*sandbox_remote.PASSED, "ANTHROPIC_"))
+    with pytest.raises(sandbox.SandboxFailed, match="ANTHROPIC_API_KEY"):
+        osh.OpenShell(run, "sssf/abc", "p").open()
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "k")
+    with pytest.raises(sandbox.SandboxFailed, match="ANTHROPIC_AUTH_TOKEN"):
+        osh.OpenShell(run, "sssf/abc", "p").open()
+    assert made == [1]
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN")
+    monkeypatch.setattr(osh.OpenShell, "cc_env", {"ANTHROPIC_API_KEY": "k"})
+    monkeypatch.setattr(osh.OpenShell, "_create", lambda self: made.append(2) or osh._VM("sb"))
+    with pytest.raises(sandbox.SandboxFailed, match="ANTHROPIC_API_KEY"):
+        osh.OpenShell(run, "sssf/abc", "p").open()
+    assert made == [1]

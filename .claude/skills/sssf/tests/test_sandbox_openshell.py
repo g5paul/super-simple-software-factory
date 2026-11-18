@@ -588,8 +588,8 @@ def test_containerfile_installs_and_checks_the_python():
 def test_containerfile_without_a_python_installs_none():
     text = osh.containerfile(F, "")
     assert "uv python" not in text
-    # the tag from when the image's check trimmed rg to one line
-    assert osh.image_tag(F, "") == "localhost/sssf-openshell:54c9163cc34d"
+    # the tag once the image holds bun 1.4.4
+    assert osh.image_tag(F, "") == "localhost/sssf-openshell:3028d837a77a"
 
 
 def test_two_pythons_give_two_image_tags():
@@ -636,6 +636,33 @@ def test_create_builds_from_the_image_for_the_hosts_python(cli, tmp_path, monkey
     assert create[create.index("--from") + 1] == osh.image_tag(osh.folder_for(repo), "3.13")
 
 
+def test_the_image_pins_bun_and_checks_it():
+    text = osh.containerfile(F, "")
+    assert osh.BUN == "1.4.4"
+    assert "RUN npm install -g bun@1.4.4" in text.splitlines()
+    assert "ignore-scripts" not in text
+    assert "&& bun --version" in next(l for l in text.splitlines() if l.startswith("RUN node --version"))
+    tag = osh.image_tag(F, "")
+    osh.BUN = "1.4.5"
+    try:
+        assert osh.image_tag(F, "") != tag
+    finally:
+        osh.BUN = "1.4.4"
+
+
+def test_the_image_check_fails_when_bun_is_missing(tmp_path):
+    line = next(l for l in osh.containerfile(F, "").splitlines() if l.startswith("RUN node --version"))[4:]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("node", "uv", "claude", "pi", "git", "fdfind", "rg"):
+        (bin_dir / name).write_text("#!/bin/sh\necho " + name + " 1.0\n")
+        (bin_dir / name).chmod(0o755)
+    (bin_dir / "head").symlink_to(shutil.which("head"))
+    done = subprocess.run([shutil.which("sh"), "-c", line], capture_output=True, text=True,
+                          env={"PATH": str(bin_dir)})
+    assert done.returncode != 0
+
+
 @pytest.mark.parametrize("rg", ["present", "missing", "fails"])
 def test_the_image_check_fails_when_rg_is_missing(tmp_path, rg):
     line = next(l for l in osh.containerfile(F, "").splitlines() if l.startswith("RUN node --version"))[4:]
@@ -646,7 +673,7 @@ def test_the_image_check_fails_when_rg_is_missing(tmp_path, rg):
     def stub(name, body):
         (bin_dir / name).write_text("#!/bin/sh\n" + body + "\n")
         (bin_dir / name).chmod(0o755)
-    for name in ("node", "uv", "claude", "pi", "git"):
+    for name in ("node", "uv", "claude", "pi", "bun", "git"):
         stub(name, "echo " + name + " 1.0")
     stub("fdfind", f"echo ran > {ran_fd}")
     (bin_dir / "head").symlink_to(shutil.which("head"))
@@ -824,3 +851,98 @@ def test_key_reaches_only_when_the_vm_would_get_it(cli, tmp_path, monkeypatch):
     with pytest.raises(sandbox.SandboxFailed, match="ANTHROPIC_API_KEY"):
         osh.OpenShell(run, "sssf/abc", "p").open()
     assert made == [1]
+
+
+# --- the tool check looks up the repo's own commands ---------------------------
+
+def _open_checked(cli, tmp_path, monkeypatch, big_repo, quality=None, setup=None, vm_tools=True):
+    """A real OpenShell box, with the real tool check, whose roster tools are stand-ins."""
+    box, repo, run, vmroot = _vm_box(cli, tmp_path, monkeypatch, big_repo)
+    monkeypatch.setattr(osh.OpenShell, "_check_tools", Remote._check_tools)
+    monkeypatch.setattr(sandbox_remote, "TOKEN_FILE", tmp_path / "token.env")
+    bin_ = tmp_path / "bin"
+    for name, text in (("node", "v24.11.1"), ("pi", "1.5.0"), ("uv", "uv 0.9.0")):
+        (bin_ / name).write_text(f"#!/bin/sh\necho {text}\n")
+        (bin_ / name).chmod(0o755)
+    if quality is not None:
+        probe = tmp_path / "quality.py"
+        probe.write_text(quality)
+        monkeypatch.setattr(sandbox_remote, "QUALITY_FILE", probe)
+    if setup is not None:
+        config = repo / "adws" / "adw_sssf_config" / "repo.yaml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(yaml.safe_dump({"worktree_setup": setup}))
+    return box
+
+
+def _lookups(cli):
+    return [c["argv"] for c in cli() if sandbox_remote.LOOKUP in c["argv"]]
+
+
+QUALITY = ("def run_quality(run):\n    return [{block}(run)]\n\n"
+           "def {block}(run):\n    return _run(QualityCheckSpec(name='x', argv={argv}), run)\n")
+
+
+def test_a_check_command_missing_from_the_vm_stops_the_run_before_any_agent(cli, tmp_path, monkeypatch, big_repo):
+    box = _open_checked(cli, tmp_path, monkeypatch, big_repo,
+                        quality=QUALITY.format(block="test", argv='["sssf-no-such-tool", "test"]'))
+    with pytest.raises(sandbox.SandboxFailed) as stopped:
+        box.open()
+    said = str(stopped.value)
+    assert "sssf-no-such-tool is missing; quality.py's `test` check runs it" in said
+    assert "can't run this repo's checks or setup" in said
+    assert box.tools["sssf-no-such-tool"] == "missing"
+    assert box.processes == 0
+    assert not any("setsid" in " ".join(c["argv"]) for c in cli())
+
+
+def test_a_setup_command_missing_from_the_vm_stops_the_run(cli, tmp_path, monkeypatch, big_repo):
+    box = _open_checked(cli, tmp_path, monkeypatch, big_repo,
+                        quality=QUALITY.format(block="test", argv="['git', 'status']"),
+                        setup=["cd . && sssf-no-such-tool install"])
+    with pytest.raises(sandbox.SandboxFailed, match="worktree_setup runs it"):
+        box.open()
+
+
+def test_commands_that_are_all_present_open_the_box(cli, tmp_path, monkeypatch, big_repo):
+    box = _open_checked(cli, tmp_path, monkeypatch, big_repo,
+                        quality=QUALITY.format(block="test", argv="['git', 'status']"),
+                        setup=["cd . && ls"])
+    box.open()
+    assert box.tools["git"] != "missing" and box.tools["ls"] == "found"
+    assert len(_lookups(cli)) == 1
+
+
+def test_the_shipped_quality_file_sends_no_lookup(cli, tmp_path, monkeypatch, big_repo):
+    box = _open_checked(cli, tmp_path, monkeypatch, big_repo)
+    box.open()
+    assert _lookups(cli) == []
+    assert set(box.tools) == {"git", "uv", "node", "pi"}
+
+
+@pytest.mark.parametrize("name", ["x; touch {m}", "$(touch {m})", "a\ntouch {m}"])
+def test_a_hostile_command_name_is_never_sent_to_the_vm(cli, tmp_path, monkeypatch, big_repo, name):
+    marker = tmp_path / "marker"
+    hostile = name.format(m=marker)
+    box = _open_checked(cli, tmp_path, monkeypatch, big_repo,
+                        quality=QUALITY.format(block="test", argv=repr([hostile, "x"])),
+                        # `x; touch <path>` is plain text: two commands, so `x` is looked up
+                        setup=["git status"] if ";" in name else [hostile, "git status"])
+    box.open()
+    assert not marker.exists()
+    for argv in _lookups(cli):
+        tail = argv[argv.index("-c"):]
+        assert tail[:3] == ["-c", sandbox_remote.LOOKUP, "sh"]
+        assert all(sandbox_remote.NAME.fullmatch(n) for n in tail[3:])
+    assert not any(hostile in " ".join(c["argv"]) for c in cli())
+
+
+def test_checking_the_commands_runs_no_repo_code(cli, tmp_path, monkeypatch, big_repo):
+    marker = tmp_path / "ran"
+    box = _open_checked(cli, tmp_path, monkeypatch, big_repo,
+                        quality=f"open({str(marker)!r}, 'w').write('x')\n"
+                                + QUALITY.format(block="test", argv="['git', 'status']"))
+    before = "adw_modules.quality" in sys.modules
+    box.open()
+    assert not marker.exists()
+    assert ("adw_modules.quality" in sys.modules) == before

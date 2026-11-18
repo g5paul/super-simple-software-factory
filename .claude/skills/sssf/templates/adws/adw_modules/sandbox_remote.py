@@ -32,6 +32,7 @@ SSSF_SANDBOX_SESSION_MINUTES shortens the session, for tests.
 
 from __future__ import annotations
 
+import ast
 import base64
 import dataclasses
 import importlib
@@ -112,6 +113,15 @@ TOOLS = {
     "pi":     {"command": "pi --version", "min": "1.4.0", "tested": 1, "for": "pi"},
 }
 MISSING = "missing"
+FOUND = "found"
+# The repo's own commands (quality.py's checks, repo.yaml's worktree_setup) are
+# looked up too: the quality.py beside this module, read as text, never run.
+QUALITY_FILE = Path(__file__).with_name("quality.py")
+QUALITY_MAX = 1024 * 1024
+NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63}", re.ASCII)
+# A constant script: names are positional arguments, never part of its text.
+LOOKUP = 'for n in "$@"; do if command -v "$n" >/dev/null 2>&1; then echo y; else echo n; fi; done'
+SKIPPED_MAX = 50
 # The pi the 2026-11-03 ChatGPT live check ran. Both image scripts (the OpenShell
 # Containerfile and scripts/e2b_template.py) read it.
 PI_VERSION = "1.5.0"
@@ -131,6 +141,182 @@ def tools_needed(cfg) -> list[str]:
     """The TOOLS a roster's agents need in the VM, in TOOLS order."""
     agents = harnesses(cfg)
     return [name for name, tool in TOOLS.items() if tool.get("for") in (None, *agents)]
+
+
+# --- the repo's own commands, read as text ------------------------------------
+# The tool check also looks up, in the VM, the command names quality.py's checks
+# and repo.yaml's worktree_setup run. quality.py is parsed, never imported or
+# called; whatever can't be judged gets a row in `skipped`.
+
+def _row(source: str, what, why: str) -> dict[str, str]:
+    return {"from": source, "what": str(what)[:120], "why": why}
+
+
+def _argv_commands(value: ast.expr, source: str, commands: list, skipped: list) -> None:
+    """Read one `argv=` value: commands are (source, text, is_shell) triples."""
+    shown = ast.unparse(value)
+    if isinstance(value, (ast.List, ast.Tuple)) and value.elts \
+            and isinstance(value.elts[0], ast.Constant) and isinstance(value.elts[0].value, str):
+        first = value.elts[0].value
+        commands.append((source, first, False))
+        if first in ("sh", "bash") and len(value.elts) >= 2:
+            flag = value.elts[1]
+            if len(value.elts) >= 3 and isinstance(flag, ast.Constant) and flag.value == "-c":
+                third = value.elts[2]
+                if not (isinstance(third, ast.Constant) and isinstance(third.value, str)):
+                    skipped.append(_row(source, shown, "shell string isn't a literal"))
+                elif first == "sh":
+                    commands.append((source, third.value, True))
+                else:
+                    # bash builtins (pushd, shopt, let) are unknown to the sh the lookup runs under
+                    skipped.append(_row(source, shown, "bash string: looked up under sh"))
+            else:
+                skipped.append(_row(source, shown, "shell flags aren't read"))
+        return
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "_placeholder":
+        skipped.append(_row(source, shown, "placeholder"))
+    else:
+        skipped.append(_row(source, shown, "argv isn't a literal list"))
+
+
+def _argv_calls(node: ast.AST) -> list[ast.expr]:
+    return [kw.value for call in ast.walk(node) if isinstance(call, ast.Call)
+            for kw in call.keywords if kw.arg == "argv"]
+
+
+def _holds_spec(node: ast.AST) -> bool:
+    for call in ast.walk(node):
+        if isinstance(call, ast.Call):
+            func = call.func
+            if any(kw.arg == "argv" for kw in call.keywords) \
+                    or (isinstance(func, ast.Name) and func.id == "QualityCheckSpec") \
+                    or (isinstance(func, ast.Attribute) and func.attr == "QualityCheckSpec"):
+                return True
+    return False
+
+
+def quality_commands(path: Path) -> tuple[list[tuple[str, str, bool]], list[dict[str, str]]]:
+    """The commands quality.py's blocks run, read as text: `(commands, skipped)`.
+    A command is `(source, text, is_shell)`. Nothing is imported or run."""
+    commands: list[tuple[str, str, bool]] = []
+    skipped: list[dict[str, str]] = []
+    try:
+        if path.stat().st_size > QUALITY_MAX:
+            return [], [_row("quality.py", path.name, "quality.py is over 1 MiB")]
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError, RecursionError, MemoryError) as error:
+        return [], [_row("quality.py", f"{path.name}: {type(error).__name__}", "quality.py couldn't be read")]
+    defs: dict[str, ast.AST] = {}
+    bound: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs[node.name] = node
+        elif isinstance(node, ast.ClassDef):
+            bound.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            bound.update(n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name))
+    # A def under if/try/with/for/while/match may not be the one the host runs: not read.
+    nested = {inner.name for node in tree.body
+              if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+              for inner in ast.walk(node) if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    entries = {name: defs[name] for name in ("run_quality", "run_tests") if name in defs}
+    loaded: dict[str, None] = {}
+    for entry in entries.values():
+        for n in ast.walk(entry):
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                loaded[n.id] = None
+    listed: dict[str, ast.AST] = {}
+    for name in loaded:
+        if name in entries:
+            continue
+        if name in defs:
+            listed[name] = defs[name]
+        elif name in nested:
+            skipped.append(_row(f"quality:{name}", name, "defined under if/try/with"))
+        elif name in bound:
+            skipped.append(_row(f"quality:{name}", name, "not a def"))
+    for name, node in defs.items():
+        if name not in entries and name not in listed and _holds_spec(node):
+            skipped.append(_row(f"quality:{name}", name, "not named in run_quality or run_tests"))
+    if not listed:
+        skipped.append(_row("quality.py", path.name, "no block named in run_quality or run_tests"))
+    for name, node in {**entries, **listed}.items():
+        calls = _argv_calls(node)
+        if not calls and name in listed:
+            skipped.append(_row(f"quality:{name}", name, "no argv= list"))
+        for value in calls:
+            _argv_commands(value, f"quality:{name}", commands, skipped)
+    return commands, skipped
+
+
+SHELL_PLAIN = re.compile(r"[A-Za-z0-9_ \t./:@%+,=&|;-]*")
+SHELL_BARE = {"export", ".", "source", "alias", "eval", "hash", "set", "unset"}
+
+
+def _segments(text: str) -> list[list[str]] | None:
+    """The word lists of a plain shell string's segments, or None when it isn't read."""
+    if not SHELL_PLAIN.fullmatch(text) or "PATH" in text:
+        return None
+    segments = []
+    for part in re.split(r"&&|\|\||;|\|", text):
+        words = part.split()
+        if not words or "&" in part:
+            return None
+        if "=" in words[0] or words[0] in SHELL_BARE:
+            return None
+        segments.append(words)
+    return segments
+
+
+def shell_words(text: str) -> list[str] | None:
+    """The first word of each segment of a plain shell string; None when skipped."""
+    segments = _segments(text)
+    return None if segments is None else [words[0] for words in segments]
+
+
+def _may_install(name: str, pool: list[str]) -> bool:
+    pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])")
+    return any(pattern.search(text) for text in pool)
+
+
+def repo_commands(quality_file: Path, setup: list[str], known) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """`(names, skipped)`: the command names to look up in the VM, each mapped to
+    the source that named it first (quality.py's first), and a row for what isn't."""
+    commands, skipped = quality_commands(quality_file)
+    pool: list[str] = []
+    for index, entry in enumerate(setup):
+        segments = _segments(str(entry))
+        source = f"worktree_setup:{index}"
+        if segments is None:
+            pool.append(str(entry))
+            skipped.append(_row(source, entry, "not a plain shell string"))
+            continue
+        pool.extend(word for words in segments for word in words[1:])
+        commands.extend((source, words[0], False) for words in segments)
+    names: dict[str, str] = {}
+    for source, text, is_shell in commands:
+        if is_shell:
+            words = shell_words(text)
+            if words is None:
+                skipped.append(_row(source, text, "not a plain shell string"))
+                continue
+            # a shell string inside quality.py: its first words are commands too
+            candidates = words
+        else:
+            candidates = [text]
+        for name in candidates:
+            if "/" in name:
+                skipped.append(_row(source, name, "a path"))
+            elif not NAME.fullmatch(name):
+                skipped.append(_row(source, name, "not a plain command name"))
+            elif name in known:
+                continue
+            elif _may_install(name, pool):
+                skipped.append(_row(source, name, "worktree_setup may install it"))
+            else:
+                names.setdefault(name, source)
+    return names, skipped
 
 
 def judge_tools(found: dict[str, str]) -> tuple[list[str], list[str]]:
@@ -559,10 +745,27 @@ class Remote:
         except self.errors as error:
             raise SandboxFailed(f"{self.name} would not make or set up the VM: {error}") from None
 
+    def _repo_names(self, known: list[str]) -> tuple[dict[str, str], list[dict[str, str]]]:
+        """The repo's command names to look up (name -> source) and the rows for what
+        can't be judged. Reads quality.py as text and repo.yaml with yaml.safe_load."""
+        setup: list[str] = []
+        skipped: list[dict[str, str]] = []
+        try:
+            from . import repo_settings, worktree
+            setup = list(repo_settings.load(worktree.main_checkout()).worktree_setup or [])
+        except Exception as error:
+            skipped.append(_row("repo.yaml", type(error).__name__, "repo.yaml couldn't be read"))
+        try:
+            names, more = repo_commands(QUALITY_FILE, setup, set(known))
+        except Exception as error:
+            return {}, skipped + [_row("quality.py", type(error).__name__, "the commands couldn't be read")]
+        return names, skipped + more
+
     def _check_tools(self) -> None:
         """Read the versions of the tools this run needs, in one call, before any
-        agent starts. Records them in the trace; raises SandboxFailed if one is
-        missing or too old, so the run fails here, not partway through a call."""
+        agent starts, then look up the command names the repo's quality.py checks
+        and worktree_setup run. Records them in the trace; raises SandboxFailed if
+        one is missing or too old, so the run fails here, not partway through a call."""
         names = tools_needed(getattr(self.run_, "cfg", None))
         line = "; ".join(f"printf '%s=' {name}; {{ {TOOLS[name]['command']} 2>&1 || echo {MISSING}; }} | head -1"
                          for name in names)
@@ -574,10 +777,35 @@ class Remote:
                 text = text.strip()
                 found[name] = MISSING if not text or "not found" in text else text
         problems, notes = judge_tools(found)
-        self.tools = found
-        self._log("sandbox_tools", {"vm": self.vm, "tools": found, "notes": notes, "problems": problems})
+        wanted, skipped = self._repo_names(names)
+        tools, missing = dict(found), []
+        if wanted:
+            listed = list(wanted)
+            out = self._must("sh", ["-c", LOOKUP, "sh", *listed])
+            answers = out.split()
+            if len(answers) == len(listed) and all(a in ("y", "n") for a in answers):
+                for name, answer in zip(listed, answers):
+                    tools[name] = FOUND if answer == "y" else MISSING
+                    if answer == "n":
+                        source, _, block = wanted[name].partition(":")
+                        runs = f"quality.py's `{block}` check runs it" if source == "quality" \
+                            else "worktree_setup runs it"
+                        missing.append(f"{name} is missing; {runs}")
+            else:
+                skipped += [_row("vm", name, "the VM's answer couldn't be read") for name in listed]
+        if len(skipped) > SKIPPED_MAX:
+            rest = len(skipped) - (SKIPPED_MAX - 1)
+            skipped = skipped[:SKIPPED_MAX - 1] + [_row("", "", f"{rest} more skips not listed")]
+        self.tools = tools
+        self._log("sandbox_tools", {"vm": self.vm, "tools": tools, "notes": notes,
+                                    "problems": problems + missing, "skipped": skipped})
         for note in notes:
             self.run_.console.note(note)
+        if missing:
+            raise SandboxFailed(f"{self.name} VM {self.vm} can't run this repo's checks or setup: "
+                                f"{'; '.join(problems + missing)}. Nothing ran in it. Add the command to "
+                                "the VM's image or change the command; see docs/designs/remote-sandboxes.md, "
+                                "\"As built: the tool check\".")
         if problems:
             raise SandboxFailed(f"{self.name} VM {self.vm} can't run this roster: {'; '.join(problems)}. "
                                 "Nothing ran in it. Pick the other provider, or see "

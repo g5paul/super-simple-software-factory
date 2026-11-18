@@ -726,6 +726,232 @@ def test_a_missing_or_old_tool_fails_the_vm_before_any_agent(box, tmp_path, monk
     assert dict(box.events)["sandbox_tools"]["tools"]["git"].startswith("git version")
 
 
+# --- the repo's own commands: quality.py read as text, worktree_setup ----------
+
+def _quality(tmp_path, text):
+    path = tmp_path / "quality.py"
+    path.write_text(text)
+    from adw_modules.sandbox_remote import quality_commands
+    return quality_commands(path)
+
+
+def _why(skipped):
+    return [(r["from"], r["why"]) for r in skipped]
+
+
+def test_a_listed_block_gives_its_argv_as_a_command(tmp_path):
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [lint(run)]\n"
+                                 "def lint(run):\n    return S(argv=['ruff', 'check'])\n")
+    assert commands == [("quality:lint", "ruff", False)] and skipped == []
+
+
+def test_an_argv_inside_an_entry_function_is_a_command(tmp_path):
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    S(argv=['ruff'])\n    return [lint(run)]\n"
+                                 "def lint(run):\n    return S(argv=['x'])\n")
+    assert ("quality:run_quality", "ruff", False) in commands
+
+
+def test_a_shell_argv_gives_the_shell_and_its_string(tmp_path):
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run)]\n"
+                                 "def t(run):\n    return S(argv=['bash', '-c', 'cd web && bun test'])\n")
+    assert commands == [("quality:t", "bash", False)]
+    # bash's own builtins (pushd, shopt) aren't known to the sh the lookup runs under
+    assert _why(skipped) == [("quality:t", "bash string: looked up under sh")]
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run)]\n"
+                                 "def t(run):\n    return S(argv=['sh', '-c', 'cd web && bun test'])\n")
+    assert commands == [("quality:t", "sh", False), ("quality:t", "cd web && bun test", True)]
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run)]\n"
+                                 "def t(run):\n    return S(argv=['bash', '-c', f'cd {D}'])\n")
+    assert commands == [("quality:t", "bash", False)]
+    assert _why(skipped) == [("quality:t", "shell string isn't a literal")]
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run)]\n"
+                                 "def t(run):\n    return S(argv=['bash', '-lc', 'sssf-no-such-tool'])\n")
+    assert commands == [("quality:t", "bash", False)]
+    assert _why(skipped) == [("quality:t", "shell flags aren't read")]
+
+
+@pytest.mark.parametrize("head", [
+    "try:\n    from .checks import t\nexcept ImportError:\n    def t(run):\n        return S(argv=['sssf-no-such-tool'])\n",
+    "if X:\n    def t(run):\n        return S(argv=['sssf-no-such-tool'])\nelse:\n    def t(run):\n        return S(argv=['git'])\n",
+    "for _ in [0]:\n    def t(run):\n        return S(argv=['sssf-no-such-tool'])\n",
+])
+def test_a_block_defined_under_a_compound_statement_is_skipped_not_read(tmp_path, head):
+    commands, skipped = _quality(tmp_path, head + "def run_quality(run):\n    return [t(run)]\n")
+    assert commands == []
+    assert ("quality:t", "defined under if/try/with") in _why(skipped)
+
+
+@pytest.mark.parametrize("argv", ["build_argv()", "[TOOL, 'x']", "'a b'", "[*A]", "[]"])
+def test_an_argv_that_isnt_a_literal_list_is_skipped(tmp_path, argv):
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run)]\n"
+                                 f"def t(run):\n    return S(argv={argv})\n")
+    assert commands == [] and _why(skipped) == [("quality:t", "argv isn't a literal list")]
+
+
+def test_a_placeholder_is_skipped_as_one(tmp_path):
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run)]\n"
+                                 "def t(run):\n    return S(argv=_placeholder('t'))\n")
+    assert commands == [] and _why(skipped) == [("quality:t", "placeholder")]
+
+
+def test_a_block_with_no_argv_list_is_skipped(tmp_path):
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run), u(run)]\n"
+                                 "def t(run):\n    return QualityCheckSpec('l', 'b', 'l', ['x'])\n"
+                                 "def u(run):\n    return _run(_spec('l'), run)\n"
+                                 "def _spec(n):\n    return S(argv=['x'])\n")
+    assert commands == []
+    assert _why(skipped) == [("quality:_spec", "not named in run_quality or run_tests"),
+                             ("quality:t", "no argv= list"), ("quality:u", "no argv= list")]
+
+
+def test_an_unlisted_block_is_skipped_not_looked_up(tmp_path):
+    commands, skipped = _quality(tmp_path, "def run_quality(run):\n    return [t(run)]\n"
+                                 "def t(run):\n    return S(argv=['git'])\n"
+                                 "def old(run):\n    return S(argv=['sssf-no-such-tool'])\n")
+    assert commands == [("quality:t", "git", False)]
+    assert _why(skipped) == [("quality:old", "not named in run_quality or run_tests")]
+
+
+def test_a_name_bound_by_assignment_or_class_is_skipped(tmp_path):
+    commands, skipped = _quality(tmp_path, "CHECKS = [S(argv=['x'])]\nclass K: pass\n"
+                                 "def run_quality(run):\n    return [c(run) for c in CHECKS] + [K]\n")
+    assert commands == []
+    assert sorted(_why(skipped)) == [("quality.py", "no block named in run_quality or run_tests"),
+                                     ("quality:CHECKS", "not a def"), ("quality:K", "not a def")]
+
+
+def test_a_file_with_no_entry_function_gives_a_row(tmp_path):
+    commands, skipped = _quality(tmp_path, "def lint(run):\n    return 1\n")
+    assert commands == [] and _why(skipped) == [("quality.py", "no block named in run_quality or run_tests")]
+
+
+@pytest.mark.parametrize("text", ["def (:\n", "x = 1\0\n"])
+def test_a_quality_file_that_wont_parse_gives_one_row(tmp_path, text):
+    commands, skipped = _quality(tmp_path, text)
+    assert commands == [] and [r["from"] for r in skipped] == ["quality.py"]
+
+
+def test_a_missing_or_huge_quality_file_gives_one_row(tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    assert [r["from"] for r in sandbox_remote.quality_commands(tmp_path / "none.py")[1]] == ["quality.py"]
+    monkeypatch.setattr(sandbox_remote, "QUALITY_MAX", 3)
+    assert [r["from"] for r in _quality(tmp_path, "x = 1\n")[1]] == ["quality.py"]
+
+
+def test_the_shipped_quality_file_gives_five_placeholders_and_no_command():
+    from adw_modules.sandbox_remote import quality_commands
+    commands, skipped = quality_commands(SKILL / "templates" / "adws" / "adw_modules" / "quality.py")
+    assert commands == []
+    assert _why(skipped) == [(f"quality:{n}", "placeholder") for n in ("test", "lint", "format", "typecheck", "build")]
+
+
+@pytest.mark.parametrize("text, words", [
+    ("cd web && bun install --frozen-lockfile --backend=copyfile", ["cd", "bun"]),
+    ("a | b; c || d", ["a", "b", "c", "d"]),
+    ("sssf-no-such-tool \"a b\"", None), ("a $(b)", None), ("a\nb", None), ("a > f", None),
+    ("a & b", None), ("a &&", None), ("", None), ("; a", None),
+    ("export PATH=/x:/usr/bin; a", None), ("FOO=1 a", None), ("source x", None), ("a && set -e", None),
+    ("echo PATH", None),
+])
+def test_shell_words_reads_only_plain_strings(text, words):
+    from adw_modules.sandbox_remote import shell_words
+    assert shell_words(text) == words
+
+
+def _repo(tmp_path, quality, setup, known=("git",)):
+    from adw_modules.sandbox_remote import repo_commands
+    path = tmp_path / "q.py"
+    path.write_text(quality)
+    return repo_commands(path, setup, set(known))
+
+
+LISTED = "def run_quality(run):\n    return [t(run)]\ndef t(run):\n    return S(argv={argv})\n"
+
+
+def test_each_row_of_the_name_table(tmp_path):
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['./x.sh']"), [])
+    assert names == {} and _why(skipped) == [("quality:t", "a path")]
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['-bad']"), [])
+    assert names == {} and _why(skipped) == [("quality:t", "not a plain command name")]
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['x' * 65]"), [])
+    assert names == {}     # a computed name isn't a literal
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['a" + "b" * 64 + "']"), [])
+    assert names == {} and _why(skipped) == [("quality:t", "not a plain command name")]
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['git']"), [])
+    assert names == {} and skipped == []
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['pnpm']"), ["npm i -g pnpm && pnpm install"])
+    assert "pnpm" not in names and ("quality:t", "worktree_setup may install it") in _why(skipped)
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['pnpm']"), ["export PATH=/a; pnpm"])
+    assert names == {} and ("quality:t", "worktree_setup may install it") in _why(skipped)
+    names, skipped = _repo(tmp_path, LISTED.format(argv="['bun']"), ["cd web && make all", "echo \"x\""])
+    assert names == {"bun": "quality:t", "cd": "worktree_setup:0", "make": "worktree_setup:0"}
+    assert _why(skipped) == [("worktree_setup:1", "not a plain shell string")]
+
+
+def test_a_setup_name_is_not_its_own_installer(tmp_path):
+    names, _ = _repo(tmp_path, "def run_quality(run): pass\n", ["sssf-no-such-tool install"])
+    assert names == {"sssf-no-such-tool": "worktree_setup:0"}
+
+
+def test_a_boxs_lookup_names_only_the_commands_and_stops_on_a_missing_one(box, tmp_path, monkeypatch):
+    from adw_modules import sandbox, sandbox_remote
+    (tmp_path / "q.py").write_text(LISTED.format(argv="['git']").replace("['git']", "['sssf-no-such-tool', 'x']"))
+    monkeypatch.setattr(sandbox_remote, "QUALITY_FILE", tmp_path / "q.py")
+    before = len(box.raw.calls)
+    with pytest.raises(sandbox.SandboxFailed, match="sssf-no-such-tool is missing; quality.py's `t` check runs it"):
+        box._check_tools()
+    lookups = [c for c in box.raw.calls[before:] if sandbox_remote.LOOKUP in " ".join(c.get("argv") or [c.get("line", "")])]
+    assert len(box.raw.calls[before:]) == 2 and len(lookups) == 1
+    assert dict(box.events)["sandbox_tools"]["tools"]["sssf-no-such-tool"] == "missing"
+
+
+def test_a_bash_builtin_in_a_bash_string_stops_nothing(box, tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    (tmp_path / "q.py").write_text(LISTED.format(argv="['bash', '-c', 'pushd . && echo ok']"))
+    monkeypatch.setattr(sandbox_remote, "QUALITY_FILE", tmp_path / "q.py")
+    box._check_tools()
+    event = [p for n, p in box.events if n == "sandbox_tools"][-1]
+    assert event["problems"] == [] and ("quality:t", "bash string: looked up under sh") in _why(event["skipped"])
+
+
+def test_a_boxs_present_command_is_logged_found_and_the_event_has_skipped(box, tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    (tmp_path / "q.py").write_text(LISTED.format(argv="['sh']"))
+    monkeypatch.setattr(sandbox_remote, "QUALITY_FILE", tmp_path / "q.py")
+    box._check_tools()
+    event = [p for n, p in box.events if n == "sandbox_tools"][-1]
+    assert event["tools"]["sh"] == "found" and event["problems"] == [] and event["skipped"] == []
+
+
+def test_a_box_on_the_shipped_quality_file_makes_no_lookup_call(box):
+    from adw_modules import sandbox_remote
+    assert not any(sandbox_remote.LOOKUP in " ".join(c.get("argv") or [c.get("line", "")]) for c in box.raw.calls)
+    assert len(dict(box.events)["sandbox_tools"]["skipped"]) == 5
+
+
+def test_an_unreadable_vm_answer_stops_nothing_and_gives_rows(box, tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    (tmp_path / "q.py").write_text(LISTED.format(argv="['sssf-no-such-tool']"))
+    monkeypatch.setattr(sandbox_remote, "QUALITY_FILE", tmp_path / "q.py")
+    real = box._must
+    monkeypatch.setattr(box, "_must", lambda cmd, args=(), **kw: "garbled\n" if sandbox_remote.LOOKUP in args else real(cmd, args, **kw))
+    box._check_tools()
+    event = [p for n, p in box.events if n == "sandbox_tools"][-1]
+    assert event["problems"] == [] and ("vm", "the VM's answer couldn't be read") in _why(event["skipped"])
+
+
+def test_the_skipped_list_is_capped_and_counts_what_it_drops(box, tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    blocks = [f"b{i}" for i in range(60)]
+    text = "def run_quality(run):\n    return [" + ", ".join(f"{b}(run)" for b in blocks) + "]\n" + "".join(
+        f"def {b}(run):\n    return S(argv=_placeholder('x'))\n" for b in blocks)
+    (tmp_path / "q.py").write_text(text)
+    monkeypatch.setattr(sandbox_remote, "QUALITY_FILE", tmp_path / "q.py")
+    box._check_tools()
+    skipped = [p for n, p in box.events if n == "sandbox_tools"][-1]["skipped"]
+    assert len(skipped) == 50 and skipped[-1]["why"] == "11 more skips not listed"
+
+
 def test_the_tool_check_reads_only_what_the_roster_runs():
     from adw_modules.sandbox_remote import tools_needed
     agents = lambda *kinds: types.SimpleNamespace(agents=[types.SimpleNamespace(coding_agent=k) for k in kinds])

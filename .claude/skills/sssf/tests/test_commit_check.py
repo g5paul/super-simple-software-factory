@@ -352,3 +352,55 @@ def test_the_exact_name_is_refused_as_before(repo, cfg, name):
     base = git(repo, "rev-parse", "HEAD")
     bad = commit(repo, name, "y\n")
     assert judge(repo, base, cfg) == [(bad, [name])]
+
+
+# --- a name no disk takes is refused before any fold ---------------------------
+
+
+def long_name_commit(repo, name: str, under: str = "") -> tuple[str, str]:
+    """A commit that adds `name` (under `under/`), built with `mktree` on stdin."""
+    base = git(repo, "rev-parse", "HEAD")
+    blob = git(repo, "hash-object", "-w", "app.py")
+    if under:
+        inner = git(repo, "mktree", stdin=f"100644 blob {blob}\t{name}\n")
+        listing = git(repo, "ls-tree", "HEAD") + f"\n040000 tree {inner}\t{under}\n"
+    else:
+        listing = git(repo, "ls-tree", "HEAD") + f"\n100644 blob {blob}\t{name}\n"
+    tree = git(repo, "mktree", stdin=listing.strip() + "\n")
+    return base, git(repo, "commit-tree", tree, "-p", base, "-m", "long")
+
+
+@pytest.fixture
+def watched(monkeypatch):
+    seen: list[int] = []
+    real = permissions._fold_part
+
+    def wrapped(part):
+        seen.append(max(len(piece) for piece in part.split(":")))
+        return real(part)
+
+    monkeypatch.setattr(permissions, "_fold_part", wrapped)
+    return seen
+
+
+@pytest.mark.parametrize("marks", [4000, 20000, 200000])
+def test_a_long_mark_name_is_refused_fast_and_never_folded(repo, cfg, watched, marks):
+    import time
+    name = "src" + "́" * (marks // 2) + "̖" * (marks // 2) + ".py"
+    base, tip = long_name_commit(repo, name)
+    start = time.perf_counter()
+    refused = permissions.judge_commits(repo, base, tip, cfg, [named(cfg, "builder")])
+    assert time.perf_counter() - start < 1
+    assert refused and refused[0][0] == tip
+    assert max(watched, default=0) <= permissions.NAME_MAX
+
+
+def test_a_long_name_under_the_session_folder_is_refused(repo, cfg):
+    base, tip = long_name_commit(repo, "a" * 256, under="sess")
+    assert permissions.judge_commits(repo, base, tip, cfg, [named(cfg, "builder")],
+                                     session="sess")
+
+
+def test_a_name_at_the_cap_in_src_passes_for_the_builder(repo, cfg):
+    base, tip = long_name_commit(repo, "a" * 255, under="src")
+    assert permissions.judge_commits(repo, base, tip, cfg, [named(cfg, "builder")]) == []

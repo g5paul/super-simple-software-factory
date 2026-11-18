@@ -317,3 +317,86 @@ def test_a_folded_match_never_unlocks_through_a_glob_folder_entry(path):
     cfg.defaults.protected_files = [*cfg.defaults.protected_files, "docs/*/", "**/b.md"]
     agent = named(cfg, "builder").model_copy(update={"writes": ["docs/*/b.md"]})
     assert not permissions.permitted(path, agent, cfg)
+
+
+# --- a component no disk takes is refused before any fold ----------------------
+
+AT_CAP = {"ascii": "a" * 255, "two-byte": "é" * 255, "four-byte": "\U0001F600" * 255}
+PAST_CAP = {k: v + v[-1] for k, v in AT_CAP.items()}
+
+
+def watch_fold(monkeypatch):
+    """Wrap `_fold_part`; the returned list holds the length of each part it was given."""
+    seen: list[int] = []
+    real = permissions._fold_part
+
+    def wrapped(part):
+        seen.append(max(len(piece) for piece in part.split(":")))
+        return real(part)
+
+    monkeypatch.setattr(permissions, "_fold_part", wrapped)
+    return seen
+
+
+@pytest.mark.parametrize("kind", AT_CAP)
+def test_too_long_counts_code_points(kind):
+    assert not permissions._too_long(AT_CAP[kind])
+    assert permissions._too_long(PAST_CAP[kind])
+
+
+@pytest.mark.parametrize("sep", ["\\", ":"])
+def test_too_long_measures_each_piece_between_separators(sep):
+    assert not permissions._too_long("a" * 200 + sep + "b" * 200)
+    assert permissions._too_long("a" * 10 + sep + "b" * 256)
+
+
+@pytest.mark.parametrize("kind", AT_CAP)
+@pytest.mark.parametrize("who", ["builder", "planner", "documenter"])
+def test_a_name_at_the_cap_gets_the_answer_of_one_shorter(kind, who):
+    cfg = load("sssf.config.yaml")
+    agent = named(cfg, who)
+    name = AT_CAP[kind]
+    for top in ("src", "specs"):
+        assert (permissions.permitted(f"{top}/{name}", agent, cfg)
+                == permissions.permitted(f"{top}/{name[:-1]}", agent, cfg))
+
+
+@pytest.mark.parametrize("kind", PAST_CAP)
+def test_a_name_past_the_cap_is_refused_for_every_agent(kind):
+    cfg = load("sssf.config.yaml")
+    name = PAST_CAP[kind]
+    everyone = [*cfg.agents, named(cfg, "builder").model_copy(update={"writes": None}),
+                named(cfg, "builder").model_copy(update={"writes": ["**", "src/", f"src/{name}"]})]
+    for agent in everyone:
+        for path in (f"src/{name}", f"specs/{name}", f"adws/adw_data/sessions/abc/{name}"):
+            assert not permissions.permitted(path, agent, cfg)
+
+
+@pytest.mark.parametrize("marks", [4000, 20000, 200000])
+def test_a_long_mark_name_is_refused_without_a_fold(monkeypatch, marks):
+    cfg = load("sssf.config.yaml")
+    seen = watch_fold(monkeypatch)
+    name = "src" + "́" * (marks // 2) + "̖" * (marks // 2) + ".py"
+    assert not permissions.permitted(f"src/{name}", named(cfg, "builder"), cfg)
+    assert seen == []
+
+
+def test_a_colon_joined_path_is_not_over_long_and_folds_in_short_runs(monkeypatch):
+    cfg = load("sssf.config.yaml")
+    seen = watch_fold(monkeypatch)
+    path = "src/x:" + ":".join(["́" * 255] * 80)
+    assert not permissions._too_long(path)
+    builder = named(cfg, "builder")
+    assert permissions.permitted(path, builder, cfg) == permissions.permitted("src/x", builder, cfg)
+    assert seen and max(seen) <= permissions.NAME_MAX
+
+
+def test_forty_components_of_marks_at_the_cap_fold_in_pieces_under_it(monkeypatch):
+    cfg = load("sssf.config.yaml")
+    seen = watch_fold(monkeypatch)
+    part = "x" + "́" * 127 + "̖" * 127
+    assert len(part) == 255
+    path = "src/" + "/".join([part] * 40)
+    assert not permissions._too_long(path)
+    permissions.permitted(path, named(cfg, "builder"), cfg)
+    assert seen and max(seen) <= permissions.NAME_MAX

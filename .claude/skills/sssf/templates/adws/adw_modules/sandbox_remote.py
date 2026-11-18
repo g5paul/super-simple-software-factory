@@ -6,7 +6,8 @@ at its host path too, so every path the run passes means the same thing on
 both sides. Each command goes through `run` or `start` below:
 
 - `run` is a check, git, or setup. It gets SSSF's own and obs variables, never the
-  Claude token. No command gets OBS_AUTH_TOKEN (HELD), which would let code in
+  Claude token. `run`, `commit` and `start` refuse when the env a VM command would
+  get holds an API key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN): `_env` checks it. No command gets OBS_AUTH_TOKEN (HELD), which would let code in
   the VM copy it into the clone and back to the host branch.
 - `start` is an agent. A Claude Code agent gets the token from
   ~/.config/sssf-sandbox/token.env (a roster of pi agents only needs no file); a pi
@@ -58,6 +59,9 @@ MAJOR_MINOR = re.compile(r"\d+\.\d+", re.ASCII)
 ANSWER_MAX = 200    # how much of a bad Python answer a message keeps
 PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with UV_PYTHON
 HELD = ("OBS_AUTH_TOKEN",)          # named variables no VM command gets, whatever PASSED says
+# The names Claude Code reads as an API key; they match agent_cc.API_KEY_VARS. A VM
+# command whose env holds one is refused.
+KEY_NAMES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 AGENT_SECONDS = 30 * 60             # what an agent call may need of a session
 COMMAND_SECONDS = 60                # what a command with no timeout may need: git, a read
 MARGIN_SECONDS = 30
@@ -174,14 +178,21 @@ def _token() -> str:
     raise SandboxFailed(f"{TOKEN_FILE} has no CLAUDE_CODE_OAUTH_TOKEN line")
 
 
-def credentials(keys: tuple[str, ...]) -> None:
+def _key_check(env) -> None:
+    """Refuse when `env` holds an API key under a name Claude Code reads."""
+    for name in KEY_NAMES:
+        if env.get(name):
+            raise SandboxFailed(f"{name} would reach the VM, and there it would win over the "
+                                "subscription token. Unset it before a sandbox run.")
+
+
+def credentials(keys: tuple[str, ...], reaches=None) -> None:
+    """`reaches` is the env a VM command would get; None judges the whole host env."""
     missing = [k for k in keys if not os.environ.get(k)]
     if missing:
         raise SandboxFailed(f"{', '.join(missing)} not set. Put them in the repo's .env; "
                             "see docs/designs/remote-sandboxes.md, decision 19.")
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        raise SandboxFailed("ANTHROPIC_API_KEY is set, and in the VM it would win over the "
-                            "subscription token. Unset it before a sandbox run.")
+    _key_check(os.environ if reaches is None else reaches)
 
 
 def _host_git(*args: str, cwd: Path) -> str:
@@ -504,6 +515,8 @@ class Remote:
 
     # What a provider adds to a pi agent's env (`start` only).
     pi_env: dict[str, str] = {}
+    # What a provider adds to a Claude Code agent's env: fixed values only.
+    cc_env: dict[str, str] = {}
 
     # --- what a provider writes ---------------------------------------------
 
@@ -527,7 +540,7 @@ class Remote:
 
     def open(self) -> None:
         """Make the VM and put the run's branch in it. Raises SandboxFailed."""
-        credentials(self.keys)
+        credentials(self.keys, {**self._env(None), **self.pi_env, **self.cc_env})
         if harnesses(getattr(self.run_, "cfg", None)) != {"pi"}:
             self._token = _token()
         problems: list[str] = []
@@ -704,16 +717,18 @@ class Remote:
         argv = list(command)
         if Path(argv[0]).is_absolute():
             argv[0] = Path(argv[0]).name        # the host's install path means nothing in the VM
+        agent_env = self._env(env)
         self._refresh(AGENT_SECONDS)
         self.handoff_in()
         self.processes += 1
         relay = self._open_relay(target) if target is not None else None
         sid_file = f"/tmp/sssf-{uuid.uuid4().hex}.sid"
-        agent_env = self._env(env)
         if "OPENAI_API_KEY" in agent_env:    # only _env's rename of agent_pi's token sets this
             agent_env.update(self.pi_env)
-        elif self._token:
-            agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token
+        else:
+            agent_env.update(self.cc_env)
+            if self._token:
+                agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token
         if relay is not None:
             agent_env["OBS_SERVER_URL"] = relay.url
             agent_env.pop("OBS_DISABLE", None)
@@ -991,7 +1006,9 @@ class Remote:
         # Only this name crosses: an OPENAI_API_KEY on the host stays there.
         if "SSSF_PI_TOKEN" in passed:
             passed["OPENAI_API_KEY"] = passed.pop("SSSF_PI_TOKEN")
-        return {"UV_PYTHON": self.python, **passed} if self.python else passed
+        out = {"UV_PYTHON": self.python, **passed} if self.python else passed
+        _key_check(out)     # the one place every run, commit and start passes through
+        return out
 
     def _cwd(self, cwd) -> str:
         return str(Path(cwd).resolve()) if cwd else os.getcwd()

@@ -511,6 +511,29 @@ def test_an_api_key_where_the_run_starts_stops_it(monkeypatch):
         sandbox_remote.credentials(("E2B_API_KEY",))
 
 
+def test_key_reaches_credentials(monkeypatch):
+    from adw_modules import sandbox_remote
+    monkeypatch.setenv("E2B_API_KEY", "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    sandbox_remote.credentials(("E2B_API_KEY",), reaches={})
+    with pytest.raises(sandbox_remote.SandboxFailed, match="ANTHROPIC_AUTH_TOKEN"):
+        sandbox_remote.credentials(("E2B_API_KEY",), reaches={"ANTHROPIC_AUTH_TOKEN": "k"})
+
+
+def test_key_reaches_run_env_refuses(box, monkeypatch):
+    from adw_modules import sandbox_remote
+    host = {**os.environ, "ANTHROPIC_API_KEY": "k"}
+    assert box.run(["true"], env=host).returncode == 0     # filtered out before the check
+    monkeypatch.setattr(sandbox_remote, "PASSED", (*sandbox_remote.PASSED, "ANTHROPIC_"))
+    before = len(box.raw.calls)
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        with pytest.raises(sandbox_remote.SandboxFailed, match=name):
+            box.run(["true"], env={name: "k"})
+    with pytest.raises(sandbox_remote.SandboxFailed, match="ANTHROPIC_API_KEY"):
+        box.start(["true"], env={"ANTHROPIC_API_KEY": "k"})
+    assert len(box.raw.calls) == before
+
+
 def test_kill_leaves_vm_stand_in_pids_alone(tmp_path, monkeypatch):
     from adw_modules import kill
     from adw_modules.tracer import Tracer

@@ -165,7 +165,8 @@ spaces, `:stream`, `\`), and a name shaped like an 8.3 short name (`CLAUDE~1`,
 `notes~1.txt`) counts as any protected name in its place. `writes` entries are matched
 exactly, so `writes: [justfile]` does not unlock `Justfile`. A path with a component over
 255 code points, measured between `/`, `\` and `:`, is refused for every agent whatever its
-`writes`, since no Linux, macOS or Windows disk takes such a name. A repo whose recipe
+`writes`. Linux's ext4 and xfs, APFS and NTFS take no name that long; OpenZFS with its
+`longname` feature on may, and no agent can write such a file there. A repo whose recipe
 file is spelled `Justfile` cannot unlock it. A file named like an 8.3 alias is
 protected wherever a protected entry has a component in that position. A glob entry's
 8.3 name, and a filesystem that folds further than Unicode's canonical caseless match,

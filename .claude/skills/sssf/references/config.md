@@ -148,7 +148,10 @@ local commit is undone, with the work tree kept. Either way the run stops with a
 A plan commit (`commit_all` with `only`) is limited to the `only` entries, and a path
 in it must be one an agent that ran may write. The host can't name the planner, so
 `only` stands in for "only the planner": with the shipped rosters that is the planner.
-`run.ran` is cleared after a full commit passes, never after an `only` commit.
+`run.ran` is cleared after a full commit passes, never after an `only` commit, since
+the planner's other work stays in the tree. So the builder's commit is judged with
+the planner's `writes` too, and a builder change to `specs/` passes this check (the
+in-call check still stops it).
 
 The local read turns off replace refs, grafts, hooks, external diff and textconv and
 reads commits raw. It cannot stop an object the agent wrote into the object store

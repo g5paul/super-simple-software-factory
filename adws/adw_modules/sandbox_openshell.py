@@ -11,7 +11,9 @@ changed Python needs `just openshell-setup`. Denials from the sandbox's network 
 `sandbox_denied` events.
 
 The Claude token and a pi agent's ChatGPT token, like every env value, travel on stdin
-in a framed block and are exported by a shell inside the sandbox. Each roster's policy
+in a framed block and are exported by a shell inside the sandbox. An input over
+STDIN_MAX (1 MiB) goes by `openshell sandbox upload` from a fresh staging folder
+instead, and the shell reads it as stdin, then removes it. Each roster's policy
 opens only its own harnesses' model hosts. It is never on a command line, on
 the host or in the sandbox (anyone can read another process's argv).
 
@@ -35,6 +37,7 @@ import shutil
 import subprocess
 import threading
 import time
+import tempfile
 import types
 import uuid
 from pathlib import Path
@@ -66,6 +69,11 @@ _TIMEOUT = 30
 LABEL_MAX = 63       # a Kubernetes label value's limit; the CLI's help gives none
 LABEL_HASH = 12      # hex characters of the name's SHA-256 in the project label
 KILL_SLACK = 30    # seconds past kill_after the CLI gets to return on its own
+# OpenShell 0.1.7 refuses more piped stdin than this: "piped stdin exceeds the 4 MiB
+# limit; use `sandbox upload` for larger input". Documents the number; code uses STDIN_MAX.
+STDIN_LIMIT = 4 * 1024 * 1024
+STDIN_MAX = 1024 * 1024    # the most SSSF pipes to one exec (frame and input), a quarter of the limit
+UPLOAD_SECONDS = 120       # inside the 180 seconds Remote._call gives a _must
 
 
 class OpenShellError(RuntimeError):
@@ -280,7 +288,8 @@ _SHELL = r"""while IFS= read -r l && [ "$l" != . ]; do
 done
 printf '%s\n' SENTINEL >&2
 m=$1; shift
-if [ "$m" = null ]; then exec "$@" </dev/null; else exec "$@"; fi""".replace("SENTINEL", SENTINEL)
+if [ "$m" = file ]; then f=$1; shift; exec 3<"$f"; rm -f "$f"; exec "$@" <&3 3<&-
+elif [ "$m" = null ]; then exec "$@" </dev/null; else exec "$@"; fi""".replace("SENTINEL", SENTINEL)
 
 
 def _exec_argv(name: str, cwd, timeout) -> list[str]:
@@ -337,13 +346,41 @@ class _VM:
     def __init__(self, name: str):
         self.name = name
 
+    def _upload(self, body: bytes) -> str:
+        """Put `body` in the VM by `sandbox upload`, from a fresh staging folder, at a
+        path SSSF picks. Returns the path; the exec's shell opens and removes it."""
+        dest = f"/tmp/sssf-in-{uuid.uuid4().hex}"
+        staging = Path(tempfile.mkdtemp(prefix="sssf-up-"))
+        try:
+            staged = staging / "input"
+            fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(body)
+            done = subprocess.run([CLI, "sandbox", "upload", "--no-git-ignore", self.name,
+                                   str(staged), dest],
+                                  stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                  timeout=UPLOAD_SECONDS)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise OpenShellError(f"openshell sandbox upload failed: {error}")
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        if done.returncode != 0:
+            raise OpenShellError(f"openshell sandbox upload failed: {_last(done.stderr)}")
+        return dest
+
     def run_process(self, command: str, args=(), *, cwd=None, env=None, sudo=False,
                     capture_output=True, input=None, kill_after=None):
         data = _frame(env or {})
+        tail = ["null", command, *args]
         if input is not None:
-            data += input.encode() if isinstance(input, str) else bytes(input)
+            body = input.encode() if isinstance(input, str) else bytes(input)
+            if len(data) + len(body) <= STDIN_MAX:
+                data += body
+                tail = ["input", command, *args]
+            else:
+                tail = ["file", self._upload(body), command, *args]
         popen = subprocess.Popen(
-            _exec_argv(self.name, cwd, kill_after) + ["input" if input is not None else "null", command, *args],
+            _exec_argv(self.name, cwd, kill_after) + tail,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             out, err = popen.communicate(data, timeout=kill_after + KILL_SLACK if kill_after else None)
@@ -385,6 +422,7 @@ class OpenShell(Remote):
     owner = SANDBOX_USER
     errors = (OpenShellError,)
     pi_env = {"PI_OFFLINE": "1"}
+    cc_env = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 
     def _create(self) -> _VM:
         name = f"sssf-{self.run_.adw_id}-{uuid.uuid4().hex[:4]}"

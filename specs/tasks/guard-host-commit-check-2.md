@@ -36,7 +36,7 @@ What the grant still has to cover after a plan commit is less than the spec assu
 
 ## The engineer's decisions
 
-These are the hub session's recommendations, put to the engineer before the run as `docs/open.md`'s P2 row on guard briefs asks. A reviewer files a finding that matches one as meeting the bar once the engineer confirms it.
+These came from the hub session, so they were put to the engineer before the run, as `docs/open.md`'s P2 row on guard briefs asks. The engineer confirmed both on 2026-11-17, and a reviewer files a finding that matches one as meeting the bar.
 
 1. **Narrow the grant by `only`, not by a tree snapshot.** A snapshot of what the planner left uncommitted, bound to each file's blob as `carried_tree` does, would be stricter for a chain that commits less than an agent's `writes`. In a VM run the host would have to read that tree from the VM. No shipped chain needs it.
 2. **Fold always, and only on the refusing side.** An agent whose `writes` names `justfile` can't write `JUSTFILE`. That's a false stop no shipped roster hits.

@@ -218,12 +218,12 @@ def machine(tmp_path, monkeypatch, cfg, service):
     real = agentsh_guard._run
     state = {"active": "active", "show": f"ExecMainStartTimestamp=@{int(time.time()) + 3600}\n"}
 
-    def fake_run(c):
+    def fake_run(c, env=None):
         if c[:2] == ["systemctl", "is-active"]:
             return subprocess.CompletedProcess(c, 0, state["active"] + "\n", "")
         if c[:2] == ["systemctl", "show"]:
             return subprocess.CompletedProcess(c, state.get("show_rc", 0), state["show"], "")
-        return real(c)
+        return real(c, env) if env is not None else real(c)
     monkeypatch.setattr(agentsh_guard, "_run", fake_run)
     status = tmp_path / "prune-status.json"
     status.write_text(json.dumps({"store_bytes": 1000, "last_prune": utc(time.time()), "last_analyze": None,

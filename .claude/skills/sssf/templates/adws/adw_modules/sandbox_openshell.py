@@ -46,6 +46,7 @@ import yaml
 
 from .sandbox import SandboxFailed
 from . import sandbox_remote, session_files
+from .utils import git_location_env
 from .sandbox_remote import Remote
 
 CLI = "openshell"
@@ -86,7 +87,8 @@ class OpenShellError(RuntimeError):
 def repo_root(cwd: Path) -> Path:
     """The main checkout of the repo `cwd` is in, also from a worktree."""
     out = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                         cwd=cwd, capture_output=True, text=True, timeout=_TIMEOUT, check=True)
+                         cwd=cwd, capture_output=True, text=True, timeout=_TIMEOUT, check=True,
+                         env=git_location_env())
     return Path(out.stdout.strip()).parent
 
 

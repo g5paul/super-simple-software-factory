@@ -5,7 +5,8 @@ exactly that id (pinned ids for repeatable runs); omitted, a fresh id is
 minted and printed so the next ADW can pick it up.
 
 `host_agents` is the one check behind repo.yaml's `host_agents: false`: it runs first in
-`ensure` (and in trial.start), before any run row, worktree or agent exists.
+`ensure` (and in trial.start), before any run row, worktree or agent exists. It reads the main checkout's repo.yaml, found
+without git's location variables (`worktree.main_checkout`).
 """
 
 from __future__ import annotations
@@ -124,7 +125,8 @@ class HostAgentsRefused(SystemExit):
 def host_agents(db: str, adw_id: str | None, sandbox_name: str | None) -> None:
     """Refuse a launch whose agents would work on this machine, when repo.yaml says
     `host_agents: false`. The file is the main checkout's, read before any worktree
-    exists, so a run's own copy can't turn it off. A resume is judged by the run's
+    exists, so a run's own copy can't turn it off. The main checkout is found without
+    git's location variables, so a `.env` or an export can't point it elsewhere. A resume is judged by the run's
     recorded worktree, as worktree.enter judges it, not by the flag; with no record,
     `sandbox_name` decides."""
     try:
@@ -162,10 +164,13 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
     repo.yaml (see choose_sandbox). `agentless` is for a chain that never calls an agent
     (adw_quality); every other launch is checked first against `host_agents: false`, before
     anything else here."""
-    if repo_sandbox:
-        sandbox_name = choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
-    if not agentless:
-        host_agents(cfg.observability.db, adw_id, sandbox_name)   # before a VM check, a worktree or a run row
+    try:
+        if repo_sandbox:
+            sandbox_name = choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
+        if not agentless:
+            host_agents(cfg.observability.db, adw_id, sandbox_name)   # before a VM check, a worktree or a run row
+    except worktree.WorktreeError as error:     # git can't find the main checkout
+        raise SystemExit(f"WorktreeError: {error}") from None
     adw_id = adw_id or new_id(8)
     if sandbox_name:
         use_worktree = True

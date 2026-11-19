@@ -108,10 +108,18 @@ def check_run(run, agent_name: str, phase_id: str) -> None:
 
 
 def _root() -> Path:
+    """The main checkout, whose repo.yaml and trace every setting reads. Outside any checkout,
+    the working folder. Inside one where git can't answer, an error: falling back to the
+    working folder would read a run's own copy of repo.yaml and a trace that isn't there."""
     try:
         return worktree.main_checkout()
-    except Exception:                       # not a repo: repo.yaml is beside the cwd
-        return Path.cwd()
+    except Exception as error:
+        if not worktree.checkout_here():    # not a repo: repo.yaml is beside the cwd
+            return Path.cwd()
+        raise worktree.WorktreeError(
+            "git could not find this repo's main checkout from the working folder "
+            f"({error}). Fix the git environment (a GIT_CONFIG_* variable, or a config file git "
+            "can't read) and launch again.") from None
 
 
 def max_live_cost() -> Optional[float]:

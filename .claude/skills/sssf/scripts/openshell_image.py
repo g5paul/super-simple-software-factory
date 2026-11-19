@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml"]
+# dependencies = ["pyyaml", "python-dotenv", "pydantic", "rich"]
 # ///
 """Build SSSF's OpenShell sandbox image with Podman, which `--sandbox openshell`
 makes each sandbox from: `localhost/sssf-openshell:<hash>`.

@@ -217,11 +217,11 @@
       "source": "adws/adw_modules/sandbox_e2b.py"
     },
     "adws/adw_modules/sandbox_openshell.py": {
-      "sha256": "32a1b83609e430f46fb57b4c78b07db76c11fdecf9aae31a0f1c4dab76f7dca8",
+      "sha256": "3c408a1239ed9629d191608eaae8844970bb64840086f697b81e54a3fb5ff1a5",
       "source": "adws/adw_modules/sandbox_openshell.py"
     },
     "adws/adw_modules/sandbox_remote.py": {
-      "sha256": "f280079bdf571c371db388247b78745ea7be5c8111cbdfc948eba3add43e3912",
+      "sha256": "51ed27eb02d432b2ea161b276d28b010b411537248c862a68e6629a59cea1ac6",
       "source": "adws/adw_modules/sandbox_remote.py"
     },
     "adws/adw_modules/sandbox_usage.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "568f914"
+  "skill": "b4c51d5"
 }

@@ -125,7 +125,9 @@ def folder_for(cwd: Path) -> Path:
 def image_python(path: Path) -> str:
     """The Python, as major.minor, the image holds for the repo `path` is in:
     what the host's uv picks in its main checkout, the value a run passes as
-    UV_PYTHON (sandbox_remote._host_python). "" when the host has none.
+    UV_PYTHON (sandbox_remote._host_python). `repo_root` is the main checkout from a
+    worktree too, and `_host_python` drops the run's own UV_PROJECT_ENVIRONMENT.
+    "" when the host has none.
     Raises ValueError when the interpreter's answer isn't a major.minor."""
     problems: list[str] = []
     python = sandbox_remote._host_python(repo_root(path), problems)

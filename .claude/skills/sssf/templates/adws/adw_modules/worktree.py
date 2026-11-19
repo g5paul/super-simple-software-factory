@@ -40,7 +40,7 @@ from pathlib import Path
 from . import repo_settings, session_files
 from .data_types import EventRecord, SSSFConfig
 from .tracer import Tracer
-from .utils import git_location_env, just, new_id
+from .utils import GIT_NO_PROGRAMS, git_location_env, just, new_id
 
 BRANCH_PREFIX = "sssf/"
 LOCK_SECONDS = 30
@@ -70,11 +70,16 @@ def in_repo() -> bool:
     return git("rev-parse", "--git-dir", check=False, env=git_location_env()).returncode == 0
 
 
-def checkout_here() -> bool:
-    """Whether the working folder or a parent holds a `.git` entry. Plain path checks: no git
-    call and no environment, so it still answers when git can't."""
+def checkout_folder() -> Path | None:
+    """The first folder at or above the working folder holding a `.git` entry. Plain path
+    checks: no git call and no environment, so it still answers when git can't."""
     here = Path.cwd().resolve()
-    return any((folder / ".git").exists() for folder in (here, *here.parents))
+    return next((folder for folder in (here, *here.parents) if (folder / ".git").exists()), None)
+
+
+def checkout_here() -> bool:
+    """Whether the working folder or a parent holds a `.git` entry."""
+    return checkout_folder() is not None
 
 
 def branch_for(adw_id: str) -> str:
@@ -237,7 +242,7 @@ def spend_since(db: str, since: str) -> list[tuple[str, float]]:
 
 
 def dirty(root: Path) -> bool:
-    return bool(git("status", "--porcelain", cwd=root).stdout.strip())
+    return bool(git(*GIT_NO_PROGRAMS, "status", "--porcelain", cwd=root).stdout.strip())
 
 
 def uncommitted(path: Path) -> list[str]:
@@ -245,7 +250,7 @@ def uncommitted(path: Path) -> list[str]:
     Empty when the folder is gone."""
     if not path.is_dir():
         return []
-    lines = git("status", "--porcelain", "--untracked-files=all", cwd=path).stdout.splitlines()
+    lines = git(*GIT_NO_PROGRAMS, "status", "--porcelain", "--untracked-files=all", cwd=path).stdout.splitlines()
     return [line[3:] for line in lines if line.strip()]
 
 

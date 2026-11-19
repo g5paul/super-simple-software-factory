@@ -116,10 +116,14 @@ def _root() -> Path:
     except Exception as error:
         if not worktree.checkout_here():    # not a repo: repo.yaml is beside the cwd
             return Path.cwd()
+        folder = worktree.checkout_folder()
+        fix = ("If git calls the folder's ownership dubious, run "
+               f"`git config --global --add safe.directory {folder}`. Otherwise fix the git "
+               "environment (a GIT_CONFIG_* variable, or a config file git can't read). "
+               "Then launch again.")
         raise worktree.WorktreeError(
-            "git could not find this repo's main checkout from the working folder "
-            f"({error}). Fix the git environment (a GIT_CONFIG_* variable, or a config file git "
-            "can't read) and launch again.") from None
+            f"git could not find this repo's main checkout from the working folder {Path.cwd()} "
+            f"(checkout folder {folder}): {error}. {fix}") from None
 
 
 def max_live_cost() -> Optional[float]:

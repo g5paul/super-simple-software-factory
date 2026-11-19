@@ -7,6 +7,9 @@ minted and printed so the next ADW can pick it up.
 `host_agents` is the one check behind repo.yaml's `host_agents: false`: it runs first in
 `ensure` (and in trial.start), before any run row, worktree or agent exists. It reads the main checkout's repo.yaml, found
 without git's location variables (`worktree.main_checkout`).
+
+`ensure` calls `sandbox.prepare` (the SDK fetch and re-exec) before `worktree.enter`, for a
+resume without the flag too, so the re-exec runs from the launch folder, not a run's worktree.
 """
 
 from __future__ import annotations
@@ -175,6 +178,10 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = Fals
     if sandbox_name:
         use_worktree = True
         sandbox.prepare(sandbox_name, cfg)
+    elif (recorded := (worktree.recorded(_db_path(cfg.observability.db), adw_id) or {}).get("sandbox")):
+        # A resume without the flag: the SDK re-exec happens here, before worktree.enter
+        # moves the process into the run's worktree, whose uv.toml and .env are the agent's.
+        sandbox.prepare(recorded, cfg)
     elif os.environ.get("SSSF_PI_TOKEN_SOCKET"):
         sandbox.extensions_in_repo(cfg, worktree.main_checkout())   # the operator container (decision 14)
     # Read once, here: before worktree.enter moves the process, and before any agent
@@ -251,8 +258,7 @@ def _open_sandbox(run: Run, place: dict, provider: str, asked: str | None) -> No
     if asked and asked != provider:
         raise SystemExit(f"run {run.adw_id} ran in a {provider} sandbox, so it resumes in one, "
                          f"not in {asked}")
-    if not asked:
-        sandbox.prepare(provider, run.cfg)   # a resume without the flag
+    # sandbox.prepare already ran in `ensure`, before worktree.enter, flag or not.
     with run.phase(PhaseParams(name="sandbox", kind="code", owner="sandbox",
                                description=f"Make the run's {provider} VM and clone its branch in")) as ph:
         # Extensions come from the VM's clone, committed at the run's start

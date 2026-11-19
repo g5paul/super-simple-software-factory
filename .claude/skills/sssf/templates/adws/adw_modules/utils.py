@@ -131,6 +131,12 @@ GIT_LOCATION_VARS = frozenset({
 })
 
 
+# Two overrides for SSSF's own host git calls in a VM run's worktree, the values permissions.py
+# uses: an empty fsmonitor (`false` would run the program `false` before git 2.36) and no
+# hooks. `-c` wins over GIT_CONFIG_COUNT. GIT_CONFIG_* itself is kept, see above.
+GIT_NO_PROGRAMS = ("-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null")
+
+
 def git_location_env() -> dict[str, str]:
     """A copy of the environment without git's location variables, for the calls that
     find the main checkout or the repo root. os.environ itself is never changed."""

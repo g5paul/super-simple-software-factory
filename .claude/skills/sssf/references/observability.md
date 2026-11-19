@@ -65,7 +65,8 @@ phases (
   seq           INTEGER,
   name TEXT, kind TEXT, owner TEXT, description TEXT,
   status        TEXT DEFAULT 'fail',   -- success must be earned
-  attempt       INTEGER DEFAULT 0, retries INTEGER DEFAULT 0,
+  attempt       INTEGER DEFAULT 0,     -- gate retries used; 0 = passed on the first try
+  retries       INTEGER DEFAULT 0,     -- gate retries allowed (PhaseParams.retries), not used
   error         TEXT,
   started_at    TEXT, ended_at TEXT
 );

@@ -105,7 +105,7 @@
       "source": "adws/adw_document.py"
     },
     "adws/adw_export.py": {
-      "sha256": "c7b5d273c99fb1ed0b4acc0f28ff8e4a2e098be8576cefc77a96f8ba2c57d630",
+      "sha256": "0db9ec04a759e50f576fc037cc3f952c3f3682f481f3d2945b0cfb468eecbf4f",
       "source": "adws/adw_export.py"
     },
     "adws/adw_kill.py": {
@@ -133,7 +133,7 @@
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
-      "sha256": "e17c3711bf805c2896b2be2f8dc14f8188e0d33890c345dab17cb41ab0b24c75",
+      "sha256": "854263a566dd3e4dd15e662fd2a30b4bcafe20785c536bf5d822de0bf736dad4",
       "source": "adws/adw_modules/agentsh_guard.py"
     },
     "adws/adw_modules/agentsh_sssf.yaml": {
@@ -141,7 +141,7 @@
       "source": "adws/adw_modules/agentsh_sssf.yaml"
     },
     "adws/adw_modules/budget.py": {
-      "sha256": "ffcfe4d87a9435691ca4ae870c38d79f50691fcfd9eb6ad423dce99bb0ea1673",
+      "sha256": "f7d9d726e372a547a5f31a9b231aa8acf133fa15c45e9743bad5b3007a4b146d",
       "source": "adws/adw_modules/budget.py"
     },
     "adws/adw_modules/changes.py": {
@@ -197,7 +197,7 @@
       "source": "adws/adw_modules/quality.py"
     },
     "adws/adw_modules/repo_settings.py": {
-      "sha256": "96ef3c4ccd213592e953ffbc5dbc32650a0ecc524923d6ce77ef24f643679c53",
+      "sha256": "de68491b539c9d67d2948adcf1ff877c4652a003dda64d5f51f57ef8cdcc4885",
       "source": "adws/adw_modules/repo_settings.py"
     },
     "adws/adw_modules/rules.py": {
@@ -217,11 +217,11 @@
       "source": "adws/adw_modules/sandbox_e2b.py"
     },
     "adws/adw_modules/sandbox_openshell.py": {
-      "sha256": "3c408a1239ed9629d191608eaae8844970bb64840086f697b81e54a3fb5ff1a5",
+      "sha256": "31e3e8242784725ae60b65a781bb36b434dc7bb1008c0bd98edb2b6e2a9aa3ad",
       "source": "adws/adw_modules/sandbox_openshell.py"
     },
     "adws/adw_modules/sandbox_remote.py": {
-      "sha256": "51ed27eb02d432b2ea161b276d28b010b411537248c862a68e6629a59cea1ac6",
+      "sha256": "3fc99e05b15f42e5a9e8a57c18b53a0e3fe2b7199ebeb9c84207073a68b9fa60",
       "source": "adws/adw_modules/sandbox_remote.py"
     },
     "adws/adw_modules/sandbox_usage.py": {
@@ -237,7 +237,7 @@
       "source": "adws/adw_modules/secret_files.py"
     },
     "adws/adw_modules/session.py": {
-      "sha256": "7a8e6e58f313c5625e5180ce2236b8799ab68c90a69763b442201706a9ba50f2",
+      "sha256": "8e343ed64deffd8c0a7a4c9da756793f68a7de9299b1c22def8dfca8b959f9e4",
       "source": "adws/adw_modules/session.py"
     },
     "adws/adw_modules/session_files.py": {
@@ -269,15 +269,15 @@
       "source": "adws/adw_modules/tracer.py"
     },
     "adws/adw_modules/trial.py": {
-      "sha256": "aa21fbc07aaf1a2ca934732b28e17c5212d7da3b5dbd25a0fae162d9b3d8b689",
+      "sha256": "5aeb9eca8d3cd6c8dca03b9431e40d808aceb79ebc732f363a770d17402c13f7",
       "source": "adws/adw_modules/trial.py"
     },
     "adws/adw_modules/utils.py": {
-      "sha256": "d37cbc2ddecc6a90499db44894be2a595b2d0cdd1ec3ea8c3695ee8396faef54",
+      "sha256": "6bd98f32d0747fce23fbaa2874ccf9bf6028d1043f11cb0fcc6482227c83003a",
       "source": "adws/adw_modules/utils.py"
     },
     "adws/adw_modules/worktree.py": {
-      "sha256": "45ec88b986d754b22c200bce5f5f551d52a25d652cf6030ed68801d450edb141",
+      "sha256": "1ea3e2845d5807840c24515e21deb5f93cfc1b97ad9d186c4d2cd8ba4cf20f23",
       "source": "adws/adw_modules/worktree.py"
     },
     "adws/adw_plan.py": {
@@ -301,7 +301,7 @@
       "source": "adws/adw_prompt.py"
     },
     "adws/adw_quality.py": {
-      "sha256": "898da05b3491cb09bf220ddf2aac837f69a38753bfe00b09091c733ca3a81f14",
+      "sha256": "fcc70a7e98a4bb961c0240f3eb1ca70b295e56367fd18e1a3e0ad540f5ddc5fa",
       "source": "adws/adw_quality.py"
     },
     "adws/adw_sandbox_usage.py": {
@@ -317,7 +317,7 @@
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {
-      "sha256": "a10028a355065c8354a6119fb09e23d1e4afd5f1acc98174c97c881b46b20755",
+      "sha256": "b955775390a93fbb3252fce5b4d49ccc6ef14f857d127e90a2e080d080bdad7e",
       "source": "repo.yaml"
     },
     "adws/adw_sssf_config/sssf.config.yaml": {
@@ -325,11 +325,11 @@
       "source": "sssf.config.claude_code.yaml"
     },
     "adws/adw_tickets.py": {
-      "sha256": "4e851ff1e0dd2a9c325e32ea0a9617b82fea26a67a654925bcfd37b461471fab",
+      "sha256": "b2c97d23c283ae63fc70297199701bf5ad5cab9338c3137ae80841a3398958b9",
       "source": "adws/adw_tickets.py"
     },
     "adws/adw_trial.py": {
-      "sha256": "fd7aae46d064b33fad1e326bdc6effeaffc5d09bc9cf3553b5bb3ea8b317ba9a",
+      "sha256": "47835d3483f8004b1bae99c75bd5f673017115fcc8452c0a1b59f7824b176287",
       "source": "adws/adw_trial.py"
     },
     "adws/adw_worktree.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "b4c51d5"
+  "skill": "6486123"
 }

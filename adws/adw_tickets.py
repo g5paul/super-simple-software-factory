@@ -91,7 +91,10 @@ def main(folder: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     agents.validate(cfg, REQUIRED_AGENTS)
     # Chosen before the claim: a VM run is a worktree run, so it builds from
     # the feature folder as committed.
-    sandbox_name = session.choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
+    try:
+        sandbox_name = session.choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
+    except worktree.WorktreeError as error:
+        raise SystemExit(f"WorktreeError: {error}") from None
     use_worktree = use_worktree or bool(sandbox_name)
     claim(cfg, folder, adw_id, use_worktree)
     run = session.ensure(cfg, adw_id, use_worktree=use_worktree, sandbox_name=sandbox_name)

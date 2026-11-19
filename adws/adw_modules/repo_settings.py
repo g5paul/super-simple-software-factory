@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from .rules import AgentRule, text
 
@@ -123,6 +123,9 @@ class RepoSettings(BaseModel):
     sandbox: Literal["none", "vercel", "e2b", "openshell"] = "none"
     # The hosts `--sandbox openshell` opens beyond its defaults, each one network rule.
     sandbox_allow: list[SandboxAllow] = Field(default_factory=list)
+    # Whether an agent may run on this machine. False refuses every launch that would
+    # put one here (session.host_agents). It needs a VM sandbox.
+    host_agents: StrictBool = True
     # Stop an agent that writes nothing for this many minutes: a hang spends
     # nothing, so the cost caps never see it (silence.py). None = off.
     max_silence_minutes: Optional[float] = Field(15, gt=0)
@@ -168,6 +171,9 @@ class RepoSettings(BaseModel):
     def _guard(self):
         if self.local_guard == "agentsh" and self.sandbox != "none":
             raise ValueError("local_guard: agentsh wraps agents on this machine; it needs sandbox: none")
+        if not self.host_agents and self.sandbox == "none":
+            raise ValueError("host_agents: false keeps every agent in a VM; it needs sandbox: openshell, "
+                             "vercel or e2b, not sandbox: none")
         names = [d.name for d in self.deny_exec]
         if len(names) != len(set(names)):
             raise ValueError("deny_exec names must be unique")

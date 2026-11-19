@@ -57,7 +57,8 @@ from .sandbox import SandboxFailed
 
 TOKEN_FILE = Path.home() / ".config" / "sssf-sandbox" / "token.env"
 MAJOR_MINOR = re.compile(r"\d+\.\d+", re.ASCII)
-ANSWER_MAX = 200    # how much of a bad Python answer a message keeps
+UV_DROPPED = ("UV_PROJECT_ENVIRONMENT",)   # set per run by worktree._own_environment: the run's, not the engineer's
+ANSWER_MAX = 200   # how much of a bad Python answer a message keeps
 PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with UV_PYTHON
 HELD = ("OBS_AUTH_TOKEN",)          # named variables no VM command gets, whatever PASSED says
 # The names Claude Code reads as an API key; they match agent_cc.API_KEY_VARS. A VM
@@ -343,12 +344,27 @@ def require_sdk(provider: str, module: str, requirement: str) -> None:
     """Make sure the provider's SDK can be imported, before the run starts.
 
     The chains don't declare it, so a run without --sandbox never fetches it.
-    A sandbox run without it starts again once, under `uv run --with`."""
+    A sandbox run without it starts again once, under `uv run --with`. The start again
+    happens in session.ensure's `sandbox.prepare`, before `worktree.enter`, so the working
+    folder is the launch folder. From inside a worktree it refuses: uv would read that
+    folder's uv.toml, .python-version and .env, which a VM run's agent can commit."""
     try:
         importlib.import_module(module)
     except ImportError:
         if os.environ.get("SSSF_SANDBOX_SDK"):
             raise SystemExit(f"--sandbox {provider} needs {requirement}, and uv could not add it")
+        from . import worktree
+        try:
+            inside = worktree.in_run_worktree()
+        except worktree.WorktreeError as error:
+            inside = False
+            if worktree.checkout_here():
+                raise SystemExit(f"SSSF won't fetch {requirement} from {Path.cwd()}: git can't "
+                                 f"answer there ({error}). Launch from the main checkout.") from None
+        if inside:
+            raise SystemExit(f"SSSF won't fetch {requirement} from inside the worktree {Path.cwd()}, "
+                             "because uv would read that folder's config. Launch from the main "
+                             f"checkout, {worktree.main_checkout()}.")
         os.environ["SSSF_SANDBOX_SDK"] = "1"
         os.execvp("uv", ["uv", "run", "--quiet", "--with", requirement, sys.argv[0], *sys.argv[1:]])
 
@@ -382,7 +398,8 @@ def credentials(keys: tuple[str, ...], reaches=None) -> None:
 
 
 def _host_git(*args: str, cwd: Path) -> str:
-    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    from .utils import GIT_NO_PROGRAMS
+    done = subprocess.run(["git", *GIT_NO_PROGRAMS, *args], cwd=cwd, capture_output=True, text=True)
     if done.returncode != 0:
         raise SandboxFailed(f"git {' '.join(args)} failed on the host: {done.stderr.strip()}")
     return done.stdout.strip()
@@ -411,6 +428,14 @@ def _bundle_head(data: bytes, synced: str) -> str:
 def _host_python(tree: Path, problems: list[str] | None = None) -> str:
     """The Python, as major.minor, that the host's uv picks in the tree.
 
+    Always called with the main checkout, never a run's worktree: an agent's commit can set
+    every file uv reads to pick a Python (`.python-version`, `.python-versions`, `.venv/`,
+    `uv.toml`, `pyproject.toml`), and `.python-version` can name a program. From the
+    main checkout those files and their parents are the engineer's; so are
+    `~/.config/uv/`, `/etc/uv/` and the environment (UV_PYTHON, UV_PYTHON_PREFERENCE,
+    UV_CONFIG_FILE, VIRTUAL_ENV, PATH ...), except UV_PROJECT_ENVIRONMENT, which a host
+    `just rebase` sets per run and which is dropped for this call.
+
     The VM's uv would pick its own: a `.python-version` is often untracked,
     so the clone doesn't have it, and the VM's image has another Python. A
     repo's tests can depend on the version, as argparse's help text does.
@@ -419,8 +444,11 @@ def _host_python(tree: Path, problems: list[str] | None = None) -> str:
     `problems`, when the answer isn't a major.minor."""
     problem = ""
     try:
+        extra = {}
+        if any(name in os.environ for name in UV_DROPPED):   # else the call is as it always was
+            extra["env"] = {k: v for k, v in os.environ.items() if k not in UV_DROPPED}
         found = subprocess.run(["uv", "python", "find"], cwd=tree, capture_output=True,
-                               text=True, timeout=60)
+                               text=True, timeout=60, **extra)
         if found.returncode != 0:
             return ""
         interpreter = found.stdout.strip()
@@ -730,7 +758,14 @@ class Remote:
         if harnesses(getattr(self.run_, "cfg", None)) != {"pi"}:
             self._token = _token()
         problems: list[str] = []
-        self.python = _host_python(self.tree, problems)
+        from . import worktree
+        try:
+            main = worktree.main_checkout()
+        except worktree.WorktreeError as error:
+            if worktree.checkout_here():
+                raise SandboxFailed(f"cannot find the main checkout for the Python lookup: {error}") from None
+            main = self.tree                    # not a repo at all: nothing of a run's to read
+        self.python = _host_python(main, problems)
         self.python_problem = problems[0] if problems else ""
         try:
             self.sandbox = self._create()

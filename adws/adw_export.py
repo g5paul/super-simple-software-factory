@@ -32,6 +32,7 @@ from pathlib import Path
 
 from adw_modules import agents, git_helper, repo_settings
 from adw_modules.data_types import SSSFConfig
+from adw_modules.utils import git_location_env
 
 # SSSF files, by decision 7: whole folders, two files, and the records runs
 # name after their adw_id. A project's own specs/ or app_docs/ files stay.
@@ -53,9 +54,10 @@ def is_sssf_file(path: str) -> bool:
     return path.startswith(SSSF_FOLDERS) or path in SSSF_FILES or RECORD.fullmatch(path) is not None
 
 
-def _git(*args: str, cwd: Path | None = None, input: bytes | None = None) -> str:
+def _git(*args: str, cwd: Path | None = None, input: bytes | None = None,
+         env: dict | None = None) -> str:
     done = subprocess.run(["git", "-c", "core.fsmonitor=", *args], cwd=cwd, input=input,
-                          capture_output=True)
+                          capture_output=True, env=env)
     if done.returncode != 0:
         raise ExportError(f"git {' '.join(args)}: {done.stderr.decode(errors='replace').strip()}")
     return done.stdout.decode(errors="surrogateescape")
@@ -92,7 +94,8 @@ CHECK_TAIL = 20
 
 def _checks(work: Path) -> tuple[list[str], bool]:
     """Run repo.yaml's export_checks in the export's worktree, in order, each one."""
-    checks = repo_settings.load(Path(_git("rev-parse", "--show-toplevel").strip())).export_checks
+    top = _git("rev-parse", "--show-toplevel", env=git_location_env()).strip()   # export_checks run on the host
+    checks = repo_settings.load(Path(top)).export_checks
     if not checks:
         return ["  unchecked: repo.yaml lists no export_checks"], True
     lines, ok = [], True

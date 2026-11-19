@@ -3,6 +3,13 @@
 `ensure(cfg, adw_id)` joins the session if it exists or creates it under
 exactly that id (pinned ids for repeatable runs); omitted, a fresh id is
 minted and printed so the next ADW can pick it up.
+
+`host_agents` is the one check behind repo.yaml's `host_agents: false`: it runs first in
+`ensure` (and in trial.start), before any run row, worktree or agent exists. It reads the main checkout's repo.yaml, found
+without git's location variables (`worktree.main_checkout`).
+
+`ensure` calls `sandbox.prepare` (the SDK fetch and re-exec) before `worktree.enter`, for a
+resume without the flag too, so the re-exec runs from the launch folder, not a run's worktree.
 """
 
 from __future__ import annotations
@@ -13,6 +20,8 @@ import os
 import signal
 import sys
 from pathlib import Path
+
+import yaml
 
 from . import (account, agent_cc, agents, agentsh_guard, budget, changes, permissions, repo_settings,
                rules, sandbox, silence, worktree)
@@ -87,7 +96,8 @@ def choose_sandbox(asked: str | None, db: str, adw_id: str | None) -> str | None
     for this machine. The flag wins, and `none` means this machine. Without
     it, a new run takes repo.yaml's `sandbox`. A run that already exists keeps
     where it ran: a VM run resumes in a new VM (design decision 12), and a
-    host run stays on the host, so a setting added since can't move it."""
+    host run stays on the host, so a setting added since can't move it (under
+    `host_agents: false` that resume refuses, see host_agents)."""
     if asked:
         return None if asked == "none" else asked
     root = budget._root()
@@ -103,26 +113,75 @@ def _vm_resume(cfg: SSSFConfig, adw_id: str | None) -> bool:
     refuse: the wrap depends on the tree being local alone."""
     if not adw_id:
         return False
-    db = cfg.observability.db
+    return bool((worktree.recorded(_db_path(cfg.observability.db), adw_id) or {}).get("sandbox"))
+
+
+def _db_path(db: str) -> str:
     path = Path(db) if Path(db).is_absolute() else budget._root() / db
-    return bool((worktree.recorded(str(path), adw_id) or {}).get("sandbox"))
+    return str(path)
+
+
+class HostAgentsRefused(SystemExit):
+    """host_agents: false, and this launch would put its agents on this machine."""
+
+
+def host_agents(db: str, adw_id: str | None, sandbox_name: str | None) -> None:
+    """Refuse a launch whose agents would work on this machine, when repo.yaml says
+    `host_agents: false`. The file is the main checkout's, read before any worktree
+    exists, so a run's own copy can't turn it off. The main checkout is found without
+    git's location variables, so a `.env` or an export can't point it elsewhere. A resume is judged by the run's
+    recorded worktree, as worktree.enter judges it, not by the flag; with no record,
+    `sandbox_name` decides."""
+    try:
+        allowed = repo_settings.load(budget._root()).host_agents
+    except (yaml.YAMLError, ValueError, OSError) as error:
+        raise SystemExit(f"{repo_settings.PATH} is invalid: {error}") from None
+    if allowed:
+        return
+    path = _db_path(db) if db else ""
+    record = worktree.recorded(path, adw_id) if adw_id and path else None
+    if record is not None:
+        if record.get("sandbox"):
+            return
+    elif sandbox_name:
+        return
+    tail = (f" Or set host_agents: true in {repo_settings.PATH} in a commit; that is the engineer's call.")
+    head = f"host_agents: false in {repo_settings.PATH} keeps every agent in a VM, and "
+    if record is not None or (adw_id and path and worktree._query(path, "select 1 from sessions where adw_id=?", adw_id)):
+        raise HostAgentsRefused(f"{head}run {adw_id} started on this machine; a resume stays where its run "
+                                f"started. Start a new run with an ADW that takes --sandbox.{tail}")
+    raise HostAgentsRefused(f"{head}{Path(sys.argv[0]).stem} would run agents on this machine. Use an ADW that "
+                            f"takes --sandbox (just sdlc, sdlc-quality, simple-sdlc, build-test or tickets), "
+                            f"and drop --sandbox none if you passed it.{tail}")
 
 
 def ensure(cfg: SSSFConfig, adw_id: str | None = None, use_worktree: bool = False,
-           sandbox_name: str | None = None, repo_sandbox: bool = False) -> Run:
+           sandbox_name: str | None = None, repo_sandbox: bool = False,
+           agentless: bool = False) -> Run:
     """Join or create the session. With `use_worktree`, or when this adw_id
     already has a worktree, the process moves into the run's worktree first
     (see worktree.py), so everything after this works there. With
     `sandbox_name`, the run's work goes to a VM (see sandbox.py); that implies
     a worktree. `repo_sandbox` is for the chains that take --sandbox: it reads
     `sandbox_name` as the flag, `none` included, and fills a missing one from
-    repo.yaml (see choose_sandbox)."""
-    if repo_sandbox:
-        sandbox_name = choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
+    repo.yaml (see choose_sandbox). `agentless` is for a chain that never calls an agent
+    (adw_quality); every other launch is checked first against `host_agents: false`, before
+    anything else here."""
+    try:
+        if repo_sandbox:
+            sandbox_name = choose_sandbox(sandbox_name, cfg.observability.db, adw_id)
+        if not agentless:
+            host_agents(cfg.observability.db, adw_id, sandbox_name)   # before a VM check, a worktree or a run row
+    except worktree.WorktreeError as error:     # git can't find the main checkout
+        raise SystemExit(f"WorktreeError: {error}") from None
     adw_id = adw_id or new_id(8)
     if sandbox_name:
         use_worktree = True
         sandbox.prepare(sandbox_name, cfg)
+    elif (recorded := (worktree.recorded(_db_path(cfg.observability.db), adw_id) or {}).get("sandbox")):
+        # A resume without the flag: the SDK re-exec happens here, before worktree.enter
+        # moves the process into the run's worktree, whose uv.toml and .env are the agent's.
+        sandbox.prepare(recorded, cfg)
     elif os.environ.get("SSSF_PI_TOKEN_SOCKET"):
         sandbox.extensions_in_repo(cfg, worktree.main_checkout())   # the operator container (decision 14)
     # Read once, here: before worktree.enter moves the process, and before any agent
@@ -199,8 +258,7 @@ def _open_sandbox(run: Run, place: dict, provider: str, asked: str | None) -> No
     if asked and asked != provider:
         raise SystemExit(f"run {run.adw_id} ran in a {provider} sandbox, so it resumes in one, "
                          f"not in {asked}")
-    if not asked:
-        sandbox.prepare(provider, run.cfg)   # a resume without the flag
+    # sandbox.prepare already ran in `ensure`, before worktree.enter, flag or not.
     with run.phase(PhaseParams(name="sandbox", kind="code", owner="sandbox",
                                description=f"Make the run's {provider} VM and clone its branch in")) as ph:
         # Extensions come from the VM's clone, committed at the run's start

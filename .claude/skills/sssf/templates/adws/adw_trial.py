@@ -18,6 +18,7 @@ Every roster must be signed in and every attempt must have a worktree slot,
 or nothing starts. With --sandbox vercel, e2b or openshell, each attempt works in its
 own remote VM; repo.yaml's `sandbox:` is the default. Once all have ended, the panel reviews them and the
 scorecard prints.
+Under `host_agents: false` in repo.yaml no trial starts: the panel's reviewers work on this machine.
 review: run the panel again, for a trial whose `start` died or whose panel failed.
 show: the scorecard, at any point.
 merge: land the engineer's pick like `just merge`, then discard the other attempts.

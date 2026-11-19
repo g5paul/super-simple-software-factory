@@ -40,7 +40,7 @@ from pathlib import Path
 from . import repo_settings, session_files
 from .data_types import EventRecord, SSSFConfig
 from .tracer import Tracer
-from .utils import just, new_id
+from .utils import GIT_NO_PROGRAMS, git_location_env, just, new_id
 
 BRANCH_PREFIX = "sssf/"
 LOCK_SECONDS = 30
@@ -51,11 +51,35 @@ class WorktreeError(RuntimeError):
     """A worktree run that cannot start, resume, merge, or be discarded as asked."""
 
 
-def git(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+def git(*args: str, cwd: Path | None = None, check: bool = True,
+        env: dict | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=env)
     if check and result.returncode != 0:
         raise WorktreeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result
+
+
+def common_dir() -> Path:
+    """The repo's shared git dir, found without git's location variables."""
+    return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir",
+                    env=git_location_env()).stdout.strip())
+
+
+def in_repo() -> bool:
+    """Whether the working folder is in a git repo, by the same lookup as common_dir()."""
+    return git("rev-parse", "--git-dir", check=False, env=git_location_env()).returncode == 0
+
+
+def checkout_folder() -> Path | None:
+    """The first folder at or above the working folder holding a `.git` entry. Plain path
+    checks: no git call and no environment, so it still answers when git can't."""
+    here = Path.cwd().resolve()
+    return next((folder for folder in (here, *here.parents) if (folder / ".git").exists()), None)
+
+
+def checkout_here() -> bool:
+    """Whether the working folder or a parent holds a `.git` entry."""
+    return checkout_folder() is not None
 
 
 def branch_for(adw_id: str) -> str:
@@ -67,9 +91,13 @@ def path_for(root: Path, cfg: SSSFConfig, adw_id: str) -> Path:
 
 
 def main_checkout() -> Path:
-    """The repo's main checkout, even when called from inside a worktree."""
-    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
-    return common.parent.resolve()
+    """The repo's main checkout, even when called from inside a worktree.
+
+    Found with git's location variables (GIT_DIR, GIT_WORK_TREE, ...) removed from the
+    child's environment. A run's own `.env` or the engineer's shell can set them, and
+    `host_agents`, the spend caps and the trace all read the main checkout, so a repo
+    that git was pointed at must not be taken for it. os.environ is not changed."""
+    return common_dir().parent.resolve()
 
 
 def anchor(cfg: SSSFConfig, root: Path) -> None:
@@ -103,7 +131,7 @@ def locked(name: str, doing: str):
     the shared git dir, so a host and a container session see the same one.
     A second caller waits LOCK_SECONDS, then refuses.
     """
-    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    common = common_dir()
     with (common / f"sssf-{name}.lock").open("a+") as handle:
         deadline = time.monotonic() + LOCK_SECONDS
         while True:
@@ -126,7 +154,7 @@ def locked(name: str, doing: str):
 @contextlib.contextmanager
 def launching():
     """The launch lock, or nothing outside a git repo, where no worktree runs."""
-    if git("rev-parse", "--git-dir", check=False).returncode != 0:
+    if not in_repo():
         yield
         return
     with locked("launch", "this run"):
@@ -214,7 +242,7 @@ def spend_since(db: str, since: str) -> list[tuple[str, float]]:
 
 
 def dirty(root: Path) -> bool:
-    return bool(git("status", "--porcelain", cwd=root).stdout.strip())
+    return bool(git(*GIT_NO_PROGRAMS, "status", "--porcelain", cwd=root).stdout.strip())
 
 
 def uncommitted(path: Path) -> list[str]:
@@ -222,13 +250,13 @@ def uncommitted(path: Path) -> list[str]:
     Empty when the folder is gone."""
     if not path.is_dir():
         return []
-    lines = git("status", "--porcelain", "--untracked-files=all", cwd=path).stdout.splitlines()
+    lines = git(*GIT_NO_PROGRAMS, "status", "--porcelain", "--untracked-files=all", cwd=path).stdout.splitlines()
     return [line[3:] for line in lines if line.strip()]
 
 
 def in_run_worktree() -> bool:
     """Whether this process works in a run's worktree, not the main checkout."""
-    here = Path(git("rev-parse", "--show-toplevel").stdout.strip()).resolve()
+    here = Path(git("rev-parse", "--show-toplevel", env=git_location_env()).stdout.strip()).resolve()
     return here != main_checkout()
 
 
@@ -239,7 +267,7 @@ def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
     run. A run that already has a worktree resumes in it whether or not
     `--worktree` was passed again, so a resume can never land in the wrong tree.
     """
-    inside_repo = git("rev-parse", "--git-dir", check=False).returncode == 0
+    inside_repo = in_repo()
     root = main_checkout() if inside_repo else Path.cwd().resolve()
     anchor(cfg, root)
     if not inside_repo:

@@ -37,7 +37,7 @@ from pydantic import ValidationError
 
 from . import repo_settings, rules, sandbox
 from .data_types import LocalGuard, Policy
-from .utils import COPY_MODES
+from .utils import COPY_MODES, git_location_env
 
 BINARY = "/usr/bin/agentsh"
 CONFIG = "/etc/agentsh/sssf.yaml"
@@ -457,7 +457,7 @@ def read(cfg) -> LocalGuard:
     worktree.enter moves the process. A repo is asked for first, because
     main_checkout() raises outside one."""
     from . import worktree
-    in_repo = worktree.git("rev-parse", "--git-dir", check=False).returncode == 0
+    in_repo = worktree.in_repo()
     root = worktree.main_checkout() if in_repo else Path.cwd().resolve()
     try:
         settings = repo_settings.load(root)
@@ -468,7 +468,7 @@ def read(cfg) -> LocalGuard:
     if not in_repo:
         raise SystemExit("local_guard: agentsh needs a git checkout; this directory is not one. "
                          f"Run `git init` here or set `local_guard: none` in {repo_settings.PATH}.")
-    common = worktree.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    common = str(worktree.common_dir())
     refuse_script = str(Path(__file__).resolve().with_name("sssf_refuse.py"))
     try:
         template = (Path(__file__).parent / "agentsh_sssf.yaml").read_text()
@@ -479,9 +479,9 @@ def read(cfg) -> LocalGuard:
 
 # ── checks ───────────────────────────────────────────────────────────────────
 
-def _run(command: list[str]) -> subprocess.CompletedProcess:
+def _run(command: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
+        return subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT, env=env)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise AgentshRefused(f"`{' '.join(command[:3])}` failed ({type(error).__name__}); {FIX}") from None
 
@@ -751,7 +751,7 @@ def check_paths(root: str, env=None) -> None:
 def check_root(root: str) -> None:
     """Refuse a root or home folder with glob syntax, then a root that is not the top of a git checkout."""
     check_paths(root)
-    result = _run(["git", "-C", root, "rev-parse", "--show-toplevel"])
+    result = _run(["git", "-C", root, "rev-parse", "--show-toplevel"], env=git_location_env())
     if result.returncode != 0 or Path(result.stdout.strip()).resolve() != Path(root).resolve():
         raise AgentshRefused(f"{root} is not the top of a git checkout, so agentsh can't be rooted there; "
                              f"{FIX}")

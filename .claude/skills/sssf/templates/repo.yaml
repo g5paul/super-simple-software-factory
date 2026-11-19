@@ -22,6 +22,12 @@ max_worktree_runs: 2
 # docs/designs/remote-sandboxes.md in the SSSF repo says what each one needs.
 sandbox: none
 
+# false refuses any run whose agents would work on this machine: `--sandbox
+# none`, an ADW that takes no --sandbox, a resume of a host run, and trials.
+# It needs a VM `sandbox` above. It suits a repo whose justfile loads `.env`,
+# which an agent on this machine could reach through a recipe of its own.
+host_agents: true
+
 # What every live run in the repo may spend together, in dollars, checked
 # before each agent call and at launch. Each run counts only its current
 # attempt, and a call in flight counts once it ends. Off unless set.

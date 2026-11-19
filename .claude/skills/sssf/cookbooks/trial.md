@@ -39,6 +39,8 @@ It refuses, and starts nothing, when:
 
 With `--sandbox vercel`, `e2b` or `openshell`, or `sandbox:` set in repo.yaml, every attempt works in its own VM, and its first line says so. Put the flag before the request: `just trial --sandbox e2b "<request>" main main`. Each attempt reports its VM as any VM run does ([run_adw.md](run_adw.md), section "In a VM"). The panel runs on this machine.
 
+- repo.yaml sets `host_agents: false`: the panel's reviewers would work on this machine, so no trial starts. That is the engineer's setting; report it.
+
 A note that two attempts "share one plan's usage window" is a warning, not a refusal. Pass it on.
 
 ## While it runs

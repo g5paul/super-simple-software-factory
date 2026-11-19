@@ -119,9 +119,34 @@ def copy_installs(env: dict[str, str], mode: str | None) -> dict[str, str]:
 MOD_LINE = re.compile(r"^\s*mod\s+sssf(\s+['\"]sssf\.just['\"])?\s*$", re.MULTILINE)
 
 
+# The variables that tell git where a repo is, as `git help git` (ENVIRONMENT) and
+# `git rev-parse --local-env-vars` list them. A `.env` a run committed or the engineer's
+# shell can set any of them. GIT_CONFIG* stays out on purpose: no config key moves the
+# common dir, and a container may need safe.directory from one of them for git to answer.
+GIT_LOCATION_VARS = frozenset({
+    "GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_IMPLICIT_WORK_TREE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
+    "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_NO_REPLACE_OBJECTS",
+})
+
+
+# Two overrides for SSSF's own host git calls in a VM run's worktree, the values permissions.py
+# uses: an empty fsmonitor (`false` would run the program `false` before git 2.36) and no
+# hooks. `-c` wins over GIT_CONFIG_COUNT. GIT_CONFIG_* itself is kept, see above.
+GIT_NO_PROGRAMS = ("-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null")
+
+
+def git_location_env() -> dict[str, str]:
+    """A copy of the environment without git's location variables, for the calls that
+    find the main checkout or the repo root. os.environ itself is never changed."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
+
+
 @functools.lru_cache(maxsize=1)
 def _recipe_prefix() -> str:
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                         env=git_location_env())
     root = Path(top.stdout.strip()) if top.returncode == 0 else Path.cwd()
     justfile = root / "justfile"
     loads = justfile.is_file() and MOD_LINE.search(justfile.read_text()) is not None

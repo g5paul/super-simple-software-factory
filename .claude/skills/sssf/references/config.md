@@ -1054,6 +1054,24 @@ How the roster maps onto `claude`:
 
 **Cost.** `total_cost_usd` in Claude's `result` event is a running total for the whole session, while its `usage` covers only the current send. The ledger keeps the last total, and each send is billed the difference. Only a total is reported, so the per-component cost columns in `agent_end` usage stay zero. On a subscription, cost is Claude's list-price figure for the tokens, not a charge.
 
+**Billed API spend.** SSSF's cost is Claude Code's own figure, so a run on the subscription shows a list price and nothing reaches the Console. A run with `SSSF_CLAUDE_AUTH=api_key` is billed to the API account, and the Console's Cost page shows it a few hours later. SSSF doesn't read the Console yet (`docs/open.md`). To see a run's billed spend by API key, outside SSSF:
+
+1. **Make the account an organization.** The Admin API isn't open to individual Console accounts. Set one up at `platform.claude.com/settings/organization`.
+2. **Create an Admin API key** (`sk-ant-admin...`), as [Create an Admin API key](https://platform.claude.com/docs/en/manage-claude/admin-api-keys) says. It can manage the whole organization, so keep it out of every repo's `.env`: a justfile with `set dotenv-load` hands `.env` to the recipes that agent-written code can run. Keep it in a file of its own outside any repo, readable only by you.
+3. **Give API-billed runs their own API key**, so `api_key_id` separates them from your other use. A workspace of their own does the same through `workspace_id`.
+4. **Read the cost** with the [Usage and Cost Analytics API](https://platform.claude.com/docs/en/manage-claude/usage-cost-analytics-api), with the admin key in `ANTHROPIC_ADMIN_KEY`:
+
+   ```bash
+   curl --globoff "https://api.anthropic.com/v1/organizations/analytics/cost?starting_at=2026-11-01T00:00:00Z&group_by[]=api_key_id" \
+     -H "anthropic-version: 2026-10-21" \
+     -H "anthropic-beta: analytics-usage-cost-2026-08-24" \
+     -H "x-api-key: $ANTHROPIC_ADMIN_KEY"
+   ```
+
+   Each row's `amount` is the cost after discounts and before credits, in cents. `list_amount` is the list price, which is what SSSF's own figure estimates.
+
+Data usually lands within 4 hours, and can take up to 24, so the API shows a day's spend, not a run's while it's going. The credit balance, the Console's figure at top right, has no API: the Console is the only place to see it.
+
 **Context.** `context_tokens` is the last top-level assistant turn's `input + cache_creation + cache_read + output`. `context_window` comes from the `result` event's `modelUsage`.
 
 `CLAUDE_CODE_PATH` in `.env` points at the binary when `claude` is not on PATH.

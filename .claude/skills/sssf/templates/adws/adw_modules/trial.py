@@ -11,7 +11,8 @@ drops the rest.
 VM; without the flag, repo.yaml's `sandbox:` decides, and `--sandbox none`
 keeps them all on this machine. The choice is made once, checked for every
 roster before anything starts, and passed to each attempt, so a trial's
-attempts all work in the same place. The panel runs on this machine.
+attempts all work in the same place. The panel runs on this machine, so under
+`host_agents: false` no trial starts (session.host_agents).
 
 Everything a trial knows lives in the trace, as events:
   trial            on each attempt, at its start (session.ensure, from SSSF_TRIAL)
@@ -452,6 +453,11 @@ def start(request: str, names: list[str], out=sys.stdout, asked: str | None = No
     `asked` is the --sandbox flag. Returns the trial id."""
     root = worktree.main_checkout()
     os.chdir(root)
+    from . import session          # imported here, as review does
+    try:
+        session.host_agents("", None, None)
+    except session.HostAgentsRefused as error:
+        raise TrialError(f"a trial's panel reviews the attempts on this machine, so no trial starts. {error}") from None
     provider = where(root, asked)
     cfg, cfgs, warnings = check(root, names, provider)
     db = cfg.observability.db

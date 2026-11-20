@@ -9,6 +9,7 @@ disposes.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import uuid
@@ -348,6 +349,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         envelope, attempt = _parse_with_retries(run, phase, call, result, send)
 
         # claim gates — violations flow back into the SAME session as corrections
+        start = (head_before.get("sha") or None) if isinstance(head_before, dict) else None
         for gate_attempt in range(1, max(1, phase.params.retries + 1) + 1):
             # Gates run git, and git would run a hook or fsmonitor the agent
             # planted. A changed git directory skips the gates; the check below
@@ -359,7 +361,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                 break                       # the check below reports it
             violations = []
             for gate in call.gates:
-                report = _as_report(gate(envelope, run))
+                report = _as_report(_judge(gate, envelope, run, start))
                 found = report.violations
                 run.tracer.gate_row(phase, gate.__name__, report, gate_attempt)
                 run.tracer.event(EventRecord(
@@ -517,6 +519,17 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 
 
 # ── internals ────────────────────────────────────────────────────────────────
+
+def _judge(gate, envelope, run, start):
+    """Run one gate. A gate that names a `start` parameter also gets the id of the
+    commit the call started from. It comes from here, from head_before, taken before
+    the agent ran: at gate time HEAD and every ref are whatever the agent left."""
+    try:
+        takes_start = "start" in inspect.signature(gate).parameters
+    except (TypeError, ValueError):
+        takes_start = False
+    return gate(envelope, run, start=start) if takes_start else gate(envelope, run)
+
 
 def _git_dir_back(guard) -> bool:
     """Whether every git config file is known to be as it was before the agent ran.

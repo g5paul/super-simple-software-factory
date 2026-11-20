@@ -39,4 +39,6 @@ Respond with ONLY valid JSON matching `BuildOutput` — no prose before or after
 }
 ```
 
+`changed_files` lists every path your change touched, from the repo root, as git names it: each file you added or edited, each file you deleted, and both the old and the new path of a rename.
+
 `status` is `success` or `fail`, and nothing else: any other value, such as `blocked`, is refused. Work you cannot finish is `fail`, with the reason in `summary`.

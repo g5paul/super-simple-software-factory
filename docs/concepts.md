@@ -276,7 +276,7 @@ A gate checks what the report claims, after the agent finishes. Nobody knows ahe
 | `artifacts_exist` | every file the report lists exists |
 | `files_non_empty` | none of them is empty |
 | `json_parses` | listed JSON files parse |
-| `diff_matches_claims` | `changed_files` matches what git sees changed |
+| `diff_matches_claims` | every path in `changed_files` exists, or is a file the call deleted or renamed away |
 | `plan_well_formed` | the plan's two copies match, no committed spec was overwritten, it has a verification heading, and it names a real file |
 | `verdict_consistent` | a review's verdict agrees with its findings |
 | `panel_complete` | a trial's referee judged every attempt and ranked each once |

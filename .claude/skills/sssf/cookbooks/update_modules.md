@@ -101,6 +101,8 @@ def tests_declared_passed(envelope, run) -> GateReport:
     return report
 ```
 
+A gate that names a `start` parameter, `gate(envelope, run, start=None)`, also gets the id of the commit the call started from, which SSSF recorded before the agent ran.
+
 `report.check(item, ok, note)` appends and returns the report, so a single-item gate is one line: `return GateReport().check(command, ok, f"exit {code}")`.
 
 **Write a note on passing checks too, not just failures.** The note is the evidence, and it is what makes a green gate worth reading — `artifacts_exist ✓ 1 checked · plan.md — exists, 454B` tells you what was verified, where a bare ✓ tells you nothing. Notes on failed checks double as the reason and are what the agent is told, so phrase them as the problem: `"claimed changed file does not exist"`.

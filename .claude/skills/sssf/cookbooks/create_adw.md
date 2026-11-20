@@ -31,7 +31,7 @@ Answer four questions, in order:
 
 3. **Does anything loop?** Test-fix cycles are bounded fix loops (see `update_adw.md`), not phase retries.
 
-4. **What does each call need to prove?** Pick gates per call from `gates.py`: `artifacts_exist`, `files_non_empty`, `json_parses`, `diff_matches_claims`, and `gates.PLAN` for every planner call, `tests_pass("cmd")` — or an inline one-off.
+4. **What does each call need to prove?** Pick gates per call from `gates.py`: `artifacts_exist`, `files_non_empty`, `json_parses`, `diff_matches_claims` (passes a claimed path that exists, or a file of the commit the call started from that is gone from the working tree, such as a deleted file or a rename's old path, matched by its exact name), and `gates.PLAN` for every planner call, `tests_pass("cmd")` — or an inline one-off.
 
 ## Step 2 — Ownership rules (the swim lanes depend on these)
 

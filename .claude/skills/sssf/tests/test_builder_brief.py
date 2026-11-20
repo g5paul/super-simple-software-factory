@@ -44,12 +44,13 @@ from adw_modules.data_types import (AxisFinding, AxisReviewOutput, BuildOutput, 
 from test_plan_checks import fake_run, plan  # noqa: E402
 from test_review_brief import FOLDER, PROMPTS, SHIPPED, check, green, seen, wrap  # noqa: E402,F401
 
-# sha256 of each file's text at 4ebe27b, before this change.
+# sha256 of each file's text at 4ebe27b, before this change. The two user.md pins
+# also hold the `changed_files` line the build gate's rename and delete rule added.
 MAIN = {
     "builder/system.md": "0e78a6f4604242b3415278b2136e426d28af43da7988377f9a19ffe7f5b9b4bc",
-    "builder/user.md": "a72492dbf093df5d4690e468beee733b48ae843f05e9a40170e79126792151a7",
+    "builder/user.md": "cb58ab37aeb19f3fb542863dc3eef46989e6ae30b0fbfb5de30526ac68169d3d",
     "ticket_builder/system.md": "5f42cf96b4607a285bb90eb616a7bbbc58aaad88413c17aa65d48b9ca4c6a66e",
-    "ticket_builder/user.md": "55818d5278403aff4bd5adf8752dcebf7eb88274442ed29bf173607cbe81c747",
+    "ticket_builder/user.md": "06815ba7cd132ba1f9a2d336d57766c4f36b7e3cccbadb073ed20242fc4fef36",
 }
 STATUS_LINE = ("`status` is `success` or `fail`, and nothing else: any other value, such as "
                "`blocked`, is refused. Work you cannot finish is `fail`, with the reason in `summary`.")

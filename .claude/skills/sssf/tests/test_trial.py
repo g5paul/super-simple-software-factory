@@ -269,11 +269,19 @@ def container_broker(tmp_path, monkeypatch):
                 return
             conn.sendall(state["answer"])
             conn.close()
-    threading.Thread(target=serve, daemon=True).start()
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
     monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", path)
     monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", tmp_path / "auth.json")
     yield state
+    # Stop the accept loop before closing, as test_agent_pi's broker does.
+    try:
+        server.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    thread.join(timeout=5)
     server.close()
+    assert not thread.is_alive(), "the fake broker's accept loop didn't stop"
     shutil.rmtree(d, ignore_errors=True)
 
 

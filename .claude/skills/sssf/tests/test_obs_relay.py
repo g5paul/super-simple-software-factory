@@ -305,6 +305,19 @@ def _post(url, body: bytes, path="/events", timeout=30):
         return error.code, b""
 
 
+def _refused(url, body: bytes) -> bool:
+    # The relay answers 413 once a body passes its cap and closes without reading
+    # the rest. A client still sending then meets a reset or a broken pipe instead
+    # of the answer: a stall past the cap does it every time, and a loaded machine
+    # did it in full skill runs (2026-11-12 and 11-13). Either way the post was refused.
+    try:
+        return _post(url, body)[0] == 413
+    except (ConnectionResetError, BrokenPipeError):
+        return True
+    except urllib.error.URLError as error:
+        return isinstance(error.reason, (ConnectionResetError, BrokenPipeError))
+
+
 @node
 # host_only, the error names the sandbox: reaches its fake service on 127.0.0.1 or a socket, and agentsh denies it.
 @pytest.mark.host_only
@@ -346,7 +359,7 @@ def test_the_relay_listens_on_loopback_only(relay):
 def test_the_relay_refuses_bad_json_and_oversized_bodies(relay):
     url, events, _ = relay
     assert _post(url, b"{nope")[0] == 400
-    assert _post(url, b"[" + b" " * (5 * 1024 * 1024) + b"]")[0] == 413
+    assert _refused(url, b"[" + b" " * (5 * 1024 * 1024) + b"]")
     assert _post(url, b"[]", path="/other")[0] == 404
     assert not events.exists() or events.read_text() == ""
 

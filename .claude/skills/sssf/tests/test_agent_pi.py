@@ -176,6 +176,17 @@ def test_a_turn_that_recovers_after_the_limit_is_not_stopped(tmp_path, monkeypat
 
 # --- the operator container: a token from the host's broker ---
 
+def _stop(server: socket.socket, thread: threading.Thread) -> None:
+    """Wake a listening socket's accept loop, wait for it to end, then close the socket."""
+    try:
+        server.shutdown(socket.SHUT_RDWR)       # a blocked accept() returns EINVAL
+    except OSError:
+        pass
+    thread.join(timeout=5)
+    server.close()
+    assert not thread.is_alive(), "the fake broker's accept loop didn't stop"
+
+
 @pytest.fixture
 def broker(tmp_path, monkeypatch):
     """A fake broker answering one line; set `answer` before connecting."""
@@ -195,11 +206,14 @@ def broker(tmp_path, monkeypatch):
                 return
             conn.sendall(state["answer"])
             conn.close()
-    threading.Thread(target=serve, daemon=True).start()
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
     monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", path)
     monkeypatch.setattr(agent_pi, "PI_AUTH_JSON", tmp_path / "auth.json")
     yield state
-    server.close()
+    # Stop the thread before closing: a thread left in its accept loop can take
+    # the fd number a later test's socket reuses and answer that test's client.
+    _stop(server, thread)
     import shutil
     shutil.rmtree(d, ignore_errors=True)
 

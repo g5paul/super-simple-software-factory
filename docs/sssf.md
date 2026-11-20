@@ -38,13 +38,13 @@ The hub's roster is the Claude Code starter ([config.md](../.claude/skills/sssf/
 
 | Agent | Model | Thinking | Why |
 |---|---|---|---|
-| planner, reviewer, standards_reviewer, spec_reviewer | Fable 5.2 | high | The Fable week (efc25f9), from 2026-11-13 to 2026-11-20 13:00 UTC, to measure what Fable does to usage. The starter has Opus 5.5 here |
+| planner, reviewer, standards_reviewer, spec_reviewer | Fable 5.2 | medium | The medium week, from 2026-11-20 to 11-27 13:00 UTC. The Fable week before it (efc25f9, at high) cost $4.28 a plan to Opus's $1.65 with no drop in review rounds; see the open.md row on the Fable planner. The starter has Opus 5.5 here |
 | builder, ticket_builder | Sonnet 5.5 | medium | as shipped |
 | scout, documenter | Haiku 5.5 | medium | as shipped |
 | guard_spec_reviewer, bypass_reviewer | Opus 5.5 | high | the guard-change chain's reviewers, kept on Opus through the Fable week so the guard check doesn't change mid-trial |
 | guard_builder | Sonnet 5.5 | medium | the builder plus the shipped guard paths, for the guard-change chain only |
 
-The last three are hub-only. Whether the Fable seats stay, or move to medium, is decided after the week ends; see the open.md rows on Fable.
+The last three are hub-only. After the medium week, the planner stays on Fable at medium or goes back to Opus; see the open.md row on the Fable planner.
 
 `protected_files` adds the hub's own rules and records to the shipped list: `.claude/agents/`, `CLAUDE.md`, `CLAUDE.local.md`, `docs/projects.md` and `adws/tests/`.
 

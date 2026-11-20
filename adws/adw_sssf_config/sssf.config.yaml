@@ -98,7 +98,7 @@ agents:
   - name: planner
     model: anthropic/claude-fable-5-2  # the plan sets the ceiling for everything after it
     max_call_cost: 4.00                # one call stops itself here (claude --max-budget-usd); about twice the most one has cost
-    thinking: high
+    thinking: medium
     color: "#a78bfa"
     purpose: Turn a request into a plan the builder can implement without asking questions.
     prompt_engineering:
@@ -154,7 +154,7 @@ agents:
   - name: reviewer
     model: anthropic/claude-fable-5-2  # a different model from the builder, so it does not share its blind spots
     max_call_cost: 2.00
-    thinking: high
+    thinking: medium
     color: "#fb7185"
     purpose: Confirm that what was built is what was asked for; change nothing.
     prompt_engineering:
@@ -193,7 +193,7 @@ agents:
   - name: standards_reviewer
     model: anthropic/claude-fable-5-2
     max_call_cost: 2.00
-    thinking: high
+    thinking: medium
     color: "#f97316"
     purpose: Check a feature's diff against the repo's documented standards and a code smell baseline; change nothing.
     prompt_engineering:
@@ -210,7 +210,7 @@ agents:
   - name: spec_reviewer
     model: anthropic/claude-fable-5-2
     max_call_cost: 2.00
-    thinking: high
+    thinking: medium
     color: "#f43f5e"
     purpose: Check a feature's diff against its spec and tickets; change nothing.
     prompt_engineering:

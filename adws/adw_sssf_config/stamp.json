@@ -33,7 +33,7 @@
       "source": "prompt_engineering/builder/system.md"
     },
     "adws/adw_data/prompt_engineering/builder/user.md": {
-      "sha256": "9db9067490ba4b71ecc6d57f408a13c7e835700185af344aa3305ddb0a620c77",
+      "sha256": "25a50ad5dca0e3fb1b3786e06b74959b40adb367919783c3aa8a688818cc2df1",
       "source": "prompt_engineering/builder/user.md"
     },
     "adws/adw_data/prompt_engineering/documenter/system.md": {
@@ -97,7 +97,7 @@
       "source": "prompt_engineering/ticket_builder/system.md"
     },
     "adws/adw_data/prompt_engineering/ticket_builder/user.md": {
-      "sha256": "1ae7cd2538f3ecca973311ae8aef0ad4f5dc26b388788c938269509a150832b4",
+      "sha256": "3d806d288dc14b07f3f6dcb30a4fc4ccae7e3af6daf7e4814ef024c92dfc0026",
       "source": "prompt_engineering/ticket_builder/user.md"
     },
     "adws/adw_document.py": {
@@ -129,7 +129,7 @@
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
-      "sha256": "61185c479b958723b2a1b6a0d61f5b580d1374de741ebbde86e7d79dbfda7acd",
+      "sha256": "7d35e398acb5febf180a41683df28983606849f96a8abb542847b2d6fdc18a27",
       "source": "adws/adw_modules/agents.py"
     },
     "adws/adw_modules/agentsh_guard.py": {
@@ -157,7 +157,7 @@
       "source": "adws/adw_modules/data_types.py"
     },
     "adws/adw_modules/gates.py": {
-      "sha256": "fe36a3efba852d526207af44d11c12353faa92dea85e6adefc2dcd95ca5006aa",
+      "sha256": "fa6778637a72b2f9300b9771d0623b0206627f290648efbef79deedc937ab74f",
       "source": "adws/adw_modules/gates.py"
     },
     "adws/adw_modules/git_helper.py": {
@@ -265,7 +265,7 @@
       "source": "adws/adw_modules/tickets.py"
     },
     "adws/adw_modules/tracer.py": {
-      "sha256": "935672eb83ef32718c87e5f85469cd6821a1aee9c4ed11429fd549dce5dddd80",
+      "sha256": "9a7fb1159b2cdf125442dacd0bd0740a9ea6abe603cbda55f3ea9e364972f3cf",
       "source": "adws/adw_modules/tracer.py"
     },
     "adws/adw_modules/trial.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "411114a"
+  "skill": "9c9be5f"
 }

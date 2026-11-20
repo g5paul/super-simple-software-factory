@@ -2,7 +2,8 @@
 
 A gate is `gate(envelope, run) -> GateReport` — one check per item it looked at.
 Violations are derived from the failed checks and sent back to the SAME agent
-session as a correction. Every check is recorded either way, so a green gate
+session as a correction. A gate that names a `start` parameter also gets the id
+of the commit the call started from. Every check is recorded either way, so a green gate
 says WHAT it verified instead of only that it passed.
 
 Gates check what is mechanically checkable; plan quality is a reviewer's job.
@@ -12,11 +13,14 @@ Gates check what is mechanically checkable; plan quality is a reviewer's job.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
 from . import sandbox
 from .data_types import EnvelopeBase, GateReport
+from .permissions import _GIT_ENV
+from .utils import GIT_NO_PROGRAMS
 
 TAIL_CHARS = 1000        # command output kept as evidence on a failure
 
@@ -60,13 +64,45 @@ def json_parses(envelope: EnvelopeBase, run) -> GateReport:
     return report
 
 
-def diff_matches_claims(envelope: EnvelopeBase, run) -> GateReport:
-    """Every file claimed changed must exist on disk."""
+# A whole SHA-1 or SHA-256 id. Git reads one as an object, never as a ref name.
+_FULL_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _files_at(start) -> set[str]:
+    """Every file in the commit `start`, named from the repo root as git names it.
+    Empty when `start` isn't a full id or git can't read it."""
+    if not isinstance(start, str) or not _FULL_ID.fullmatch(start):
+        return set()
+    done = sandbox.current().run(
+        [*_GIT_ENV, "git", "--no-replace-objects", *GIT_NO_PROGRAMS,
+         "-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false",
+         "ls-tree", "-r", "-z", "--name-only", "--full-tree", start], text=False)
+    if done.returncode != 0:
+        return set()
+    out = done.stdout
+    return set((os.fsdecode(out) if isinstance(out, bytes) else out or "").split("\0")) - {""}
+
+
+def diff_matches_claims(envelope: EnvelopeBase, run, start: str | None = None) -> GateReport:
+    """Every claimed path exists, or is a file in the start commit that is gone
+    from the working tree (a deleted file, a rename's old path).
+
+    `start` is the id of the commit the call started from. agents.execute records
+    it before the agent runs and hands it over; the gate never reads HEAD or a
+    ref, which the agent can move. Without a full id, nothing counts as deleted.
+    Names match exactly as git prints them from the repo root."""
     report = GateReport()
+    at_start = None
     for f in getattr(envelope, "changed_files", []):
         p = Path(f)
-        found = sandbox.current().exists(p)
-        report.check(f, found, f"exists, {_size(p)}" if found else "claimed changed file does not exist")
+        if sandbox.current().exists(p):
+            report.check(f, True, f"exists, {_size(p)}")
+            continue
+        if at_start is None:
+            at_start = _files_at(start)
+        deleted = f in at_start
+        report.check(f, deleted, "deleted in the working tree" if deleted
+                     else "claimed changed file does not exist")
     return report
 
 

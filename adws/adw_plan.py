@@ -28,7 +28,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Capture the incoming ask")) as ph:
         ph.log(input=prompt)
 
-    with run.phase(PhaseParams(name="plan", kind="agent", owner="planner",
+    with run.phase(PhaseParams(name="plan", kind="agent", owner="planner", retries=1,
                                description="Turn the request into an implementable plan")) as ph:
         ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
                           gates=gates.PLAN))

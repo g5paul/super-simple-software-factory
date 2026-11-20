@@ -58,7 +58,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     # Once per run, before any builder call: the command verify will run after it.
     verify_next = plan_checks.builder_brief(run, None, base=quality.run_tests)
 
-    with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
+    with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
                                description="Implement the request")) as ph:
         built = previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
                                              verify_next=verify_next,

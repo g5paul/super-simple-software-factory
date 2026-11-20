@@ -13,11 +13,11 @@
       "source": "adws/adw_build.py"
     },
     "adws/adw_build_review.py": {
-      "sha256": "42bd52b07c79c67dca45c8c2a23a7e09c860e83895b53838cef9adc3ddc13bcd",
+      "sha256": "d222ec805961bedae4b63d4610be508d5c3c4708d21a35c4dc159fee08b27881",
       "source": "adws/adw_build_review.py"
     },
     "adws/adw_build_test.py": {
-      "sha256": "f14ee85071cb01997ce8ce68d3a7fe2272e79c7ea03455a9561de02931659fbb",
+      "sha256": "ee4418bfc00e078967cb0a3b785532193cabb70ceb90b8948323cad9787a1bbf",
       "source": "adws/adw_build_test.py"
     },
     "adws/adw_data/harness_engineering/subagents.ts": {
@@ -281,19 +281,19 @@
       "source": "adws/adw_modules/worktree.py"
     },
     "adws/adw_plan.py": {
-      "sha256": "a9bbb286232a4f3c81c59c5ad65058d99a78e77866ec247edc0c5d41d7a46fcf",
+      "sha256": "7a50273c11353141d9e29dab1a522181893e90de0e1f22c07772ad4aabac0471",
       "source": "adws/adw_plan.py"
     },
     "adws/adw_plan_build.py": {
-      "sha256": "b441eca51bca35e8c6de67d88f51e9e1f4e6cbe75e32a9f7f699cfb58cdfeb8f",
+      "sha256": "6f3412f43ffb765ef2d09fa4ade42fa9ad381eef57cb31d4fe63355f0c2b8b4d",
       "source": "adws/adw_plan_build.py"
     },
     "adws/adw_plan_build_test.py": {
-      "sha256": "339b6539032b5e8542b07f2dddacc11010be1210210bf0a9bfe74436230ea793",
+      "sha256": "b8a30624a4e1c51b82ce83195cdc1725950b515c34d89a6cdcee29ebdad84602",
       "source": "adws/adw_plan_build_test.py"
     },
     "adws/adw_plan_build_test_quality.py": {
-      "sha256": "84c4469731770e5e974b2179bf95e0dd00f560156a15ffd6edff445be49ad2f0",
+      "sha256": "1c40bcee530d1eb9a757c05e1120fa4902b5261cb95d699bfcc63e16bd73ee4b",
       "source": "adws/adw_plan_build_test_quality.py"
     },
     "adws/adw_prompt.py": {
@@ -313,7 +313,7 @@
       "source": "adws/adw_scout.py"
     },
     "adws/adw_simple_sdlc.py": {
-      "sha256": "bc141debf31c31241497d25dfb18d42f7053159c4d4f9040d9cf902241617360",
+      "sha256": "ed4e21e99dd9d161f708b5a79fbf85eb5058206045d90b6c429dd065e48c87e2",
       "source": "adws/adw_simple_sdlc.py"
     },
     "adws/adw_sssf_config/repo.yaml": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "b3f7dd3"
+  "skill": "411114a"
 }

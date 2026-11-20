@@ -10,6 +10,9 @@ build time, because the sandbox can't download one. The tag covers both, so a
 changed Python needs `just openshell-setup`. Denials from the sandbox's network policy go in the trace as
 `sandbox_denied` events.
 
+Every exec gets `TMPDIR=/var/tmp`, which is on the VM's disk, and the policy allows it
+read-write. The VM's size comes from the gateway's config, which `just openshell-setup` writes.
+
 The Claude token and a pi agent's ChatGPT token, like every env value, travel on stdin
 in a framed block and are exported by a shell inside the sandbox. An input over
 STDIN_MAX (1 MiB) goes by `openshell sandbox upload` from a fresh staging folder
@@ -60,6 +63,7 @@ NODE_EXE = "/usr/local/bin/node"
 CLAUDE_EXE = "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 ANY_BINARY = "/**"      # untested reading: the proof run checks it
 READ_ONLY_PATHS = ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
+TMPDIR = "/var/tmp"   # on the overlay disk; /tmp is a tmpfs taken from the VM's RAM
 REGISTRIES = ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
 CONFIG = "adws/adw_sssf_config/sssf.config.yaml"
 DATA_DIR = "adws/adw_data"
@@ -191,7 +195,7 @@ def policy(folder: Path, allow: list, harnesses=frozenset({"claude_code"})) -> d
             # include_workdir stays: both policies the 2026-11-07 tests ran had it, and
             # Claude Code's home is most likely the workdir. The proof run checks it.
             "filesystem_policy": {"include_workdir": True, "read_only": list(READ_ONLY_PATHS),
-                                  "read_write": ["/tmp", "/dev/null", str(folder)]},
+                                  "read_write": ["/tmp", TMPDIR, "/dev/null", str(folder)]},
             "landlock": {"compatibility": "hard_requirement"},
             "network_policies": rules}
 
@@ -376,7 +380,7 @@ class _VM:
 
     def run_process(self, command: str, args=(), *, cwd=None, env=None, sudo=False,
                     capture_output=True, input=None, kill_after=None):
-        data = _frame(env or {})
+        data = _frame({**(env or {}), "TMPDIR": TMPDIR})
         tail = ["null", command, *args]
         if input is not None:
             body = input.encode() if isinstance(input, str) else bytes(input)
@@ -400,7 +404,7 @@ class _VM:
                                      stderr=err_text)
 
     def create_process(self, command: str, args=(), *, cwd=None, env=None) -> _Stream:
-        frame = _frame(env or {})
+        frame = _frame({**(env or {}), "TMPDIR": TMPDIR})
         popen = subprocess.Popen(_exec_argv(self.name, cwd, None) + ["null", command, *args],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  text=True, bufsize=1, errors="replace")

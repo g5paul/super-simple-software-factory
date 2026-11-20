@@ -190,7 +190,11 @@ procs ADW_ID:
 # scripts/openshell_image.py refuses the same way, except with --print. Neither stops an
 # agent that clears SSSF_ADW_ID, runs the steps by hand, or starts it through something
 # that gives it a fresh environment, such as ssh, sudo or systemd-run; see config.md.
-# It never runs sudo. It creates TLS keys and gateway.toml only when missing, and
+# It never runs sudo. It creates TLS keys only when missing. It creates gateway.toml when
+# missing and otherwise changes only the three VM sizes under [openshell.drivers.vm]
+# (vcpus, mem_mib, overlay_disk_mib; set them with SSSF_OPENSHELL_VCPUS,
+# SSSF_OPENSHELL_MEM_MIB, SSSF_OPENSHELL_OVERLAY_DISK_MIB). It restarts the gateway only
+# when gateway.toml is newer than the running gateway and no sandbox is listed. It
 # rewrites its own unit file ~/.config/systemd/user/openshell-gateway.service on every
 # run, which is how a rerun picks up a moved openshell-gateway; keep your own unit under
 # another name.
@@ -218,6 +222,7 @@ openshell-setup:
         mkdir -p "$(dirname "$conf")"
         printf '[openshell]\nversion = 2\n\n[openshell.gateway]\nbind_address = "127.0.0.1:17670"\ncompute_driver = "vm"\n' > "$conf"
     fi
+    uv run .claude/skills/sssf/scripts/openshell_gateway.py size --config "$conf"
     unit="$HOME/.config/systemd/user/openshell-gateway.service"
     mkdir -p "$(dirname "$unit")"
     cat > "$unit" <<EOF
@@ -236,6 +241,7 @@ openshell-setup:
     EOF
     systemctl --user daemon-reload
     systemctl --user enable --now openshell-gateway
+    uv run .claude/skills/sssf/scripts/openshell_gateway.py restart --config "$conf"
     uv run .claude/skills/sssf/scripts/openshell_image.py --repo .
     openshell status
     echo "Next: adw_simple_sdlc --worktree --sandbox openshell"

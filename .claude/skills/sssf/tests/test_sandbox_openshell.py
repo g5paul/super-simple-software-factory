@@ -203,7 +203,7 @@ def test_the_default_policy():
         "version": 1,
         "filesystem_policy": {"include_workdir": True,
                               "read_only": ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"],
-                              "read_write": ["/tmp", "/dev/null", "/home/u/repo"]},
+                              "read_write": ["/tmp", "/var/tmp", "/dev/null", "/home/u/repo"]},
         "landlock": {"compatibility": "hard_requirement"},
         "network_policies": expected_rules()}
     assert "github" not in osh.policy_yaml(folder, [])
@@ -851,6 +851,52 @@ def test_key_reaches_only_when_the_vm_would_get_it(cli, tmp_path, monkeypatch):
     with pytest.raises(sandbox.SandboxFailed, match="ANTHROPIC_API_KEY"):
         osh.OpenShell(run, "sssf/abc", "p").open()
     assert made == [1]
+
+
+# --- TMPDIR: every exec writes temp files on the VM's disk, not the RAM tmpfs ----
+
+def _tmpdir_lines(call) -> list[str]:
+    return [l for l in stdin_of(call).splitlines() if l.startswith("TMPDIR=")]
+
+
+def test_every_exec_carries_tmpdir_on_the_disk(cli):
+    vm = osh._VM("sb")
+    want = "TMPDIR=" + base64.b64encode(b"/var/tmp").decode()
+    show = "import os;print(os.environ['TMP' + 'DIR'])"
+    done = vm.run_process("python3", ["-c", show])
+    assert done.stdout.strip() == "/var/tmp"
+    vm.run_process("true", env={"TMPDIR": "/elsewhere", "A": "1"})
+    vm.run_process("cat", input="hello")
+    vm.create_process("true").wait()
+    execs = [c for c in cli() if c["argv"][:2] == ["sandbox", "exec"]]
+    assert len(execs) == 4
+    for call in execs:
+        assert _tmpdir_lines(call) == [want]
+        assert "/elsewhere" not in stdin_of(call) and "TMPDIR" not in " ".join(call["argv"])
+
+
+def test_a_runs_commands_and_agents_get_tmpdir(cli, tmp_path, monkeypatch):
+    values, _ = _started_env(cli, tmp_path, monkeypatch, {"SSSF_X": "1", "TMPDIR": "/elsewhere"})
+    assert values["TMPDIR"] == "/var/tmp"
+    repo, run, _ = layout(tmp_path / "run", monkeypatch)
+    box = osh.OpenShell(run, "sssf/abc", "p")
+    box.sandbox = osh._VM("sb")
+    monkeypatch.setattr(Remote, "_refresh", lambda self, seconds: None)
+    done = box.run(["sh", "-c", "printf %s \"$TMPDIR\""], cwd=repo, env={"TMPDIR": "/elsewhere"})
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "/var/tmp"
+
+
+def test_tmpdir_is_in_the_policy_and_outside_the_repo(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    write_shipped_config(repo)
+    monkeypatch.chdir(repo)
+    osh.OpenShell(run, "sssf/abc", "p")._create()
+    written = yaml.safe_load((run.session_dir / "openshell-policy.yaml").read_text())
+    writable = written["filesystem_policy"]["read_write"]
+    assert osh.TMPDIR in writable and "/tmp" in writable
+    folder = osh.folder_for(repo)
+    assert Path(osh.TMPDIR) != folder and folder not in Path(osh.TMPDIR).parents
 
 
 # --- the tool check looks up the repo's own commands ---------------------------

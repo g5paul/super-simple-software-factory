@@ -369,7 +369,7 @@ A killed run marks itself `fail` in the trace. In Claude Code, "stop run a1b2c3d
 | `rosters` | each roster and its models | reads `adws/adw_sssf_config/` |
 | `login-check` | that Claude Code agents can sign in | `agent_cc.check_login()` |
 | `container` | the operator session in the operator container | `container/run.sh` |
-| `openshell-setup` | the gateway and image for `--sandbox openshell` | `scripts/openshell_image.py` and systemd |
+| `openshell-setup` | the gateway and image for `--sandbox openshell` | `scripts/openshell_image.py`, `scripts/openshell_gateway.py` and systemd |
 | `e2b-template` | SSSF's E2B VM template, once per team | `scripts/e2b_template.py` |
 | `sandbox-usage` | what VM runs used of the free allowances | `adw_sandbox_usage.py` |
 | `agentsh-install` | this repo's agentsh policy, and the `sudo` lines to install it | the hub's `scripts/agentsh_install.py` |

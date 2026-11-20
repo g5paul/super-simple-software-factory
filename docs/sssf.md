@@ -133,21 +133,19 @@ After each merge, move the clone forward with `git -C ~/github/sssf-install pull
 
 ## The dashboard
 
-Run the all-projects dashboard from here:
-
-```bash
-just obs-all
-```
-
-The dashboard reads the machine-wide registry, so it shows every project from any repo. Run from here, it's built from the skill source, always the newest, and nothing runs in a project's repo. It only reads their traces. `just obs` in a project still shows that one repo.
-
-## The factory board
+Run the dashboard from here with the factory board:
 
 ```bash
 just factory
 ```
 
-This starts the same dashboard with `--factory <hub>`, and its landing page gains a health board for every registered repo and this machine. The page runs in this order: the account panel, the board, then the project cards. A tile per section gives its red, amber and ok counts and its worst problem; click one to list only that section. Below the tiles, each item takes one line, red first, with the number that tripped it. Click a line to see what's wrong in full and the next step, a command or which session to ask. The red, amber and ok counts above the tiles open and close each level's lines: red and amber start open and ok closed, and the browser remembers the choice. The header keeps the red and amber counts in view; click them to go to the board. The tab title carries the red count.
+The dashboard reads the machine-wide registry, so it shows every project from any repo. Run from here, it's built from the skill source, always the newest, and nothing runs in a project's repo. It only reads their traces.
+
+`just obs-all` starts the same dashboard without the board. `just obs` in a project still shows that one repo.
+
+## The factory board
+
+`just factory` starts the dashboard with `--factory <hub>`, and its landing page gains a health board for every registered repo and this machine. The page runs in this order: the account panel, the board, then the project cards. A tile per section gives its red, amber and ok counts and its worst problem; click one to list only that section. Below the tiles, each item takes one line, red first, with the number that tripped it. Click a line to see what's wrong in full and the next step, a command or which session to ask. The red, amber and ok counts above the tiles open and close each level's lines: red and amber start open and ok closed, and the browser remembers the choice. The header keeps the red and amber counts in view; click them to go to the board. The tab title carries the red count.
 
 - **Projects**, from `check_projects.py --json`: red for a dirty tree, a skill that doesn't match the hub's at its stamp, or a failed last quality run; amber for a skill behind the hub's latest, or no passing quality run since the update.
 - **Machine**: free memory, leftover pytest processes, live VMs from the traces, agentsh's store size and the last prune, and each trace's slowest agentsh poll and dropped `ptrace_execve` events in the last day.

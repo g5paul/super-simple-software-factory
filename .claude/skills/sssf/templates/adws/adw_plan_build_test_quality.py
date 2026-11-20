@@ -42,7 +42,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Capture the incoming ask")) as ph:
         ph.log(input=prompt)
 
-    with run.phase(PhaseParams(name="plan", kind="agent", owner="planner",
+    with run.phase(PhaseParams(name="plan", kind="agent", owner="planner", retries=1,
                                description="Turn the request into an implementable plan")) as ph:
         plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
                                  gates=gates.PLAN))
@@ -50,7 +50,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     # Once per run, before any builder call: the commands verify will run after it.
     verify_next = plan_checks.builder_brief(run, plan)
 
-    with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
+    with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
                                description="Implement the plan exactly")) as ph:
         previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
                                      verify_next=verify_next,

@@ -28,12 +28,12 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Capture the incoming ask")) as ph:
         ph.log(input=prompt)
 
-    with run.phase(PhaseParams(name="plan", kind="agent", owner="planner",
+    with run.phase(PhaseParams(name="plan", kind="agent", owner="planner", retries=1,
                                description="Turn the request into an implementable plan")) as ph:
         plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
                                  gates=gates.PLAN))
 
-    with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
+    with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
                                description="Implement the plan exactly")) as ph:
         build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
                                   gates=[gates.diff_matches_claims]))

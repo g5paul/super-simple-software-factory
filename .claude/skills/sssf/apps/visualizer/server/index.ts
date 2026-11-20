@@ -36,6 +36,7 @@ import { sandboxUsage } from "./sandbox.ts";
 import { Projects, projectForDb, registryPath } from "./projects.ts";
 import { leaderboard, rosterSha, trialView } from "./trials.ts";
 import { Factory, bunRunner, factoryHandler, factoryHub } from "./factory.ts";
+import { ttlCache } from "./ttl.ts";
 import type {
   AccountUsage,
   AgentPrompts,
@@ -96,6 +97,9 @@ const factoryRoutes: Record<string, (req: Request) => Promise<Response>> =
 const account = new Account(undefined, undefined, () => projects.everyProject().map((p) => p.dbPath));
 const piSessions = new PiSessions();
 const codexLimits = new CodexLimits();
+// The account panel's trace reads. Short enough that a new pi call shows within one poll or two.
+const ACCOUNT_TRACE_TTL_MS = 15_000;
+const accountTraces = ttlCache<{ sessions: Set<string>; piCalls: PiCallAt[]; limitHit: PiLimitHit | null }>(ACCOUNT_TRACE_TTL_MS);
 codexLimits.start();
 
 function json(data: unknown, status = 200): Response {
@@ -263,17 +267,23 @@ const server = listen((port) => Bun.serve({
       const oldestWeek = Math.min(...readArchive(codexLimits.archiveFile).filter((a) => a.provider === "chatgpt").map((a) => a.start * 1000));
       const piFrom = Math.max(now - 120 * 86_400_000, Math.min(now - Math.max(SPAN_MS["7d"], SPAN_MS[piSpan]), oldestWeek));
       const since = new Date(piFrom).toISOString();
-      const sessions = new Set<string>();
-      const piCalls: PiCallAt[] = [];
-      let limitHit: PiLimitHit | null = null;
-      for (const p of projects.everyProject()) {
-        const db = projects.db(p);
-        for (const id of db?.agentSessionIds() ?? []) sessions.add(id);
-        for (const c of db?.piCalls(since) ?? []) piCalls.push({ ...c, at: Date.parse(c.at), project: p.name });
-        // Only the plan's shortest window: an older hit may well have reset (pi-usage-stop.md decision 6).
-        const hit = db?.piLimitHit(new Date(now - 5 * 3_600_000).toISOString());
-        if (hit && (!limitHit || hit.at > limitHit.at)) limitHit = { ...hit, project: p.name };
-      }
+      // The traces' part, reused for ACCOUNT_TRACE_TTL_MS: the panel polls every 10 s.
+      const traces = accountTraces(piSpan, () => {
+        const sessions = new Set<string>();
+        const piCalls: PiCallAt[] = [];
+        let limitHit: PiLimitHit | null = null;
+        for (const p of projects.everyProject()) {
+          const db = projects.db(p);
+          for (const id of db?.agentSessionIds() ?? []) sessions.add(id);
+          for (const c of db?.piCalls(since) ?? []) piCalls.push({ ...c, at: Date.parse(c.at), project: p.name });
+          // Only the plan's shortest window: an older hit may well have reset (pi-usage-stop.md decision 6).
+          const hit = db?.piLimitHit(new Date(now - 5 * 3_600_000).toISOString());
+          if (hit && (!limitHit || hit.at > limitHit.at)) limitHit = { ...hit, project: p.name };
+        }
+        return { sessions, piCalls, limitHit };
+      });
+      const { sessions, limitHit } = traces;
+      const piCalls = [...traces.piCalls];
       // pi used outside SSSF; SSSF's own pi agents keep their sessions inside each run.
       for (const c of piSessions.calls(Date.parse(since), (cwd) => projects.projectOf(cwd))) piCalls.push(c);
       const usage = account.summary(now, sessions, (cwd) => projects.projectOf(cwd), piCalls, span, piSpan,

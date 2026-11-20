@@ -41,3 +41,31 @@ def test_finish_leaves_another_runs_open_phase_alone(tmp_path):
                         " VALUES ('other', 'e5f6a7b8', 1, 'build', 'running', '2026-11-11T03:00:00+00:00')")
     tracer.session_finish("a1b2c3d4", ok=True)
     assert tracer.conn.execute("SELECT status FROM phases WHERE phase_id='other'").fetchone() == ("running",)
+
+
+START_LOOKUP = ("SELECT payload_json FROM events WHERE adw_id = ? AND name = ? AND type = 'agent_start'"
+                " AND started_at <= ? ORDER BY started_at DESC LIMIT 1")
+
+
+def plan(conn, sql, args):
+    return " ".join(row[3] for row in conn.execute(f"EXPLAIN QUERY PLAN {sql}", args))
+
+
+def test_an_agents_start_is_found_by_index_not_by_scanning_every_event(tmp_path):
+    tracer = Tracer(tmp_path / "sssf.db", tmp_path / "events.jsonl", data_root=tmp_path)
+    assert "USING INDEX" in plan(tracer.conn, START_LOOKUP, ("a1b2c3d4", "builder", "2026-11-19"))
+
+
+def test_a_trace_from_before_the_index_gets_it_when_opened(tmp_path):
+    import sqlite3
+    old = sqlite3.connect(tmp_path / "sssf.db")
+    old.execute("CREATE TABLE events (event_id TEXT PRIMARY KEY, adw_id TEXT, phase_id TEXT, parent_id TEXT,"
+                " type TEXT, name TEXT, payload_json TEXT, tokens INTEGER, started_at TEXT, ended_at TEXT)")
+    old.execute("INSERT INTO events (event_id, adw_id, type, name, started_at) VALUES"
+                " ('e1', 'a1b2c3d4', 'agent_start', 'builder', '2026-11-19T01:00:00+00:00')")
+    old.commit()
+    assert "USING INDEX" not in plan(old, START_LOOKUP, ("a1b2c3d4", "builder", "2026-11-19"))
+    old.close()
+    tracer = Tracer(tmp_path / "sssf.db", tmp_path / "events.jsonl", data_root=tmp_path)
+    assert "USING INDEX" in plan(tracer.conn, START_LOOKUP, ("a1b2c3d4", "builder", "2026-11-19"))
+    assert tracer.conn.execute("SELECT count(*) FROM events").fetchone() == (1,)

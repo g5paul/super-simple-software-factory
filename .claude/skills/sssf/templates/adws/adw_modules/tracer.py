@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS events (
   tokens        INTEGER,
   started_at    TEXT, ended_at TEXT
 );
+-- A run's events by name and type, in time order. Without it each lookup of an
+-- agent's start scans every event, and the dashboard's account panel slows as
+-- the trace grows. IF NOT EXISTS adds it to an older trace when it next opens.
+CREATE INDEX IF NOT EXISTS events_by_run ON events (adw_id, name, type, started_at);
 CREATE TABLE IF NOT EXISTS envelopes (
   envelope_id   TEXT PRIMARY KEY,
   adw_id        TEXT REFERENCES sessions,

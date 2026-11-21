@@ -219,7 +219,7 @@ The Forwarder, after the first review (eleven findings, all fixed):
 - An event needs a non-empty `ts`, because obs's session row needs `first_ts`. JSON with `NaN` or `Infinity` is dropped, since obs's `JSON.parse` refuses it, and so is an event whose `provider`, `model`, `cwd` or `session_file` isn't a string, which obs's SQLite binding throws on. A batch obs refuses with a 4xx other than auth or rate limiting is dropped, so the rest still go.
 - Past the cap it keeps no more events or ids.
 - It posts with no proxy and follows no redirect, so the token goes only to the obs server named.
-- A post that ran out of time but landed isn't counted as rejected when it goes again.
+- A post that ended unanswered but may have landed isn't counted as rejected when it goes again. That covers both the forwarder's own wait running out and the socket's timeout or a lost answer after the request went. A post that never left (connection refused) is still counted rejected if obs rejects it later.
 - At most one post thread is ever open, so a stuck server leaves one thread behind, not one per retry.
 - A start takes the relay request first, so a start that fails early never hands it to the next call.
 

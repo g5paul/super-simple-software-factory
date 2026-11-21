@@ -482,7 +482,6 @@ def test_a_malformed_line_seen_live_and_swept_counts_once(obs):
 # host_only, downstream: under agentsh it fails with: AssertionError: assert {'posted': 0,...'unposted': 1} == {'posted': 1,...
 @pytest.mark.host_only
 def test_a_post_that_ran_out_of_time_but_landed_isnt_called_rejected(obs, monkeypatch):
-    import time
     from adw_modules import obs_relay
     monkeypatch.setattr(obs_relay, "POST_SECONDS", 0.3)
     monkeypatch.setattr(obs_relay, "RETRY_SECONDS", 0.2)
@@ -490,11 +489,84 @@ def test_a_post_that_ran_out_of_time_but_landed_isnt_called_rejected(obs, monkey
     fwd = _forwarder(obs)
     fwd.live()
     fwd.feed(_line(_event(1)))                         # the live post times out, and lands
-    _wait_for(lambda: obs.events)
+    _wait_for(lambda: obs.events and "post" in _kinds(fwd), seconds=20)
     obs.delay = 0
-    time.sleep(0.5)                                    # the live retry: obs calls it a repeat
+    monkeypatch.setattr(obs_relay, "POST_SECONDS", 30)  # only the first post is meant to run out of time
+    _wait_for(lambda: len(obs.batches) >= 2 and fwd.counts()["posted"] == 1, seconds=20)   # the live retry: obs calls it a repeat
     fwd.finish(_line(_event(1)))
     assert fwd.counts() == {"posted": 1, "rejected": 0, "dropped": 0, "unposted": 0}
+
+
+class _Answer:
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self.body
+
+
+class StubObs:
+    """Obs with no socket, in place of obs_relay._OPENER: `fail` is what the
+    first post raises, after obs stored its events if `lands`. Later posts get
+    obs's answer, which rejects an event_id already stored."""
+
+    def __init__(self, fail: Exception, lands: bool):
+        self.fail, self.lands = fail, lands
+        self.stored: list[str] = []
+        self.posts = 0
+
+    def open(self, req, timeout=None):
+        self.posts += 1
+        ids = [e["event_id"] for e in json.loads(req.data)]
+        if self.posts == 1:
+            if self.lands:
+                self.stored += ids
+            raise self.fail
+        rejected = [i for i in ids if i in self.stored]
+        self.stored += [i for i in ids if i not in rejected]
+        return _Answer(json.dumps({"ingested": len(ids) - len(rejected), "rejected": rejected}).encode())
+
+
+def _stub_forwarder(monkeypatch, stub):
+    from adw_modules import obs_relay
+    monkeypatch.setattr(obs_relay, "_OPENER", stub)
+    monkeypatch.setattr(obs_relay, "RETRY_SECONDS", 0.05)
+    monkeypatch.setattr(obs_relay, "LIVE_SECONDS", 0.05)
+    return obs_relay.Forwarder(obs_relay.Target(server="http://obs.invalid", token="obs-secret"))
+
+
+def test_a_post_whose_own_timeout_fired_first_but_landed_isnt_called_rejected(monkeypatch):
+    # The socket's timeout and the forwarder's wait for the post thread get the
+    # same seconds. Under load the socket's fires first, and the post ends as an
+    # error instead of a thread left running.
+    stub = StubObs(TimeoutError("timed out"), lands=True)
+    fwd = _stub_forwarder(monkeypatch, stub)
+    fwd.live()
+    fwd.feed(_line(_event(1)))
+    _wait_for(lambda: stub.posts >= 2 and sum(fwd.counts().values()), seconds=20)
+    fwd.finish(_line(_event(1)))
+    assert "post" in _kinds(fwd)
+    assert fwd.counts() == {"posted": 1, "rejected": 0, "dropped": 0, "unposted": 0}
+    assert "rejected" not in _kinds(fwd)
+
+
+def test_a_post_that_never_left_and_obs_then_rejects_is_called_rejected(monkeypatch):
+    import urllib.error
+    stub = StubObs(urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")), lands=False)
+    stub.stored.append("e1")                    # obs holds the id from somewhere else
+    fwd = _stub_forwarder(monkeypatch, stub)
+    fwd.live()
+    fwd.feed(_line(_event(1)))
+    _wait_for(lambda: stub.posts >= 2 and sum(fwd.counts().values()), seconds=20)
+    fwd.finish(_line(_event(1)))
+    assert fwd.counts() == {"posted": 0, "rejected": 1, "dropped": 0, "unposted": 0}
+    assert "rejected" in _kinds(fwd)
 
 
 def test_the_token_never_follows_a_redirect(obs):

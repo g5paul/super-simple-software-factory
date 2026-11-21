@@ -147,13 +147,16 @@ def test(run) -> QualityCheckResult:
         area="backend",
         operation="build",
         # The hub suite, the command each test file's docstring gives, run from
-        # the skill folder. It took 550 to 589 s from 2026-11-14 to 16 (about
-        # 2,800 tests) and passed 600 s on 2026-11-16, so the cap is 1200 s.
+        # the skill folder. On the host it takes about 740 s (3,858 tests, 5.2 a
+        # second, 2026-11-20). In an OpenShell VM (4 vCPUs, 4 GiB) it ran 2.7 a
+        # second, about 1450 s for the whole suite, and timed out at the old
+        # 1200 s cap (run 4a74c2b9). The cap only has to catch a hang, so it is
+        # 2400 s: the VM's time with about two thirds over.
         argv=["uv", "run", "--directory", ".claude/skills/sssf",
               "--with", "pytest", "--with", "pydantic", "--with", "pyyaml",
               "--with", "python-dotenv", "--with", "rich",
               "pytest", "tests", "-q", "-p", "no:cacheprovider"],
-        timeout_seconds=1200,
+        timeout_seconds=2400,
     ), run)
 
 

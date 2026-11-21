@@ -104,7 +104,9 @@ def test_a_change_is_put_back_and_stops_the_run(repo, plant):
         with open(git_dir / "info" / "exclude", "a") as f:
             f.write("secret_new_file.py\n")
     elif plant == "chmod":
-        sample.chmod(0o755)
+        # Flip the owner's execute bit, so the mode differs from the one git init gave the
+        # sample under any umask: 775 with 0002, 755 with 0022 (an OpenShell VM's).
+        sample.chmod(stat.S_IMODE(sample.stat().st_mode) ^ stat.S_IXUSR)
     else:
         sample.unlink()
     with pytest.raises(permissions.PermissionBreach, match="git directory") as caught:
@@ -1226,12 +1228,21 @@ def test_a_stalled_listing_still_restores(repo, home, monkeypatch):
     import time
     run, guard = _guarded(repo)
     saved = (home / ".gitconfig").read_bytes()
-    monkeypatch.setattr(permissions, "_KEYS", "sleep 30")
+    stall = 30
+    monkeypatch.setattr(permissions, "_KEYS", f"sleep {stall}")
     monkeypatch.setattr(permissions, "KEYS_SECONDS", 1)
     (home / ".gitconfig").write_text("[user]\n\tname = other\n")
+    # The file exists before and after, so _shared lists it twice: the saved version and the
+    # live one. `sleep` has no watchdog of its own (the real _KEYS kills git after
+    # KEYS_SECONDS), so each listing ends at _sh's timeout, KEYS_SECONDS + 5 = 6 s: 12 s in
+    # all. 13 s more is room for a loaded machine. The bound stays under one whole stall, so
+    # a listing nothing stopped still fails the test.
+    allowed = 2 * (permissions.KEYS_SECONDS + 5)
+    bound = allowed + 13
+    assert bound < stall
     start = time.monotonic()
     msg = _breach(run, guard)
-    assert time.monotonic() - start < 15
+    assert time.monotonic() - start < bound
     assert "could not be listed" in msg
     assert (home / ".gitconfig").read_bytes() == saved
 
@@ -2140,6 +2151,34 @@ def require_unnameable(u: Unnameable) -> None:
         pytest.skip("this filesystem can still name the path")
 
 
+def require_nameable(u) -> None:
+    """Skip when this machine can't name the path even unlocked. Past PATH_MAX, getcwd reads
+    each parent directory up to /, and an OpenShell VM's policy refuses listing / and /var."""
+    out = permissions._sh('cd -P "$1" && pwd -P', f"{u.base}/A/B").stdout
+    if not out.startswith("/"):
+        pytest.skip("this machine can't name the unlocked path: past PATH_MAX, getcwd must list "
+                    "every parent directory up to /, and something here refuses that, as an "
+                    "OpenShell VM's policy does for / and /var")
+
+
+@pytest.mark.parametrize("named", [True, False])
+def test_require_nameable_skips_only_when_the_path_has_no_name(tmp_path, monkeypatch, named):
+    asked = []
+
+    def fake(script, *args, **kwargs):
+        asked.append((script, args))
+        return subprocess.CompletedProcess([], 0 if named else 1, f"{tmp_path}/long\n" if named else "",
+                                           "" if named else "sh: 1: pwd: getcwd() failed: Permission denied\n")
+    monkeypatch.setattr(permissions, "_sh", fake)
+    u = SimpleNamespace(base=tmp_path)
+    if named:
+        require_nameable(u)
+    else:
+        with pytest.raises(pytest.skip.Exception, match="can't name the unlocked path"):
+            require_nameable(u)
+    assert asked == [('cd -P "$1" && pwd -P', (f"{tmp_path}/A/B",))]
+
+
 @pytest.mark.parametrize("fake", ["pwd() { return 1; }", "pwd() { echo; }", "pwd() { echo rel; }"])
 def test_a_failed_pwd_reads_as_not_resolving(tmp_path, fake):
     d = tmp_path / "d"
@@ -2168,6 +2207,7 @@ def test_real_of_an_unnameable_dir_is_marked(unnameable):
     assert where[f"{u.base}/A/B"][0] == ""
     assert where[f"{u.base}/A"][0].startswith("/")
     u.unlock()
+    require_nameable(u)
     assert _real(u.inc) == u.physical
 
 
@@ -2213,6 +2253,7 @@ def test_a_dotdot_include_under_an_unnameable_dir_stops_the_run_first(repo, unna
 @pytest.mark.host_only
 def test_a_prefix_that_becomes_unnameable_has_moved(unnameable):
     u = unnameable
+    require_nameable(u)
     walked = [u.inc]
     guard = {"walked": walked, "where": permissions._where(walked)}
     assert guard["where"][f"{u.base}/A/B"][0].startswith("/")

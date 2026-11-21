@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -1427,7 +1428,64 @@ def test_a_stop_takes_the_forked_agent_down_even_when_ps_cannot_run(machine, ser
     assert not marker.exists()
 
 
+OUTLIVES_ROW = "An agent's processes can outlive its call in a VM"
+
+
+def require_signal_to_a_non_utf8_name(tmp_path) -> None:
+    """Skip when this machine refuses a signal to a process whose name (/proc/<pid>/comm)
+    isn't valid UTF-8. OpenShell does: os.kill and `kill -9` both get EPERM. Found by trying
+    one. The probe waits for the name first: between fork and exec the process is still named
+    after Python, and that signal would be delivered."""
+    folder = os.fsencode(tmp_path) + b"/probe"
+    os.mkdir(folder)
+    script = folder + b"/\xff"
+    with open(script, "wb") as f:
+        f.write(b"#!/bin/sh\nread _\n")          # waits on stdin, so closing it ends the probe
+    os.chmod(script, 0o755)
+    probe = subprocess.Popen([script], stdin=subprocess.PIPE)
+    try:
+        deadline = time.time() + 5
+        named = False
+        while time.time() < deadline and not named:
+            try:
+                named = Path(f"/proc/{probe.pid}/comm").read_bytes() == b"\xff\n"
+            except OSError:
+                pass
+            if not named:
+                time.sleep(0.02)
+        if not named:
+            return                               # can't tell: run the test as before
+        try:
+            os.kill(probe.pid, signal.SIGKILL)
+        except PermissionError:
+            pytest.skip("this machine refuses a signal to a process whose name isn't valid UTF-8, "
+                        f"as OpenShell does; see docs/open.md, \"{OUTLIVES_ROW}\"")
+    finally:
+        probe.stdin.close()                      # ends the probe when the kill was refused
+        probe.wait(timeout=10)
+
+
+def test_the_non_utf8_probe_skips_when_the_signal_is_refused(tmp_path, monkeypatch):
+    real, refused = os.kill, []
+
+    def fake(pid, sig):
+        try:
+            name = Path(f"/proc/{pid}/comm").read_bytes()
+        except OSError:
+            name = b""
+        if name == b"\xff\n":
+            refused.append(pid)
+            raise PermissionError(1, "Operation not permitted")
+        return real(pid, sig)
+    monkeypatch.setattr(os, "kill", fake)
+    with pytest.raises(pytest.skip.Exception, match=OUTLIVES_ROW):
+        require_signal_to_a_non_utf8_name(tmp_path)
+    assert len(refused) == 1
+    assert not Path(f"/proc/{refused[0]}").exists()      # the probe ended and was reaped
+
+
 def test_a_stop_takes_a_child_with_a_non_utf8_name_and_its_own_child(machine, service, tmp_path, monkeypatch):
+    require_signal_to_a_non_utf8_name(tmp_path)
     bad = os.fsencode(tmp_path) + b"/\xff"
     with open(bad, "wb") as script:
         script.write(b"#!/bin/sh\n"

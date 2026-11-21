@@ -75,8 +75,53 @@ def _kill_group(proc: subprocess.Popen) -> None:
     import signal
     try:
         os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
         pass
+    except PermissionError:
+        # A seccomp filter can refuse every kill with a negative pid, so kill
+        # each process in the group by its own pid.
+        try:
+            listing = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "pgid="],
+                                     capture_output=True, text=True).stdout
+        except OSError:
+            listing = ""
+        members = []
+        for line in listing.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit() \
+                    and int(parts[1]) == proc.pid:
+                members.append(int(parts[0]))
+        for pid in members:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+
+def _stop_command(proc: subprocess.Popen) -> None:
+    """Kill the command's descendants by pid, so a child that called setsid is
+    still found through its parent, then kill its group."""
+    try:
+        from . import rules
+        rules.stop_tree(proc.pid)
+    except Exception:
+        pass
+    _kill_group(proc)
+
+
+def _decode(stream, data, text: bool):
+    """What a timed-out read of `stream` holds, as communicate would have
+    returned it: decoded with the pipe's encoding and errors for text."""
+    if data is None:
+        data = "" if text else b""
+    if not text or not isinstance(data, bytes):
+        return data
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        s = data.decode(encoding, getattr(stream, "errors", None) or "strict")
+    except UnicodeDecodeError:
+        s = data.decode(encoding, "replace")
+    return s.replace("\r\n", "\n").replace("\r", "\n")
 
 
 class Local:
@@ -94,6 +139,12 @@ class Local:
         # or an interrupt kills the whole group. subprocess.run kills only the
         # process it started, so a check run as `uv run pytest` left pytest
         # running: one hung for 4.5 hours after guard run 0ece22a5's verify.
+        # On a timeout it first kills the command's descendants by pid (a child
+        # that called setsid left the group but is still found through its
+        # parent), then the group; if the group kill is refused, it kills each
+        # group member by pid. TimeoutExpired then carries the output and stderr
+        # read so far (str with text=True, bytes otherwise), even if something
+        # still holds the pipes after 5 s.
         # stdin is DEVNULL, since a process outside the terminal's session
         # can't read it anyway.
         with subprocess.Popen(command, cwd=cwd, env=env, shell=shell, text=text,
@@ -101,15 +152,18 @@ class Local:
                               stderr=subprocess.PIPE, start_new_session=True) as proc:
             try:
                 out, err = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                _kill_group(proc)
+            except subprocess.TimeoutExpired as first:
+                out, err = first.output, first.stderr
+                _stop_command(proc)
                 try:
                     out, err = proc.communicate(timeout=5)
-                except subprocess.TimeoutExpired:   # something left the group with the pipes
-                    out, err = None, None
-                raise subprocess.TimeoutExpired(command, timeout, output=out, stderr=err) from None
+                except subprocess.TimeoutExpired as second:   # something still holds the pipes
+                    out, err = second.output, second.stderr
+                raise subprocess.TimeoutExpired(
+                    command, timeout, output=_decode(proc.stdout, out, text),
+                    stderr=_decode(proc.stderr, err, text)) from None
             except BaseException:
-                _kill_group(proc)
+                _stop_command(proc)
                 raise
         return subprocess.CompletedProcess(command, proc.returncode, out, err)
 

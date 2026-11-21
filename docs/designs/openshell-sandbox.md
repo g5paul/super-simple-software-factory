@@ -83,6 +83,14 @@ Run 2026-11-18 by the engineer's session for run 459e0656, in throwaway sandboxe
 | A host key in the CLI's env | With dummy `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` exported to `create --no-auto-providers`, `upload` and `exec`, neither reached the sandbox's env, PID 1's env, or any file under `/tmp`, `/home` or `/etc`, and no provider was made |
 | The telemetry setting | Claude Code's env-vars page says `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` turns off auto-updates, telemetry, error reporting, `/feedback`, release notes, PR badge checks, availability checks and feature-flag fetching, with nothing on model calls or sign-in. Whether it ends the `datadoghq.com` denials shows on the first real run |
 
+Run 2026-11-21 by the engineer's session, after guard run ac415b86's reviews asked whether a pi agent could read the Claude token from another process, in throwaway sandboxes from an SSSF image, each deleted after:
+
+| Check | Result |
+|---|---|
+| Another exec's environment | Every exec runs as `ubuntu` (uid 1000), `/proc` is mounted with no `hidepid`, and Yama isn't loaded. Even so, a second `sandbox exec` couldn't open `/proc/<pid>/environ` or `/proc/<pid>/maps` of a `sleep` that a first exec started ("Permission denied"). That held both while the first exec was still running and after it had ended, for a `setsid nohup` child that outlived it. The second exec could read the same process's `status` and `cmdline`. Those two files are readable to any process of the same user, and the two refused ones need ptrace access, so the refusal is Landlock's ptrace scoping: each exec is its own Landlock domain, and a process can't ptrace one outside its own domain. A pi agent's exec therefore can't read a Claude agent's token, or a child's that outlived its call |
+| The same exec | Within one exec, a sibling's `environ` is readable. One exec holds one agent call, and its children inherit that call's env anyway, so this gives nothing new |
+| Command lines | `cmdline` is readable across execs, so a secret on a command line would leak to every other exec. The env frame keeps the token off command lines, as the 2026-11-18 check found |
+
 `sandbox_openshell.py` limits what an agent can do, so it's guard code. It goes through the guard-change chain, and `CLAUDE.md`'s list of guard files gains it.
 
 ## As built

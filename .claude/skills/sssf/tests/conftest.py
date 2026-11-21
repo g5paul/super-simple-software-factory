@@ -4,6 +4,10 @@ install.py records every repo it installs into in a registry file under the
 user's config dir. Point it at a temp file for every test, so the suite never
 writes to the real ~/.config/sssf/projects.json. monkeypatch changes
 os.environ, so install.py subprocesses inherit the setting.
+
+Every test also gets a git identity in its own global config file, through
+GIT_CONFIG_GLOBAL, so temp repos commit where the machine has no ~/.gitconfig.
+A test that needs its own HOME's .gitconfig as the global config unsets it.
 """
 
 from __future__ import annotations
@@ -15,6 +19,24 @@ import pytest
 def private_registry(tmp_path_factory, monkeypatch):
     path = tmp_path_factory.mktemp("registry") / "projects.json"
     monkeypatch.setenv("SSSF_REGISTRY", str(path))
+    return path
+
+
+TEST_GIT_NAME = "SSSF Test"
+TEST_GIT_EMAIL = "sssf-test@example.invalid"
+
+
+@pytest.fixture(autouse=True)
+def git_identity(tmp_path_factory, monkeypatch):
+    """Every test gets a git identity that doesn't come from the machine, so a temp
+    repo can commit where there is no ~/.gitconfig, as in an OpenShell VM. It is git's
+    global config, so a repo's own user.name or user.email still wins. The file is new
+    for each test: a test's `git config --global` never reaches the next one. It hides
+    the engineer's ~/.gitconfig. A test whose own HOME holds the .gitconfig it means git
+    to read asks for this fixture and unsets GIT_CONFIG_GLOBAL."""
+    path = tmp_path_factory.mktemp("gitconfig") / "gitconfig"
+    path.write_text(f"[user]\n\tname = {TEST_GIT_NAME}\n\temail = {TEST_GIT_EMAIL}\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(path))
     return path
 
 

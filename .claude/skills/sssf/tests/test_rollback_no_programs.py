@@ -81,13 +81,15 @@ def sandboxed():
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    """A HOME of the test's own, so the guard saves a test ~/.gitconfig."""
+def home(tmp_path, monkeypatch, git_identity):
+    """A HOME of the test's own, so the guard saves a test ~/.gitconfig. Git's
+    global config is this home's .gitconfig, not the suite's test identity."""
     path = tmp_path / "home"
     path.mkdir()
     (path / ".gitconfig").write_text("[user]\n\tname = t\n")
     monkeypatch.setenv("HOME", str(path))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
     return path
 
 

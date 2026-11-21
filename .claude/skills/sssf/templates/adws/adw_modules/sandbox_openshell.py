@@ -13,6 +13,10 @@ changed Python needs `just openshell-setup`. Denials from the sandbox's network 
 Every exec gets `TMPDIR=/var/tmp`, which is on the VM's disk, and the policy allows it
 read-write. The VM's size comes from the gateway's config, which `just openshell-setup` writes.
 
+A VM's processes can open `/dev/null` (read-write), `/dev/urandom`, `/dev/zero` and
+`/dev/random` (read-only), and `/dev/fd/N`. `/dev/stdout` and `/dev/stderr` don't
+open there, so write `>&2`.
+
 The Claude token and a pi agent's ChatGPT token, like every env value, travel on stdin
 in a framed block and are exported by a shell inside the sandbox. An input over
 STDIN_MAX (1 MiB) goes by `openshell sandbox upload` from a fresh staging folder
@@ -62,7 +66,10 @@ PYTHON_BIN = "/usr/local/bin"               # on PATH, so uv finds python3.<mino
 NODE_EXE = "/usr/local/bin/node"
 CLAUDE_EXE = "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 ANY_BINARY = "/**"      # untested reading: the proof run checks it
-READ_ONLY_PATHS = ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
+# The devices are read-only because nothing needs to write them. /dev/tty, /dev/ptmx,
+# /dev/pts and the three std streams are left out on purpose; `>&2` works without them.
+READ_ONLY_PATHS = ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/dev/zero", "/dev/random",
+                   "/etc", "/var/log"]
 TMPDIR = "/var/tmp"   # on the overlay disk; /tmp is a tmpfs taken from the VM's RAM
 REGISTRIES = ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
 CONFIG = "adws/adw_sssf_config/sssf.config.yaml"

@@ -104,7 +104,7 @@ class Forwarder:
         self._sending = threading.Lock()       # one poster at a time
         self._warned: dict[str, str] = {}
         self._seen: set[str] = set()
-        self._maybe: set[str] = set()          # sent by a post that ran out of time
+        self._maybe: set[str] = set()          # sent by a post that ran out of time or lost its answer
         self._pending: list[tuple[str, str]] = []     # (event_id, json)
         self._events = 0
         self._bytes = 0
@@ -224,8 +224,9 @@ class Forwarder:
                     if status == "bad":
                         self._bad += len(batch)
                         continue
-                    # A post that ran out of time may have landed; obs reports
-                    # those ids as rejected when they come again.
+                    # A post that ran out of time, or lost its answer after the
+                    # request went, may have landed; obs reports those ids as
+                    # rejected when they come again.
                     landed = {r for r in rejected if r in self._maybe}
                     self.rejected += len(rejected) - len(landed)
                     self.posted += len(batch) - len(rejected) + len(landed)
@@ -239,7 +240,9 @@ class Forwarder:
     def _post(self, batch: list[tuple[str, str]], seconds: float) -> tuple[str, list]:
         """("ok", rejected ids), ("bad", []) or ("down", []). The post runs in a
         thread of its own so a server that answers a byte at a time can't
-        hold it past `seconds`; that thread is left, a daemon, if it does."""
+        hold it past `seconds`; that thread is left, a daemon, if it does. Ids
+        of a post that ran out of time, or whose answer was lost after the
+        request went, go to _maybe: obs may have stored them."""
         if self._inflight is not None and self._inflight.is_alive():
             self._inflight.join(seconds)          # one post thread at most, ever
             if self._inflight.is_alive():
@@ -257,6 +260,8 @@ class Forwarder:
                     out["answer"] = json.loads(res.read() or b"{}")
             except urllib.error.HTTPError as error:
                 out["code"] = error.code
+            except urllib.error.URLError as error:    # urllib raises it only when the request didn't go
+                out["error"], out["unsent"] = type(error).__name__, True
             except BaseException as error:
                 out["error"] = type(error).__name__
 
@@ -277,6 +282,9 @@ class Forwarder:
             self._note("post", f"obs at {self.target.server} answered {code}")
             return "down", []
         if "error" in out:
+            if not out.get("unsent"):           # the request went, so it may have landed
+                with self._lock:
+                    self._maybe.update(event_id for event_id, _ in batch)
             self._note("post", f"obs at {self.target.server} couldn't be reached: {out['error']}")
             return "down", []
         answer = out.get("answer")

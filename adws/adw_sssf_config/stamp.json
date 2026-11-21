@@ -169,7 +169,7 @@
       "source": "adws/adw_modules/kill.py"
     },
     "adws/adw_modules/obs_relay.py": {
-      "sha256": "5d8ba256e8e685c7220c384373bba44357960efd6f9056a1042838073ae0a9a3",
+      "sha256": "6a66244d4ff12e35c935e86a1d4927e8b7b045322bba839653015c018230cf39",
       "source": "adws/adw_modules/obs_relay.py"
     },
     "adws/adw_modules/permissions.py": {

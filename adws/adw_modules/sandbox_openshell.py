@@ -152,7 +152,7 @@ def containerfile(folder: Path, python: str | None = None) -> str:
     return "\n".join([
         f"FROM {BASE_IMAGE}",
         "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends"
-        " git curl ca-certificates python3 xz-utils ripgrep fd-find && rm -rf /var/lib/apt/lists/*",
+        " git curl ca-certificates python3 xz-utils ripgrep fd-find rsync && rm -rf /var/lib/apt/lists/*",
         f"RUN curl -fsSL https://nodejs.org/dist/v{NODE}/node-v{NODE}-linux-x64.tar.xz"
         " | tar -xJ -C /usr/local --strip-components=1",
         "RUN curl -LsSf https://astral.sh/uv/install.sh"

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -21,7 +23,7 @@ SKILL = Path(__file__).resolve().parent.parent
 MODULES = SKILL / "templates" / "adws" / "adw_modules"
 sys.path.insert(0, str(SKILL / "templates" / "adws"))
 
-from adw_modules import gates, git_helper, permissions, sandbox
+from adw_modules import gates, git_helper, permissions, rules, sandbox
 from adw_modules.data_types import EnvelopeBase
 
 
@@ -185,3 +187,104 @@ def test_a_timed_out_command_leaves_nothing_it_started_running(tmp_path):
     assert not _alive(child)
     out = raised.value.stdout or ""
     assert "started" in (out.decode() if isinstance(out, bytes) else out)
+
+
+def _dead_within(pid: int, seconds: float) -> bool:
+    for _ in range(int(seconds * 10)):
+        if not _alive(pid):
+            return True
+        time.sleep(0.1)
+    return not _alive(pid)
+
+
+def _reap(pidfile: Path) -> None:
+    """Kill what a test's command left, pass or fail."""
+    try:
+        os.kill(int(pidfile.read_text()), signal.SIGKILL)
+    except (OSError, ValueError):
+        pass
+
+
+def test_a_timed_out_command_stops_a_child_that_left_its_group(tmp_path):
+    """A child that called setsid kept the pipes, so the second wait timed out
+    and the output was dropped; the child kept running too."""
+    if shutil.which("setsid") is None:
+        pytest.skip("no setsid here")
+    pidfile = tmp_path / "child.pid"
+    try:
+        started = time.monotonic()
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            sandbox.LOCAL.run(
+                ["sh", "-c", f"echo started; setsid sleep 300 & echo $! > {pidfile}; wait"],
+                timeout=1)
+        assert time.monotonic() - started < 7
+        assert isinstance(raised.value.stdout, str)
+        assert "started" in raised.value.stdout
+        assert _dead_within(int(pidfile.read_text()), 5)
+    finally:
+        _reap(pidfile)
+
+
+def test_a_refused_group_kill_still_stops_the_command_and_keeps_its_output(tmp_path, monkeypatch):
+    """In an OpenShell VM every kill with a negative pid fails with EPERM."""
+    def refuse(*_args):
+        raise PermissionError(1, "Operation not permitted")
+    monkeypatch.setattr(os, "killpg", refuse)
+    pidfile = tmp_path / "child.pid"
+    try:
+        started = time.monotonic()
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            sandbox.LOCAL.run(
+                ["sh", "-c", f"echo started; sleep 300 & echo $! > {pidfile}; wait"], timeout=1)
+        assert time.monotonic() - started < 7
+        assert "started" in raised.value.stdout
+        assert _dead_within(int(pidfile.read_text()), 5)
+    finally:
+        _reap(pidfile)
+
+
+def test_a_refused_group_kill_kills_each_group_member_by_its_own_pid(tmp_path, monkeypatch):
+    """With stop_tree out of the way, only _kill_group's per-pid fallback can
+    end the shell and its sleep."""
+    def refuse(*_args):
+        raise PermissionError(1, "Operation not permitted")
+    monkeypatch.setattr(os, "killpg", refuse)
+    monkeypatch.setattr(rules, "stop_tree", lambda pid: None)
+    pidfile = tmp_path / "child.pid"
+    try:
+        started = time.monotonic()
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            sandbox.LOCAL.run(
+                ["sh", "-c", f"echo started; sleep 300 & echo $! > {pidfile}; wait"], timeout=1)
+        assert time.monotonic() - started < 7
+        assert "started" in raised.value.stdout
+        assert _dead_within(int(pidfile.read_text()), 5)
+    finally:
+        _reap(pidfile)
+
+
+@pytest.mark.parametrize("text", [True, False])
+def test_output_survives_a_child_that_got_away_with_the_pipes(tmp_path, text):
+    """The second wait really times out here, since nothing in the command's
+    tree or group holds the pipes; the output read must still come back."""
+    if shutil.which("setsid") is None:
+        pytest.skip("no setsid here")
+    pidfile = tmp_path / "child.pid"
+    try:
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            sandbox.LOCAL.run(
+                ["sh", "-c", f"echo started; (setsid sleep 30 & echo $! > {pidfile}); sleep 300"],
+                timeout=1, text=text)
+        assert raised.value.stdout == ("started\n" if text else b"started\n")
+        assert raised.value.stderr == ("" if text else b"")
+    finally:
+        _reap(pidfile)
+
+
+@pytest.mark.parametrize("text", [True, False])
+def test_timed_out_output_is_str_for_text_and_bytes_otherwise(text):
+    """Popen's pipes are bytes until communicate decodes them."""
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        sandbox.LOCAL.run(["sh", "-c", "echo started; sleep 300"], timeout=1, text=text)
+    assert isinstance(raised.value.stdout, str if text else bytes)
+    assert "started" in (raised.value.stdout if text else raised.value.stdout.decode())

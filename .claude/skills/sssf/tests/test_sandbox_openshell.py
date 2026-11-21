@@ -365,6 +365,23 @@ def test_containerfile_holds_pi_ripgrep_and_fd():
     assert "pi --version" in check and "rg --version" in check and "fdfind --version" in check
 
 
+def test_the_image_holds_rsync_and_nothing_else_changed():
+    import hashlib
+    text = osh.containerfile(F, "")
+    apts = [l for l in text.splitlines() if "apt-get install" in l]
+    assert len(apts) == 1
+    assert apts[0].endswith(
+        " git curl ca-certificates python3 xz-utils ripgrep fd-find rsync && rm -rf /var/lib/apt/lists/*")
+    before = text.replace(" fd-find rsync &&", " fd-find &&")
+    assert before != text
+    assert ("localhost/sssf-openshell:" + hashlib.sha256(before.encode()).hexdigest()[:12]
+            == "localhost/sssf-openshell:3028d837a77a")
+    assert "rsync" not in osh.policy_yaml(F, [])
+    assert "rsync" not in osh.policy_yaml(F, [], frozenset({"claude_code", "pi"}))
+    assert osh.READ_ONLY_PATHS == ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
+    assert osh.REGISTRIES == ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
+
+
 def test_the_e2b_script_reads_the_shared_pi_version():
     path = SKILL / "scripts" / "e2b_template.py"
     spec = importlib.util.spec_from_file_location("e2b_template_under_test", path)
@@ -588,8 +605,8 @@ def test_containerfile_installs_and_checks_the_python():
 def test_containerfile_without_a_python_installs_none():
     text = osh.containerfile(F, "")
     assert "uv python" not in text
-    # the tag once the image holds bun 1.4.4
-    assert osh.image_tag(F, "") == "localhost/sssf-openshell:3028d837a77a"
+    # the tag once the image holds rsync
+    assert osh.image_tag(F, "") == "localhost/sssf-openshell:87ec13f36d5e"
 
 
 def test_two_pythons_give_two_image_tags():

@@ -202,7 +202,8 @@ def test_the_default_policy():
     assert osh.policy(folder, []) == {
         "version": 1,
         "filesystem_policy": {"include_workdir": True,
-                              "read_only": ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"],
+                              "read_only": ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/dev/zero",
+                                            "/dev/random", "/etc", "/var/log"],
                               "read_write": ["/tmp", "/var/tmp", "/dev/null", "/home/u/repo"]},
         "landlock": {"compatibility": "hard_requirement"},
         "network_policies": expected_rules()}
@@ -378,7 +379,8 @@ def test_the_image_holds_rsync_and_nothing_else_changed():
             == "localhost/sssf-openshell:3028d837a77a")
     assert "rsync" not in osh.policy_yaml(F, [])
     assert "rsync" not in osh.policy_yaml(F, [], frozenset({"claude_code", "pi"}))
-    assert osh.READ_ONLY_PATHS == ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
+    assert osh.READ_ONLY_PATHS == ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/dev/zero", "/dev/random",
+                                   "/etc", "/var/log"]
     assert osh.REGISTRIES == ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
 
 
@@ -914,6 +916,51 @@ def test_tmpdir_is_in_the_policy_and_outside_the_repo(cli, tmp_path, monkeypatch
     assert osh.TMPDIR in writable and "/tmp" in writable
     folder = osh.folder_for(repo)
     assert Path(osh.TMPDIR) != folder and folder not in Path(osh.TMPDIR).parents
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_vm_can_read_dev_zero_and_dev_random(kind):
+    p = osh.policy(F, [], sandbox_remote.harnesses(roster(*KINDS[kind])))
+    fs = p["filesystem_policy"]
+    for device in ("/dev/zero", "/dev/random"):
+        assert device in fs["read_only"]
+        assert device not in fs["read_write"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_policy_differs_from_the_baseline_only_by_the_two_devices(kind):
+    harnesses = sandbox_remote.harnesses(roster(*KINDS[kind]))
+    p = osh.policy(F, [], harnesses)
+    fs = p["filesystem_policy"]
+    rest = [x for x in fs["read_only"] if x not in ("/dev/zero", "/dev/random")]
+    assert rest == ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
+    assert len(set(fs["read_only"])) == len(fs["read_only"])
+    assert fs["read_write"] == ["/tmp", "/var/tmp", "/dev/null", str(F)]
+    assert fs["include_workdir"] is True
+    assert p["landlock"] == {"compatibility": "hard_requirement"}
+    assert set(p) == {"version", "filesystem_policy", "landlock", "network_policies"}
+    assert set(fs) == {"include_workdir", "read_only", "read_write"}
+    assert p["version"] == 1
+    expected = {"package_registries": expected_rules()["package_registries"]}
+    if "claude_code" in KINDS[kind]:
+        expected["anthropic_api"] = expected_rules()["anthropic_api"]
+    if "pi" in KINDS[kind]:
+        expected["openai_api"] = OPENAI
+    assert p["network_policies"] == expected
+    for closed in ("/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/full"):
+        assert closed not in fs["read_only"] and closed not in fs["read_write"]
+    text = osh.containerfile(F, "")
+    assert "/dev/zero" not in text and "/dev/random" not in text
+
+
+def test_create_writes_the_devices_into_the_policy_file(cli, tmp_path, monkeypatch):
+    repo, run, _ = layout(tmp_path, monkeypatch)
+    write_shipped_config(repo)
+    monkeypatch.chdir(repo)
+    osh.OpenShell(run, "sssf/abc", "p")._create()
+    fs = yaml.safe_load((run.session_dir / "openshell-policy.yaml").read_text())["filesystem_policy"]
+    for device in ("/dev/zero", "/dev/random"):
+        assert device in fs["read_only"] and device not in fs["read_write"]
 
 
 # --- the tool check looks up the repo's own commands ---------------------------

@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -200,7 +201,131 @@ def test_a_key_the_environment_already_had_is_still_held_back_from_agents(tmp_pa
     assert "APP_SECRET" in got["operator"]
 
 
-FAKE_PI = '''\
+def dotenv_repo(tmp_path: Path) -> Path:
+    stamped_repo(tmp_path)
+    (tmp_path / ".env").write_text("APP_SECRET=from-dotenv\nSSSF_X=1\nDATABASE_URL=db\n")
+    (tmp_path / "probe.py").write_text(PROBE)
+    return tmp_path
+
+
+def run_probe(cwd: Path, sign: str | None = None, **extra):
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("APP_SECRET", "SSSF_X", "DATABASE_URL", "SSSF_AGENTSH", "SSSF_AGENT")}
+    env["SHELL_ONLY"] = "1"
+    if sign is not None:
+        env["SSSF_AGENTSH"] = sign
+    env.update(extra)
+    return subprocess.run([sys.executable, "probe.py"], cwd=cwd, env=env,
+                          capture_output=True, text=True, check=False)
+
+
+def got(done) -> dict:
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def no_acl(path: Path) -> None:
+    """Take every permission away with an ACL, with no chmod."""
+    if not hasattr(os, "setxattr"):
+        pytest.skip("no os.setxattr")
+    acl = struct.pack("<I", 2) + b"".join(
+        struct.pack("<HHI", tag, 0, 0xFFFFFFFF) for tag in (0x01, 0x04, 0x20))
+    try:
+        os.setxattr(path, "system.posix_acl_access", acl)
+    except OSError:
+        pytest.skip("filesystem without ACLs")
+    try:
+        path.open().close()
+    except PermissionError:
+        return
+    pytest.skip("the ACL did not make the file unreadable")
+
+
+def make_unreadable(path: Path, how: str) -> None:
+    if how == "chmod":
+        path.chmod(0o000)
+    else:
+        no_acl(path)
+
+
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 file")
+@pytest.mark.parametrize("how", ["chmod", "acl"])
+def test_an_agents_process_under_agentsh_imports_utils_past_an_unreadable_env_file(tmp_path, how):
+    repo = dotenv_repo(tmp_path)
+    try:
+        make_unreadable(repo / ".env", how)
+        done = run_probe(repo, sign="1")
+    finally:
+        (repo / ".env").chmod(0o600)
+    assert done.returncode == 0, done.stderr
+    out = got(done)
+    assert out["dotenv"] == []
+    for agent in ("operator", "cc", "pi"):
+        assert "APP_SECRET" not in out[agent] and "DATABASE_URL" not in out[agent]
+    for agent in ("cc", "pi"):
+        assert "SHELL_ONLY" in out[agent]
+
+
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 file")
+@pytest.mark.parametrize("how", ["chmod", "acl"])
+@pytest.mark.parametrize("sign,extra", [
+    (None, {}), ("0", {}), ("", {}), ("true", {}), (None, {"SSSF_AGENT": "builder"}),
+])
+def test_any_other_process_stops_on_an_unreadable_env_file(tmp_path, how, sign, extra):
+    repo = dotenv_repo(tmp_path)
+    try:
+        make_unreadable(repo / ".env", how)
+        done = run_probe(repo, sign=sign, APP_SECRET="from-shell", **extra)
+    finally:
+        (repo / ".env").chmod(0o600)
+    assert done.returncode != 0
+    assert "PermissionError" in done.stderr
+    assert done.stdout.strip() == ""
+
+
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 file")
+def test_an_env_file_cannot_give_a_process_the_sign(tmp_path):
+    repo = dotenv_repo(tmp_path)
+    with (repo / ".env").open("a") as f:
+        f.write("SSSF_AGENTSH=1\n")
+    early = repo / "adws" / ".env"
+    early.write_text("X=1\n")
+    try:
+        early.chmod(0o000)
+        done = run_probe(repo)
+    finally:
+        early.chmod(0o600)
+    assert done.returncode != 0
+    assert "PermissionError" in done.stderr
+    assert done.stdout.strip() == ""
+
+
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
+@pytest.mark.parametrize("sign", [None, "1"])
+def test_a_readable_env_file_gives_the_same_keys_from_the_checkout_and_a_worktree_folder(tmp_path, sign):
+    repo = dotenv_repo(tmp_path)
+    w1 = repo / "adws" / "adw_data" / "worktrees" / "w1"
+    shutil.copytree(repo / "adws" / "adw_modules", w1 / "adws" / "adw_modules")
+    (w1 / "probe.py").write_text(PROBE)
+    for cwd in (repo, w1):
+        done = run_probe(cwd, sign=sign)
+        assert done.returncode == 0, done.stderr
+        out = got(done)
+        assert out["dotenv"] == ["APP_SECRET", "DATABASE_URL", "SSSF_X"]
+        for name in ("APP_SECRET", "DATABASE_URL", "SSSF_X"):
+            assert name in out["operator"]
+        for agent in ("cc", "pi"):
+            assert "APP_SECRET" not in out[agent] and "DATABASE_URL" not in out[agent]
+            assert "SSSF_X" in out[agent] and "SHELL_ONLY" in out[agent]
+
+
+FAKE_PI ='''\
 #!/usr/bin/env python3
 import json, os, sys
 if "--list-models" in sys.argv:

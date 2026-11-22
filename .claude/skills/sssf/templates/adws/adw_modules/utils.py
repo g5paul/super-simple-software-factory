@@ -13,11 +13,30 @@ from typing import Iterable
 
 from dotenv import dotenv_values, find_dotenv, load_dotenv
 
-load_dotenv()
 # Every key .env names, read from the file as dotenv_values does, not from what
 # load_dotenv changed: a `just` recipe (`set dotenv-load`) or a shell export of
 # the same name has already put the key in os.environ, and it is still .env's.
-DOTENV_KEYS = frozenset(dotenv_values(find_dotenv()))
+#
+# agentsh denies an agent's processes the open of .env. Only there, inside the
+# wrap (SSSF_AGENTSH=1, set by agentsh_guard.py), an unreadable .env loads
+# nothing and names no key: the agent's environment was stripped by agent_env
+# before the wrap started, and nothing in the wrap can read the file to put a
+# key back. Every other process stops on it, because an agent can take the
+# file's permissions away, and an orchestrator with no names here would hand
+# agents every .env key its shell exports.
+#
+# The sign is read after the open failed, which is still before any .env loads:
+# neither call writes os.environ before it opens the file, so no .env can set
+# the sign for this process, and just's dotenv-load ran before the process
+# started wherever the sign is read. The names are read first, so .env's keys
+# are never in os.environ without being in DOTENV_KEYS.
+DOTENV_KEYS: frozenset[str] = frozenset()
+try:
+    DOTENV_KEYS = frozenset(dotenv_values(find_dotenv()))
+    load_dotenv()
+except PermissionError:
+    if os.environ.get("SSSF_AGENTSH") != "1":
+        raise
 AGENT_PREFIXES = ("SSSF_", "OBS_")
 AGENT_KEYS = frozenset({"CLAUDE_CODE_OAUTH_TOKEN"})
 

@@ -1,4 +1,4 @@
-t() { printf '%-34s ' "$1"; out=$(bash -c "$2" 2>&1); rc=$?; if printf '%s' "$out" | grep -q "ran test live\|FAKE=not-a-secret\|^gh version\|Everything up-to-date\|^usage: git"; then echo "RAN   rc=$rc"; else echo "held  rc=$rc  $(printf '%s' "$out" | head -1 | cut -c1-60)"; fi; }
+t() { printf '%-34s ' "$1"; out=$(bash -c "$2" 2>&1); rc=$?; if printf '%s' "$out" | grep -q "ran test live\|FAKE=not-a-secret\|^gh version\|Everything up-to-date\|^usage: git\|^mode changed"; then echo "RAN   rc=$rc"; else echo "held  rc=$rc  $(printf '%s' "$out" | head -1 | cut -c1-60)"; fi; }
 t "backslash-newline" $'ju\\\nst test live'
 t "split args" $'just test \\\nlive'
 t "<<- tabs" $'bash <<-\'EOF2\'\n\tju\\\n\tst test live\n\tEOF2'
@@ -26,3 +26,5 @@ t "argv0 newline" $'exec -a \'g\nit\' git push --dry-run'
 t "quoted command word" "'just' test live"
 t "split quoted word" "ju''st test live"
 t "bun loads .env itself" 'bun -e "console.log(\"FAKE=\"+process.env.FAKE)"'
+# Last: it leaves the workspace's .env at mode 0. Run `chmod 600 .env` outside the wrap to undo it.
+t "acl strips .env's mode" 'python3 -c "import os,struct; os.setxattr(\".e\"+\"nv\",\"system.posix_acl_access\",struct.pack(\"<I\",2)+b\"\".join(struct.pack(\"<HHI\",t,0,0xFFFFFFFF) for t in (1,4,32)))" && echo "mode changed $(stat -c %a .env)"'

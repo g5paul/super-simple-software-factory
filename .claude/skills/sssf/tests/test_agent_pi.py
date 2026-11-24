@@ -784,3 +784,273 @@ def test_run_passes_the_calls_extensions_to_in_vm(tmp_path, monkeypatch):
     except RuntimeError:
         pass
     assert seen == [["a.ts"]]
+
+
+# ── a wrapped pi agent's own agent dir (local_guard: agentsh) ────────────────
+# Every test here sets HOME and MODELS_JSON under tmp_path, so nothing is read or written in the
+# real home, and no real pi runs.
+
+from adw_modules import agentsh_guard  # noqa: E402
+
+KEY = "sk-literal-models-key"
+
+
+class Own:
+    """A wrapped call with the wrap stubbed: `start` records what the agent would have seen."""
+
+    def __init__(self, tmp_path, monkeypatch, provider="openai", adw_id="abc", guard="agentsh"):
+        self.tmp, self.mp = tmp_path, monkeypatch
+        self.home = tmp_path / "home"
+        (self.home / ".pi" / "agent").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(self.home))
+        monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+        monkeypatch.delenv("SSSF_PI_AUTH", raising=False)
+        self.models = self.home / ".pi" / "agent" / "models.json"
+        self.models.write_text('{"providers": {"x": {"apiKey": "%s"}}}' % KEY)
+        monkeypatch.setattr(agent_pi, "MODELS_JSON", str(self.models))
+        self.request = _fake_pi(tmp_path, monkeypatch, _turn("stop", text="ok"))
+        monkeypatch.setattr(agent_pi, "resolve_model", lambda model: (provider, "gpt"))
+        self.request.adw_id = adw_id
+        data = tmp_path / "data"
+        data.mkdir()
+        self.request.data_root = str(data)
+        self.request.session_dir = str(data / "sessions")
+        self.request.raw_output_path = str(data / "raw.jsonl")
+        self.request.local_guard = LocalGuard(mode=guard)
+        self.dir = Path(agentsh_guard.pi_home(adw_id, str(self.home)))
+        self.homes = self.home / agentsh_guard.PI_HOMES
+        self.seen: list[dict] = []
+        self.auth_calls = tmp_path / "auth_calls"
+        self.token, self.code, self.check = "tok-123", 0, ""
+        self._script()
+        real_start = agentsh_guard.start
+
+        def start(tree, harness, cmd, *, cwd, env, guard, tally=None, on_event=None):
+            self.seen.append({"cmd": cmd, "env": dict(env),
+                              "auth": self._read(self.dir / "auth.json"),
+                              "models": self._read(self.dir / "models.json")})
+            return real_start(tree, harness, cmd, cwd=cwd, env=env, guard=LocalGuard(mode="none"),
+                              tally=tally, on_event=on_event)
+        monkeypatch.setattr(agentsh_guard, "start", start)
+
+    @staticmethod
+    def _read(path):
+        return path.read_bytes() if path.is_file() else None
+
+    def _script(self):
+        (self.tmp / "token").write_text(self.token)
+        (self.tmp / "check").write_text(self.check)
+        pi = Path(agent_pi.PI_PATH)
+        events = self.tmp / "events.jsonl"
+        pi.write_text(f"""#!/bin/sh
+if [ "$1" = auth ]; then
+  echo "$2 $4" >> {self.auth_calls}
+  if [ "$2" = check ]; then cat {self.tmp}/check; exit 0; fi
+  cat {self.tmp}/token
+  exit {self.code}
+fi
+cat {events}
+""")
+
+    def set(self, token=None, code=None, check=None):
+        self.token = self.token if token is None else token
+        self.code = self.code if code is None else code
+        self.check = self.check if check is None else check
+        self._script()
+
+    def run(self):
+        return agent_pi.run(self.request)
+
+    def auth(self):
+        return self.auth_calls.read_text().splitlines() if self.auth_calls.exists() else []
+
+
+@pytest.fixture
+def own(tmp_path, monkeypatch):
+    return Own(tmp_path, monkeypatch)
+
+
+def test_the_host_call_has_discovery_off_and_the_operators_environment(tmp_path, monkeypatch):
+    log = tmp_path / "argv"
+    envlog = tmp_path / "env"
+    script = tmp_path / "pi"
+    script.write_text(f'#!/bin/sh\necho "$@" > {log}\nenv > {envlog}\n'
+                      'echo "provider model context"\necho "openai gpt 200K"\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+    agent_pi._pi_catalog.cache_clear()
+    try:
+        assert agent_pi._pi_catalog() == [("openai", "gpt", 200_000)]
+    finally:
+        agent_pi._pi_catalog.cache_clear()
+    argv = log.read_text().split()
+    assert argv[0] == "--list-models" and set(agent_pi.HOST_FLAGS) <= set(argv)
+    assert set(agent_pi.HOST_FLAGS) == {"--no-extensions", "--no-skills", "--no-prompt-templates",
+                                        "--no-themes", "--no-context-files"}
+    got = dict(line.split("=", 1) for line in envlog.read_text().splitlines() if "=" in line)
+    for name, value in agent_pi.operator_env().items():
+        if name not in ("_", "SHLVL", "PWD", "OLDPWD"):
+            assert got.get(name) == value, name
+
+
+def test_every_agent_call_carries_the_agent_flags_and_the_refuse_extension_last(tmp_path, monkeypatch):
+    request = _fake_pi(tmp_path, monkeypatch, _turn("stop", text="ok"))
+    request.extensions = ["a.ts"]
+    seen = []
+    real = agent_pi.agentsh_guard.start
+
+    def start(tree, harness, cmd, **kw):
+        seen.append(list(cmd))
+        return real(tree, harness, cmd, **kw)
+    monkeypatch.setattr(agent_pi.agentsh_guard, "start", start)
+    agent_pi.run(request)
+    cmd = seen[0]
+    for flag in agent_pi.AGENT_FLAGS:
+        assert flag in cmd, flag
+    assert set(agent_pi.AGENT_FLAGS) == {"--no-extensions", "--no-prompt-templates", "--no-themes"}
+    assert "--no-skills" not in cmd and "--no-context-files" not in cmd
+    assert cmd[cmd.index("-e") + 1] == "a.ts"
+    assert [cmd[i + 1] for i, c in enumerate(cmd) if c == "-e"][-1] == str(agent_pi.REFUSE_EXTENSION)
+    assert cmd.index("--no-extensions") < cmd.index("-e")
+
+
+def test_the_agent_gets_its_own_dir_outside_the_data_root(own):
+    own.set(code=0)
+    own.run()
+    assert own.homes.stat().st_mode & 0o777 == 0o700          # SSSF made it
+    (own.dir / "auth.json").write_text('{"openai": {"type": "oauth", "refresh": "R"}}')
+    own.run()
+    seen = own.seen[1]
+    assert seen["env"]["PI_CODING_AGENT_DIR"] == agentsh_guard.pi_home("abc", str(own.home))
+    assert not str(own.dir).startswith(own.request.data_root + os.sep)
+    assert own.homes.stat().st_mode & 0o777 == 0o700
+    assert seen["auth"] == b"{}"
+    assert seen["models"] == own.models.read_bytes() and KEY.encode() in seen["models"]
+    assert seen["env"]["PATH"].endswith(os.pathsep + str(own.models.parent / "bin"))
+    assert seen["env"]["OPENAI_API_KEY"] == "tok-123"
+    for path in Path(own.request.data_root).rglob("*"):
+        if path.is_file():
+            assert KEY.encode() not in path.read_bytes(), path
+
+
+def test_a_second_call_writes_both_files_again(own):
+    own.run()
+    own.models.write_text('{"providers": {}}')
+    (own.dir / "auth.json").write_text('{"x": 1}')
+    own.run()
+    assert own.seen[1]["models"] == b'{"providers": {}}' and own.seen[1]["auth"] == b"{}"
+
+
+def test_a_link_at_the_agent_dir_is_replaced_not_followed(own, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    own.homes.mkdir(parents=True)
+    own.dir.symlink_to(outside)
+    own.run()
+    assert list(outside.iterdir()) == []
+    assert not own.dir.is_symlink() and own.seen[0]["auth"] == b"{}"
+
+
+@pytest.mark.parametrize("kind", ["link", "file"])
+def test_a_link_or_file_at_the_homes_folder_stops_the_call(own, tmp_path, kind):
+    own.homes.parent.mkdir(parents=True)
+    if kind == "link":
+        (tmp_path / "elsewhere").mkdir()
+        own.homes.symlink_to(tmp_path / "elsewhere")
+    else:
+        own.homes.write_text("x")
+    with pytest.raises(sandbox.SandboxFailed, match="sssf-pi"):
+        own.run()
+    assert own.seen == []
+    if kind == "link":
+        assert list((tmp_path / "elsewhere").iterdir()) == []
+
+
+@pytest.mark.parametrize("bad", ["..", "a/b", ""])
+def test_a_run_id_that_is_not_one_plain_name_stops_the_call(own, bad):
+    own.request.adw_id = bad
+    with pytest.raises(sandbox.SandboxFailed):
+        own.run()
+    assert own.seen == [] and not own.homes.exists()
+
+
+def test_with_local_guard_none_pi_uses_its_own_folder_and_nothing_is_made(own):
+    own.request.local_guard = LocalGuard(mode="none")
+    own.run()
+    assert "PI_CODING_AGENT_DIR" not in own.seen[0]["env"]
+    assert own.auth() == [] and not own.homes.exists()
+
+
+@pytest.mark.parametrize("target", ["auth.json", "models.json"])
+@pytest.mark.parametrize("inside", [False, True])
+def test_a_folder_where_a_file_goes_stops_the_call_and_stays(own, target, inside):
+    own.dir.mkdir(parents=True)
+    (own.dir / target).mkdir()
+    if inside:
+        (own.dir / target / "keep").write_text("x")
+    with pytest.raises(sandbox.SandboxFailed) as raised:
+        own.run()
+    assert not isinstance(raised.value, IsADirectoryError)
+    assert str(own.dir / target) in str(raised.value)
+    assert own.seen == [] and (own.dir / target).is_dir()
+    if inside:
+        assert (own.dir / target / "keep").read_text() == "x"
+
+
+def test_openai_gets_the_host_token_in_openai_api_key(own):
+    own.run()
+    assert own.seen[0]["env"]["OPENAI_API_KEY"] == "tok-123"
+    assert own.auth() == ["print-bearer-token openai"]
+
+
+def test_anthropic_token_goes_in_the_oauth_variable_and_an_api_key_in_the_key_variable(tmp_path, monkeypatch):
+    own = Own(tmp_path, monkeypatch, provider="anthropic")
+    own.run()
+    assert own.seen[0]["env"]["ANTHROPIC_OAUTH_TOKEN"] == "tok-123"
+    own.set(token="sk-ant-api-xyz")
+    own.run()
+    assert own.seen[1]["env"]["ANTHROPIC_API_KEY"] == "sk-ant-api-xyz"
+
+
+def test_a_failed_auth_with_no_key_names_the_provider_and_writes_nothing(own, monkeypatch):
+    for var in ("OPENAI_API_KEY",):
+        monkeypatch.delenv(var, raising=False)
+    own.set(token="", code=1)
+    with pytest.raises(sandbox.SandboxFailed, match="openai"):
+        own.run()
+    assert own.seen == [] and not own.dir.exists()
+
+
+def test_a_failed_auth_with_a_key_in_the_environment_goes_on(own, monkeypatch):
+    own.set(token="", code=1)
+    monkeypatch.setattr(agent_pi, "child_env", lambda *a, **k: {"OPENAI_API_KEY": "sk-env", "PATH": "/usr/bin"})
+    own.run()
+    assert own.seen[0]["env"]["OPENAI_API_KEY"] == "sk-env"
+
+
+def test_an_api_key_under_subscription_mode_raises_without_the_key(own, monkeypatch):
+    monkeypatch.setenv("SSSF_PI_AUTH", "subscription")
+    own.set(token="sk-secret-key")
+    with pytest.raises(sandbox.SandboxFailed) as raised:
+        own.run()
+    assert "sk-secret-key" not in str(raised.value) and own.seen == []
+
+
+def test_another_providers_stored_sign_in_stops_and_a_key_or_failure_goes_on(tmp_path, monkeypatch):
+    own = Own(tmp_path, monkeypatch, provider="google")
+    own.set(check='{"status": "ready", "authType": "oauth"}')
+    with pytest.raises(sandbox.SandboxFailed, match="google"):
+        own.run()
+    own.set(check='{"status": "ready", "authType": "api_key"}')
+    own.run()
+    own.set(check="not json")
+    own.run()
+    assert len(own.seen) == 2
+
+
+def test_a_token_socket_makes_no_auth_call(own, monkeypatch):
+    monkeypatch.setenv("SSSF_PI_TOKEN_SOCKET", str(own.tmp / "sock"))
+    monkeypatch.setattr(agent_pi, "_in_container", lambda env, tree: env)
+    own.run()
+    assert own.auth() == []

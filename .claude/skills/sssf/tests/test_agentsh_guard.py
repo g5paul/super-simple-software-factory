@@ -1133,6 +1133,14 @@ def raising(error):
     return on_event
 
 
+@pytest.fixture(autouse=True)
+def no_real_pi_agent_dir(monkeypatch):
+    """A wrapped pi call makes an agent dir in the home folder and asks the host pi for a sign-in
+    (agent_pi._own_agent_dir). The tests here use a fake wrap and fake pi, so that step is left
+    out; tests/test_agent_pi.py covers it with HOME under tmp_path."""
+    monkeypatch.setattr(agent_pi, "_own_agent_dir", lambda env, tree, request, provider: env)
+
+
 @pytest.fixture(params=["cc", "pi"])
 def harness_run(request, machine, service, tmp_path, monkeypatch, fake):
     """run(on_event) -> the call under the fake wrap, with an agent that reports cost."""
@@ -1820,8 +1828,8 @@ def test_the_file_rule_order_matches_main_around_the_new_allows(world):
     assert "sssf-tool-write" not in order
     wanted = (set(MAIN_FILE_RULES) - {"sssf-tool-write"}) | {
         "sssf-sessions", "sssf-agent-cache", "sssf-config-folders", "sssf-system-link",
-        "sssf-home-folder"} | (
-        {"sssf-refuse-script", "sssf-agent-config", "sssf-agent-read"} if world.claude else set())
+        "sssf-home-folder", "sssf-agent-read"} | (
+        {"sssf-refuse-script", "sssf-agent-config"} if world.claude else set())
     assert set(order) == wanted and len(order) == len(wanted)
 
 
@@ -1870,6 +1878,751 @@ def test_an_alias_key_in_another_case_is_still_denied(key):
 # ── tool config above the workspace, agent caches, system links ──────────────
 
 MAINS = ["/home/u/github/super-simple-software-factory", "/home/u/github/repo"]
+
+# `agentsh_guard.policy_text(repo_settings.RepoSettings(), "/home/u/github/repo/.git", harness, "n",
+# sessions="/home/u/github/repo/adws/adw_data/sessions",
+# refuse_script="/home/u/github/repo/adws/adw_modules/sssf_refuse.py")` as rendered at f28562b,
+# before the pi agent dir change. Pasted, never to be rebuilt from the module: the point is that
+# an edit to a constant in agentsh_guard can't change what these tests expect.
+BASELINE_CLAUDE = r'''version: 1
+name: n
+description: SSSF default-deny policy for claude
+command_rules:
+  - name: sssf-no-live-tests
+    commands: [just]
+    args_patterns: ['(^|\s)test\s+live(\s|$)']
+    decision: deny
+  - name: sssf-no-gh
+    commands: [gh]
+    decision: deny
+  - name: sssf-no-push
+    commands: [git]
+    # The regex runs over all of argv joined by spaces, argv[0] first: the verb itself, or
+    # an option before it (-c a=b, -C /x, --git-dir /x). `push` must be a word of its own after
+    # a leading option, or appear anywhere in an alias's value or after it.
+    # A hook name such as hook.pre-push.enabled, or a path such as /x/push-tools, doesn't match.
+    # The alias pattern ignores case, because git reads config keys in any case. It catches
+    # `ALIAS.p=push` and `alias.p=PUSH`.
+    # (?s) and (?is) are there so a newline in an option's value can't hide the verb.
+    args_patterns: ['^\S*\s+push(\s|$)', '(?s)^\S*\s+-.*\spush(\s|$)', '(?is)^\S*\s+-.*\salias\.[^=\s]*=.*push']
+    decision: deny
+  - name: sssf-allow-rest
+    decision: allow
+file_rules:
+  - name: sssf-env-examples
+    paths:
+      - '**/.env.example'
+      - '**/.env.sample'
+    operations: ['*']
+    decision: allow
+  - name: sssf-secret-files
+    paths:
+      - '**/.env'
+      - '**/.env.*'
+    operations: ['*']
+    decision: deny
+  - name: sssf-credentials
+    paths:
+      - '${HOME}/.ssh/**'
+      - '${HOME}/.aws/**'
+      - '${HOME}/.azure/**'
+      - '${HOME}/.gnupg/**'
+      - '${HOME}/.kube/**'
+      - '${HOME}/.docker/**'
+      - '${HOME}/.config/gh/**'
+      - '${HOME}/.config/gcloud/**'
+      - '${HOME}/.config/sssf-sandbox/**'
+      - '${HOME}/.git-credentials'
+      - '${HOME}/.netrc'
+      - '${HOME}/.npmrc'
+      - '${HOME}/.pypirc'
+      - '${HOME}/.cargo/credentials'
+      - '${HOME}/.cargo/credentials.toml'
+    operations: ['*']
+    decision: deny
+  - name: sssf-proc-secrets
+    paths:
+      - '/proc/*/environ'
+      - '/proc/*/mem'
+      - '/proc/*/task/*/environ'
+      - '/proc/*/task/*/mem'
+    operations: ['*']
+    decision: deny
+  - name: sssf-other-sign-in
+    paths:
+      - '${HOME}/.pi/agent/auth.json'
+    operations: ['*']
+    decision: deny
+  - name: sssf-agent-config
+    paths:
+      - '${HOME}/.claude/settings.json'
+      - '${HOME}/.claude/settings.local.json'
+      - '${HOME}/.claude/CLAUDE.md'
+      - '${HOME}/.claude/AGENTS.md'
+      - '${HOME}/.claude/skills/**'
+      - '${HOME}/.claude/rules/**'
+      - '${HOME}/.claude/hooks/**'
+      - '${HOME}/.claude/agents/**'
+      - '${HOME}/.claude/commands/**'
+    operations: ['write', 'create', 'delete', 'rename', 'link', 'symlink', 'symlink_target', 'mkdir', 'rmdir', 'chmod', 'chown']
+    decision: deny
+  - name: sssf-git-config
+    paths:
+      - '/home/u/github/repo/.git/hooks'
+      - '/home/u/github/repo/.git/hooks/**'
+      - '/home/u/github/repo/.git/config'
+      - '/home/u/github/repo/.git/config.lock'
+      - '${PROJECT_ROOT}/.git/hooks'
+      - '${PROJECT_ROOT}/.git/hooks/**'
+      - '${PROJECT_ROOT}/.git/config'
+      - '${PROJECT_ROOT}/.git/config.lock'
+    operations: ['write', 'create', 'delete', 'rename', 'link', 'symlink', 'symlink_target', 'mkdir', 'rmdir', 'chmod', 'chown']
+    decision: deny
+  - name: sssf-workspace
+    paths:
+      - '${PROJECT_ROOT}'
+      - '${PROJECT_ROOT}/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-git-data
+    paths:
+      - '/home/u/github/repo/.git'
+      - '/home/u/github/repo/.git/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-sessions
+    paths:
+      - '/home/u/github/repo/adws/adw_data/sessions'
+      - '/home/u/github/repo/adws/adw_data/sessions/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-agent-cache
+    paths:
+      - '/home/u/github/repo/adws/adw_data/agent-cache'
+      - '/home/u/github/repo/adws/adw_data/agent-cache/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-refuse-script
+    paths:
+      - '/home/u/github/repo/adws/adw_modules/sssf_refuse.py'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-main-config
+    paths:
+      - '/home/u/github/repo'
+      - '/home/u/github/repo/.claude'
+      - '/home/u/github/repo/.claude/**'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-temp
+    paths:
+      - '/tmp'
+      - '/tmp/**'
+      - '/var/tmp'
+      - '/var/tmp/**'
+      - '/dev/shm'
+      - '/dev/shm/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-devices
+    paths:
+      - '/dev/null'
+      - '/dev/zero'
+      - '/dev/tty'
+      - '/dev/ptmx'
+      - '/dev/pts/**'
+      - '/dev/urandom'
+      - '/dev/random'
+      - '/dev/fd/**'
+      - '/dev/stdin'
+      - '/dev/stdout'
+      - '/dev/stderr'
+    operations: ['*']
+    decision: allow
+  - name: sssf-fd-leaves
+    paths:
+      - '/proc/*/fd/*'
+      - '/proc/*/task/*/fd/*'
+    operations: ['*']
+    decision: allow
+  - name: sssf-mkdir-parents
+    paths:
+      - '/'
+      - '/home'
+      - '/tmp'
+      - '/run'
+      - '/run/user'
+      - '/run/user/*'
+      - '${HOME}'
+      - '${HOME}/.cache'
+      - '${HOME}/.local'
+      - '${HOME}/.local/state'
+      - '${HOME}/.local/share'
+      - '${HOME}/.config'
+    operations: ['mkdir']
+    decision: allow
+  - name: sssf-agent-write
+    paths:
+      - '${HOME}/.cache/claude-cli-nodejs/**'
+      - '${HOME}/.local/state/claude/**'
+      - '/run/user/*/cc-socks'
+      - '/run/user/*/cc-socks/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-agent-read
+    paths:
+      - '${HOME}/CLAUDE.local.md'
+      - '${HOME}/.config/anthropic'
+      - '${HOME}/.config/anthropic/**'
+      - '${HOME}/.local/share/claude/**'
+      - '/mnt/c/Program Files/ClaudeCode'
+      - '/mnt/c/Program Files/ClaudeCode/**'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-config-search
+    paths:
+      - '/uv.toml'
+      - '/pyproject.toml'
+      - '/.python-version'
+      - '/.python-versions'
+      - '/package.json'
+      - '/pnpm-workspace.yaml'
+      - '/home/uv.toml'
+      - '/home/pyproject.toml'
+      - '/home/.python-version'
+      - '/home/.python-versions'
+      - '/home/package.json'
+      - '/home/pnpm-workspace.yaml'
+      - '/home/u/uv.toml'
+      - '/home/u/pyproject.toml'
+      - '/home/u/.python-version'
+      - '/home/u/.python-versions'
+      - '/home/u/package.json'
+      - '/home/u/pnpm-workspace.yaml'
+      - '/home/u/github/uv.toml'
+      - '/home/u/github/pyproject.toml'
+      - '/home/u/github/.python-version'
+      - '/home/u/github/.python-versions'
+      - '/home/u/github/package.json'
+      - '/home/u/github/pnpm-workspace.yaml'
+      - '/home/u/github/repo/uv.toml'
+      - '/home/u/github/repo/pyproject.toml'
+      - '/home/u/github/repo/.python-version'
+      - '/home/u/github/repo/.python-versions'
+      - '/home/u/github/repo/package.json'
+      - '/home/u/github/repo/pnpm-workspace.yaml'
+      - '/home/u/github/repo/adws/uv.toml'
+      - '/home/u/github/repo/adws/pyproject.toml'
+      - '/home/u/github/repo/adws/.python-version'
+      - '/home/u/github/repo/adws/.python-versions'
+      - '/home/u/github/repo/adws/package.json'
+      - '/home/u/github/repo/adws/pnpm-workspace.yaml'
+      - '/home/u/github/repo/adws/adw_data/uv.toml'
+      - '/home/u/github/repo/adws/adw_data/pyproject.toml'
+      - '/home/u/github/repo/adws/adw_data/.python-version'
+      - '/home/u/github/repo/adws/adw_data/.python-versions'
+      - '/home/u/github/repo/adws/adw_data/package.json'
+      - '/home/u/github/repo/adws/adw_data/pnpm-workspace.yaml'
+      - '/home/u/github/repo/adws/adw_data/worktrees/uv.toml'
+      - '/home/u/github/repo/adws/adw_data/worktrees/pyproject.toml'
+      - '/home/u/github/repo/adws/adw_data/worktrees/.python-version'
+      - '/home/u/github/repo/adws/adw_data/worktrees/.python-versions'
+      - '/home/u/github/repo/adws/adw_data/worktrees/package.json'
+      - '/home/u/github/repo/adws/adw_data/worktrees/pnpm-workspace.yaml'
+      - '${HOME}/.bunfig.toml'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-config-folders
+    paths:
+      - '/'
+      - '/home'
+      - '/home/u'
+      - '/home/u/github'
+      - '/home/u/github/repo'
+      - '/home/u/github/repo/adws'
+      - '/home/u/github/repo/adws/adw_data'
+      - '/home/u/github/repo/adws/adw_data/worktrees'
+    operations: ['open', 'stat', 'readlink', 'access']
+    decision: allow
+  - name: sssf-system-read
+    paths:
+      - '/usr'
+      - '/usr/**'
+      - '/lib'
+      - '/lib/**'
+      - '/lib64'
+      - '/lib64/**'
+      - '/bin'
+      - '/bin/**'
+      - '/sbin'
+      - '/sbin/**'
+      - '/opt'
+      - '/opt/**'
+      - '/etc'
+      - '/etc/**'
+      - '/sys'
+      - '/sys/**'
+      - '/proc'
+      - '/proc/**'
+      - '/'
+      - '/home'
+      - '/var'
+      - '/run'
+      - '/mnt'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-system-link
+    paths:
+      - '/usr/bin/**'
+      - '/bin/**'
+      - '${HOME}/.local/share/uv/python/*/bin/python3.*'
+    operations: ['symlink_target']
+    decision: allow
+  - name: sssf-home-folder
+    paths:
+      - '${HOME}'
+    operations: ['open', 'stat', 'readlink', 'access']
+    decision: allow
+  - name: sssf-home-read
+    paths:
+      - '${HOME}/.bashrc'
+      - '${HOME}/.profile'
+      - '${HOME}/.bash_profile'
+      - '${HOME}/.bash_login'
+      - '${HOME}/.editrc'
+      - '${HOME}/.inputrc'
+      - '${HOME}/.gitconfig'
+      - '${HOME}/.config'
+      - '${HOME}/.config/git/**'
+      - '${HOME}/.config/uv/**'
+      - '${HOME}/.cargo'
+      - '${HOME}/.cargo/env'
+      - '${HOME}/.cargo/bin/**'
+      - '${HOME}/.local'
+      - '${HOME}/.local/bin/**'
+      - '${HOME}/.nvm/**'
+      - '${HOME}/.rustup/**'
+      - '${HOME}/.local/share/uv/python'
+      - '${HOME}/.local/share/uv/python/**'
+      - '${HOME}/.local/share/uv/tools'
+      - '${HOME}/.local/share/uv/tools/**'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-default-deny
+    paths:
+      - '/'
+      - '/**'
+    operations: ['*']
+    decision: deny
+network_rules:
+  # The server's HTTP API, upstream finding #29.
+  - name: sssf-no-agentsh-api
+    cidrs: ['127.0.0.1/32', '::1/128']
+    ports: [18080]
+    decision: deny
+  # The session proxy needs no rule: the patched build allows it exactly.
+  # The model hosts: Claude Code and pi on a ChatGPT subscription.
+  - name: sssf-model-hosts
+    domains: ['api.anthropic.com', '*.anthropic.com', 'api.openai.com', 'chatgpt.com', '*.chatgpt.com']
+    ports: [443]
+    decision: allow
+  # The login refresh hosts: pi's ChatGPT token and Claude Code's OAuth token.
+  - name: sssf-auth-hosts
+    domains: ['auth.openai.com', 'platform.claude.com']
+    ports: [443]
+    decision: allow
+  # The package registries.
+  - name: sssf-registries
+    domains: ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org', 'crates.io', 'index.crates.io', 'static.crates.io']
+    ports: [443]
+    decision: allow
+  # Everything else is denied: no match is a deny.
+signal_rules:
+  - name: sssf-signal-self
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: self
+    decision: allow
+  - name: sssf-signal-session
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: session
+    decision: allow
+  - name: sssf-signal-parent
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: parent
+    decision: deny
+    message: 'SSSF: an agent may signal only its own processes'
+  - name: sssf-signal-external
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: external
+    decision: deny
+    message: 'SSSF: an agent may signal only its own processes'
+  - name: sssf-signal-system
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: system
+    decision: deny
+    message: 'SSSF: an agent may signal only its own processes'
+'''
+
+BASELINE_PI = r'''version: 1
+name: n
+description: SSSF default-deny policy for pi
+command_rules:
+  - name: sssf-no-live-tests
+    commands: [just]
+    args_patterns: ['(^|\s)test\s+live(\s|$)']
+    decision: deny
+  - name: sssf-no-gh
+    commands: [gh]
+    decision: deny
+  - name: sssf-no-push
+    commands: [git]
+    # The regex runs over all of argv joined by spaces, argv[0] first: the verb itself, or
+    # an option before it (-c a=b, -C /x, --git-dir /x). `push` must be a word of its own after
+    # a leading option, or appear anywhere in an alias's value or after it.
+    # A hook name such as hook.pre-push.enabled, or a path such as /x/push-tools, doesn't match.
+    # The alias pattern ignores case, because git reads config keys in any case. It catches
+    # `ALIAS.p=push` and `alias.p=PUSH`.
+    # (?s) and (?is) are there so a newline in an option's value can't hide the verb.
+    args_patterns: ['^\S*\s+push(\s|$)', '(?s)^\S*\s+-.*\spush(\s|$)', '(?is)^\S*\s+-.*\salias\.[^=\s]*=.*push']
+    decision: deny
+  - name: sssf-allow-rest
+    decision: allow
+file_rules:
+  - name: sssf-env-examples
+    paths:
+      - '**/.env.example'
+      - '**/.env.sample'
+    operations: ['*']
+    decision: allow
+  - name: sssf-secret-files
+    paths:
+      - '**/.env'
+      - '**/.env.*'
+    operations: ['*']
+    decision: deny
+  - name: sssf-credentials
+    paths:
+      - '${HOME}/.ssh/**'
+      - '${HOME}/.aws/**'
+      - '${HOME}/.azure/**'
+      - '${HOME}/.gnupg/**'
+      - '${HOME}/.kube/**'
+      - '${HOME}/.docker/**'
+      - '${HOME}/.config/gh/**'
+      - '${HOME}/.config/gcloud/**'
+      - '${HOME}/.config/sssf-sandbox/**'
+      - '${HOME}/.git-credentials'
+      - '${HOME}/.netrc'
+      - '${HOME}/.npmrc'
+      - '${HOME}/.pypirc'
+      - '${HOME}/.cargo/credentials'
+      - '${HOME}/.cargo/credentials.toml'
+    operations: ['*']
+    decision: deny
+  - name: sssf-proc-secrets
+    paths:
+      - '/proc/*/environ'
+      - '/proc/*/mem'
+      - '/proc/*/task/*/environ'
+      - '/proc/*/task/*/mem'
+    operations: ['*']
+    decision: deny
+  - name: sssf-other-sign-in
+    paths:
+      - '${HOME}/.claude/.credentials.json'
+    operations: ['*']
+    decision: deny
+  - name: sssf-git-config
+    paths:
+      - '/home/u/github/repo/.git/hooks'
+      - '/home/u/github/repo/.git/hooks/**'
+      - '/home/u/github/repo/.git/config'
+      - '/home/u/github/repo/.git/config.lock'
+      - '${PROJECT_ROOT}/.git/hooks'
+      - '${PROJECT_ROOT}/.git/hooks/**'
+      - '${PROJECT_ROOT}/.git/config'
+      - '${PROJECT_ROOT}/.git/config.lock'
+    operations: ['write', 'create', 'delete', 'rename', 'link', 'symlink', 'symlink_target', 'mkdir', 'rmdir', 'chmod', 'chown']
+    decision: deny
+  - name: sssf-workspace
+    paths:
+      - '${PROJECT_ROOT}'
+      - '${PROJECT_ROOT}/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-git-data
+    paths:
+      - '/home/u/github/repo/.git'
+      - '/home/u/github/repo/.git/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-sessions
+    paths:
+      - '/home/u/github/repo/adws/adw_data/sessions'
+      - '/home/u/github/repo/adws/adw_data/sessions/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-agent-cache
+    paths:
+      - '/home/u/github/repo/adws/adw_data/agent-cache'
+      - '/home/u/github/repo/adws/adw_data/agent-cache/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-main-config
+    paths:
+      - '/home/u/github/repo'
+      - '/home/u/github/repo/.claude'
+      - '/home/u/github/repo/.claude/**'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-temp
+    paths:
+      - '/tmp'
+      - '/tmp/**'
+      - '/var/tmp'
+      - '/var/tmp/**'
+      - '/dev/shm'
+      - '/dev/shm/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-devices
+    paths:
+      - '/dev/null'
+      - '/dev/zero'
+      - '/dev/tty'
+      - '/dev/ptmx'
+      - '/dev/pts/**'
+      - '/dev/urandom'
+      - '/dev/random'
+      - '/dev/fd/**'
+      - '/dev/stdin'
+      - '/dev/stdout'
+      - '/dev/stderr'
+    operations: ['*']
+    decision: allow
+  - name: sssf-fd-leaves
+    paths:
+      - '/proc/*/fd/*'
+      - '/proc/*/task/*/fd/*'
+    operations: ['*']
+    decision: allow
+  - name: sssf-mkdir-parents
+    paths:
+      - '/'
+      - '/home'
+      - '/tmp'
+      - '/run'
+      - '/run/user'
+      - '/run/user/*'
+      - '${HOME}'
+      - '${HOME}/.cache'
+      - '${HOME}/.local'
+      - '${HOME}/.local/state'
+      - '${HOME}/.local/share'
+      - '${HOME}/.config'
+    operations: ['mkdir']
+    decision: allow
+  - name: sssf-agent-write
+    paths:
+      - '${HOME}/.pi'
+      - '${HOME}/.pi/**'
+    operations: ['*']
+    decision: allow
+  - name: sssf-config-search
+    paths:
+      - '/uv.toml'
+      - '/pyproject.toml'
+      - '/.python-version'
+      - '/.python-versions'
+      - '/package.json'
+      - '/pnpm-workspace.yaml'
+      - '/home/uv.toml'
+      - '/home/pyproject.toml'
+      - '/home/.python-version'
+      - '/home/.python-versions'
+      - '/home/package.json'
+      - '/home/pnpm-workspace.yaml'
+      - '/home/u/uv.toml'
+      - '/home/u/pyproject.toml'
+      - '/home/u/.python-version'
+      - '/home/u/.python-versions'
+      - '/home/u/package.json'
+      - '/home/u/pnpm-workspace.yaml'
+      - '/home/u/github/uv.toml'
+      - '/home/u/github/pyproject.toml'
+      - '/home/u/github/.python-version'
+      - '/home/u/github/.python-versions'
+      - '/home/u/github/package.json'
+      - '/home/u/github/pnpm-workspace.yaml'
+      - '/home/u/github/repo/uv.toml'
+      - '/home/u/github/repo/pyproject.toml'
+      - '/home/u/github/repo/.python-version'
+      - '/home/u/github/repo/.python-versions'
+      - '/home/u/github/repo/package.json'
+      - '/home/u/github/repo/pnpm-workspace.yaml'
+      - '/home/u/github/repo/adws/uv.toml'
+      - '/home/u/github/repo/adws/pyproject.toml'
+      - '/home/u/github/repo/adws/.python-version'
+      - '/home/u/github/repo/adws/.python-versions'
+      - '/home/u/github/repo/adws/package.json'
+      - '/home/u/github/repo/adws/pnpm-workspace.yaml'
+      - '/home/u/github/repo/adws/adw_data/uv.toml'
+      - '/home/u/github/repo/adws/adw_data/pyproject.toml'
+      - '/home/u/github/repo/adws/adw_data/.python-version'
+      - '/home/u/github/repo/adws/adw_data/.python-versions'
+      - '/home/u/github/repo/adws/adw_data/package.json'
+      - '/home/u/github/repo/adws/adw_data/pnpm-workspace.yaml'
+      - '/home/u/github/repo/adws/adw_data/worktrees/uv.toml'
+      - '/home/u/github/repo/adws/adw_data/worktrees/pyproject.toml'
+      - '/home/u/github/repo/adws/adw_data/worktrees/.python-version'
+      - '/home/u/github/repo/adws/adw_data/worktrees/.python-versions'
+      - '/home/u/github/repo/adws/adw_data/worktrees/package.json'
+      - '/home/u/github/repo/adws/adw_data/worktrees/pnpm-workspace.yaml'
+      - '${HOME}/.bunfig.toml'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-config-folders
+    paths:
+      - '/'
+      - '/home'
+      - '/home/u'
+      - '/home/u/github'
+      - '/home/u/github/repo'
+      - '/home/u/github/repo/adws'
+      - '/home/u/github/repo/adws/adw_data'
+      - '/home/u/github/repo/adws/adw_data/worktrees'
+    operations: ['open', 'stat', 'readlink', 'access']
+    decision: allow
+  - name: sssf-system-read
+    paths:
+      - '/usr'
+      - '/usr/**'
+      - '/lib'
+      - '/lib/**'
+      - '/lib64'
+      - '/lib64/**'
+      - '/bin'
+      - '/bin/**'
+      - '/sbin'
+      - '/sbin/**'
+      - '/opt'
+      - '/opt/**'
+      - '/etc'
+      - '/etc/**'
+      - '/sys'
+      - '/sys/**'
+      - '/proc'
+      - '/proc/**'
+      - '/'
+      - '/home'
+      - '/var'
+      - '/run'
+      - '/mnt'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-system-link
+    paths:
+      - '/usr/bin/**'
+      - '/bin/**'
+      - '${HOME}/.local/share/uv/python/*/bin/python3.*'
+    operations: ['symlink_target']
+    decision: allow
+  - name: sssf-home-folder
+    paths:
+      - '${HOME}'
+    operations: ['open', 'stat', 'readlink', 'access']
+    decision: allow
+  - name: sssf-home-read
+    paths:
+      - '${HOME}/.bashrc'
+      - '${HOME}/.profile'
+      - '${HOME}/.bash_profile'
+      - '${HOME}/.bash_login'
+      - '${HOME}/.editrc'
+      - '${HOME}/.inputrc'
+      - '${HOME}/.gitconfig'
+      - '${HOME}/.config'
+      - '${HOME}/.config/git/**'
+      - '${HOME}/.config/uv/**'
+      - '${HOME}/.cargo'
+      - '${HOME}/.cargo/env'
+      - '${HOME}/.cargo/bin/**'
+      - '${HOME}/.local'
+      - '${HOME}/.local/bin/**'
+      - '${HOME}/.nvm/**'
+      - '${HOME}/.rustup/**'
+      - '${HOME}/.local/share/uv/python'
+      - '${HOME}/.local/share/uv/python/**'
+      - '${HOME}/.local/share/uv/tools'
+      - '${HOME}/.local/share/uv/tools/**'
+    operations: ['open', 'read', 'stat', 'list', 'readlink', 'access']
+    decision: allow
+  - name: sssf-default-deny
+    paths:
+      - '/'
+      - '/**'
+    operations: ['*']
+    decision: deny
+network_rules:
+  # The server's HTTP API, upstream finding #29.
+  - name: sssf-no-agentsh-api
+    cidrs: ['127.0.0.1/32', '::1/128']
+    ports: [18080]
+    decision: deny
+  # The session proxy needs no rule: the patched build allows it exactly.
+  # The model hosts: Claude Code and pi on a ChatGPT subscription.
+  - name: sssf-model-hosts
+    domains: ['api.anthropic.com', '*.anthropic.com', 'api.openai.com', 'chatgpt.com', '*.chatgpt.com']
+    ports: [443]
+    decision: allow
+  # The login refresh hosts: pi's ChatGPT token and Claude Code's OAuth token.
+  - name: sssf-auth-hosts
+    domains: ['auth.openai.com', 'platform.claude.com']
+    ports: [443]
+    decision: allow
+  # The package registries.
+  - name: sssf-registries
+    domains: ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org', 'crates.io', 'index.crates.io', 'static.crates.io']
+    ports: [443]
+    decision: allow
+  # Everything else is denied: no match is a deny.
+signal_rules:
+  - name: sssf-signal-self
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: self
+    decision: allow
+  - name: sssf-signal-session
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: session
+    decision: allow
+  - name: sssf-signal-parent
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: parent
+    decision: deny
+    message: 'SSSF: an agent may signal only its own processes'
+  - name: sssf-signal-external
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: external
+    decision: deny
+    message: 'SSSF: an agent may signal only its own processes'
+  - name: sssf-signal-system
+    signals: ['@all', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63']
+    target:
+      type: system
+    decision: deny
+    message: 'SSSF: an agent may signal only its own processes'
+'''
+BASELINES = {"claude_code": BASELINE_CLAUDE, "pi": BASELINE_PI}
+
 CONFIG_FILES = ("uv.toml", "pyproject.toml", ".python-version", ".python-versions",
                 "package.json", "pnpm-workspace.yaml")
 
@@ -2116,8 +2869,93 @@ def test_pi_policy_keeps_its_shape():
                                                       "pi", "n", **PATHS))["file_rules"]
     by_name = {r["name"]: r for r in rules_}
     assert by_name["sssf-agent-write"]["paths"] == agentsh_guard.PI_WRITE
-    assert "sssf-agent-read" not in by_name
+    assert by_name["sssf-agent-read"]["paths"] == agentsh_guard.PI_READ
+    assert by_name["sssf-agent-read"]["operations"] == agentsh_guard.READ
     assert by_name["sssf-other-sign-in"]["paths"] == agentsh_guard.CLAUDE_SIGN_IN
+
+
+# ── the pi agent dir: nothing in ~/.pi, a folder of its own under ~/.local/state ────
+
+PI_ROOTS = [(m, r) for m in MAINS for r in (m, WORKSPACE)]
+D = agentsh_guard.pi_home("abc", HOME)
+HOMES = f"{HOME}/.local/state/sssf-pi"
+
+
+@pytest.mark.parametrize("main,root", PI_ROOTS)
+def test_a_pi_agent_writes_nothing_in_dot_pi_and_everything_in_its_own_dir(main, root):
+    r = Rules(shipped_text(main, "pi"), HOME, root)
+    for path in (f"{HOME}/.pi/agent/extensions/x.js", f"{HOME}/.pi/agent/settings.json",
+                 f"{HOME}/.pi/agent/auth.json", f"{HOME}/.pi/agent/bin/rg",
+                 f"{HOME}/.pi/sssf-decoy/agent/extensions/x.js"):
+        for op in agentsh_guard.WRITE_OPS:
+            name = r.first_match(path, op)
+            assert r.decision(name) == "deny", (path, op, name)
+    for path in (f"{D}/auth.json", f"{D}/auth.json.lock", f"{D}/models.json", f"{D}/models-store.json",
+                 f"{D}/bin/fd"):
+        for op in ("write", "create", "mkdir", "rmdir", "rename"):
+            assert r.first_match(path, op) == "sssf-agent-write", (path, op)
+    assert r.first_match(f"{HOME}/.pi/agent/bin/rg", "read") == "sssf-agent-read"
+    for path in (f"{HOME}/.pi/agent/auth.json", f"{HOME}/.pi/agent/models.json"):
+        assert r.decision(r.first_match(path, "read")) == "deny", path
+    assert r.decision(r.first_match(HOMES, "stat")) == "allow"
+    for op in agentsh_guard.WRITE_OPS:
+        assert r.decision(r.first_match(HOMES, op)) == "deny", op
+
+
+@pytest.mark.parametrize("main,root", PI_ROOTS)
+def test_the_copy_stays_private_from_claude_code_and_no_folder_above_it_moves(main, root):
+    r = Rules(shipped_text(main, "claude_code"), HOME, root)
+    for path in (D, f"{D}/models.json", f"{D}/auth.json", f"{D}/bin/rg"):
+        for op in ("read", "open", "stat", "list", *agentsh_guard.WRITE_OPS):
+            assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+    for path in (D, HOMES, f"{HOME}/.local/state", f"{HOME}/.local", HOME):
+        for op in ("rename", "link", "symlink", "delete", "rmdir", "write", "create", "chmod", "chown"):
+            assert r.decision(r.first_match(path, op)) == "deny", (path, op)
+
+
+@pytest.mark.parametrize("main", MAINS)
+def test_the_sessions_tree_is_why_the_copy_does_not_live_there(main):
+    # 2738b794 kept it at <sessions>/<id>/pi-agent. Any Claude agent may rename the folders above
+    # that path and read the file at its new path, so the folder moved out of the sessions tree.
+    r = Rules(shipped_text(main, "claude_code"), HOME, main)
+    sessions = f"{main}/adws/adw_data/sessions"
+    assert r.decision(r.first_match(f"{sessions}/abc", "rename")) == "allow"
+    assert r.decision(r.first_match(sessions, "rename")) == "allow"
+    assert r.decision(r.first_match(f"{sessions}/abc/pi-agent/models.json", "read")) == "allow"
+
+
+def test_another_runs_pi_agent_may_read_the_copy_as_it_could_read_the_original():
+    # The who-reads table: on the baseline every pi agent reads ~/.pi/agent/models.json.
+    r = Rules(shipped_text(MAINS[0], "pi"), HOME, MAINS[0])
+    assert r.decision(r.first_match(agentsh_guard.pi_home("other", HOME) + "/models.json", "read")) == "allow"
+
+
+ROSTERS = ["sssf.config.yaml", "sssf.config.chatgpt.yaml", "sssf.config.claude_code.yaml"]
+FIXED = {"git_dir": "/home/u/github/repo/.git", "sessions": "/home/u/github/repo/adws/adw_data/sessions",
+         "refuse_script": "/home/u/github/repo/adws/adw_modules/sssf_refuse.py"}
+
+
+@pytest.mark.parametrize("roster", ROSTERS)
+def test_only_what_the_spec_names_changes_against_the_baseline_text(roster):
+    cfg = agents.load_config(str(SKILL / "templates" / roster))
+    harnesses = sorted({"claude_code" if a.coding_agent == "claude_code" else "pi" for a in cfg.agents})
+    assert harnesses and set(harnesses) <= set(BASELINES)
+    for harness in harnesses:
+        text = agentsh_guard.policy_text(repo_settings.RepoSettings(), FIXED["git_dir"], harness, "n",
+                                         sessions=FIXED["sessions"], refuse_script=FIXED["refuse_script"])
+        if harness == "claude_code":
+            assert text == BASELINE_CLAUDE
+            continue
+        new, old = yaml.safe_load(text), yaml.safe_load(BASELINE_PI)
+        for part in ("command_rules", "network_rules", "signal_rules"):
+            assert new[part] == old[part], part
+        rules_ = list(new["file_rules"])
+        at = next(i for i, x in enumerate(rules_) if x["name"] == "sssf-agent-write")
+        assert rules_[at + 1]["name"] == "sssf-agent-read"
+        read = rules_.pop(at + 1)
+        assert read["paths"] == agentsh_guard.PI_READ and read["operations"] == agentsh_guard.READ
+        rules_[at] = {**rules_[at], "paths": ["${HOME}/.pi", "${HOME}/.pi/**"]}
+        assert rules_ == old["file_rules"]
 
 
 def test_claude_token_from_the_environment_then_the_file(tmp_path, monkeypatch):

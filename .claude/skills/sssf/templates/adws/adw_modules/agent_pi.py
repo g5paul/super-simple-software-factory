@@ -64,6 +64,18 @@ def _count(value: str) -> int:
     return int(value)
 
 
+# Discovery off for pi runs on the host, outside the wrap. A model list needs none of the five.
+HOST_FLAGS = ("--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
+              "--no-context-files")
+# Agents: no extension is found on its own (-e paths still load, the refuse extension included),
+# and a -p --mode json call uses no prompt template or theme. Skills and context files stay on:
+# the project's AGENTS.md, CLAUDE.md and skills are the text a repo gives its agents, and pi has
+# no flag that turns off the agent dir's copies alone. So under agentsh the agent dir's skills/,
+# AGENTS.md and CLAUDE.md are writable by any run's pi agent, and later wrapped pi agents load
+# them. --no-extensions does not stop pi resolving a settings.json `packages` entry.
+AGENT_FLAGS = ("--no-extensions", "--no-prompt-templates", "--no-themes")
+
+
 @lru_cache(maxsize=1)
 def _pi_catalog() -> list[tuple[str, str, int]]:
     """Read pi's merged catalog, including built-in providers and custom models.
@@ -72,11 +84,13 @@ def _pi_catalog() -> list[tuple[str, str, int]]:
     container it has no login of its own, so it gets the host broker's token as
     OPENAI_API_KEY (_in_container), as an agent call does; without it pi lists
     no openai models. A broker error raises SandboxFailed and nothing is cached.
+    pi starts with discovery off (HOST_FLAGS), since this call is unwrapped and must
+    not run an extension an agent left in a pi folder.
     The cache holds the parsed rows only, never the environment."""
     env = _in_container(operator_env(), sandbox.LOCAL)
     try:
         result = subprocess.run(
-            [PI_PATH, "--list-models"], capture_output=True, text=True,
+            [PI_PATH, "--list-models", *HOST_FLAGS], capture_output=True, text=True,
             timeout=30, env=env, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -361,20 +375,30 @@ PI_AUTH_JSON: Optional[Path] = None   # tests monkeypatch this; None works it ou
 BROKER_TIMEOUT = 150            # more than the broker's own 120 s pi timeout
 
 
+def _host_token(provider: str, check: bool = False) -> tuple[int, str]:
+    """The exit code and stripped output of the host's `pi auth print-bearer-token`
+    for a provider, or of `pi auth check --json` with check=True (a status, no
+    credential). The token output is a credential: never print it."""
+    done = subprocess.run([PI_PATH, "auth", "print-bearer-token", "--provider", provider,
+                           "--min-expiry", f"{VM_TOKEN_MINUTES}m"] if not check else
+                          [PI_PATH, "auth", "check", "--provider", provider, "--json"],
+                          capture_output=True, text=True, check=False, env=operator_env(),
+                          timeout=30 if check else None)
+    return done.returncode, done.stdout.strip()
+
+
 def vm_token() -> str:
     """A ChatGPT access token for one pi agent in a remote VM, from the host's
     sign-in (docs/research/pi-chatgpt-in-vm.md). pi refreshes the login under
     its own lock if it has to, so the login and its refresh token stay on this
     machine and the VM gets only an access token that expires within the hour.
     Never print it."""
-    done = subprocess.run([PI_PATH, "auth", "print-bearer-token", "--provider", "openai",
-                           "--min-expiry", f"{VM_TOKEN_MINUTES}m"],
-                          capture_output=True, text=True, check=False, env=operator_env())
-    token = done.stdout.strip()
-    if done.returncode != 0 or not token:
+    # `pi auth` returns before pi loads any extension (main.js:460), so no discovery flag here.
+    code, token = _host_token("openai")
+    if code != 0 or not token:
         raise sandbox.SandboxFailed(
             "pi has no ChatGPT sign-in to hand a VM a token from (pi auth print-bearer-token "
-            f"--provider openai exited {done.returncode}). Sign in with `pi`, then /login.")
+            f"--provider openai exited {code}). Sign in with `pi`, then /login.")
     if token.startswith("sk-"):
         raise sandbox.SandboxFailed(
             "pi's openai credential is an API key, not the ChatGPT sign-in, and SSSF doesn't "
@@ -593,6 +617,108 @@ def _in_vm(env: dict[str, str], tree, refuse_rules: list[dict],
     return env
 
 
+# provider -> (the variable a sign-in token goes in, the prefix that marks an API key, the
+# variables that count as a key already in the environment)
+SIGN_IN = {
+    "openai": ("OPENAI_API_KEY", "sk-", ("OPENAI_API_KEY",)),
+    "anthropic": ("ANTHROPIC_OAUTH_TOKEN", "sk-ant-api",
+                  ("ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN")),
+}
+API_KEY_VAR = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+
+
+def _sign_in(env: dict[str, str], provider: str) -> None:
+    """A wrapped pi has an empty auth.json, so its sign-in comes from the host."""
+    if provider in SIGN_IN:
+        token_var, key_prefix, key_vars = SIGN_IN[provider]
+        code, token = _host_token(provider)
+        if code != 0 or not token:
+            if any(env.get(v) for v in key_vars):
+                return
+            raise sandbox.SandboxFailed(
+                f"pi has no {provider} sign-in to hand a wrapped agent and the environment has no "
+                f"{provider} key. Sign in with `pi`, then /login.")
+        if token.startswith(key_prefix):
+            if os.environ.get("SSSF_PI_AUTH") == "subscription":
+                raise sandbox.SandboxFailed(
+                    f"pi's {provider} credential is an API key, and SSSF_PI_AUTH=subscription "
+                    "keeps API keys from agents. Sign in with `pi` and /login.")
+            env[API_KEY_VAR[provider]] = token
+        else:
+            env[token_var] = token
+        return
+    try:
+        status = json.loads(_host_token(provider, check=True)[1])
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return
+    if (isinstance(status, dict) and status.get("status") == "ready"
+            and status.get("authType") == "oauth"):
+        raise sandbox.SandboxFailed(
+            f"pi's {provider} sign-in is stored in pi, and SSSF hands a wrapped agent a sign-in "
+            "for openai and anthropic only. Use a key for it in .env.")
+
+
+def _pi_homes() -> str:
+    """The folder of every wrapped pi agent's agent dir, made the way agentsh_guard.start makes
+    the agent cache. It is the root each write below it is given, so session_files opens each
+    folder under it without following a link."""
+    homes = str(Path.home() / agentsh_guard.PI_HOMES)
+    try:
+        os.makedirs(os.path.dirname(homes), exist_ok=True)
+        try:
+            os.mkdir(homes, 0o700)
+        except FileExistsError:
+            pass
+        info = os.lstat(homes)
+    except OSError as error:
+        raise sandbox.SandboxFailed(
+            f"can't make {homes} for pi's agent dirs: {error}. Look at it with `ls -la`.") from None
+    if not stat.S_ISDIR(info.st_mode):
+        raise sandbox.SandboxFailed(
+            f"{homes} is not a folder, so SSSF can't make a pi agent dir in it. Look at it with "
+            "`ls -la`, remove it and start again.")
+    return homes
+
+
+def _write_own(path: Path, data, root: str) -> None:
+    """session_files.write, with a folder or link in the file's place turned into a plain stop."""
+    try:
+        session_files.write(path, data, root)
+    except OSError:
+        raise sandbox.SandboxFailed(
+            f"SSSF can't write {path} because something that isn't a file is there. An agent may "
+            "have put it there. Look at it with `ls -la`, remove it and start again.") from None
+
+
+def _own_agent_dir(env: dict[str, str], tree, request, provider: str) -> dict[str, str]:
+    """Under an agentsh guard, a pi agent dir of the run's own in ~/.local/state/sssf-pi, so a
+    wrapped pi writes nothing in ~/.pi that an unwrapped one reads. Written again on every call:
+    an empty auth.json and a copy of the engineer's models.json, which is not blanked afterwards."""
+    guard = request.local_guard
+    if tree is not sandbox.LOCAL or guard is None or guard.mode != "agentsh":
+        return env
+    if not os.environ.get(CONTAINER_SOCKET_VAR):
+        _sign_in(env, provider)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", request.adw_id or ""):
+        raise sandbox.SandboxFailed(
+            f"can't make a pi agent dir for the run id {request.adw_id!r}: it is not one plain name")
+    homes = _pi_homes()
+    agent_dir = agentsh_guard.pi_home(request.adw_id)
+    _write_own(Path(agent_dir) / "auth.json", "{}", homes)
+    try:
+        models = _read_regular(Path(MODELS_JSON))
+    except FileNotFoundError:
+        models = b"{}"
+    except OSError as error:
+        raise sandbox.SandboxFailed(f"can't copy pi's models.json ({MODELS_JSON}): {error}") from None
+    _write_own(Path(agent_dir) / "models.json", models, homes)
+    env["PI_CODING_AGENT_DIR"] = agent_dir
+    # pi's managed fd and rg, for the find and grep tools; last, so nothing in PATH is shadowed.
+    env["PATH"] = os.pathsep.join(p for p in (env.get("PATH", ""),
+                                              str(Path(MODELS_JSON).parent / "bin")) if p)
+    return env
+
+
 def _with_refusals(env: dict[str, str], refuse_rules: list[dict],
                    secret_files=()) -> dict[str, str]:
     if refuse_rules:
@@ -660,6 +786,11 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     `on_spawn(pid)` and `on_exit(pid)` bracket the child process so the caller
     can record it as killable — a hung coding agent is otherwise a pid you have
     to hunt for in `ps` while the run sits there.
+
+    Every call starts pi with AGENT_FLAGS. Under an agentsh guard the agent has its own agent
+    dir in ~/.local/state/sssf-pi and a host-issued sign-in, reads nothing in ~/.pi but `bin/`,
+    and SSSF rewrites its `auth.json` and the `models.json` copy before every call
+    (_own_agent_dir).
     """
     provider, model_id = resolve_model(request.model)
     cmd = [
@@ -669,6 +800,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         "--session-id", request.session_id,
         "--session-dir", request.session_dir,
         "--system-prompt", request.system_prompt,
+        *AGENT_FLAGS,
     ]
     if request.tools:
         cmd += ["--tools", ",".join(request.tools)]
@@ -699,8 +831,9 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
         child_env(request.agent_name, request.adw_id, request.agent_env),
         request.refuse_rules, request.secret_files)
     env = _in_vm(env, tree, request.refuse_rules, request.extensions)
+    env = _own_agent_dir(env, tree, request, provider)
     env = _in_container(env, tree)
-    process = agentsh_guard.start(tree, HARNESS, cmd, cwd=request.cwd, env=env,
+    process =agentsh_guard.start(tree, HARNESS, cmd, cwd=request.cwd, env=env,
                                   guard=request.local_guard, tally=request.refusal_tally, on_event=on_event)
     if on_spawn:
         on_spawn(process.pid)

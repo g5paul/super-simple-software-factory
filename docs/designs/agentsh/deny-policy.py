@@ -107,7 +107,11 @@ CLAUDE_READ = [f"${{HOME}}/{p}" for p in (
 CLAUDE_WRITE = [f"${{HOME}}/{p}" for p in (
     ".cache/claude-cli-nodejs/**", ".local/state/claude/**",
 )] + ["/run/user/*/cc-socks", "/run/user/*/cc-socks/**"]
-PI_WRITE = ["${HOME}/.pi", "${HOME}/.pi/**"]
+# A wrapped pi agent writes in its own agent dir, ~/.local/state/sssf-pi/<adw_id>, and nothing in
+# ~/.pi; it reads only pi's managed `bin/` there. See agentsh_guard.PI_HOMES.
+PI_HOMES = ".local/state/sssf-pi"
+PI_WRITE = [f"${{HOME}}/{PI_HOMES}/**"]
+PI_READ = ["${HOME}/.pi/agent/bin", "${HOME}/.pi/agent/bin/**", f"${{HOME}}/{PI_HOMES}"]
 
 
 def rule(name, paths, ops, decision):
@@ -137,7 +141,7 @@ def config_search(main: str, data_root: str, quote: Callable[[str], str] = str) 
 def file_rules(git_dir, agent, *, sessions, refuse_script):
     other_sign_in, config_deny, reads, writes = {
         "claude": (PI_SIGN_IN, CLAUDE_CONFIG, CLAUDE_READ, CLAUDE_WRITE),
-        "pi": (CLAUDE_SIGN_IN, [], [], PI_WRITE),
+        "pi": (CLAUDE_SIGN_IN, [], PI_READ, PI_WRITE),
     }[agent]
     main = str(Path(git_dir).parent)
     data_root = str(Path(sessions).parent)

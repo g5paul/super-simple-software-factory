@@ -125,7 +125,7 @@
       "source": "adws/adw_modules/agent_cc.py"
     },
     "adws/adw_modules/agent_pi.py": {
-      "sha256": "f151e128b7a2823347af30ab212141d36cd02ff2212f8b66c8266bd977debc9d",
+      "sha256": "33d013b6c435148d389bacc9c645acc5db955e54aeb1880a16a22cb00754c783",
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
@@ -221,7 +221,7 @@
       "source": "adws/adw_modules/sandbox_openshell.py"
     },
     "adws/adw_modules/sandbox_remote.py": {
-      "sha256": "a340092341a8151e225528c1a04a4265a2448dfd0f7b12836729bdffbd083215",
+      "sha256": "1401de10e6e496a7fdae74cd3e881479afdf5c9bc7d53a3fc20569d0003a41b9",
       "source": "adws/adw_modules/sandbox_remote.py"
     },
     "adws/adw_modules/sandbox_usage.py": {
@@ -269,7 +269,7 @@
       "source": "adws/adw_modules/tracer.py"
     },
     "adws/adw_modules/trial.py": {
-      "sha256": "4d9ef91dd61b3ef1107afa7bd0ec4ff16d8a67c9444a705828297b0fb3023d03",
+      "sha256": "fb23258b9a71723394dd94640e6b7fa3b715409f750c306a8e98126c2e0b1b39",
       "source": "adws/adw_modules/trial.py"
     },
     "adws/adw_modules/utils.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "21c53c1"
+  "skill": "ef41512"
 }

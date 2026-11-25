@@ -134,6 +134,18 @@ def test_the_childs_environment_has_jitis_file_cache_off(run):
     assert run.argv()["env"]["JITI_FS_CACHE"] == "false"
 
 
+def test_the_child_inherits_the_compile_cache_setting_under_sssf(run):
+    code, _, err = run.go(NODE_DISABLE_COMPILE_CACHE="1")     # agent_pi.run puts it on the parent
+    assert code == 0, err
+    assert run.argv()["env"]["NODE_DISABLE_COMPILE_CACHE"] == "1"
+
+
+def test_an_interactive_pis_child_gets_it_only_from_the_shell(run):
+    done = run.go_plain(NODE_DISABLE_COMPILE_CACHE=None)
+    assert done.returncode == 0, done.stderr
+    assert "NODE_DISABLE_COMPILE_CACHE" not in run.argv()["env"]
+
+
 def test_a_parent_with_the_cache_on_still_gives_the_child_it_off(run):
     code, _, err = run.go(JITI_FS_CACHE="true")
     assert code == 0, err

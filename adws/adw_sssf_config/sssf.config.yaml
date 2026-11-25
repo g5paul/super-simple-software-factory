@@ -89,6 +89,8 @@ defaults:
     - .claude/skills/sssf/tests/fixtures/subagents/
     - .claude/skills/sssf/tests/test_pi_extension_cache.py
     - .claude/skills/sssf/tests/fixtures/jiti/
+    - .claude/skills/sssf/tests/test_pi_compile_cache.py
+    - .claude/skills/sssf/tests/fixtures/compile_cache/
   rate_limit_stop: 0.8                 # stop before an agent starts once a usage window (5-hour, where the plan has one, or 7-day) is this full, and stop any call once the account moves onto usage credits; null = off for both
   # Hub: a guard run makes up to three Opus bypass reviews at up to $5 each, and from 2026-11-13
   # its planner is Fable at up to $4 a call, so the cap went from $20 to $30.
@@ -296,6 +298,8 @@ agents:
       - .claude/skills/sssf/tests/fixtures/subagents/
       - .claude/skills/sssf/tests/test_pi_extension_cache.py
       - .claude/skills/sssf/tests/fixtures/jiti/
+      - .claude/skills/sssf/tests/test_pi_compile_cache.py
+      - .claude/skills/sssf/tests/fixtures/compile_cache/
     tools:
       - read
       - grep

@@ -246,6 +246,17 @@ def test_pi_on_openai_needs_the_chatgpt_sign_in_and_subscription_auth(monkeypatc
     assert "provider_not_found" in trial.pi_problems("google")[0]
 
 
+def test_pi_auth_check_starts_in_the_hosts_folder_not_the_project(monkeypatch):
+    seen = {}
+
+    def run(*a, **k):
+        seen.update(k)
+        return SimpleNamespace(stdout=json.dumps({"status": "not_ready"}))
+    monkeypatch.setattr(trial.subprocess, "run", run)
+    trial.pi_problems("google")
+    assert seen["cwd"] == "/"
+
+
 @pytest.fixture
 def container_broker(tmp_path, monkeypatch):
     """A fake broker answering one line; set `answer` before connecting."""

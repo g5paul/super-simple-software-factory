@@ -826,7 +826,7 @@ class Own:
         real_start = agentsh_guard.start
 
         def start(tree, harness, cmd, *, cwd, env, guard, tally=None, on_event=None):
-            self.seen.append({"cmd": cmd, "env": dict(env),
+            self.seen.append({"cmd": cmd, "env": dict(env), "cwd": cwd,
                               "auth": self._read(self.dir / "auth.json"),
                               "models": self._read(self.dir / "models.json")})
             return real_start(tree, harness, cmd, cwd=cwd, env=env, guard=LocalGuard(mode="none"),
@@ -1054,3 +1054,125 @@ def test_a_token_socket_makes_no_auth_call(own, monkeypatch):
     monkeypatch.setattr(agent_pi, "_in_container", lambda env, tree: env)
     own.run()
     assert own.auth() == []
+
+
+# The host's pi starts in HOST_CWD (/), never in the project, and the model list gets --no-approve.
+# Every pi here is a fake that logs its argv and `pwd -P`, except the one real-pi test below.
+
+def _planted_repo(root: Path, marker: Path) -> Path:
+    repo = root / "repo"
+    (repo / ".pi" / "commands").mkdir(parents=True)
+    (repo / ".pi" / "commands" / "x.md").write_text("x")
+    (repo / ".pi" / "settings.json").write_text(json.dumps(
+        {"packages": ["npm:sssf-probe"], "npmCommand": ["sh", "-c", f"touch {marker}"]}))
+    return repo
+
+
+def _logging_pi(tmp_path, monkeypatch):
+    log = tmp_path / "calls"
+    script = tmp_path / "pi"
+    script.write_text(f'#!/bin/sh\necho "$(pwd -P) $*" >> {log}\n'
+                      'if [ "$1" = --list-models ]; then\n'
+                      '  printf "provider model context max\\n"\n'
+                      '  printf "openai gpt-a 272K 128K\\n"\n'
+                      '  printf "custom-p m1 1.0M 64K\\n"\n'
+                      '  printf "short line\\n"\n'
+                      '  printf "bad model xyz 1\\n"\n'
+                      '  printf "google gem 8K 1K\\n"\n'
+                      'elif [ "$2" = check ]; then echo \'{"status": "ready"}\'\n'
+                      'else echo tok-1; fi\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+    agent_pi._pi_catalog.cache_clear()
+    return log
+
+
+def _calls(log: Path) -> list[tuple[str, list[str]]]:
+    return [(line.split(" ", 1)[0], line.split(" ", 1)[1].split()) for line in log.read_text().splitlines()]
+
+
+def test_every_host_start_runs_in_the_root_folder_not_the_project(tmp_path, monkeypatch):
+    marker = tmp_path / "marker"
+    repo = _planted_repo(tmp_path, marker)
+    log = _logging_pi(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+    assert agent_pi.HOST_CWD == "/"
+    try:
+        agent_pi._pi_catalog()
+        agent_pi._host_token("openai")
+        agent_pi._host_token("google", check=True)
+        agent_pi.vm_token()
+        agent_pi._sign_in({}, "openai")
+    finally:
+        agent_pi._pi_catalog.cache_clear()
+    calls = _calls(log)
+    assert [cwd for cwd, _ in calls[:5]] == ["/"] * 5
+    assert not marker.exists()
+    listing = calls[0][1]
+    assert listing[0] == "--list-models" and "--no-approve" in listing
+    assert set(agent_pi.HOST_FLAGS) <= set(listing)
+    assert calls[1][1] == "auth print-bearer-token --provider openai --min-expiry".split() + [
+        f"{agent_pi.VM_TOKEN_MINUTES}m"]
+    assert calls[2][1] == "auth check --provider google --json".split()
+    assert calls[3][1] == calls[1][1]
+
+
+def test_the_baseline_start_would_have_run_in_the_project(tmp_path, monkeypatch):
+    """The control: the baseline's call, with no cwd, logs the repo and no --no-approve."""
+    import subprocess
+    repo = _planted_repo(tmp_path, tmp_path / "marker")
+    log = _logging_pi(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+    subprocess.run([agent_pi.PI_PATH, "--list-models", *agent_pi.HOST_FLAGS],
+                   capture_output=True, check=False)
+    cwd, argv = _calls(log)[0]
+    assert cwd == str(repo.resolve()) and "--no-approve" not in argv
+
+
+def test_the_model_list_returns_the_same_rows_as_before(tmp_path, monkeypatch):
+    log = _logging_pi(tmp_path, monkeypatch)
+    try:
+        assert agent_pi._pi_catalog() == [
+            ("openai", "gpt-a", 272_000), ("custom-p", "m1", 1_000_000), ("google", "gem", 8_000)]
+    finally:
+        agent_pi._pi_catalog.cache_clear()
+    assert log.exists()
+
+
+def test_an_agent_call_keeps_its_cwd_and_gets_no_no_approve(own):
+    own.run()
+    assert own.seen[0]["cwd"] == own.request.cwd
+    assert "--no-approve" not in own.seen[0]["cmd"]
+
+
+def _real_pi_env(root: Path) -> dict[str, str]:
+    home, agent = root / "home", root / "agent"
+    home.mkdir()
+    agent.mkdir()
+    env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "TERM")}
+    return {**env, "HOME": str(home), "PI_CODING_AGENT_DIR": str(agent), "PI_OFFLINE": "1"}
+
+
+# One real pi, offline, with HOME and PI_CODING_AGENT_DIR in temp folders; skipped without pi.
+@pytest.mark.skipif(shutil.which("pi") is None, reason="pi is not installed")
+def test_a_real_pi_in_the_root_folder_touches_nothing_in_the_project(tmp_path):
+    import subprocess
+    argv = [shutil.which("pi"), "--list-models", *agent_pi.HOST_FLAGS, *agent_pi.NO_PROJECT,
+            "--offline"]
+    env = _real_pi_env(tmp_path)
+    marker = tmp_path / "marker"
+    repo = _planted_repo(tmp_path, marker)
+    before = sorted(str(p.relative_to(repo)) for p in repo.rglob("*"))
+    subprocess.run(argv, cwd=agent_pi.HOST_CWD, env=env, capture_output=True, timeout=60,
+                   check=False)
+    assert not marker.exists()
+    assert (repo / ".pi" / "commands").is_dir() and not (repo / ".pi" / "prompts").exists()
+    assert sorted(str(p.relative_to(repo)) for p in repo.rglob("*")) == before
+    # The control: the baseline's argv and cwd rename .pi/commands to .pi/prompts.
+    other = tmp_path / "other"
+    other.mkdir()
+    base = _planted_repo(other, other / "marker")
+    subprocess.run([argv[0], "--list-models", *agent_pi.HOST_FLAGS, "--offline"], cwd=base,
+                   env=env, capture_output=True, timeout=60, check=False)
+    assert (base / ".pi" / "prompts").is_dir()

@@ -67,7 +67,7 @@ Update the hub's install and commit it. In a scratch repo with SSSF installed an
 
 ## Running the tests
 
-The planner and the builder run under agentsh. Run only the touched test files from `.claude/skills/sssf` with `-m 'not pushes and not host_only'`, and leave the whole suite to verify. A whole-suite run under agentsh makes the after-call event read take many minutes (`docs/open.md`). Every `.env` a test writes is in a temp repo and holds made-up keys. Never open, copy or print the hub's own `.env`; check it by key name only, if at all. A submodule test needs `-c protocol.file.allow=always` for `git submodule add` from a local path.
+The planner and the builder run under agentsh. Run only the touched test files from `.claude/skills/sssf` with `-m 'not pushes and not host_only'`, and leave the whole suite to verify. A whole-suite run under agentsh makes the after-call event read take many minutes (`docs/open.md`). Every `.env` a test writes is in a temp repo and holds made-up keys. Never open, copy or print the hub's own `.env`; check it by key name only, if at all. A submodule test needs `-c protocol.file.allow=always` for `git submodule add` from a local path. Seed a test's bare repo with `git clone --bare` or `git fetch`. agentsh refuses every `git push` from an agent's processes, and one refused push stops the run, as it stopped guard run c98e111d's build on 2026-11-25. A test that must push gets the `pushes` marker.
 
 ## Out of scope
 

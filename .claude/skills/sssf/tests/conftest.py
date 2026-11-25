@@ -16,6 +16,26 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def keep_the_working_folder():
+    """Put the working folder back after each test. Many tests `os.chdir` into their
+    `tmp_path` and never leave. With `tmp_path_retention_policy = failed` pytest removes
+    that folder when the test passes, which would leave the next test in a deleted folder.
+    This fixture is set up first, so it is torn down after `tmp_path` is removed."""
+    import os
+    before = os.getcwd()
+    yield
+    os.chdir(before)
+
+
+@pytest.fixture(autouse=True)
+def a_tmp_path_first(keep_the_working_folder, tmp_path):
+    """Set `tmp_path` up before the other autouse fixtures, which take `monkeypatch`. pytest
+    sets autouse fixtures up in name order, so this name sorts first. Then
+    `monkeypatch` is undone before pytest removes a passed test's `tmp_path`. A test that
+    patches `os.scandir` would otherwise break that removal."""
+
+
+@pytest.fixture(autouse=True)
 def private_registry(tmp_path_factory, monkeypatch):
     path = tmp_path_factory.mktemp("registry") / "projects.json"
     monkeypatch.setenv("SSSF_REGISTRY", str(path))

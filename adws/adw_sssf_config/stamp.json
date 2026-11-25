@@ -21,7 +21,7 @@
       "source": "adws/adw_build_test.py"
     },
     "adws/adw_data/harness_engineering/subagents.ts": {
-      "sha256": "a99c37ca0c08021537721fbb6d2f1d69742cf90581db8204217949b6c3471dae",
+      "sha256": "11377b34e7c9245dbb563bf3139435a14feffa61f8496b26bbb75711f67c94f9",
       "source": "harness_engineering/subagents.ts"
     },
     "adws/adw_data/harness_engineering/themeMap.ts": {
@@ -125,7 +125,7 @@
       "source": "adws/adw_modules/agent_cc.py"
     },
     "adws/adw_modules/agent_pi.py": {
-      "sha256": "627ca2274656a2f580fccdf3081e5d89cd5d76de08e839d8c4c308c21369dfef",
+      "sha256": "f151e128b7a2823347af30ab212141d36cd02ff2212f8b66c8266bd977debc9d",
       "source": "adws/adw_modules/agent_pi.py"
     },
     "adws/adw_modules/agents.py": {
@@ -221,7 +221,7 @@
       "source": "adws/adw_modules/sandbox_openshell.py"
     },
     "adws/adw_modules/sandbox_remote.py": {
-      "sha256": "3fc99e05b15f42e5a9e8a57c18b53a0e3fe2b7199ebeb9c84207073a68b9fa60",
+      "sha256": "a340092341a8151e225528c1a04a4265a2448dfd0f7b12836729bdffbd083215",
       "source": "adws/adw_modules/sandbox_remote.py"
     },
     "adws/adw_modules/sandbox_usage.py": {
@@ -341,5 +341,5 @@
       "source": "justfile"
     }
   },
-  "skill": "aed2fbc"
+  "skill": "21c53c1"
 }

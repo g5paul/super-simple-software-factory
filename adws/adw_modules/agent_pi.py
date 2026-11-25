@@ -80,6 +80,10 @@ HOST_CWD = "/"
 # AGENTS.md and CLAUDE.md are writable by any run's pi agent, and later wrapped pi agents load
 # them. --no-extensions does not stop pi resolving a settings.json `packages` entry.
 AGENT_FLAGS = ("--no-extensions", "--no-prompt-templates", "--no-themes")
+# Set last on every agent's environment: jiti then compiles each -e extension from its source and
+# reads no compiled copy from /tmp/jiti, which any agent can write. Must be the text `false`.
+# The reason and the cost are in references/config.md.
+NO_EXTENSION_CACHE = {"JITI_FS_CACHE": "false"}
 
 
 @lru_cache(maxsize=1)
@@ -804,7 +808,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
 
     The agent's environment also carries SSSF_REFUSE_EXTENSION (the refuse extension's path) and
     SSSF_SESSION_DIR (the absolute session dir). A starter subagent loads the one and keeps its
-    session in the other.
+    session in the other. It carries JITI_FS_CACHE=false too, so pi compiles each extension from
+    its source and reads no cache file.
     """
     provider, model_id = resolve_model(request.model)
     cmd = [
@@ -851,6 +856,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     env = _in_vm(env, tree, request.refuse_rules, request.extensions)
     env = _own_agent_dir(env, tree, request, provider)
     env = _in_container(env, tree)
+    env.update(NO_EXTENSION_CACHE)       # last: no earlier step and no operator value wins
     process =agentsh_guard.start(tree, HARNESS, cmd, cwd=request.cwd, env=env,
                                   guard=request.local_guard, tally=request.refusal_tally, on_event=on_event)
     if on_spawn:

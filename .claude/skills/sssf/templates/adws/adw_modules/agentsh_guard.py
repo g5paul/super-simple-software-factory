@@ -165,7 +165,26 @@ CLAUDE_READ = [f"${{HOME}}/{p}" for p in (
 CLAUDE_WRITE = [f"${{HOME}}/{p}" for p in (
     ".cache/claude-cli-nodejs/**", ".local/state/claude/**",
 )] + ["/run/user/*/cc-socks", "/run/user/*/cc-socks/**"]
-PI_WRITE = ["${HOME}/.pi", "${HOME}/.pi/**"]
+# A wrapped pi agent writes nothing in ~/.pi. Its agent dir is ~/.local/state/sssf-pi/<adw_id>
+# (agent_pi sets PI_CODING_AGENT_DIR), and a policy is installed per repo, so the rule can't name
+# the run: any run's pi agent can write any run's agent dir, in any repo, and so can leave
+# `settings.json`, `bin/`, `skills/`, `AGENTS.md` or `CLAUDE.md` there for a later wrapped pi agent.
+# Only wrapped pi agents read that folder (docs/open.md).
+# PI_HOMES holds the pi agent dirs of wrapped agents, one per run. It sits under the home folder
+# because no Claude Code agent may read it or write, rename or link any folder above it: the Claude
+# policy allows nothing there, so default-deny closes it. SSSF makes it, and no policy lets an agent
+# replace the folder itself.
+PI_HOMES = ".local/state/sssf-pi"
+PI_WRITE = [f"${{HOME}}/{PI_HOMES}/**"]
+# pi's managed `fd` and `rg`, read and run by agents and never written, and the homes folder
+# itself, which pi may stat on its way in. Everything else in ~/.pi falls to sssf-default-deny.
+PI_READ = ["${HOME}/.pi/agent/bin", "${HOME}/.pi/agent/bin/**", f"${{HOME}}/{PI_HOMES}"]
+
+
+def pi_home(adw_id: str, home: Optional[str] = None) -> str:
+    """The agent dir of a wrapped pi agent for one run. agent_pi writes there and the tests
+    judge the same path."""
+    return os.path.join(home or str(Path.home()), PI_HOMES, adw_id)
 
 # harness (the interface's HARNESS) -> the name its policy carries
 SHORT = {"claude_code": "claude", "pi": "pi"}
@@ -340,7 +359,7 @@ def file_rules(git_dir: str, agent: str, secret_files: list[str] = (), *,
                sessions: str, refuse_script: str) -> str:
     other_sign_in, config_deny, reads, writes = {
         "claude": (PI_SIGN_IN, CLAUDE_CONFIG, CLAUDE_READ, CLAUDE_WRITE),
-        "pi": (CLAUDE_SIGN_IN, [], [], PI_WRITE),
+        "pi": (CLAUDE_SIGN_IN, [], PI_READ, PI_WRITE),
     }[agent]
     main = str(Path(git_dir).parent)
     data_root = str(Path(sessions).parent)

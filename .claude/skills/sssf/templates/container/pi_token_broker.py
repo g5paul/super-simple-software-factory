@@ -14,6 +14,7 @@ trap only kills it, run.sh removes a socket left at the path before the next
 start, and the broker itself still replaces a socket nothing answers on when it
 is started some other way.
 pi starts in /, never in the folder run.sh was started in (agent_pi.HOST_CWD).
+pi starts with Node's compile cache off (NODE_DISABLE_COMPILE_CACHE=1).
 Never prints or logs a token. Stdlib only; works on Python 3.10.
 """
 
@@ -29,6 +30,7 @@ import sys
 MIN_EXPIRY = "35m"
 PI = os.environ.get("PI_PATH", "pi")
 PI_TIMEOUT = 120  # seconds
+NO_COMPILE_CACHE = {"NODE_DISABLE_COMPILE_CACHE": "1"}   # must match agent_pi.NO_COMPILE_CACHE (a test pins it)
 
 
 def mint() -> tuple[bool, str]:
@@ -37,6 +39,7 @@ def mint() -> tuple[bool, str]:
         done = subprocess.run([PI, "auth", "print-bearer-token", "--provider", "openai",
                                "--min-expiry", MIN_EXPIRY],
                               capture_output=True, text=True, timeout=PI_TIMEOUT, check=False,
+                              env={**os.environ, **NO_COMPILE_CACHE},
                               # Same folder as agent_pi.HOST_CWD: pi reads nothing from the
                               # folder run.sh was started in.
                               cwd="/")

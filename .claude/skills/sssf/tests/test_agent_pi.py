@@ -1207,6 +1207,42 @@ def test_the_agent_gets_jitis_file_cache_off_whatever_the_operator_set(tmp_path,
     assert _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)["JITI_FS_CACHE"] == "false"
 
 
+def test_the_agent_gets_nodes_compile_cache_off_whatever_the_operator_set(tmp_path, monkeypatch):
+    monkeypatch.delenv("NODE_DISABLE_COMPILE_CACHE", raising=False)
+    monkeypatch.delenv("NODE_COMPILE_CACHE", raising=False)
+    assert _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)["NODE_DISABLE_COMPILE_CACHE"] == "1"
+    monkeypatch.setenv("NODE_DISABLE_COMPILE_CACHE", "0")
+    monkeypatch.setenv("NODE_COMPILE_CACHE", "/somewhere")
+    assert _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)["NODE_DISABLE_COMPILE_CACHE"] == "1"
+
+
+def test_an_agentsh_call_gets_nodes_compile_cache_off(own):
+    own.mp.setenv("NODE_DISABLE_COMPILE_CACHE", "0")
+    own.set(code=0)
+    own.run()
+    assert own.seen[-1]["env"]["NODE_DISABLE_COMPILE_CACHE"] == "1"
+
+
+def test_a_pi_the_agent_runs_records_the_compile_cache_setting(tmp_path, monkeypatch):
+    envlog = tmp_path / "env"
+    req = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi"))
+    script = Path(agent_pi.PI_PATH)
+    script.write_text(f"#!/bin/sh\nenv > {envlog}\n" + script.read_text().split("\n", 1)[1])
+    monkeypatch.setenv("NODE_DISABLE_COMPILE_CACHE", "0")
+    monkeypatch.setattr(sandbox, "current", lambda: sandbox.LOCAL)
+    agent_pi.run(req)
+    assert "NODE_DISABLE_COMPILE_CACHE=1" in envlog.read_text().splitlines()
+
+
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
+def test_the_container_agent_gets_the_compile_cache_setting_next_to_the_brokers_token(
+        broker, tmp_path, monkeypatch):
+    monkeypatch.setenv("NODE_DISABLE_COMPILE_CACHE", "0")
+    env = _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)
+    assert env["OPENAI_API_KEY"] == "eyJ-tok" and env["NODE_DISABLE_COMPILE_CACHE"] == "1"
+
+
 def test_the_cache_setting_is_the_same_in_the_vm_start(tmp_path, monkeypatch):
     from adw_modules import sandbox_remote
     assert agent_pi.NO_EXTENSION_CACHE == sandbox_remote.PI_NO_CACHE == {"JITI_FS_CACHE": "false"}

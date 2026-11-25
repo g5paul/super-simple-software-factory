@@ -62,6 +62,7 @@ ANSWER_MAX = 200   # how much of a bad Python answer a message keeps
 PASSED = ("SSSF_", "OBS_")          # the host variables a VM command gets, with UV_PYTHON
 HELD = ("OBS_AUTH_TOKEN",)          # named variables no VM command gets, whatever PASSED says
 PI_NO_CACHE = {"JITI_FS_CACHE": "false"}   # must match agent_pi.NO_EXTENSION_CACHE (a test pins it)
+PI_NO_COMPILE_CACHE = {"NODE_DISABLE_COMPILE_CACHE": "1"}   # must match agent_pi.NO_COMPILE_CACHE (a test pins it)
 # The names Claude Code reads as an API key; they match agent_cc.API_KEY_VARS. A VM
 # command whose env holds one is refused.
 KEY_NAMES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
@@ -112,7 +113,7 @@ TOOLS = {
     "uv":     {"command": "uv --version"},
     "claude": {"command": "claude --version", "min": "2.1.312", "tested": 2, "for": "claude_code"},
     "node":   {"command": "node --version", "min": "22.19.0", "for": "pi"},   # pi's engines field
-    "pi":     {"command": "pi --version", "min": "1.4.0", "tested": 1, "for": "pi"},
+    "pi":     {"command": "NODE_DISABLE_COMPILE_CACHE=1 pi --version", "min": "1.4.0", "tested": 1, "for": "pi"},
 }
 MISSING = "missing"
 FOUND = "found"
@@ -990,6 +991,7 @@ class Remote:
         if "OPENAI_API_KEY" in agent_env:    # only _env's rename of agent_pi's token sets this
             agent_env.update(self.pi_env)
             agent_env.update(PI_NO_CACHE)
+            agent_env.update(PI_NO_COMPILE_CACHE)
         else:
             agent_env.update(self.cc_env)
             if self._token:

@@ -84,6 +84,10 @@ AGENT_FLAGS = ("--no-extensions", "--no-prompt-templates", "--no-themes")
 # reads no compiled copy from /tmp/jiti, which any agent can write. Must be the text `false`.
 # The reason and the cost are in references/config.md.
 NO_EXTENSION_CACHE = {"JITI_FS_CACHE": "false"}
+# Set last on every pi SSSF starts, the host's included: pi's bin calls enableCompileCache(), and
+# Node would read V8 code cache from $TMPDIR/node-compile-cache, which any agent can write. Any
+# value turns the cache off, so an operator's value can't turn it on. references/config.md.
+NO_COMPILE_CACHE = {"NODE_DISABLE_COMPILE_CACHE": "1"}
 
 
 @lru_cache(maxsize=1)
@@ -98,8 +102,10 @@ def _pi_catalog() -> list[tuple[str, str, int]]:
     not run an extension an agent left in a pi folder. It starts in HOST_CWD, not the
     project, and gets --no-approve: the flags alone left pi's migration of the cwd's
     .pi/commands and a trusted project's settings.json packages.
+    It also gets NODE_DISABLE_COMPILE_CACHE=1, so pi reads no Node compile cache.
     The cache holds the parsed rows only, never the environment."""
     env = _in_container(operator_env(), sandbox.LOCAL)
+    env.update(NO_COMPILE_CACHE)     # pi reads no Node compile cache here either
     try:
         result = subprocess.run(
             [PI_PATH, "--list-models", *HOST_FLAGS, *NO_PROJECT], capture_output=True, text=True,
@@ -391,11 +397,12 @@ def _host_token(provider: str, check: bool = False) -> tuple[int, str]:
     """The exit code and stripped output of the host's `pi auth print-bearer-token`
     for a provider, or of `pi auth check --json` with check=True (a status, no
     credential). The token output is a credential: never print it. pi starts in
-    HOST_CWD, so it reads nothing from the project."""
+    HOST_CWD, so it reads nothing from the project, and with NODE_DISABLE_COMPILE_CACHE=1,
+    so it reads no Node compile cache."""
     done = subprocess.run([PI_PATH, "auth", "print-bearer-token", "--provider", provider,
                            "--min-expiry", f"{VM_TOKEN_MINUTES}m"] if not check else
                           [PI_PATH, "auth", "check", "--provider", provider, "--json"],
-                          capture_output=True, text=True, check=False, env=operator_env(),
+                          capture_output=True, text=True, check=False, env={**operator_env(), **NO_COMPILE_CACHE},
                           timeout=30 if check else None, cwd=HOST_CWD)
     return done.returncode, done.stdout.strip()
 
@@ -809,7 +816,8 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     The agent's environment also carries SSSF_REFUSE_EXTENSION (the refuse extension's path) and
     SSSF_SESSION_DIR (the absolute session dir). A starter subagent loads the one and keeps its
     session in the other. It carries JITI_FS_CACHE=false too, so pi compiles each extension from
-    its source and reads no cache file.
+    its source and reads no cache file. It carries NODE_DISABLE_COMPILE_CACHE=1 as well, so pi
+    reads no Node compile cache.
     """
     provider, model_id = resolve_model(request.model)
     cmd = [
@@ -857,6 +865,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     env = _own_agent_dir(env, tree, request, provider)
     env = _in_container(env, tree)
     env.update(NO_EXTENSION_CACHE)       # last: no earlier step and no operator value wins
+    env.update(NO_COMPILE_CACHE)         # last too, for the same reason
     process =agentsh_guard.start(tree, HARNESS, cmd, cwd=request.cwd, env=env,
                                   guard=request.local_guard, tally=request.refusal_tally, on_event=on_event)
     if on_spawn:

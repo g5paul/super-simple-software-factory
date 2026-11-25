@@ -1603,6 +1603,49 @@ def test_a_pi_start_gets_jitis_file_cache_off(box):
     assert seen["JITI_FS_CACHE"] == "false"
 
 
+def test_a_pi_start_gets_nodes_compile_cache_off(box):
+    token = {"SSSF_PI_TOKEN": "chatgpt-access"}
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, **token}))
+    assert seen["NODE_DISABLE_COMPILE_CACHE"] == "1"
+    seen = _env_of(box.start(["sh", "-c", "env"],
+                             env={**os.environ, **token, "NODE_DISABLE_COMPILE_CACHE": "0"}))
+    assert seen["NODE_DISABLE_COMPILE_CACHE"] == "1"
+
+
+def test_a_claude_start_gets_no_compile_cache_setting(box):
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ}))
+    assert "NODE_DISABLE_COMPILE_CACHE" not in seen
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, "NODE_DISABLE_COMPILE_CACHE": "1"}))
+    assert "NODE_DISABLE_COMPILE_CACHE" not in seen
+
+
+def test_the_tool_check_runs_pi_with_the_compile_cache_off(box):
+    box.run_.cfg = types.SimpleNamespace(agents=[types.SimpleNamespace(coding_agent="pi")])
+    lines = []
+    real = box._must
+    def spy(cmd, args=(), **kw):
+        lines.extend(args)
+        return real(cmd, args, **kw)
+    box._must = spy
+    try:
+        box._check_tools()
+    except Exception:
+        pass       # this VM may lack node or pi; the line it was asked to run is what counts
+    assert any("NODE_DISABLE_COMPILE_CACHE=1 pi --version" in a for a in lines)
+
+
+def test_every_provider_starts_through_the_shared_start():
+    from adw_modules import sandbox_remote
+    for module, name in (("sandbox_e2b", "E2B"), ("sandbox_vercel", "Vercel"),
+                         ("sandbox_openshell", "OpenShell")):
+        try:
+            cls = getattr(__import__(f"adw_modules.{module}", fromlist=[name]), name)
+        except ImportError:
+            continue
+        assert "start" not in cls.__dict__, name
+        assert cls.start is sandbox_remote.Remote.start
+
+
 def test_a_claude_start_gets_no_jiti_setting(box):
     seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, "JITI_FS_CACHE": "true"}))
     assert "JITI_FS_CACHE" not in seen

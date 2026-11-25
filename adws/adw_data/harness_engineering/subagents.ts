@@ -11,6 +11,18 @@
  *   /subcont 1 --thinking xhigh now write tests for it
  *   /subrm 2                               — remove subagent #2 widget
  *   /subclear                              — clear all subagent widgets
+ *
+ * Under SSSF (SSSF_ADW_ID or SSSF_REFUSE_EXTENSION set when this loads):
+ * - each child loads SSSF's refuse extension (SSSF_REFUSE_EXTENSION), so its
+ *   `refuse` rules and secret-file check apply to the child's tools;
+ * - the child's tool_execution_start/_end events are forwarded to this pi's
+ *   stdout, where SSSF's stream check reads them (kill rules stop the run);
+ * - subagent_create and subagent_continue wait for the child and return its
+ *   result, so no child outlives its parent's call;
+ * - the child's session goes in $SSSF_SESSION_DIR/subagents/;
+ * - a child never starts when the extension or session dir is missing, or
+ *   when its task starts with "@" (pi would attach that file).
+ * Without them (an interactive pi) nothing changes.
  */
 
 import { StringEnum, type ThinkingLevel } from "@mariozechner/pi-ai";
@@ -18,7 +30,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-const { spawn } = require("child_process") as any;
+import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -117,10 +129,70 @@ export default function (pi: ExtensionAPI) {
 	let nextId = 1;
 	let widgetCtx: any;
 
+	// Read once, at load, before the model's first tool call. The model's own
+	// commands run in child shells and can't change this process's environment.
+	const REFUSE_EXTENSION = process.env.SSSF_REFUSE_EXTENSION || "";
+	const SESSION_DIR = process.env.SSSF_SESSION_DIR || "";
+	const UNDER_SSSF = !!(process.env.SSSF_ADW_ID || REFUSE_EXTENSION);
+
+	// The reason no child may start, or "" when one may.
+	function preflight(prompt: string): string {
+		if (!UNDER_SSSF) return "";
+		if (!REFUSE_EXTENSION || !path.isAbsolute(REFUSE_EXTENSION)) {
+			return "SSSF_REFUSE_EXTENSION is unset or not an absolute path, so a subagent would run without SSSF's checks.";
+		}
+		try {
+			if (!fs.statSync(REFUSE_EXTENSION).isFile()) throw new Error("not a file");
+		} catch {
+			return `SSSF_REFUSE_EXTENSION (${REFUSE_EXTENSION}) is not a regular file, so a subagent would run without SSSF's checks.`;
+		}
+		if (!SESSION_DIR || !path.isAbsolute(SESSION_DIR)) {
+			return "SSSF_SESSION_DIR is unset or not an absolute path, so there is no place for the subagent's session.";
+		}
+		if (prompt.trimStart().startsWith("@")) {
+			return "A subagent task starting with @ is refused: pi would attach that file as an argument.";
+		}
+		return "";
+	}
+
+	// Fail closed: a child SSSF can't see doesn't keep running.
+	function killAll(signal: string = "SIGKILL") {
+		for (const state of agents.values()) {
+			if (state.proc && state.status === "running") {
+				try { state.proc.kill(signal); } catch {}
+				state.status = "error";
+			}
+		}
+	}
+
+	function forward(state: SubState, event: any) {
+		if (!UNDER_SSSF) return;
+		const line = JSON.stringify({
+			...event,
+			toolCallId: `sub${state.id}:${event.toolCallId}`,
+			subagent: state.id,
+		}) + "\n";
+		try {
+			// The stream's own write, not the one pi's output guard replaced.
+			Object.getPrototypeOf(process.stdout).write.call(process.stdout, line, (err: any) => {
+				if (err) killAll();
+			});
+		} catch {
+			killAll();
+		}
+	}
+
+	if (UNDER_SSSF) {
+		process.stdout.on("error", () => killAll());
+		process.on("exit", () => killAll("SIGKILL"));
+	}
+
 	// ── Session file helpers ──────────────────────────────────────────────────
 
 	function makeSessionFile(id: number): string {
-		const dir = path.join(os.homedir(), ".pi", "agent", "sessions", "subagents");
+		const dir = UNDER_SSSF
+			? path.join(SESSION_DIR, "subagents")
+			: path.join(os.homedir(), ".pi", "agent", "sessions", "subagents");
 		fs.mkdirSync(dir, { recursive: true });
 		return path.join(dir, `subagent-${id}-${Date.now()}.jsonl`);
 	}
@@ -203,8 +275,16 @@ export default function (pi: ExtensionAPI) {
 			} else if (type === "tool_execution_start") {
 				state.toolCount++;
 				updateWidgets();
+				forward(state, event);
+			} else if (type === "tool_execution_end") {
+				forward(state, event);
 			}
 		} catch {}
+	}
+
+	function resultText(state: SubState, prompt: string): string {
+		const result = state.textChunks.join("");
+		return `Subagent #${state.id}${state.turnCount > 1 ? ` (Turn ${state.turnCount})` : ""} finished "${prompt}" in ${Math.round(state.elapsed / 1000)}s.\n\nResult:\n${result.slice(0, 8000)}${result.length > 8000 ? "\n\n... [truncated]" : ""}`;
 	}
 
 	function spawnAgent(
@@ -234,6 +314,8 @@ export default function (pi: ExtensionAPI) {
 				"--model", model,
 				"--tools", "read,bash,grep,find,ls",
 				"--thinking", thinking,
+				// Under SSSF the refuse extension is the child's only extension.
+				...(UNDER_SSSF ? ["-e", REFUSE_EXTENSION, "--"] : []),
 				prompt,
 			], {
 				stdio: ["ignore", "pipe", "pipe"],
@@ -274,17 +356,19 @@ export default function (pi: ExtensionAPI) {
 				state.proc = undefined;
 				updateWidgets();
 
-				const result = state.textChunks.join("");
 				ctx.ui.notify(
 					`Subagent #${state.id} ${state.status} in ${Math.round(state.elapsed / 1000)}s`,
 					state.status === "done" ? "success" : "error"
 				);
 
-				pi.sendMessage({
-					customType: "subagent-result",
-					content: `Subagent #${state.id}${state.turnCount > 1 ? ` (Turn ${state.turnCount})` : ""} finished "${prompt}" in ${Math.round(state.elapsed / 1000)}s.\n\nResult:\n${result.slice(0, 8000)}${result.length > 8000 ? "\n\n... [truncated]" : ""}`,
-					display: true,
-				}, { deliverAs: "followUp", triggerTurn: true });
+				// Under SSSF the tool returns this text itself.
+				if (!UNDER_SSSF) {
+					pi.sendMessage({
+						customType: "subagent-result",
+						content: resultText(state, prompt),
+						display: true,
+					}, { deliverAs: "followUp", triggerTurn: true });
+				}
 
 				resolve();
 			});
@@ -304,7 +388,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "subagent_create",
-		description: "Spawn a background subagent. Thinking level is required and is the primary way to match the subagent to task complexity: low for lightweight/simple tasks, medium for routine tasks needing moderate reasoning, high for complex multi-step work, and xhigh for the hardest tasks or when accuracy and performance are critical. Unless the user explicitly requests a specific model, omit model and use the default inherited parent model. Returns immediately and delivers results as a follow-up message.",
+		description: "Spawn a background subagent. Thinking level is required and is the primary way to match the subagent to task complexity: low for lightweight/simple tasks, medium for routine tasks needing moderate reasoning, high for complex multi-step work, and xhigh for the hardest tasks or when accuracy and performance are critical. Unless the user explicitly requests a specific model, omit model and use the default inherited parent model. " + (UNDER_SSSF
+				? "Waits for the subagent to finish and returns its result."
+				: "Returns immediately and delivers results as a follow-up message."),
 		parameters: Type.Object({
 			task: Type.String({ description: "The complete task description for the subagent to perform" }),
 			model: Type.Optional(Type.String({
@@ -316,6 +402,10 @@ export default function (pi: ExtensionAPI) {
 		}),
 		execute: async (callId, args, _signal, _onUpdate, ctx) => {
 			widgetCtx = ctx;
+			const refused = preflight(args.task);
+			if (refused) {
+				return { content: [{ type: "text", text: `Error: no subagent started. ${refused}` }] };
+			}
 			const id = nextId++;
 			const state: SubState = {
 				id,
@@ -332,6 +422,12 @@ export default function (pi: ExtensionAPI) {
 			agents.set(id, state);
 			updateWidgets();
 
+			if (UNDER_SSSF) {
+				// Wait, so no child outlives this call.
+				await spawnAgent(state, args.task, ctx, { model: args.model, thinking: args.thinking });
+				return { content: [{ type: "text", text: resultText(state, args.task) }] };
+			}
+
 			// Fire-and-forget
 			spawnAgent(state, args.task, ctx, { model: args.model, thinking: args.thinking });
 
@@ -343,7 +439,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "subagent_continue",
-		description: "Continue an existing subagent conversation. Thinking level is required and is the primary way to match this turn to task complexity: low for lightweight/simple tasks, medium for routine tasks needing moderate reasoning, high for complex multi-step work, and xhigh for the hardest tasks or when accuracy and performance are critical. Unless the user explicitly requests a specific model, omit model and use the default inherited parent model. Returns immediately while it runs in the background.",
+		description: "Continue an existing subagent conversation. Thinking level is required and is the primary way to match this turn to task complexity: low for lightweight/simple tasks, medium for routine tasks needing moderate reasoning, high for complex multi-step work, and xhigh for the hardest tasks or when accuracy and performance are critical. Unless the user explicitly requests a specific model, omit model and use the default inherited parent model. " + (UNDER_SSSF
+				? "Waits for the subagent to finish and returns its result."
+				: "Returns immediately while it runs in the background."),
 		parameters: Type.Object({
 			id: Type.Number({ description: "The ID of the subagent to continue" }),
 			prompt: Type.String({ description: "The follow-up prompt or new instructions" }),
@@ -363,6 +461,10 @@ export default function (pi: ExtensionAPI) {
 			if (state.status === "running") {
 				return { content: [{ type: "text", text: `Error: Subagent #${args.id} is still running.` }] };
 			}
+			const refused = preflight(args.prompt);
+			if (refused) {
+				return { content: [{ type: "text", text: `Error: no subagent started. ${refused}` }] };
+			}
 
 			state.status = "running";
 			state.task = args.prompt;
@@ -372,6 +474,10 @@ export default function (pi: ExtensionAPI) {
 			updateWidgets();
 
 			ctx.ui.notify(`Continuing Subagent #${args.id} (Turn ${state.turnCount})…`, "info");
+			if (UNDER_SSSF) {
+				await spawnAgent(state, args.prompt, ctx, { model: args.model, thinking: args.thinking });
+				return { content: [{ type: "text", text: resultText(state, args.prompt) }] };
+			}
 			spawnAgent(state, args.prompt, ctx, { model: args.model, thinking: args.thinking });
 
 			return {
@@ -440,6 +546,11 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Usage: /sub [--model provider/model] [--thinking low|medium|high|xhigh] <task>", "error");
 				return;
 			}
+			const refused = preflight(task);
+			if (refused) {
+				ctx.ui.notify(`No subagent started. ${refused}`, "error");
+				return;
+			}
 
 			const id = nextId++;
 			const state: SubState = {
@@ -498,6 +609,11 @@ export default function (pi: ExtensionAPI) {
 
 			if (state.status === "running") {
 				ctx.ui.notify(`Subagent #${num} is still running — wait for it to finish first.`, "warning");
+				return;
+			}
+			const refused = preflight(prompt);
+			if (refused) {
+				ctx.ui.notify(`No subagent started. ${refused}`, "error");
 				return;
 			}
 

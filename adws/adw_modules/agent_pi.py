@@ -801,6 +801,10 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     dir in ~/.local/state/sssf-pi and a host-issued sign-in, reads nothing in ~/.pi but `bin/`,
     and SSSF rewrites its `auth.json` and the `models.json` copy before every call
     (_own_agent_dir). The agent's pi keeps the repo as its cwd and gets no --no-approve.
+
+    The agent's environment also carries SSSF_REFUSE_EXTENSION (the refuse extension's path) and
+    SSSF_SESSION_DIR (the absolute session dir). A starter subagent loads the one and keeps its
+    session in the other.
     """
     provider, model_id = resolve_model(request.model)
     cmd = [
@@ -840,6 +844,10 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     env = _with_refusals(
         child_env(request.agent_name, request.adw_id, request.agent_env),
         request.refuse_rules, request.secret_files)
+    # For the starter harness's subagents (subagents.ts): the extension each child loads and the
+    # folder its session goes in. Set on every pi agent, rules or none.
+    env["SSSF_REFUSE_EXTENSION"] = str(REFUSE_EXTENSION)
+    env["SSSF_SESSION_DIR"] = os.path.abspath(request.session_dir)
     env = _in_vm(env, tree, request.refuse_rules, request.extensions)
     env = _own_agent_dir(env, tree, request, provider)
     env = _in_container(env, tree)

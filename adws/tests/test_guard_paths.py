@@ -24,6 +24,7 @@ MODULES = SKILL + "templates/adws/adw_modules/"
 TESTS = SKILL + "tests/"
 FOLDER = TESTS + "fixtures/agentsh-first-real-runs/"
 SUBAGENTS = TESTS + "fixtures/subagents/"
+JITI = TESTS + "fixtures/jiti/"
 
 LISTED = [
     MODULES + "rules.py",
@@ -60,13 +61,17 @@ LISTED = [
     SKILL + "templates/harness_engineering/subagents.ts",
     TESTS + "test_subagents_extension.py",
     SUBAGENTS,
+    TESTS + "test_pi_extension_cache.py",
+    JITI,
 ]
 
 # A concrete path to try for each entry; each folder gets a file that exists and a new one.
 PATHS = [p for p in LISTED if not p.endswith("/")] + [FOLDER + "execve-denial-event.json",
                                                        FOLDER + "brand-new.json",
                                                        SUBAGENTS + "driver.mjs",
-                                                       SUBAGENTS + "brand-new.mjs"]
+                                                       SUBAGENTS + "brand-new.mjs",
+                                                       JITI + "probe.mjs",
+                                                       JITI + "brand-new.mjs"]
 
 CFG = agents.load_config(str(ROOT / "adws/adw_sssf_config/sssf.config.yaml"))
 BY_NAME = {a.name: a for a in CFG.agents}
@@ -81,8 +86,8 @@ def ok(path: str, name: str) -> bool:
     return permissions.permitted(path, agent(name), CFG)
 
 
-def test_the_list_has_34_entries_and_each_exists_in_the_hub():
-    assert len(LISTED) == 34 and len(set(LISTED)) == 34
+def test_the_list_has_36_entries_and_each_exists_in_the_hub():
+    assert len(LISTED) == 36 and len(set(LISTED)) == 36
     for entry in LISTED:
         assert (ROOT / entry).exists(), entry
 

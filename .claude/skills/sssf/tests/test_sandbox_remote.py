@@ -1595,6 +1595,19 @@ def test_a_claude_start_keeps_the_token_and_gets_no_pi_env(box):
     assert "PI_OFFLINE" not in seen and "OPENAI_API_KEY" not in seen
 
 
+def test_a_pi_start_gets_jitis_file_cache_off(box):
+    token = {"SSSF_PI_TOKEN": "chatgpt-access"}
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, **token}))
+    assert seen["JITI_FS_CACHE"] == "false"
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, **token, "JITI_FS_CACHE": "true"}))
+    assert seen["JITI_FS_CACHE"] == "false"
+
+
+def test_a_claude_start_gets_no_jiti_setting(box):
+    seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, "JITI_FS_CACHE": "true"}))
+    assert "JITI_FS_CACHE" not in seen
+
+
 def test_a_hosts_pi_offline_does_not_cross(box):
     seen = _env_of(box.start(["sh", "-c", "env"], env={**os.environ, "PI_OFFLINE": "1",
                                                         "SSSF_PI_TOKEN": "chatgpt-access"}))

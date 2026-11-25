@@ -1200,6 +1200,53 @@ def _env_the_agent_gets(tmp_path, monkeypatch, tree, refuse_rules=()):
     return seen
 
 
+def test_the_agent_gets_jitis_file_cache_off_whatever_the_operator_set(tmp_path, monkeypatch):
+    assert _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)["JITI_FS_CACHE"] == "false"
+    monkeypatch.setenv("JITI_FS_CACHE", "true")
+    monkeypatch.setenv("JITI_CACHE", "true")
+    assert _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)["JITI_FS_CACHE"] == "false"
+
+
+def test_the_cache_setting_is_the_same_in_the_vm_start(tmp_path, monkeypatch):
+    from adw_modules import sandbox_remote
+    assert agent_pi.NO_EXTENSION_CACHE == sandbox_remote.PI_NO_CACHE == {"JITI_FS_CACHE": "false"}
+
+
+def test_an_agentsh_call_gets_jitis_file_cache_off(own):
+    own.mp.setenv("JITI_FS_CACHE", "true")
+    own.set(code=0)
+    own.run()
+    assert own.seen[-1]["env"]["JITI_FS_CACHE"] == "false"
+
+
+def test_a_pi_the_agent_runs_records_the_cache_setting(tmp_path, monkeypatch):
+    envlog = tmp_path / "env"
+    req = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi"))
+    script = Path(agent_pi.PI_PATH)
+    script.write_text(f"#!/bin/sh\nenv > {envlog}\n" + script.read_text().split("\n", 1)[1])
+    monkeypatch.setenv("JITI_FS_CACHE", "true")
+    monkeypatch.setattr(sandbox, "current", lambda: sandbox.LOCAL)
+    agent_pi.run(req)
+    assert "JITI_FS_CACHE=false" in envlog.read_text().splitlines()
+
+
+def test_the_hosts_pi_catalog_gets_no_jiti_setting(tmp_path, monkeypatch):
+    envlog = tmp_path / "env"
+    script = tmp_path / "pi"
+    script.write_text(f'#!/bin/sh\nenv > {envlog}\n'
+                      'echo "provider model context"\necho "openai gpt 200K"\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    monkeypatch.delenv("SSSF_PI_TOKEN_SOCKET", raising=False)
+    monkeypatch.delenv("JITI_FS_CACHE", raising=False)
+    agent_pi._pi_catalog.cache_clear()
+    try:
+        agent_pi._pi_catalog()
+    finally:
+        agent_pi._pi_catalog.cache_clear()
+    assert not any(l.startswith("JITI_FS_CACHE=") for l in envlog.read_text().splitlines())
+
+
 def test_the_agent_gets_the_refuse_extension_and_an_absolute_session_dir(tmp_path, monkeypatch):
     env = _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)
     assert env["SSSF_REFUSE_EXTENSION"] == str(agent_pi.REFUSE_EXTENSION)

@@ -25,6 +25,8 @@ t "git-push by its path" '/usr/lib/git-core/git-push --dry-run origin main'
 t "argv0 newline" $'exec -a \'g\nit\' git push --dry-run'
 t "quoted command word" "'just' test live"
 t "split quoted word" "ju''st test live"
+t "empty double quotes in a word" 'j""ust test live'
+t "command word from a variable" 'J=just; $J test live'
 t "bun loads .env itself" 'bun -e "console.log(\"FAKE=\"+process.env.FAKE)"'
 # Last: it leaves the workspace's .env at mode 0. Run `chmod 600 .env` outside the wrap to undo it.
 t "acl strips .env's mode" 'python3 -c "import os,struct; os.setxattr(\".e\"+\"nv\",\"system.posix_acl_access\",struct.pack(\"<I\",2)+b\"\".join(struct.pack(\"<HHI\",t,0,0xFFFFFFFF) for t in (1,4,32)))" && echo "mode changed $(stat -c %a .env)"'

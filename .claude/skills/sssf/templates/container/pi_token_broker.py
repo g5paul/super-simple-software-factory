@@ -13,6 +13,7 @@ Installs no signal handlers and doesn't unlink its socket on exit: run.sh's
 trap only kills it, run.sh removes a socket left at the path before the next
 start, and the broker itself still replaces a socket nothing answers on when it
 is started some other way.
+pi starts in /, never in the folder run.sh was started in (agent_pi.HOST_CWD).
 Never prints or logs a token. Stdlib only; works on Python 3.10.
 """
 
@@ -35,7 +36,10 @@ def mint() -> tuple[bool, str]:
     try:
         done = subprocess.run([PI, "auth", "print-bearer-token", "--provider", "openai",
                                "--min-expiry", MIN_EXPIRY],
-                              capture_output=True, text=True, timeout=PI_TIMEOUT, check=False)
+                              capture_output=True, text=True, timeout=PI_TIMEOUT, check=False,
+                              # Same folder as agent_pi.HOST_CWD: pi reads nothing from the
+                              # folder run.sh was started in.
+                              cwd="/")
     except FileNotFoundError:
         return False, ("pi is not installed on the host, so the container can't get a ChatGPT "
                        "token. Install pi on the host, sign in with `pi`, then /login.")

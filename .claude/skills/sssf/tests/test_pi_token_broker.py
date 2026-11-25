@@ -31,10 +31,11 @@ def box():
         script.chmod(0o755)
         return str(script)
 
-    def start(pi, sock=None):
+    def start(pi, sock=None, cwd=None):
         sock = sock or d / "b.sock"
         p = subprocess.Popen([sys.executable, str(BROKER), str(sock)], stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True, env={**os.environ, "PI_PATH": pi})
+                             stderr=subprocess.PIPE, text=True, env={**os.environ, "PI_PATH": pi},
+                             cwd=cwd)
         procs.append(p)
         for _ in range(100):
             if Path(sock).exists() or p.poll() is not None:
@@ -68,6 +69,20 @@ def test_it_hands_out_the_token_and_asks_pi_the_fixed_way(box):
     _, sock = box.start(box.fake_pi("echo eyJ-access"))
     assert oct(os.stat(sock).st_mode & 0o777) == "0o600"
     assert ask(sock) == "OK eyJ-access\n"
+    assert (box.dir / "argv").read_text().split() == (
+        "auth print-bearer-token --provider openai --min-expiry 35m".split())
+
+
+# host_only, the error names the sandbox: writes or links a file that agentsh denies.
+@pytest.mark.host_only
+def test_pi_starts_in_the_root_folder_not_where_the_broker_was_started(box):
+    repo = box.dir / "repo"
+    (repo / ".pi").mkdir(parents=True)
+    (repo / ".pi" / "settings.json").write_text('{"packages": ["npm:sssf-probe"]}')
+    pi = box.fake_pi(f"pwd -P > {box.dir}/cwd\necho eyJ-access")
+    _, sock = box.start(pi, cwd=repo)
+    assert ask(sock) == "OK eyJ-access\n"
+    assert (box.dir / "cwd").read_text().strip() == "/"
     assert (box.dir / "argv").read_text().split() == (
         "auth print-bearer-token --provider openai --min-expiry 35m".split())
 

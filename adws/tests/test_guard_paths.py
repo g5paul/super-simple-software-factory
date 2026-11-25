@@ -23,6 +23,7 @@ SKILL = ".claude/skills/sssf/"
 MODULES = SKILL + "templates/adws/adw_modules/"
 TESTS = SKILL + "tests/"
 FOLDER = TESTS + "fixtures/agentsh-first-real-runs/"
+SUBAGENTS = TESTS + "fixtures/subagents/"
 
 LISTED = [
     MODULES + "rules.py",
@@ -56,11 +57,16 @@ LISTED = [
     TESTS + "fixtures/cc_turn1.jsonl",
     TESTS + "fixtures/cc_turn2.jsonl",
     FOLDER,
+    SKILL + "templates/harness_engineering/subagents.ts",
+    TESTS + "test_subagents_extension.py",
+    SUBAGENTS,
 ]
 
-# A concrete path to try for each entry; the folder gets a file that exists and a new one.
+# A concrete path to try for each entry; each folder gets a file that exists and a new one.
 PATHS = [p for p in LISTED if not p.endswith("/")] + [FOLDER + "execve-denial-event.json",
-                                                       FOLDER + "brand-new.json"]
+                                                       FOLDER + "brand-new.json",
+                                                       SUBAGENTS + "driver.mjs",
+                                                       SUBAGENTS + "brand-new.mjs"]
 
 CFG = agents.load_config(str(ROOT / "adws/adw_sssf_config/sssf.config.yaml"))
 BY_NAME = {a.name: a for a in CFG.agents}
@@ -75,8 +81,8 @@ def ok(path: str, name: str) -> bool:
     return permissions.permitted(path, agent(name), CFG)
 
 
-def test_the_list_has_31_entries_and_each_exists_in_the_hub():
-    assert len(LISTED) == 31 and len(set(LISTED)) == 31
+def test_the_list_has_34_entries_and_each_exists_in_the_hub():
+    assert len(LISTED) == 34 and len(set(LISTED)) == 34
     for entry in LISTED:
         assert (ROOT / entry).exists(), entry
 
@@ -209,3 +215,10 @@ def test_a_path_dirty_before_the_call_is_not_checked_out_over(tree):
     with pytest.raises(permissions.PermissionBreach):
         permissions.enforce(tree, None, agent("builder"), before)
     assert (tree.repo_root / path).read_text() == "second\n"
+
+
+def test_the_starter_subagent_extension_is_guard_code():
+    """Guard run f91f5f0e: subagents.ts starts pi agents that SSSF's checks must reach."""
+    path = SKILL + "templates/harness_engineering/subagents.ts"
+    assert path in CFG.defaults.protected_files
+    assert path in (agent("guard_builder").writes or [])

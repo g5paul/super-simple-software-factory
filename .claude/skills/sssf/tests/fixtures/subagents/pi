@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+// A stand-in for pi, as a subagent's child. It records its argv and environment, loads each
+// -e extension (before `--`) into a fake ExtensionAPI, runs the tool calls FAKE_PI_CALLS lists
+// through the extensions' tool_call handlers, and prints pi-shaped json-mode events.
+//
+// FAKE_PI_LOG    file for {argv, env, pid}
+// FAKE_PI_CALLS  JSON list of {id, toolName, input}
+// FAKE_PI_SLEEP  ms to sleep after the events, then write FAKE_PI_MARKER and exit
+const fs = require("node:fs");
+const { pathToFileURL } = require("node:url");
+
+const argv = process.argv.slice(2);
+fs.writeFileSync(process.env.FAKE_PI_LOG, JSON.stringify({ argv, env: process.env, pid: process.pid }));
+if (process.env.FAKE_PI_PIDFILE) fs.writeFileSync(process.env.FAKE_PI_PIDFILE, String(process.pid));
+
+const out = (event) => process.stdout.write(JSON.stringify(event) + "\n");
+
+(async () => {
+  const handlers = [];
+  const api = { on: (name, h) => { if (name === "tool_call") handlers.push(h); } };
+  const end = argv.indexOf("--") === -1 ? argv.length : argv.indexOf("--");
+  for (let i = 0; i < end; i++) {
+    if (argv[i] === "-e") (await import(pathToFileURL(argv[i + 1]).href)).default(api);
+  }
+  for (const c of JSON.parse(process.env.FAKE_PI_CALLS || "[]")) {
+    out({ type: "tool_execution_start", toolCallId: c.id, toolName: c.toolName, args: c.input });
+    let blocked;
+    for (const h of handlers) {
+      blocked = await h({ type: "tool_call", toolCallId: c.id, toolName: c.toolName, input: c.input });
+      if (blocked && blocked.block) break;
+    }
+    const text = blocked && blocked.block ? blocked.reason : "ok";
+    out({
+      type: "tool_execution_end", toolCallId: c.id, toolName: c.toolName,
+      result: { content: [{ type: "text", text }] },
+      isError: !!(blocked && blocked.block),
+      ...(blocked && blocked.block ? {} : { durationMs: 5 }),
+    });
+  }
+  out({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "child says hi" } });
+  out({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "final" }] } });
+  const sleep = Number(process.env.FAKE_PI_SLEEP || 0);
+  setTimeout(() => {
+    if (process.env.FAKE_PI_MARKER) fs.writeFileSync(process.env.FAKE_PI_MARKER, "done");
+    process.exit(0);
+  }, sleep);
+})();

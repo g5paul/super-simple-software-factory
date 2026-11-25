@@ -1176,3 +1176,38 @@ def test_a_real_pi_in_the_root_folder_touches_nothing_in_the_project(tmp_path):
     subprocess.run([argv[0], "--list-models", *agent_pi.HOST_FLAGS, "--offline"], cwd=base,
                    env=env, capture_output=True, timeout=60, check=False)
     assert (base / ".pi" / "prompts").is_dir()
+
+
+# ── the starter harness's subagents: the extension and the session dir ───────
+
+def _env_the_agent_gets(tmp_path, monkeypatch, tree, refuse_rules=()):
+    seen = {}
+
+    def start(tree_, harness, cmd, cwd, env, **kw):
+        seen.update(env)
+        raise RuntimeError("stop here")
+    req = _fake_pi(tmp_path, monkeypatch, _turn("stop", "hi")).model_copy(
+        update={"session_dir": "rel/sessions", "refuse_rules": list(refuse_rules)})
+    monkeypatch.setattr(sandbox, "current", lambda: tree)
+    monkeypatch.setattr(agent_pi.agentsh_guard, "start", start)
+    if tree is not sandbox.LOCAL:
+        monkeypatch.setattr(agent_pi, "_in_vm", lambda env, *a, **k: env)
+        monkeypatch.setattr(agent_pi, "_own_agent_dir", lambda env, *a, **k: env)
+        monkeypatch.setattr(agent_pi, "_in_container", lambda env, *a, **k: env)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(RuntimeError, match="stop here"):
+        agent_pi.run(req)
+    return seen
+
+
+def test_the_agent_gets_the_refuse_extension_and_an_absolute_session_dir(tmp_path, monkeypatch):
+    env = _env_the_agent_gets(tmp_path, monkeypatch, sandbox.LOCAL)
+    assert env["SSSF_REFUSE_EXTENSION"] == str(agent_pi.REFUSE_EXTENSION)
+    assert env["SSSF_SESSION_DIR"] == str(tmp_path / "rel" / "sessions")
+
+
+def test_a_remote_agent_gets_them_too(tmp_path, monkeypatch):
+    vm, _ = _vm_tree(monkeypatch)
+    env = _env_the_agent_gets(tmp_path, monkeypatch, vm)
+    assert env["SSSF_REFUSE_EXTENSION"] == str(agent_pi.REFUSE_EXTENSION)
+    assert os.path.isabs(env["SSSF_SESSION_DIR"])

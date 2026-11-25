@@ -1,5 +1,6 @@
 /**
  * SSSF's refuse mode for a repo's agent_rules, loaded into every pi agent with -e.
+ * It is also loaded into each starter-harness subagent (subagents.ts).
  * It also blocks `read`, `grep`, `find` and `ls` on a protected secret file,
  * from SSSF_SECRET_FILES (absolute paths found at agent start).
  *

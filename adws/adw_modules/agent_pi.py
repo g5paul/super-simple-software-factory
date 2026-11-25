@@ -67,6 +67,12 @@ def _count(value: str) -> int:
 # Discovery off for pi runs on the host, outside the wrap. A model list needs none of the five.
 HOST_FLAGS = ("--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
               "--no-context-files")
+# pi ignores project-local files with --no-approve (cli/args.js:232); the second layer under HOST_CWD.
+NO_PROJECT = ("--no-approve",)
+# Where every pi SSSF starts on the host runs. pi reads `.pi/` in its cwd only and walks up for
+# `.agents/skills`; `/` has no parents and only root writes it, so the host's pi reads nothing of
+# the project's and nothing an agent can leave.
+HOST_CWD = "/"
 # Agents: no extension is found on its own (-e paths still load, the refuse extension included),
 # and a -p --mode json call uses no prompt template or theme. Skills and context files stay on:
 # the project's AGENTS.md, CLAUDE.md and skills are the text a repo gives its agents, and pi has
@@ -85,13 +91,15 @@ def _pi_catalog() -> list[tuple[str, str, int]]:
     OPENAI_API_KEY (_in_container), as an agent call does; without it pi lists
     no openai models. A broker error raises SandboxFailed and nothing is cached.
     pi starts with discovery off (HOST_FLAGS), since this call is unwrapped and must
-    not run an extension an agent left in a pi folder.
+    not run an extension an agent left in a pi folder. It starts in HOST_CWD, not the
+    project, and gets --no-approve: the flags alone left pi's migration of the cwd's
+    .pi/commands and a trusted project's settings.json packages.
     The cache holds the parsed rows only, never the environment."""
     env = _in_container(operator_env(), sandbox.LOCAL)
     try:
         result = subprocess.run(
-            [PI_PATH, "--list-models", *HOST_FLAGS], capture_output=True, text=True,
-            timeout=30, env=env, check=False,
+            [PI_PATH, "--list-models", *HOST_FLAGS, *NO_PROJECT], capture_output=True, text=True,
+            timeout=30, env=env, check=False, cwd=HOST_CWD,
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -378,12 +386,13 @@ BROKER_TIMEOUT = 150            # more than the broker's own 120 s pi timeout
 def _host_token(provider: str, check: bool = False) -> tuple[int, str]:
     """The exit code and stripped output of the host's `pi auth print-bearer-token`
     for a provider, or of `pi auth check --json` with check=True (a status, no
-    credential). The token output is a credential: never print it."""
+    credential). The token output is a credential: never print it. pi starts in
+    HOST_CWD, so it reads nothing from the project."""
     done = subprocess.run([PI_PATH, "auth", "print-bearer-token", "--provider", provider,
                            "--min-expiry", f"{VM_TOKEN_MINUTES}m"] if not check else
                           [PI_PATH, "auth", "check", "--provider", provider, "--json"],
                           capture_output=True, text=True, check=False, env=operator_env(),
-                          timeout=30 if check else None)
+                          timeout=30 if check else None, cwd=HOST_CWD)
     return done.returncode, done.stdout.strip()
 
 
@@ -393,7 +402,8 @@ def vm_token() -> str:
     its own lock if it has to, so the login and its refresh token stay on this
     machine and the VM gets only an access token that expires within the hour.
     Never print it."""
-    # `pi auth` returns before pi loads any extension (main.js:460), so no discovery flag here.
+    # `pi auth` returns before pi reads its cwd or loads any extension (main.js:460, 467), so no
+    # discovery flag here; it starts in HOST_CWD all the same.
     code, token = _host_token("openai")
     if code != 0 or not token:
         raise sandbox.SandboxFailed(
@@ -790,7 +800,7 @@ def run(request: AgentRequest, on_event: Optional[Callable[[dict], None]] = None
     Every call starts pi with AGENT_FLAGS. Under an agentsh guard the agent has its own agent
     dir in ~/.local/state/sssf-pi and a host-issued sign-in, reads nothing in ~/.pi but `bin/`,
     and SSSF rewrites its `auth.json` and the `models.json` copy before every call
-    (_own_agent_dir).
+    (_own_agent_dir). The agent's pi keeps the repo as its cwd and gets no --no-approve.
     """
     provider, model_id = resolve_model(request.model)
     cmd = [

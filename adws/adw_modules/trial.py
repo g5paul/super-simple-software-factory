@@ -135,7 +135,7 @@ def pi_problems(made_by: str) -> list[str]:
     try:
         done = subprocess.run([agent_pi.PI_PATH, "auth", "check", "--provider", made_by, "--json"],
                               capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                              env=agent_pi.child_env(), timeout=60)
+                              env=agent_pi.child_env(), timeout=60, cwd=agent_pi.HOST_CWD)
         status = json.loads(done.stdout or "{}")
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
         return [f"`pi auth check --provider {made_by}` gave no answer: {error}"]

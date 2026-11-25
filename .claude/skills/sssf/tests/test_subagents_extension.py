@@ -123,7 +123,37 @@ def test_the_child_loads_the_refuse_extension_as_its_only_extension(run):
     assert argv.count("-e") == 1
     assert argv[argv.index("-e") + 1] == str(REFUSE_EXT)
     assert argv.index("--no-extensions") < argv.index("-e")
+    assert argv.index("--no-prompt-templates") < argv.index("-e")
+    assert argv.index("--no-themes") < argv.index("-e")
     assert argv[argv.index("-e"):] == ["-e", str(REFUSE_EXT), "--", "look around"]
+
+
+def test_the_childs_environment_has_jitis_file_cache_off(run):
+    code, _, err = run.go()
+    assert code == 0, err
+    assert run.argv()["env"]["JITI_FS_CACHE"] == "false"
+
+
+def test_a_parent_with_the_cache_on_still_gives_the_child_it_off(run):
+    code, _, err = run.go(JITI_FS_CACHE="true")
+    assert code == 0, err
+    assert run.argv()["env"]["JITI_FS_CACHE"] == "false"
+
+
+def test_without_sssf_the_childs_cache_is_off_too(run):
+    done = run.go_plain(JITI_FS_CACHE="true")
+    assert done.returncode == 0, done.stderr
+    assert run.argv()["env"]["JITI_FS_CACHE"] == "false"
+
+
+@pytest.mark.parametrize("task", ["/x", "/skill:demo"])
+def test_a_task_starting_with_a_slash_still_starts_a_child(run, task):
+    proc = run.start(task=task)
+    _, err = proc.communicate(timeout=30)
+    assert proc.returncode == 0, err
+    argv = run.argv()["argv"]
+    assert argv[-2:] == ["--", task]
+    assert "--no-prompt-templates" in argv
 
 
 def test_a_childs_read_of_a_secret_file_and_a_matching_command_are_blocked(run):
@@ -296,12 +326,13 @@ def test_the_session_goes_in_the_run_session_dir_and_nothing_in_home_pi(run):
     assert not (run.home / ".pi").exists()
 
 
-def test_without_sssf_the_session_is_in_home_and_the_argv_is_mains(run):
+def test_without_sssf_the_session_is_in_home_and_the_argv_is_main_plus_two_flags(run):
+    # --no-prompt-templates and --no-themes are the only difference from b752435's argv.
     done = run.go_plain()
     assert done.returncode == 0, done.stderr
     argv = run.argv()["argv"]
     session = Path(argv[argv.index("--session") + 1])
     assert session.parent == run.home / ".pi" / "agent" / "sessions" / "subagents"
     assert argv == ["--mode", "json", "-p", "--session", str(session), "--no-extensions",
-                    "--model", "openai/gpt", "--tools", "read,bash,grep,find,ls",
+                    "--no-prompt-templates", "--no-themes", "--model", "openai/gpt", "--tools", "read,bash,grep,find,ls",
                     "--thinking", "low", "look around"]

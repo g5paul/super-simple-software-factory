@@ -21,8 +21,11 @@
  *   result, so no child outlives its parent's call;
  * - the child's session goes in $SSSF_SESSION_DIR/subagents/;
  * - a child never starts when the extension or session dir is missing, or
- *   when its task starts with "@" (pi would attach that file).
- * Without them (an interactive pi) nothing changes.
+ *   when its task starts with "@" (pi would attach that file);
+ * - the child compiles its extension with jiti's file cache off (JITI_FS_CACHE=false).
+ * In both modes the child starts with --no-prompt-templates and --no-themes, so a
+ * task starting with "/" loads no prompt template; "/skill:<name>" still works.
+ * Without the SSSF settings (an interactive pi) nothing else changes.
  */
 
 import { StringEnum, type ThinkingLevel } from "@mariozechner/pi-ai";
@@ -311,6 +314,7 @@ export default function (pi: ExtensionAPI) {
 				"-p",
 				"--session", state.sessionFile,   // persistent session for /subcont resumption
 				"--no-extensions",
+				"--no-prompt-templates", "--no-themes",
 				"--model", model,
 				"--tools", "read,bash,grep,find,ls",
 				"--thinking", thinking,
@@ -319,7 +323,8 @@ export default function (pi: ExtensionAPI) {
 				prompt,
 			], {
 				stdio: ["ignore", "pipe", "pipe"],
-				env: { ...process.env },
+				// jiti then reads no cached copy of the child's extension.
+				env: { ...process.env, JITI_FS_CACHE: "false" },
 			});
 
 			state.proc = proc;

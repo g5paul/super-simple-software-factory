@@ -418,6 +418,7 @@ def test_a_pi_start_gets_the_chatgpt_token_and_pi_offline_not_the_claude_token(c
     values, calls = _started_env(cli, tmp_path, monkeypatch, {"SSSF_PI_TOKEN": "chatgpt-access"})
     assert values["OPENAI_API_KEY"] == "chatgpt-access" and values["PI_OFFLINE"] == "1"
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in values
+    assert values["JITI_FS_CACHE"] == "false"
     assert not any("chatgpt-access" in " ".join(c["argv"]) or TOKEN in " ".join(c["argv"]) for c in calls)
 
 
@@ -425,6 +426,7 @@ def test_a_claude_start_keeps_the_claude_token(cli, tmp_path, monkeypatch):
     values, calls = _started_env(cli, tmp_path, monkeypatch, {"SSSF_X": "1"})
     assert values["CLAUDE_CODE_OAUTH_TOKEN"] == TOKEN
     assert "PI_OFFLINE" not in values and "OPENAI_API_KEY" not in values
+    assert "JITI_FS_CACHE" not in values
     assert not any(TOKEN in " ".join(c["argv"]) for c in calls)
 
 

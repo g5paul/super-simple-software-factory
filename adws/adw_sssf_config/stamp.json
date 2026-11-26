@@ -181,7 +181,7 @@
       "source": "adws/adw_modules/permissions.py"
     },
     "adws/adw_modules/plan_checks.py": {
-      "sha256": "27ee0cd6bf74aa93d063ab7686e3f964b00dd4c8eaaf952a1a42b61fb514ef45",
+      "sha256": "65dbe556a2b7d3460f48c12a75854ba34710ca3e592c41bd85fa190674892255",
       "source": "adws/adw_modules/plan_checks.py"
     },
     "adws/adw_modules/prices.json": {
@@ -345,5 +345,5 @@
       "source": "justfile"
     }
   },
-  "skill": "b12d5fd"
+  "skill": "23de11a"
 }

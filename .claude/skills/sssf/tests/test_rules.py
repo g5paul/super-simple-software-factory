@@ -749,9 +749,7 @@ def test_a_repo_rule_equal_to_the_built_in_one_still_counts():
     assert stop.value.refusals == rules.MAX_REFUSALS
 
 
-# host_only, downstream: under agentsh it fails with: adw_modules.sandbox.SandboxFailed: pi has no ChatGPT sign-in to hand a...
-@pytest.mark.host_only
-def test_a_pi_agent_in_a_vm_gets_the_refuse_extension_without_refuse_rules():
+def test_a_pi_agent_in_a_vm_gets_the_refuse_extension_without_refuse_rules(stand_in_pi):
     installed = []
     vm = SimpleNamespace(install=installed.append, name="vercel", relay_obs=lambda t: None)
     agent_pi._in_vm({}, vm, [])

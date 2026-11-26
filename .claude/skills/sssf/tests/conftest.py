@@ -8,6 +8,9 @@ os.environ, so install.py subprocesses inherit the setting.
 Every test also gets a git identity in its own global config file, through
 GIT_CONFIG_GLOBAL, so temp repos commit where the machine has no ~/.gitconfig.
 A test that needs its own HOME's .gitconfig as the global config unsets it.
+
+A test that must pass with pi signed out or missing takes `stand_in_pi`, which points
+agent_pi.PI_PATH at a script that answers `--list-models` and `auth print-bearer-token`.
 """
 
 from __future__ import annotations
@@ -83,6 +86,41 @@ def no_dotenv_keys(monkeypatch):
     for key in utils.DOTENV_KEYS:          # utils' load_dotenv put these in os.environ
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(utils, "DOTENV_KEYS", frozenset())
+
+
+# A `pi` for tests that must not depend on the machine's pi or its sign-in. It answers the two
+# calls those tests reach and exits 2 on anything else, so a new call shows up as a failure.
+STAND_IN_PI = """#!/bin/sh
+case "$1 $2" in
+  "--list-models "*)
+    echo "provider  model             context  max-out  thinking  images"
+    echo "openai    gpt-6.1-sol       400K     128K     yes       yes"
+    echo "openai    gpt-6.1-terra     400K     128K     yes       yes"
+    echo "google    gemini-3.6-flash  1M       64K      yes       yes" ;;
+  "auth print-bearer-token") echo "eyJ-stand-in-not-a-real-token" ;;
+  *) exit 2 ;;
+esac
+"""
+
+
+@pytest.fixture
+def stand_in_pi(tmp_path_factory, monkeypatch):
+    """Point agent_pi.PI_PATH at a script that lists the ChatGPT roster's models and
+    prints a made-up bearer token, so a test passes with pi signed out or missing, as in
+    an OpenShell VM. The calls through agents.validate and agent_pi.vm_token still run.
+    _pi_catalog caches its rows for the process, so the cache is cleared before and after."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "templates" / "adws"))
+    from adw_modules import agent_pi
+    script = tmp_path_factory.mktemp("pi") / "pi"
+    script.write_text(STAND_IN_PI)
+    script.chmod(0o755)
+    monkeypatch.setattr(agent_pi, "PI_PATH", str(script))
+    monkeypatch.delenv(agent_pi.CONTAINER_SOCKET_VAR, raising=False)
+    agent_pi._pi_catalog.cache_clear()
+    yield script
+    agent_pi._pi_catalog.cache_clear()
 
 
 def pytest_configure(config):

@@ -37,7 +37,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import repo_settings, session_files
+from . import checkout, repo_settings, session_files
 from .data_types import EventRecord, SSSFConfig
 from .tracer import Tracer
 from .utils import GIT_NO_PROGRAMS, git_location_env, just, new_id
@@ -96,8 +96,20 @@ def main_checkout() -> Path:
     Found with git's location variables (GIT_DIR, GIT_WORK_TREE, ...) removed from the
     child's environment. A run's own `.env` or the engineer's shell can set them, and
     `host_agents`, the spend caps and the trace all read the main checkout, so a repo
-    that git was pointed at must not be taken for it. os.environ is not changed."""
-    return common_dir().parent.resolve()
+    that git was pointed at must not be taken for it. os.environ is not changed.
+
+    The lookup is checkout.py's, shared with utils.py and the template justfile: a plain
+    clone, a linked worktree, a submodule (its own checkout) and a separate-git-dir repo's
+    main worktree answer. A bare repo with worktrees, and a linked worktree of a
+    separate-git-dir repo, have no main checkout to find: WorktreeError, as does a working
+    folder outside any repo."""
+    try:
+        found = checkout.main_checkout_from(Path.cwd())
+    except checkout.NoMainCheckout as stop:
+        raise WorktreeError(str(stop)) from stop
+    if found is None:
+        raise WorktreeError("not in a git repository")
+    return found
 
 
 def anchor(cfg: SSSFConfig, root: Path) -> None:
@@ -302,6 +314,10 @@ def enter(cfg: SSSFConfig, adw_id: str, requested: bool) -> dict | None:
             f"{'are' if len(others) > 1 else 'is'} still going in this repo, and "
             f"max_worktree_runs in {repo_settings.PATH} allows {cap} at once. Wait for one, "
             f"or stop it with `{just('kill <adw_id>')}`.")
+    try:
+        checkout.from_common(common_dir())      # refuse before any branch or folder is made
+    except checkout.NoMainCheckout as stop:
+        raise WorktreeError(str(stop)) from stop
     git("worktree", "prune")
     branch = branch_for(adw_id)
     if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0:

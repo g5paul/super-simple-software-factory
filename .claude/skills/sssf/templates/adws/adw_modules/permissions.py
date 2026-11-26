@@ -963,6 +963,26 @@ def _diff_paths(repo, parent: str, commit: str) -> list[tuple[str, str, str, str
     return found
 
 
+def _secret_patterns(repo) -> list[str]:
+    """repo.yaml's `secret_files`, read from the main checkout of `repo`, the way
+    agents.py reads them. A repo.yaml that can't be read raises GitFailed: the
+    commit check can't tell what is secret, so it refuses."""
+    from . import checkout, repo_settings
+    try:
+        main = checkout.main_checkout_from(Path(repo)) or Path(repo)
+        return list(repo_settings.load(main).secret_files)
+    except Exception as failed:
+        raise GitFailed(f"SSSF's commit check couldn't read repo.yaml's secret_files: {failed}")
+
+
+def _secret(path: str, patterns) -> bool:
+    """Whether `path` names a secret file: .env and its kin, or a `secret_files` pattern.
+    Exact names only, as secret_files reads them."""
+    from . import secret_files
+    name = path.rsplit("/", 1)[-1]
+    return secret_files.is_default(name) or secret_files._matches(name, path, list(patterns))
+
+
 def _in_carried(repo, carried: str, path: str, status: str, mode: str, sha: str) -> bool:
     out = _host_read(repo, ["--literal-pathspecs", "ls-tree", "-z", carried, "--", path])
     entry = out.decode("utf-8", "surrogateescape").split("\0")[0]
@@ -1023,11 +1043,16 @@ def judge_commits(repo, base: str, tip: str, cfg: SSSFConfig, agents, *, only=No
         sha = parents[0]
     walked.reverse()
     refused: list[tuple[str, list[str]]] = []
+    patterns = _secret_patterns(repo) if walked else []
     for commit in walked:
         parent = _commit_parents(repo, commit)[0]
         bad = []
         for path, status, mode, new in _diff_paths(repo, parent, commit):
             ok = not _in_git_dir(path) and not _too_long(path)
+            if ok and _secret(path, patterns):
+                # No agent's grant lifts this. Only a path the local checkout already
+                # held, byte for byte (`carried`), is excused from the secret rule.
+                ok = bool(carried and _in_carried(repo, carried, path, status, mode, new))
             if ok and only is not None:
                 ok = _inside(path, only)
             if ok:
@@ -1169,6 +1194,19 @@ def undo_commits(run, before: dict[str, str]) -> list[str]:
             "which doesn't descend from it (a reset or rebase). Nothing was undone.")
     shas = _git(["rev-list", "--abbrev-commit", f"{before['sha']}..{after['sha']}"],
                 run.repo_root, off).split()
+    # Read before the reset: the secret files these commits changed. enforce(), which gets
+    # this same dict, adds them to its breach, so a commit of one is never silent.
+    # The undo itself never depends on this: a repo.yaml that can't be read leaves the
+    # default names, and a log that can't be read records nothing.
+    code, named, _ = _try_git(["log", "--format=", "--name-only", "-z", "--no-renames", "-m",
+                               f"{before['sha']}..{after['sha']}"], run.repo_root, off,
+                              literal=False)
+    try:
+        patterns = _secret_patterns(run.repo_root)
+    except GitFailed:
+        patterns = []
+    before["secret_committed"] = "\0".join(
+        sorted({p for p in (named if code == 0 else "").split("\0") if p and _secret(p, patterns)}))
     undo = ["reset", "-q", "--no-recurse-submodules", before["sha"]]
     code, _, err = _try_git(undo, run.repo_root, off)
     if code != 0:
@@ -2461,6 +2499,7 @@ def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
                 commits.append(words[0])
                 parents[words[0]] = words[1:]
             open_ = agent.model_copy(update={"writes": None})
+            patterns = _secret_patterns(run.repo_root)
 
             def run_script(script: str, words: list[str]):
                 done = sandbox.current().run(["sh", "-c", script, "sh", *words],
@@ -2536,15 +2575,16 @@ def ref_moves(run, agent: AgentConfig, before: dict[str, str] | None) -> str:
                     at += 2
                 for sha, records in zip(chunk, lists):
                     barred = sorted({shown for path, shown in records
-                                     if not permitted(path, agent, run.cfg)
-                                     and not permitted(path, open_, run.cfg)})
+                                     if _secret(path, patterns)
+                                     or (not permitted(path, agent, run.cfg)
+                                         and not permitted(path, open_, run.cfg))})
                     if barred:
                         offenders[sha] = barred
         if not offenders and not replaced:
             return ""
 
         lines = [f"Refs other than the run's own branch gained commits that change protected "
-                 f"paths while {agent.name} ran, or a replace ref changed. Nothing was moved "
+                 f"paths or secret files while {agent.name} ran, or a replace ref changed. Nothing was moved "
                  "back, deleted or rewritten:"]
         for name in sorted(tips):
             code, out, _err = git("rev-list", tips[name], "--not", *old)
@@ -2608,7 +2648,18 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
     off = _filters_off(run.repo_root) if breaches else []
     outcomes = {p: _roll_back(run, p, before, after, off) for p in breaches}
     moved = ref_moves(run, agent, head_before) if head_before else ""
-    if not breaches and not moved:
+    # Secret files the agent's own commits changed, recorded by undo_commits() before it
+    # reset them. The commits are undone and their changes are in the tree.
+    secret = sorted(p for p in (head_before or {}).get("secret_committed", "").split("\0") if p)
+    if secret:
+        listed = ", ".join(_said_line(p) for p in secret[:REF_PATHS_SHOWN])
+        more = len(secret) - REF_PATHS_SHOWN
+        committed = (f"{agent.name} committed secret file(s) {listed}"
+                     + (f" (+{more} more)" if more > 0 else "")
+                     + "; the commits were undone and the changes are in the tree, uncommitted.")
+    else:
+        committed = ""
+    if not breaches and not moved and not committed:
         return touched
 
     # The run stops here, so the agent's permitted changes are never verified,
@@ -2616,7 +2667,7 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
     # uncommitted in the tree and has to be finished or discarded by hand.
     kept = [p for p in touched if p not in outcomes]
     if not breaches:
-        message = moved
+        message = "\n".join(m for m in (moved, committed) if m)
     else:
         scope = ("read-only" if agent.writes == []
                  else f"limited to {agent.writes}" if agent.writes
@@ -2633,8 +2684,8 @@ def enforce(run, phase, agent: AgentConfig, before: dict[str, str],
     if kept:
         message += ("\nIts other changes are left uncommitted and unreviewed:\n"
                     + "\n".join(f"  - {p}" for p in kept))
-    if breaches and moved:
-        message += "\n" + moved
+    if breaches:
+        message += "".join("\n" + m for m in (moved, committed) if m)
     raise PermissionBreach(
         message, left=[p for p, o in outcomes.items()
                        if o not in ("rolled back", "deleted", "unstaged and deleted", "unstaged",

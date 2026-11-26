@@ -66,6 +66,9 @@ LISTED = [
     JITI,
     TESTS + "test_pi_compile_cache.py",
     COMPILE,
+    MODULES + "checkout.py",
+    TESTS + "test_main_env.py",
+    TESTS + "test_secret_commits.py",
 ]
 
 # A concrete path to try for each entry; each folder gets a file that exists and a new one.
@@ -92,7 +95,7 @@ def ok(path: str, name: str) -> bool:
 
 
 def test_the_list_has_36_entries_and_each_exists_in_the_hub():
-    assert len(LISTED) == 38 and len(set(LISTED)) == 38
+    assert len(LISTED) == 41 and len(set(LISTED)) == 41
     for entry in LISTED:
         assert (ROOT / entry).exists(), entry
 

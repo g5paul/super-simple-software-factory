@@ -312,6 +312,8 @@ def test_sessions_and_phases_recipes_still_print(tmp_path):
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     set_repo_yaml(repo, OFF)
     shutil.copy(SKILL / "templates" / "justfile", repo / "justfile")
+    (repo / "adws/adw_modules").mkdir(parents=True)     # the justfile's dotenv-command runs this
+    shutil.copy(ADWS / "adw_modules" / "checkout.py", repo / "adws/adw_modules/checkout.py")
     db = repo / "adws/adw_data/sssf.db"
     db.parent.mkdir(parents=True)
     tracer = Tracer(str(db), str(repo / "adws/adw_data/events.jsonl"), data_root=str(repo / "adws/adw_data"))

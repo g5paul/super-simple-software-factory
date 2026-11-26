@@ -141,8 +141,17 @@ def rig(tmp_path):
 HOW = [pytest.param("dotenv", marks=pytest.mark.host_only), "shell"]
 
 
-@pytest.mark.parametrize("how", HOW)
-def test_the_plant_works(rig, how):
+@pytest.mark.host_only
+def test_a_worktree_dotenv_plant_loads_nothing(rig):
+    """Baseline: the worktree's `.env` loaded, so GIT_DIR reached the process. Now only the
+    main checkout's `.env` loads."""
+    env = rig.plant("dotenv", GIT_DIR="sub/gd")
+    env["PYTHONPATH"] = str(rig.wt / "adws")
+    done = rig.launch(code="import adw_modules.utils, os; print(os.environ.get('GIT_DIR'))", env=env)
+    assert done.stdout.strip() == "None", done.stderr
+
+
+def test_the_plant_works(rig, how="shell"):
     env = rig.plant(how, GIT_DIR="sub/gd")
     env["PYTHONPATH"] = str(rig.wt / "adws")
     done = rig.launch(code="import adw_modules.utils, os; print(os.environ.get('GIT_DIR'))", env=env)
@@ -193,7 +202,7 @@ def test_every_setting_comes_from_the_real_checkout(rig, how):
     assert done.stdout.split() == [str(rig.root.resolve()), "7.0", "vercel"], done.stderr
 
 
-@pytest.mark.parametrize("how", HOW)
+@pytest.mark.parametrize("how", ["shell"])      # a worktree's `.env` no longer loads, so it can't plant this
 def test_a_failing_git_refuses(rig, how):
     done = rig.chain("adw_plan", "make it", env=rig.plant(how, GIT_CONFIG_COUNT="x"))
     assert done.returncode != 0

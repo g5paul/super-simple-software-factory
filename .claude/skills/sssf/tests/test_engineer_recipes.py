@@ -49,6 +49,7 @@ def run(tmp_path: Path, repo: Path, *argv: str, adw_id: str | None = None):
     env.pop("SSSF_AGENT", None)
     env.update(PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                STANDIN_LOG=str(tmp_path / "standin.log"),
+               JUST_NO_DOTENV="true",       # the stand-in `uv` must see only the recipe's own call
                SSSF_SOURCE=str(tmp_path / "hub" / ".claude" / "skills" / "sssf"))
     (tmp_path / "hub" / ".claude" / "skills" / "sssf").mkdir(parents=True, exist_ok=True)
     if adw_id is not None:

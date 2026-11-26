@@ -329,7 +329,9 @@ def recipe_run(tmp_path: Path, **extra: str):
         path = bin_dir / name
         path.write_text(UV if name == "uv" else FAKE)
         path.chmod(0o755)
-    env = environment(tmp_path, REAL_PYTHON=sys.executable, SCRIPT_PATH=str(SCRIPT), **extra)
+    # the template's dotenv-command would need checkout.py in this bare scratch repo
+    env = environment(tmp_path, REAL_PYTHON=sys.executable, SCRIPT_PATH=str(SCRIPT),
+                      JUST_NO_DOTENV="true", **extra)
     return subprocess.run([JUST, "openshell-setup"], cwd=repo, capture_output=True, text=True, env=env)
 
 

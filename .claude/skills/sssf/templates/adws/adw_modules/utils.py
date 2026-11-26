@@ -13,6 +13,15 @@ from typing import Iterable
 
 from dotenv import dotenv_values, find_dotenv, load_dotenv
 
+from .checkout import GIT_LOCATION_VARS, NoMainCheckout, git_location_env, main_checkout_from
+
+# Only the main checkout's .env loads (checkout.py finds it from this file's folder), so a
+# worktree's own copy, which a run's commit or an agent's file could plant, is never read.
+# Inside a git repo the first .env the walk from this copy finds (find_dotenv, the
+# baseline's file) still gives names, so DOTENV_KEYS is never smaller than it was: its keys
+# are held back from agents, but not loaded. Outside any git repo the baseline's walk
+# loads, as there is no worktree to hide a .env in.
+#
 # Every key .env names, read from the file as dotenv_values does, not from what
 # load_dotenv changed: a `just` recipe (`set dotenv-load`) or a shell export of
 # the same name has already put the key in os.environ, and it is still .env's.
@@ -32,8 +41,22 @@ from dotenv import dotenv_values, find_dotenv, load_dotenv
 # are never in os.environ without being in DOTENV_KEYS.
 DOTENV_KEYS: frozenset[str] = frozenset()
 try:
-    DOTENV_KEYS = frozenset(dotenv_values(find_dotenv()))
-    load_dotenv()
+    try:
+        _main = main_checkout_from(Path(__file__).resolve().parent)
+    except NoMainCheckout as _stop:
+        raise SystemExit(f"SSSF: {_stop}") from None
+    if _main is None:
+        DOTENV_KEYS = frozenset(dotenv_values(find_dotenv()))
+        load_dotenv()
+    else:
+        _file = _main / ".env"
+        _walked = find_dotenv()
+        _names = set(dotenv_values(_file)) if _file.is_file() else set()
+        if _walked:
+            _names |= set(dotenv_values(_walked))
+        DOTENV_KEYS = frozenset(_names)
+        if _file.is_file():
+            load_dotenv(_file)
 except PermissionError:
     if os.environ.get("SSSF_AGENTSH") != "1":
         raise
@@ -138,28 +161,10 @@ def copy_installs(env: dict[str, str], mode: str | None) -> dict[str, str]:
 MOD_LINE = re.compile(r"^\s*mod\s+sssf(\s+['\"]sssf\.just['\"])?\s*$", re.MULTILINE)
 
 
-# The variables that tell git where a repo is, as `git help git` (ENVIRONMENT) and
-# `git rev-parse --local-env-vars` list them. A `.env` a run committed or the engineer's
-# shell can set any of them. GIT_CONFIG* stays out on purpose: no config key moves the
-# common dir, and a container may need safe.directory from one of them for git to answer.
-GIT_LOCATION_VARS = frozenset({
-    "GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_IMPLICIT_WORK_TREE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
-    "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_NO_REPLACE_OBJECTS",
-})
-
-
 # Two overrides for SSSF's own host git calls in a VM run's worktree, the values permissions.py
 # uses: an empty fsmonitor (`false` would run the program `false` before git 2.36) and no
 # hooks. `-c` wins over GIT_CONFIG_COUNT. GIT_CONFIG_* itself is kept, see above.
 GIT_NO_PROGRAMS = ("-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null")
-
-
-def git_location_env() -> dict[str, str]:
-    """A copy of the environment without git's location variables, for the calls that
-    find the main checkout or the repo root. os.environ itself is never changed."""
-    return {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
 
 
 @functools.lru_cache(maxsize=1)

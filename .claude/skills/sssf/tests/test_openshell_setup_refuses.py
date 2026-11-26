@@ -50,7 +50,8 @@ def environment(tmp_path: Path, bin_dir: Path, adw_id: str | None = None) -> dic
     env.pop("SSSF_ADW_ID", None)
     env.pop("SSSF_AGENT", None)
     env.update(HOME=str(home), PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-               STANDIN_LOG=str(tmp_path / "standin.log"))
+               STANDIN_LOG=str(tmp_path / "standin.log"),
+               JUST_NO_DOTENV="true")       # the stand-in `uv` must see only the recipe's own call
     if adw_id is not None:
         env["SSSF_ADW_ID"] = adw_id
     return env

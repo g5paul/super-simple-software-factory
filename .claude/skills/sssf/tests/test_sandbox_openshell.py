@@ -203,7 +203,7 @@ def test_the_default_policy():
         "version": 1,
         "filesystem_policy": {"include_workdir": True,
                               "read_only": ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/dev/zero",
-                                            "/dev/random", "/etc", "/var/log"],
+                                            "/dev/random", "/etc", "/var/log", "/var"],
                               "read_write": ["/tmp", "/var/tmp", "/dev/null", "/home/u/repo"]},
         "landlock": {"compatibility": "hard_requirement"},
         "network_policies": expected_rules()}
@@ -380,7 +380,7 @@ def test_the_image_holds_rsync_and_nothing_else_changed():
     assert "rsync" not in osh.policy_yaml(F, [])
     assert "rsync" not in osh.policy_yaml(F, [], frozenset({"claude_code", "pi"}))
     assert osh.READ_ONLY_PATHS == ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/dev/zero", "/dev/random",
-                                   "/etc", "/var/log"]
+                                   "/etc", "/var/log", "/var"]
     assert osh.REGISTRIES == ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
 
 
@@ -923,6 +923,21 @@ def test_tmpdir_is_in_the_policy_and_outside_the_repo(cli, tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("kind", KINDS)
+def test_every_parent_of_tmpdir_is_covered_by_the_policy(kind):
+    """A tool that lists a parent of TMPDIR must be allowed to. pytest lists every parent
+    of a test file outside its rootdir, up to but not including `/` (run 12ec0782)."""
+    fs = osh.policy(F, [], sandbox_remote.harnesses(roster(*KINDS[kind])))["filesystem_policy"]
+    covered = [Path(p) for p in fs["read_only"] + fs["read_write"]]
+    tmpdir = Path(osh.TMPDIR)
+    assert tmpdir.is_absolute() and tmpdir != Path("/")
+    below_root = [p for p in (tmpdir, *tmpdir.parents) if p != Path("/")]
+    uncovered = [str(p) for p in below_root if not any(p == c or c in p.parents for c in covered)]
+    assert uncovered == [], f"the policy covers no path at or above {uncovered}, so it can't be listed"
+    assert "/" not in fs["read_only"] and "/" not in fs["read_write"]
+    assert osh.TMPDIR in fs["read_write"] and "/var" not in fs["read_write"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
 def test_a_vm_can_read_dev_zero_and_dev_random(kind):
     p = osh.policy(F, [], sandbox_remote.harnesses(roster(*KINDS[kind])))
     fs = p["filesystem_policy"]
@@ -937,7 +952,7 @@ def test_the_policy_differs_from_the_baseline_only_by_the_two_devices(kind):
     p = osh.policy(F, [], harnesses)
     fs = p["filesystem_policy"]
     rest = [x for x in fs["read_only"] if x not in ("/dev/zero", "/dev/random")]
-    assert rest == ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"]
+    assert rest == ["/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log", "/var"]
     assert len(set(fs["read_only"])) == len(fs["read_only"])
     assert fs["read_write"] == ["/tmp", "/var/tmp", "/dev/null", str(F)]
     assert fs["include_workdir"] is True

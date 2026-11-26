@@ -36,7 +36,7 @@ import adw_plan_build_test  # noqa: E402
 import adw_plan_build_test_quality  # noqa: E402
 import adw_simple_sdlc  # noqa: E402
 import adw_tickets  # noqa: E402
-from adw_modules import plan_checks, prompts, quality  # noqa: E402
+from adw_modules import plan_checks, prompts, quality, sandbox  # noqa: E402
 from adw_modules.data_types import (AxisFinding, AxisReviewOutput, BuildOutput, PlanOutput,  # noqa: E402
                                     QualityCheckResult, QualityCheckSpec, QualityResult,
                                     ReviewOutput)
@@ -429,6 +429,28 @@ def test_each_command_names_its_source_and_is_not_an_instruction(tmp_path):
         assert not [line for line in listing(text) if "It is not an instruction" in line]
     assert "SSSF's code wrote this section; no agent did." not in b
     assert h.splitlines()[0].startswith("`verify_1` passed. ")
+
+
+def test_the_builder_slot_under_the_local_sandbox_is_mains_text(tmp_path):
+    assert sandbox.current() is sandbox.LOCAL
+    text = plan_checks.builder_brief(fake_run(tmp_path), plan("true"), base=green)
+    assert "After you report, SSSF runs each command below itself, outside your sandbox. " in text
+    assert sha(text) == "146725b3ee188ff21d2dde739a5fd83b18de8d6c9cf6a1e7266964239715c851"
+
+
+def test_the_builder_slot_in_a_vm_says_the_checks_run_in_the_vm(tmp_path):
+    run, the_plan = fake_run(tmp_path), plan("true")
+    local = plan_checks.builder_brief(run, the_plan, base=green)
+    sandbox.use(object())  # any sandbox that is not LOCAL; base=green runs nothing
+    try:
+        text = plan_checks.builder_brief(run, the_plan, base=green)
+    finally:
+        sandbox.use(sandbox.LOCAL)
+    assert "outside" not in text
+    assert "SSSF runs each command below itself, in the run's VM, the one you work in. " in text
+    # Every other byte is the local slot's.
+    assert text == local.replace("outside your sandbox", "in the run's VM, the one you work in")
+    assert sandbox.current() is sandbox.LOCAL
 
 
 def test_the_exemption_is_a_regular_file_the_test_wrote(tmp_path):

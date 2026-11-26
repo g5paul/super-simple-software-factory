@@ -8,8 +8,14 @@
 # exists, and an update never touches it, so this file stays the skill's and
 # `just sssf-update` can replace it.
 
-# `.env` reaches every ADW through this, so keys work without exporting them.
-set dotenv-load
+# The main checkout's `.env` reaches every ADW through this, so keys work without
+# exporting them. From a run's worktree it still prints the main checkout's file and
+# never the worktree's own. It runs the system `python3` directly, with no `uv`: uv
+# would find a worktree's `.venv` (or `.python-version`, `uv.toml`) and run the
+# interpreter a committed file names, before every recipe. `-I` keeps PYTHON* variables
+# and the working folder off the import path. Needs a `just` that knows
+# `dotenv-command` (1.59.0 is the version tested) and a `python3` (3.9 or newer) on PATH.
+set dotenv-command := "python3 -I adws/adw_modules/checkout.py --dotenv"
 set positional-arguments
 
 import? 'local.just'

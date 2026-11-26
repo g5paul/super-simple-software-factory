@@ -148,6 +148,10 @@
       "sha256": "2f02eaddc3e8e922a2c46be4aae2ce04f4ab4801aa6b72053cf9d3e1dc27808d",
       "source": "adws/adw_modules/changes.py"
     },
+    "adws/adw_modules/checkout.py": {
+      "sha256": "b33284d996a3c415a110c4a8e04983fb1a0346b212f9d42e9a1b9c91fcbcb1a9",
+      "source": "adws/adw_modules/checkout.py"
+    },
     "adws/adw_modules/console.py": {
       "sha256": "e9666d93224bbc3162fdcd8645dea0ab1bcb824a1796fd1bedaf1f3fb0e53224",
       "source": "adws/adw_modules/console.py"
@@ -173,7 +177,7 @@
       "source": "adws/adw_modules/obs_relay.py"
     },
     "adws/adw_modules/permissions.py": {
-      "sha256": "5019764972c897a6236145e3f7b57b9b8c7b62330138705fe8e4b50157252170",
+      "sha256": "59986b430d4901fac900e8371cc17954a2c95f32e30acce936586bb62a475160",
       "source": "adws/adw_modules/permissions.py"
     },
     "adws/adw_modules/plan_checks.py": {
@@ -273,11 +277,11 @@
       "source": "adws/adw_modules/trial.py"
     },
     "adws/adw_modules/utils.py": {
-      "sha256": "ff3c5e36886bf810f5670d459d35bbd426dfbb3f890382879b143aef2b693340",
+      "sha256": "8c3e83e05897b85277b55a95802034f9078d4d5b356fabf6e4b14a8e6e98d1e9",
       "source": "adws/adw_modules/utils.py"
     },
     "adws/adw_modules/worktree.py": {
-      "sha256": "1ea3e2845d5807840c24515e21deb5f93cfc1b97ad9d186c4d2cd8ba4cf20f23",
+      "sha256": "ba537aee37e1d60da17110d9124054c0729a1bdaad654743dcbf303a24124f90",
       "source": "adws/adw_modules/worktree.py"
     },
     "adws/adw_plan.py": {
@@ -337,9 +341,9 @@
       "source": "adws/adw_worktree.py"
     },
     "justfile": {
-      "sha256": "09e73b62d951f491bee8b85a25e9f9aa78b4ad9e71728ddb40504d0dcc5cc18b",
+      "sha256": "594e140c9abee4409dafb4f75025b65082fc4baa1a709aa2bac73268defb06fd",
       "source": "justfile"
     }
   },
-  "skill": "ef41512"
+  "skill": "09d9de0"
 }

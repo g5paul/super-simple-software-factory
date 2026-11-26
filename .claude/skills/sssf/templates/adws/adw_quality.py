@@ -13,7 +13,7 @@ Phases: engineer(request) -> code(quality)
 import argparse
 import sys
 
-from adw_modules import agents, quality, session, utils
+from adw_modules import agents, plan_checks, session, utils
 from adw_modules.data_types import PhaseParams
 
 REQUIRED_AGENTS: list[str] = []
@@ -30,7 +30,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="quality", kind="code", owner="quality",
                                description="Run the deterministic quality blocks")) as ph:
-        result = quality.run_quality(run)
+        result = plan_checks.verify(run, None)
         ph.log(passed=result.passed, checks=result.tally(),
                artifacts=", ".join(result.artifacts))
         if not result.passed:

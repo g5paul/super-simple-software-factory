@@ -214,10 +214,10 @@ def test_the_reviewer_slot_in_a_vm_says_the_checks_ran_in_the_vm():
     finally:
         sandbox.use(sandbox.LOCAL)
     assert "outside" not in text
-    assert ("SSSF ran each command below itself, in the run's VM, the one the agents work in, "
+    assert ("SSSF ran each command below itself, in a fresh VM of the run's own, not the one the agents work in, "
             "and each one exited 0. ") in text
     assert text == (LOCAL_VERIFY + REVISED_LINE).replace(
-        "outside any agent's sandbox", "in the run's VM, the one the agents work in")
+        "outside any agent's sandbox", "in a fresh VM of the run's own, not the one the agents work in")
     assert sandbox.current() is sandbox.LOCAL
 
 

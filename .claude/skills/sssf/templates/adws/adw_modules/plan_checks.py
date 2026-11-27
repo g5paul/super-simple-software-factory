@@ -189,16 +189,18 @@ def builder_brief(run, plan: PlanOutput | None, base=None) -> str:
 def verify(run, plan: PlanOutput | None, base=None) -> QualityResult:
     """quality.py's blocks (or `base`, e.g. quality.run_tests), then every check
     the plan named, as one result, run in `sandbox.verifying(run)`: a fresh VM under
-    a VM sandbox, as before on `Local`. With no plan checks it returns `base`'s own
-    result. The default is looked up at call time, so a wrapped or patched
-    run_quality is the one that runs."""
-    with sandbox.verifying(run):
+    a VM sandbox, as before on `Local`. No path returns `base`'s own result: it
+    passes when nothing failed. A green round under a VM records its tree
+    (`mark_green`), which the commits that follow must hold. The default is looked
+    up at call time, so a wrapped or patched run_quality is the one that runs."""
+    with sandbox.verifying(run) as fresh:
         result = (base or quality.run_quality)(run)
         extra = [_run(run, i, command) for i, command in _plan_commands(plan)]
-    if not extra:
-        return result
     failures = result.failures + [
         f"{check.name}: `{check.command}` exited {check.returncode}\n{check.output_tail}".rstrip()
         for check in extra if not check.passed]
-    return QualityResult(passed=not failures, checks=result.checks + extra, failures=failures,
-                         artifacts=result.artifacts + [check.output_artifact for check in extra])
+    final = QualityResult(passed=not failures, checks=result.checks + extra, failures=failures,
+                          artifacts=result.artifacts + [check.output_artifact for check in extra])
+    if final.passed and fresh is not None:
+        fresh.mark_green()
+    return final

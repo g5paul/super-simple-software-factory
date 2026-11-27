@@ -224,7 +224,9 @@ def verifying(run):
     nothing. Under a VM, the box makes a fresh VM from the run's branch at the last
     sync plus the builder's patch (`open_verify`), `current()` is that VM inside the
     scope, and it is deleted on the way out, pass, fail or exception. A box that
-    can't make one raises SandboxFailed: no check runs in the build VM."""
+    can't make one raises SandboxFailed: no check runs in the build VM. The yielded
+    box is what `plan_checks.verify` marks green, so a box's `open_verify` must
+    return something with `mark_green`."""
     box = current()
     if box is LOCAL:
         yield None

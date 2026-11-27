@@ -23,10 +23,14 @@ both sides. Each command goes through `run` or `start` below:
 - At the end, uncommitted work is saved as a patch in the run's folder, not
   applied, and the VM is deleted.
 - Verify runs in a VM of its own (`open_verify`, used through `sandbox.verifying`): the
-  builder's work since the last sync is taken out as one patch with a temporary index,
-  judged on the host (`permissions.judge_commits`), and applied in a new VM that holds
-  the branch at the last sync. `worktree_setup` runs there, then every check, and the
-  VM is deleted. It starts no agent, lands no commit, and the build VM is not changed.
+  work a commit would hold (the real index plus `git add -A`, in a copy of the index) is
+  taken out as one patch, judged on the host (`permissions.judge_commits`), and applied
+  in a new VM that holds the branch at the last sync. `worktree_setup` runs there, then
+  every check, and the VM is deleted. It starts no agent, lands no commit, and the build
+  VM is not changed. A green round records the tree the host built from the patch; from
+  then on every commit that comes back (a sync or `close()`) must hold exactly that tree,
+  except at `wrote`, or the bundle is refused. That holds until the chain's own commit
+  lands (`commit`) or a new round opens.
 
 A provider (sandbox_vercel, sandbox_e2b, sandbox_openshell) makes the VM and hands back an
 object with Vercel's SDK calls: run_process, create_process, stop, destroy.
@@ -736,6 +740,7 @@ class Remote:
         self._obs_dir = ""
         self._relays: set[_Relay] = set()
         self.synced = ""
+        self._verified = ""     # the tree id of the last green verify round, or ""
         self.python = ""
         self.python_problem = ""
         self.tools: dict[str, str] = {}
@@ -1179,7 +1184,12 @@ class Remote:
 
         The host judges every commit first (permissions.judge_commits), reading
         only objects its own `git bundle unbundle` hashed. A refused bundle lands
-        nothing: it is kept as sandbox-refused.bundle and PermissionBreach is raised."""
+        nothing: it is kept as sandbox-refused.bundle and PermissionBreach is raised.
+
+        While a verified tree is in force (a green verify round, until the chain's own
+        commit lands or a new round opens), every commit of `synced..tip` must hold
+        that tree, except at the `wrote` paths, or the whole bundle is refused. Only a
+        `must_move` call (`commit`) ends the verified tree; a sync leaves it."""
         from . import permissions
         head = self._must("git", ["rev-parse", "HEAD"], cwd=str(self.tree)).strip()
         if head == self.synced:
@@ -1212,6 +1222,24 @@ class Remote:
                 self.tree, self.synced, tip, cfg, getattr(self.run_, "ran", []), only=only,
                 session=inside, wrote=list(wrote),
                 taken=list(getattr(self.run_, "taken", ())))
+            if not refused and self._verified:
+                # Every commit of synced..tip must hold the tree verify passed, except
+                # at `wrote`. judge_commits refused any merge, root or tip that does not
+                # descend from the sync, so this is one line of commits.
+                line = _host_git("rev-list", "--reverse", f"{self.synced}..{tip}", cwd=self.tree).split()
+                for commit in line:
+                    got = _host_git("rev-parse", f"{commit}^{{tree}}", cwd=self.tree)
+                    if got == self._verified:
+                        continue
+                    names = _host_git("diff-tree", "-r", "--no-renames", "--name-only", "-z",
+                                      self._verified, got, cwd=self.tree)
+                    left = [n for n in names.split("\0") if n and n not in wrote]
+                    if left:
+                        refused.append((commit, ["not the tree verify passed"]))
+                        shown_paths = ", ".join(permissions._said_line(n) for n in left[:20])
+                        text = (f"The tree verify passed is {self._verified[:12]}, and commit "
+                                f"{commit[:12]} differs from it at: {shown_paths}. Every commit made "
+                                f"after the last green verify must hold exactly what it checked.")
         except (permissions.PermissionBreach, SandboxFailed) as error:
             refused, text = [(tip or head, ["unreadable"])], str(error)
         if refused:
@@ -1221,7 +1249,9 @@ class Remote:
             shown = text or permissions.refusal_text(refused)
             self._log("sandbox_commits_refused",
                       {"vm": self.vm, "synced": self.synced[:12], "head": (tip or head)[:12],
-                       "refused": [[c, p] for c, p in refused], "bundle": str(kept)}, type="error")
+                       "refused": [[c, p] for c, p in refused], "bundle": str(kept),
+                       **({"verified": self._verified[:12]} if self._verified else {})},
+                      type="error")
             raise permissions.PermissionBreach(
                 f"The VM's commits were refused and did not land (the host branch is still at "
                 f"{self.synced[:12]}); the bundle is kept at {kept}:\n{shown}")
@@ -1230,28 +1260,41 @@ class Remote:
         count = _host_git("rev-list", "--count", f"{self.synced}..{tip}", cwd=self.tree)
         self._log("sandbox_commits", {"vm": self.vm, "count": int(count), "head": tip[:12]})
         self.synced = tip
+        if must_move:
+            self._verified = ""     # the chain's own commit ends the verified tree
         permissions.commit_passed(self.run_, only)
 
     # --- a fresh VM for verify ------------------------------------------------
 
     def _patch_out(self) -> bytes:
-        """The builder's work since the last sync, committed or not, as one patch.
-        Made with a temporary index, so this VM's index, HEAD and tree are not changed.
-        Empty when there is none."""
-        script = ('idx=$(mktemp -u); trap \'rm -f "$idx"\' EXIT; export GIT_INDEX_FILE="$idx"; '
-                  'git read-tree HEAD && git add -A && git diff --cached --binary "$1" | base64 -w0')
+        """What a commit made now would hold, against the last sync, as one patch: this
+        VM's real index plus `git add -A`, so a force-added ignored file and a
+        skip-worktree entry are in it. Made with a copy of the index, so this VM's
+        index, HEAD and tree are not changed. No git command writes into a pipe, so a
+        failing one stops the round (SandboxFailed). Empty when there is none."""
+        script = ('set -e; idx=$(mktemp -u); out=$(mktemp); trap \'rm -f "$idx" "$out"\' EXIT; '
+                  'real=$(git rev-parse --git-path index); '
+                  'if [ -e "$real" ]; then cp "$real" "$idx"; fi; '
+                  'export GIT_INDEX_FILE="$idx"; git add -A; '
+                  'git diff --cached --binary "$1" > "$out"; base64 -w0 "$out"')
         packed = self._must("sh", ["-c", script, "sh", self.synced], cwd=str(self.tree))
-        return base64.b64decode(packed.strip()) if packed.strip() else b""
+        try:
+            return base64.b64decode(packed.strip(), validate=True) if packed.strip() else b""
+        except ValueError as error:
+            raise SandboxFailed(f"{self.name} could not read the build VM's patch: {error}") from None
 
-    def _judge_patch(self, patch: bytes) -> None:
+    def _judge_patch(self, patch: bytes) -> str:
         """Judge `patch` on the host before any of it goes into a VM: apply it to the
         last sync in a temporary index, make a commit of the result, and ask
         permissions.judge_commits. Raises PermissionBreach if it is refused or can't
         be read, keeping the patch as sandbox-refused-verify.patch. Moves no ref and
-        touches no worktree or index of the host."""
+        touches no worktree or index of the host. Returns the id of the tree the patch
+        makes (the last sync's tree for an empty patch, which is judged by nothing)."""
         from . import permissions
+        if not patch:
+            return _host_git("rev-parse", f"{self.synced}^{{tree}}", cwd=self.tree)
         folder = Path(tempfile.mkdtemp())
-        refused, text, commit = [], "", ""
+        refused, text, commit, tree = [], "", "", ""
         try:
             env = {"GIT_INDEX_FILE": str(folder / "index"),
                    "GIT_AUTHOR_NAME": "sssf", "GIT_AUTHOR_EMAIL": "sssf@localhost",
@@ -1286,20 +1329,24 @@ class Remote:
                 f"The VM's work was refused before verify and nothing was run (the host branch is "
                 f"still at {self.synced[:12]}); the patch is kept at {kept}:\n"
                 f"{text or permissions.refusal_text(refused)}")
+        return tree
 
     def open_verify(self) -> "VerifyBox":
         """A new VM for one verify round: the branch at the last sync plus this VM's
         patch, `worktree_setup` run in it. Raises SandboxFailed or PermissionBreach.
-        The build VM and the host branch are not changed. The caller closes the box."""
+        The build VM and the host branch are not changed. The caller closes the box.
+        A new round forgets the earlier green; the box's `mark_green` records this
+        round's tree (the one the host built from the judged patch), which every
+        commit that comes back afterwards must hold (see `commits_out`)."""
+        self._verified = ""
         try:
             patch = self._patch_out()
         except OSError as error:
             raise SandboxFailed(f"{self.name} could not take the build VM's patch: {error}") from None
-        if patch:
-            self._judge_patch(patch)
+        tree = self._judge_patch(patch)
         inner = type(self)(self.run_, self.branch, self.project)
         inner.python, inner.python_problem = self.python, self.python_problem
-        box = VerifyBox(inner)
+        box = VerifyBox(inner, self, tree)
         try:
             began = time.monotonic()
             inner.sandbox = inner._create()
@@ -1329,7 +1376,7 @@ class Remote:
                                          "create_seconds": round(made - began, 1),
                                          "clone_seconds": round(cloned - made, 1),
                                          "setup_seconds": round(done - cloned, 1),
-                                         "patch_bytes": len(patch)})
+                                         "patch_bytes": len(patch), "tree": tree[:12]})
         except BaseException as error:
             if inner.sandbox is not None:
                 box.close()
@@ -1450,14 +1497,34 @@ class Remote:
 
 class VerifyBox:
     """The VM of one verify round, made by `Remote.open_verify`. It can run a
-    command and be closed, and nothing else: no `start`, `commit`, `install` or
-    `open_verify`, so no agent starts in it, no commit lands from it and rounds
-    don't nest."""
+    command, read a file and be closed, and nothing else: no `start`, `commit`,
+    `install` or `open_verify`, so no agent starts in it, no commit lands from it
+    and rounds don't nest."""
 
     name = "verify"
 
-    def __init__(self, inner: Remote):
+    def __init__(self, inner: Remote, outer: Remote, tree: str):
         self.inner = inner
+        self.outer = outer
+        self.tree = tree
+
+    def mark_green(self) -> None:
+        """This round passed: the build VM's commits from now on must hold this tree.
+        May be called after `close()`."""
+        self.outer._verified = self.tree
+        self.outer._log("sandbox_verified", {"vm": self.outer.vm, "tree": self.tree[:12]})
+
+    def exists(self, path) -> bool:
+        return self.inner.exists(path)
+
+    def is_file(self, path) -> bool:
+        return self.inner.is_file(path)
+
+    def size(self, path) -> int:
+        return self.inner.size(path)
+
+    def read_text(self, path) -> str:
+        return self.inner.read_text(path)
 
     @property
     def vm(self) -> str:

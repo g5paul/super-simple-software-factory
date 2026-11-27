@@ -272,7 +272,7 @@ def test_the_verify_vm_has_no_start_commit_or_install_and_a_commit_through_it_mo
     _verify(rig, "true", base=_block("true", seen))
     fresh = rig.open_verify()
     try:
-        for name in ("start", "commit", "install", "write_text", "open_verify"):
+        for name in ("start", "commit", "install", "write_text", "remove", "handoff_out", "open_verify"):
             assert not hasattr(fresh, name)
         done = fresh.run(["git", "commit", "-q", "--allow-empty", "-m", "x"], cwd=rig.host_tree)
         assert done.returncode == 0
@@ -293,8 +293,11 @@ def test_under_local_verifying_yields_none_and_verify_runs_as_before(monkeypatch
     with sandbox.verifying(object()) as fresh:
         assert fresh is None
     from adw_modules import plan_checks
-    result = plan_checks.verify(types.SimpleNamespace(), None, base=lambda run: "the base's own result")
-    assert result == "the base's own result"
+    from adw_modules.data_types import QualityResult
+    base = QualityResult(passed=True, checks=[], failures=[], artifacts=["a"])
+    result = plan_checks.verify(types.SimpleNamespace(), None, base=lambda run: base)
+    assert (result.passed, result.checks, result.failures, result.artifacts) == (
+        base.passed, base.checks, base.failures, base.artifacts)
 
 
 def test_no_chain_template_calls_the_blocks_directly():

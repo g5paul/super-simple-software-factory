@@ -61,7 +61,8 @@ def commit_all(message: str, only: list[str] | None = None, *, run=None, wrote=(
 
     The commit is judged against the agents' `writes` (permissions.judge_commits).
     In a VM the sandbox's `commit` brings the commit back and judges it before the
-    host branch moves. Locally, with a `run`, a refused commit is undone (the tree
+    host branch moves. After a green verify the commit must hold the verified tree,
+    except the `wrote` paths, or it is refused. Locally, with a `run`, a refused commit is undone (the tree
     is kept) and PermissionBreach is raised. `wrote` names paths the chain itself
     wrote into this commit. With `run=None` nothing is checked. A passing `only`
     commit ends the agents' grant inside its entries until the next full commit."""

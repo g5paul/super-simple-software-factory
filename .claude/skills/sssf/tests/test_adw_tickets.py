@@ -506,10 +506,23 @@ class VMTree(sandbox_mod.Local):
 
     def __init__(self):
         self.writes: list[str] = []
+        self.verifies = 0
 
     def write_text(self, path, text):
         self.writes.append(str(path))
         super().write_text(path, text)
+
+    def open_verify(self):
+        """Each verify round gets its own box, as a real VM does; here it is the same tree."""
+        self.verifies += 1
+        return _VerifyTree()
+
+
+class _VerifyTree(sandbox_mod.Local):
+    name = "verify"
+
+    def close(self):
+        pass
 
 
 @pytest.fixture

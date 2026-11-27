@@ -149,7 +149,7 @@ def build_feature(run, folder: str) -> int:
         for i in range(1, MAX_FIX_LOOPS + 1):
             with run.phase(PhaseParams(name=f"{prefix}_verify_{i}", kind="code", owner="quality",
                                        description="Run the suite and every quality check")) as ph:
-                result = quality.run_quality(run)
+                result = plan_checks.verify(run, None)
                 record(ph, result)
             if result.passed or i == MAX_FIX_LOOPS:
                 return result

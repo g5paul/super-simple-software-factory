@@ -10,6 +10,8 @@ Usage:
 Phases: engineer(request) -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
         [-> code(commit), in a worktree run with a green suite]
 
+Under a VM the verified-tree binding is not ended, so `close()` refuses any commit that isn't the verified tree.
+
 Testing is CODE. The suite's command is written down in adw_modules/quality.py,
 so running it needs no judgement — only repairing it does. Failures reach the
 builder as an envelope through `quality.as_envelope`, which is the same door an
@@ -69,7 +71,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name=f"test_{i}", kind="code", owner="quality",
                                    description="Run the suite — a known command, so code runs "
                                                "it and no agent has to rediscover it")) as ph:
-            test = quality.run_tests(run)
+            test = plan_checks.verify(run, None, base=quality.run_tests)
             record(ph, test)
 
         if test.passed:

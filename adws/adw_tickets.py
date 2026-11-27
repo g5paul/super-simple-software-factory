@@ -19,7 +19,10 @@ Phases: engineer(request) -> code(read) -> scout
            -> git(tNN_commit)
         -> standards_reviewer(review_standards) -> spec_reviewer(review_spec)
         [-> ticket_builder(review_fix) -> code(review_verify_1) ... -> git(commit_review_fix)]
-        -> git(changes) -> documenter -> git(commit_docs)
+        -> git(changes: sandbox.verify_done first) -> documenter -> git(commit_docs)
+
+Under a VM every commit but the documenter's is held to the tree the last green verify
+round passed; `changes` begins with `sandbox.verify_done()`, which ends that binding.
 
 The read step is code. It rejects a bad folder (no spec seams, a missing
 blocker, a cycle) before any agent spends money, and prints what the feature
@@ -70,7 +73,7 @@ import sys
 from pathlib import Path
 
 from adw_modules import (account, agents, budget, changes, gates, git_helper, permissions, plan_checks,
-                         quality, rules, session, tickets, worktree)
+                         quality, rules, sandbox, session, tickets, worktree)
 from adw_modules.data_types import (AgentCall, AxisReviewOutput, BuildOutput, ChangeCapture,
                                     DocumentOutput, EventRecord, GenericOutput, PhaseParams,
                                     ScoutOutput)
@@ -149,7 +152,7 @@ def build_feature(run, folder: str) -> int:
         for i in range(1, MAX_FIX_LOOPS + 1):
             with run.phase(PhaseParams(name=f"{prefix}_verify_{i}", kind="code", owner="quality",
                                        description="Run the suite and every quality check")) as ph:
-                result = quality.run_quality(run)
+                result = plan_checks.verify(run, None)
                 record(ph, result)
             if result.passed or i == MAX_FIX_LOOPS:
                 return result
@@ -294,6 +297,7 @@ def build_feature(run, folder: str) -> int:
 
     with run.phase(PhaseParams(name="changes", kind="code", owner="git",
                                description="Diff the whole feature, for the documenter")) as ph:
+        sandbox.verify_done()     # the docs commit is not the tree verify checked
         changeset = changes.capture(run, ChangeCapture(base=base))
         ph.log(base=f"{changeset.base.label} @ {changeset.base.commit[:7]}",
                files=len(changeset.files) + len(changeset.untracked),

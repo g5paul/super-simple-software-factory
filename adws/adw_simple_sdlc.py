@@ -12,13 +12,17 @@ Phases: engineer(request) -> planner -> git(commit_plan)
            (still red after the last verify: the run ends here, with no review)
         -> reviewer [-> builder(revise) -> reviewer ... bounded]
         -> code(reverify, only if a revision changed code)
-        -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
+        -> git(commit_build) -> code(changes: sandbox.verify_done first)
+        -> documenter -> git(commit_docs)
 
 Three commits, three work products, three authors. The plan, the code, and the
 write-up each land in their own commit, and each commit message is the words of
 the agent that produced it — `commit_message` on PlanOutput describes the spec,
 on BuildOutput the code, on DocumentOutput the write-up. No agent's sentence is
-ever reused for another agent's diff.
+ever reused for another agent's diff. Under a VM the code commit is held to the
+tree the last green verify round passed; the docs commit is not (verify did not
+check it, and it is held to the documenter's `writes`), so `changes` begins with
+`sandbox.verify_done()`, which ends that binding.
 
 Testing is CODE, not an agent. `bun test` is a command, not a judgement call:
 an agent rediscovering it every run costs a million tokens to learn what a
@@ -55,7 +59,7 @@ pinned before the first commit phase and printed in the request phase.
 import argparse
 import sys
 
-from adw_modules import agents, changes, gates, git_helper, plan_checks, quality, session, utils
+from adw_modules import agents, changes, gates, git_helper, plan_checks, quality, sandbox, session, utils
 from adw_modules.data_types import (AgentCall, BuildOutput, ChangeCapture,
                                     DocumentOutput, PhaseParams, PlanOutput,
                                     ReviewOutput)
@@ -186,6 +190,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
         with run.phase(PhaseParams(name="changes", kind="code", owner="git",
                                    description="Diff the whole run against its pinned baseline, for the documenter")) as ph:
+            sandbox.verify_done()     # the docs commit is not the tree verify checked
             changeset = changes.capture(run, ChangeCapture(base=baseline))
             ph.log(base=f"{changeset.base.label} @ {changeset.base.commit[:7]}",
                    reason=changeset.base.reason,

@@ -8,6 +8,8 @@ Usage:
     uv run adws/adw_quality.py "<reason for the quality run>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
 
 Phases: engineer(request) -> code(quality)
+
+Under a VM the verified-tree binding is not ended, so `close()` refuses any commit that isn't the verified tree.
 """
 
 import argparse

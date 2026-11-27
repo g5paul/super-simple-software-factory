@@ -279,28 +279,39 @@ def test_an_only_commit_before_any_verify_lands(rig):
     _pending(rig)
     before = _host_head(rig)
     git_helper.commit_all("plan", only=["feat.txt"], run=rig.run_)
-    assert _host_head(rig) != before and rig._verified == ""
+    assert _host_head(rig) != before and rig._verified is None
 
 
-def test_after_the_chains_own_commit_the_check_ends_and_a_later_commit_lands(rig):
-    from adw_modules import git_helper
+@pytest.mark.parametrize("ended", [False, True])
+def test_after_the_chains_own_commit_the_binding_is_its_tree_until_the_chain_ends_it(rig, ended):
+    from adw_modules import git_helper, permissions, sandbox
     _setup(rig)
     _pending(rig)
     assert _verify(rig, CHECK).passed and rig._verified
     git_helper.commit_all("build", run=rig.run_)
-    assert rig._verified == ""
+    assert rig._verified == _git(rig.host_tree, "rev-parse", "HEAD^{tree}").strip()
+    if ended:
+        sandbox.verify_done()
+        assert rig._verified is None and rig.run_.ran == []
     rig.run_.ran.append(next(a for a in rig.run_.cfg.agents if a.name == "documenter"))
     (rig.vm_tree / "docs").mkdir(exist_ok=True)
     (rig.vm_tree / "docs" / "x.md").write_text("doc\n")
+    if not ended:
+        before = _host_head(rig)
+        with pytest.raises(permissions.PermissionBreach):
+            git_helper.commit_all("docs", run=rig.run_)
+        assert _host_head(rig) == before
+        return
     git_helper.commit_all("docs", run=rig.run_)
     assert _git(rig.host_tree, "show", "HEAD:docs/x.md") == "doc\n"
 
 
-def test_opening_a_new_round_forgets_the_earlier_green(rig):
+def test_a_red_round_keeps_the_earlier_green(rig):
     _setup(rig)
     assert _verify(rig, "true").passed and rig._verified
+    green = rig._verified
     assert _verify(rig, "false").passed is False
-    assert rig._verified == ""
+    assert rig._verified == green
 
 
 def test_a_verify_round_moves_nothing_and_reads_no_head_from_the_build_vm(rig):
@@ -367,3 +378,328 @@ def test_a_base_that_says_passed_with_a_failure_listed_fails_verify():
         types.SimpleNamespace(), None,
         base=lambda run: QualityResult(passed=True, checks=[], failures=["x"]))
     assert result.passed is False
+
+
+# --- the binding lasts until the chain ends it (run 1befc519) ------------------
+
+BAD = "OK = 0\n"
+
+
+def _left_commit(rig, text=BAD, name="app.py"):
+    """A process the builder left running commits in the build VM, outside any agent call.
+    The builder's call is on record, so the path rules alone would let the file through."""
+    builder = next(a for a in rig.run_.cfg.agents if a.name == "builder")
+    if builder not in rig.run_.ran:
+        rig.run_.ran.append(builder)
+    (rig.vm_tree / name).write_text(text)
+    _git(rig.vm_tree, "add", "-A")
+    _git(rig.vm_tree, "commit", "-qm", "left")
+
+
+def _refused_bundle(rig) -> Path:
+    return Path(rig.run_.session_dir) / "sandbox-refused.bundle"
+
+
+def _documenter(rig):
+    rig.run_.ran.append(next(a for a in rig.run_.cfg.agents if a.name == "documenter"))
+
+
+def _fail_patch(rig, monkeypatch):
+    from adw_modules import sandbox
+
+    def broken():
+        raise sandbox.SandboxFailed("git failed in the build VM")
+    monkeypatch.setattr(rig, "_patch_out", broken)
+
+
+def _failed_round(rig):
+    from adw_modules import sandbox
+    with pytest.raises(sandbox.SandboxFailed):
+        _verify(rig, "true")
+
+
+def test_a_tickets_run_whose_review_fix_changes_nothing_lands_its_docs_commit(rig):
+    from adw_modules import git_helper, sandbox
+    _setup(rig)
+    _pending(rig)
+    assert _verify(rig, CHECK).passed
+    git_helper.commit_all("t01", run=rig.run_)
+    assert _verify(rig, CHECK).passed            # the review round: nothing changed
+    sandbox.verify_done()
+    _documenter(rig)
+    (rig.vm_tree / "app_docs").mkdir(exist_ok=True)
+    (rig.vm_tree / "app_docs" / "x.md").write_text("doc\n")
+    git_helper.commit_all("docs", run=rig.run_)
+    assert _git(rig.host_tree, "show", "HEAD:app_docs/x.md") == "doc\n"
+
+
+@pytest.mark.parametrize("where", ["sync", "close"])
+@pytest.mark.parametrize("second", ["red", "failed"])
+def test_a_bad_commit_after_a_green_round_and_a_red_or_failed_one_lands_nothing(
+        rig, monkeypatch, second, where):
+    from adw_modules import permissions
+    sync = _setup(rig)
+    assert _verify(rig, "true").passed
+    if second == "red":
+        assert _verify(rig, "false").passed is False
+    else:
+        _fail_patch(rig, monkeypatch)
+        _failed_round(rig)
+    _left_commit(rig)
+    with pytest.raises(permissions.PermissionBreach):
+        rig.commits_out() if where == "sync" else rig.close(stop=True)
+    assert _host_head(rig) == sync
+    assert _refused_bundle(rig).exists()
+
+
+@pytest.mark.parametrize("second", ["red", "failed"])
+def test_nothing_lands_before_the_first_green_round(rig, monkeypatch, second):
+    from adw_modules import permissions
+    sync = _setup(rig)
+    if second == "red":
+        assert _verify(rig, "false").passed is False
+    else:
+        _fail_patch(rig, monkeypatch)
+        _failed_round(rig)
+    assert rig._verified == ""
+    (rig.vm_tree / "docs").mkdir(exist_ok=True)
+    _left_commit(rig, "doc\n", "docs/x.md")      # the sync's tree plus a docs file
+    with pytest.raises(permissions.PermissionBreach):
+        rig.close(stop=True)
+    assert _host_head(rig) == sync
+
+
+# Round 2's plants: the build VM's word about its own patch decides nothing.
+
+@pytest.mark.parametrize("forge", ["config", "patch"])
+def test_a_forged_empty_patch_still_binds_the_last_sync(rig, monkeypatch, forge):
+    from adw_modules import git_helper, permissions
+    sync = _setup(rig)
+    (rig.vm_tree / "app.py").write_text(BAD)
+    if forge == "config":
+        _git(rig.vm_tree, "config", "diff.external", "true")
+    else:
+        # stand-in for any way a left process empties the patch
+        monkeypatch.setattr(rig, "_patch_out", lambda: b"")
+    result = _verify(rig, "true")
+    assert result.passed and rig._verified is not None
+    if forge == "config" and rig._verified != _git(rig.host_tree, "rev-parse", "HEAD^{tree}").strip():
+        pytest.skip("diff.external does not forge the patch in this stand-in")
+    with pytest.raises(permissions.PermissionBreach):
+        git_helper.commit_all("build", run=rig.run_)
+    assert _host_head(rig) == sync
+
+
+def test_good_bytes_during_the_patch_and_bad_ones_after_land_nothing(rig, monkeypatch):
+    from adw_modules import git_helper, permissions
+    sync = _setup(rig)
+    real = rig._patch_out
+    app = rig.vm_tree / "app.py"
+    app.write_text(BAD)
+
+    def wrapped():
+        app.write_text(APP)
+        try:
+            return real()
+        finally:
+            app.write_text(BAD)
+    monkeypatch.setattr(rig, "_patch_out", wrapped)
+    assert _verify(rig, "true").passed
+    with pytest.raises(permissions.PermissionBreach):
+        git_helper.commit_all("build", run=rig.run_)
+    assert _host_head(rig) == sync
+
+
+@pytest.mark.parametrize("where", ["verify_done", "close"])
+def test_a_bad_commit_then_the_good_bytes_back_lands_nothing(rig, where):
+    from adw_modules import permissions, sandbox
+    sync = _setup(rig)
+    _left_commit(rig)
+    (rig.vm_tree / "app.py").write_text(APP)
+    assert _verify(rig, "true").passed
+    with pytest.raises(permissions.PermissionBreach):
+        sandbox.verify_done() if where == "verify_done" else rig.close(stop=True)
+    assert _host_head(rig) == sync
+
+
+def _forged_empty(rig, monkeypatch):
+    monkeypatch.setattr(rig, "_patch_out", lambda: b"")
+
+
+def _forged_config(rig, monkeypatch):
+    _git(rig.vm_tree, "config", "diff.external", "true")
+
+
+def _failed(rig, monkeypatch):
+    _fail_patch(rig, monkeypatch)
+
+
+def _head_moved(rig, monkeypatch):
+    _left_commit(rig, "OK = 2\n")
+
+
+@pytest.mark.parametrize("report", [None, _forged_empty, _failed, _forged_config, _head_moved])
+def test_what_the_build_vm_reports_never_turns_the_check_off(rig, monkeypatch, report):
+    from adw_modules import permissions, sandbox
+    sync = _setup(rig)
+    _pending(rig)
+    if report is not None:
+        report(rig, monkeypatch)
+    try:
+        _verify(rig, CHECK)
+    except sandbox.SandboxFailed:
+        assert report is _failed
+    assert rig._verified is not None
+    _left_commit(rig)
+    with pytest.raises(permissions.PermissionBreach):
+        rig.commits_out()
+    assert _host_head(rig) == sync
+
+
+@pytest.mark.parametrize("event", ["sync", "red", "failed", "chain_commit"])
+def test_only_the_chains_call_ends_the_binding(rig, monkeypatch, event):
+    from adw_modules import git_helper, sandbox
+    _setup(rig)
+    _pending(rig)
+    assert _verify(rig, CHECK).passed
+    if event == "sync":
+        _git(rig.vm_tree, "add", "-A")
+        assert rig.run(["git", "commit", "-qm", "x"], cwd=rig.host_tree).returncode == 0
+    elif event == "red":
+        assert _verify(rig, "false").passed is False
+    elif event == "failed":
+        _fail_patch(rig, monkeypatch)
+        _failed_round(rig)
+    else:
+        git_helper.commit_all("build", run=rig.run_)
+    assert rig._verified is not None
+    sandbox.verify_done()
+    assert rig._verified is None
+
+
+def test_verify_done_with_a_bad_commit_in_the_vm_refuses_and_stays_bound(rig):
+    from adw_modules import permissions, sandbox
+    sync = _setup(rig)
+    assert _verify(rig, "true").passed
+    _left_commit(rig)
+    with pytest.raises(permissions.PermissionBreach):
+        sandbox.verify_done()
+    assert rig._verified is not None and _host_head(rig) == sync
+    with pytest.raises(permissions.PermissionBreach):
+        rig.close(stop=True)
+    assert _host_head(rig) == sync
+
+
+# Ordinary runs, per chain: each chain's host calls in its order.
+
+def _commit_count(rig, since) -> int:
+    return int(_git(rig.host_tree, "rev-list", "--count", f"{since}..HEAD").strip())
+
+
+def _chain_simple_sdlc(rig, change):
+    from adw_modules import git_helper, sandbox
+    agents = {a.name: a for a in rig.run_.cfg.agents}
+    rig.run_.ran.append(agents["planner"])
+    (rig.vm_tree / "specs").mkdir(exist_ok=True)
+    (rig.vm_tree / "specs" / "s.md").write_text("spec\n")
+    git_helper.commit_all("plan", ["specs/s.md"], run=rig.run_)
+    _as_builder(rig, lambda: change(rig))
+    assert _verify(rig, CHECK).passed
+    git_helper.commit_all("build", run=rig.run_)
+    sandbox.verify_done()
+    _documenter(rig)
+    (rig.vm_tree / "app_docs").mkdir(exist_ok=True)
+    (rig.vm_tree / "app_docs" / "x.md").write_text("doc\n")
+    git_helper.commit_all("docs", run=rig.run_)
+    return 3
+
+
+def _chain_tickets(rig, change, fix):
+    from adw_modules import git_helper, sandbox
+    count = 0
+    for n, work in enumerate([lambda: change(rig), lambda: (rig.vm_tree / "t2.txt").write_text("t2\n")]):
+        _as_builder(rig, work)
+        assert _verify(rig, CHECK).passed
+        mark = f"issues/{n}.md"
+        (rig.vm_tree / "issues").mkdir(exist_ok=True)
+        (rig.vm_tree / mark).write_text("resolved\n")
+        git_helper.commit_all(f"t{n}", run=rig.run_, wrote=[mark])
+        count += 1
+    if fix:
+        _as_builder(rig, lambda: (rig.vm_tree / "rf.txt").write_text("rf\n"))
+    assert _verify(rig, CHECK).passed
+    if fix:
+        git_helper.commit_all("review fix", run=rig.run_)
+        count += 1
+    sandbox.verify_done()
+    _documenter(rig)
+    (rig.vm_tree / "app_docs").mkdir(exist_ok=True)
+    (rig.vm_tree / "app_docs" / "x.md").write_text("doc\n")
+    git_helper.commit_all("docs", run=rig.run_)
+    return count + 1
+
+
+def _chain_build_test(rig, change):
+    from adw_modules import git_helper
+    _as_builder(rig, lambda: change(rig))
+    assert _verify(rig, "false").passed is False
+    _as_builder(rig, lambda: (rig.vm_tree / "fix.txt").write_text("fix\n"))
+    assert _verify(rig, CHECK).passed
+    git_helper.commit_all("build", run=rig.run_)
+    return 1
+
+
+def _chain_guard(rig, change):
+    from adw_modules import git_helper
+    rig.run_.ran.append(next(a for a in rig.run_.cfg.agents if a.name == "planner"))
+    (rig.vm_tree / "specs").mkdir(exist_ok=True)
+    (rig.vm_tree / "specs" / "s.md").write_text("spec\n")
+    _git(rig.vm_tree, "add", "specs/s.md")
+    assert rig.run(["git", "commit", "-qm", "spec"], cwd=rig.host_tree).returncode == 0
+    _as_builder(rig, lambda: change(rig))
+    assert _verify(rig, CHECK).passed
+    assert rig.run(["git", "commit-tree", "-m", "snap", "HEAD^{tree}"], cwd=rig.host_tree).returncode == 0
+    assert _verify(rig, CHECK).passed
+    git_helper.commit_all("build", run=rig.run_)
+    return 2
+
+
+def _chain_quality(rig, change):
+    assert _verify(rig, CHECK).passed
+    return 0
+
+
+CHAINS = {
+    "simple_sdlc": _chain_simple_sdlc,
+    "tickets_fix": lambda rig, change: _chain_tickets(rig, change, True),
+    "tickets_nofix": lambda rig, change: _chain_tickets(rig, change, False),
+    "build_test": _chain_build_test,
+    "guard": _chain_guard,
+    "quality": _chain_quality,
+}
+
+
+@pytest.mark.parametrize("change", [_edit, _rename, _delete, _binary])
+@pytest.mark.parametrize("chain", list(CHAINS))
+def test_each_chains_ordinary_run_lands_every_commit(rig, chain, change):
+    sync = _setup(rig)
+    expected = CHAINS[chain](rig, change)
+    rig.close(stop=True)
+    assert _commit_count(rig, sync) == expected
+    assert not _refused_bundle(rig).exists()
+
+
+def test_the_chains_end_the_binding_before_the_documenter():
+    import re
+    chains = SKILL / "templates" / "adws"
+    for name in ("adw_simple_sdlc.py", "adw_tickets.py"):
+        text = (chains / name).read_text()
+        calls = [m.start() for m in re.finditer(r"^\s+sandbox\.verify_done\(\)", text, re.M)]
+        assert len(calls) == 1, name
+        call = calls[0]
+        assert call > text.rindex("plan_checks.verify("), name
+        assert call < text.index('owner="documenter"'), name
+        assert call > max(text.rfind('name="commit_build"'), text.rfind('name="commit_review_fix"')), name
+    for path in sorted(chains.glob("*.py")):
+        if path.name not in ("adw_simple_sdlc.py", "adw_tickets.py"):
+            assert not re.search(r"^\s+sandbox\.verify_done\(\)", path.read_text(), re.M), path.name

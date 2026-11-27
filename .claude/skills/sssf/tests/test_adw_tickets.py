@@ -512,6 +512,7 @@ class VMTree(sandbox_mod.Local):
     def __init__(self):
         self.writes: list[str] = []
         self.verifies = 0
+        self.calls: list[str] = []      # "verify" per round, "end" per end_verified
 
     def write_text(self, path, text):
         self.writes.append(str(path))
@@ -520,7 +521,11 @@ class VMTree(sandbox_mod.Local):
     def open_verify(self):
         """Each verify round gets its own box, as a real VM does; here it is the same tree."""
         self.verifies += 1
+        self.calls.append("verify")
         return _VerifyTree()
+
+    def end_verified(self):
+        self.calls.append("end")
 
 
 class _VerifyTree(sandbox_mod.Local):
@@ -557,6 +562,9 @@ def test_a_sandbox_run_builds_on_its_own_branch_and_marks_tickets_done_in_the_vm
     assert on_branch("sssf/tk000006") == ["01: A", "03: C", "02: B", "Document summaries"]
     assert sorted(Path(p).name for p in vm.tree.writes) == ["01-a.md", "02-b.md", "03-c.md"]
     assert "resolved" in git("show", f"sssf/tk000006:{FOLDER}/issues/01-a.md")
+    # the chain ended the verified binding once, after its last round, before the documenter
+    assert vm.tree.calls.count("end") == 1 and vm.tree.calls[-1] == "end"
+    assert "verify" in vm.tree.calls
 
 
 # host_only, downstream: under agentsh it fails with: AssertionError: assert 1 == 0

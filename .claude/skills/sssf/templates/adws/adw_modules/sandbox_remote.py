@@ -27,10 +27,12 @@ both sides. Each command goes through `run` or `start` below:
   taken out as one patch, judged on the host (`permissions.judge_commits`), and applied
   in a new VM that holds the branch at the last sync. `worktree_setup` runs there, then
   every check, and the VM is deleted. It starts no agent, lands no commit, and the build
-  VM is not changed. A green round records the tree the host built from the patch; from
-  then on every commit that comes back (a sync or `close()`) must hold exactly that tree,
-  except at `wrote`, or the bundle is refused. That holds until the chain's own commit
-  lands (`commit`) or a new round opens.
+  VM is not changed. The chain's first round binds it: from then on every commit that
+  comes back (a sync or `close()`) must hold the tree of the last green round, except
+  at `wrote`, or the bundle is refused; before the first green round nothing lands. A
+  red or failed round keeps the last green tree, a green one replaces it, and the
+  chain's own commit (`commit`) moves the binding to its tree. Only `end_verified`
+  (`sandbox.verify_done`) ends it. Nothing the build VM reports decides any of this.
 
 A provider (sandbox_vercel, sandbox_e2b, sandbox_openshell) makes the VM and hands back an
 object with Vercel's SDK calls: run_process, create_process, stop, destroy.
@@ -740,7 +742,8 @@ class Remote:
         self._obs_dir = ""
         self._relays: set[_Relay] = set()
         self.synced = ""
-        self._verified = ""     # the tree id of the last green verify round, or ""
+        # None: not bound; "": bound, no green round yet; else the last green round's tree.
+        self._verified: str | None = None
         self.python = ""
         self.python_problem = ""
         self.tools: dict[str, str] = {}
@@ -1186,10 +1189,12 @@ class Remote:
         only objects its own `git bundle unbundle` hashed. A refused bundle lands
         nothing: it is kept as sandbox-refused.bundle and PermissionBreach is raised.
 
-        While a verified tree is in force (a green verify round, until the chain's own
-        commit lands or a new round opens), every commit of `synced..tip` must hold
-        that tree, except at the `wrote` paths, or the whole bundle is refused. Only a
-        `must_move` call (`commit`) ends the verified tree; a sync leaves it."""
+        While bound (from the chain's first verify round on), every commit of
+        `synced..tip` must hold the tree of the last green round, except at the `wrote`
+        paths, or the whole bundle is refused. Before the first green round nothing
+        lands. A red or failed round keeps the last green tree. A `must_move` call
+        (`commit`) that lands moves the binding to its tree. Only `end_verified` ends
+        it; a sync leaves it."""
         from . import permissions
         head = self._must("git", ["rev-parse", "HEAD"], cwd=str(self.tree)).strip()
         if head == self.synced:
@@ -1222,11 +1227,16 @@ class Remote:
                 self.tree, self.synced, tip, cfg, getattr(self.run_, "ran", []), only=only,
                 session=inside, wrote=list(wrote),
                 taken=list(getattr(self.run_, "taken", ())))
-            if not refused and self._verified:
+            if not refused and self._verified is not None:
                 # Every commit of synced..tip must hold the tree verify passed, except
                 # at `wrote`. judge_commits refused any merge, root or tip that does not
                 # descend from the sync, so this is one line of commits.
                 line = _host_git("rev-list", "--reverse", f"{self.synced}..{tip}", cwd=self.tree).split()
+                if self._verified == "":
+                    refused = [(commit, ["no verify round has passed"]) for commit in line]
+                    text = ("No verify round has gone green since this chain's first round "
+                            "opened, so no commit made in the VM may land.")
+                    line = []
                 for commit in line:
                     got = _host_git("rev-parse", f"{commit}^{{tree}}", cwd=self.tree)
                     if got == self._verified:
@@ -1250,7 +1260,7 @@ class Remote:
             self._log("sandbox_commits_refused",
                       {"vm": self.vm, "synced": self.synced[:12], "head": (tip or head)[:12],
                        "refused": [[c, p] for c, p in refused], "bundle": str(kept),
-                       **({"verified": self._verified[:12]} if self._verified else {})},
+                       **({"verified": self._verified[:12]} if self._verified is not None else {})},
                       type="error")
             raise permissions.PermissionBreach(
                 f"The VM's commits were refused and did not land (the host branch is still at "
@@ -1260,8 +1270,9 @@ class Remote:
         count = _host_git("rev-list", "--count", f"{self.synced}..{tip}", cwd=self.tree)
         self._log("sandbox_commits", {"vm": self.vm, "count": int(count), "head": tip[:12]})
         self.synced = tip
-        if must_move:
-            self._verified = ""     # the chain's own commit ends the verified tree
+        if must_move and self._verified is not None:
+            # The chain's own commit landed: what comes back next must hold its tree.
+            self._verified = _host_git("rev-parse", f"{tip}^{{tree}}", cwd=self.tree)
         permissions.commit_passed(self.run_, only)
 
     # --- a fresh VM for verify ------------------------------------------------
@@ -1335,10 +1346,13 @@ class Remote:
         """A new VM for one verify round: the branch at the last sync plus this VM's
         patch, `worktree_setup` run in it. Raises SandboxFailed or PermissionBreach.
         The build VM and the host branch are not changed. The caller closes the box.
-        A new round forgets the earlier green; the box's `mark_green` records this
-        round's tree (the one the host built from the judged patch), which every
-        commit that comes back afterwards must hold (see `commits_out`)."""
-        self._verified = ""
+        The first round of a chain binds it: from then on every commit that comes back
+        must hold the tree of the last green round (see `commits_out`), and before the
+        first green nothing lands. A later round, red or failed, keeps the last green
+        tree; the box's `mark_green` replaces it with this round's tree (the one the
+        host built from the judged patch). Only `end_verified` ends the binding."""
+        if self._verified is None:
+            self._verified = ""
         try:
             patch = self._patch_out()
         except OSError as error:
@@ -1389,6 +1403,18 @@ class Remote:
         """Run a `git commit` in the VM and judge what comes back with `only` and `wrote`.
         A commit that exits 0 and doesn't move the VM's HEAD is refused."""
         return self._run(argv, sync=lambda: self.commits_out(only, wrote, must_move=True))
+
+    def end_verified(self) -> None:
+        """The chain's verify is over (sandbox.verify_done). Bring back what the VM holds
+        while the binding is still in force, then end it. Raises PermissionBreach, and
+        leaves the binding in force, if a commit there doesn't hold the verified tree."""
+        from . import permissions
+        if self._verified is None:
+            return
+        self.commits_out()
+        self._verified = None
+        permissions.commit_passed(self.run_, None)
+        self._log("sandbox_verified_end", {"vm": self.vm, "synced": self.synced[:12]})
 
     # --- helpers ------------------------------------------------------------
 
@@ -1509,8 +1535,9 @@ class VerifyBox:
         self.tree = tree
 
     def mark_green(self) -> None:
-        """This round passed: the build VM's commits from now on must hold this tree.
-        May be called after `close()`."""
+        """This round passed: the build VM's commits from now on must hold this tree,
+        replacing the earlier green's. A red or failed round never lifts it; only
+        `end_verified` ends the binding. May be called after `close()`."""
         self.outer._verified = self.tree
         self.outer._log("sandbox_verified", {"vm": self.outer.vm, "tree": self.tree[:12]})
 

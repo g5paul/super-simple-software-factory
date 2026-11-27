@@ -244,6 +244,16 @@ def verifying(run):
         fresh.close()
 
 
+def verify_done() -> None:
+    """A chain calls this once its verify is over and before a commit verify did not
+    check (the documenter's). Under a VM it brings back what is there, still held to
+    the verified tree, then ends the binding (`Remote.end_verified`). Under `Local`
+    it does nothing. Raises PermissionBreach."""
+    end = getattr(current(), "end_verified", None)
+    if end is not None:
+        end()
+
+
 # --- remote sandboxes -------------------------------------------------------
 
 PROVIDERS = ("vercel", "e2b", "openshell")

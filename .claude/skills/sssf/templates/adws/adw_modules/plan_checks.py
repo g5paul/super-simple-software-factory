@@ -191,7 +191,8 @@ def verify(run, plan: PlanOutput | None, base=None) -> QualityResult:
     the plan named, as one result, run in `sandbox.verifying(run)`: a fresh VM under
     a VM sandbox, as before on `Local`. No path returns `base`'s own result: it
     passes when nothing failed. A green round under a VM records its tree
-    (`mark_green`), which the commits that follow must hold. The default is looked
+    (`mark_green`), which the commits that follow must hold; a red or failed round
+    keeps the last green tree, and only `sandbox.verify_done()` ends the binding. The default is looked
     up at call time, so a wrapped or patched run_quality is the one that runs."""
     with sandbox.verifying(run) as fresh:
         result = (base or quality.run_quality)(run)

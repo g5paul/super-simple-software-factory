@@ -9,6 +9,8 @@ Usage:
 
 Phases: engineer(request) -> planner -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded] -> git(commit)
 
+Under a VM the verified-tree binding is not ended, so `close()` refuses any commit that isn't the verified tree.
+
 Testing is CODE: the suite's command lives in adw_modules/quality.py, so no
 agent spends a context window rediscovering it. Failures flow back to the
 builder as an envelope, and only an exhausted fix loop fails the run.

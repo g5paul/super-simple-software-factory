@@ -35,6 +35,11 @@ NAMES = ["scout", "ticket_builder", "standards_reviewer", "spec_reviewer", "docu
 FOLDER = ".scratch/summaries"
 
 
+def _quality(passed: bool) -> QualityResult:
+    """A block's result; `verify` derives `passed` from `failures`, so they must agree."""
+    return QualityResult(passed=passed, failures=[] if passed else ["red"])
+
+
 def git(*args: str) -> str:
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
                           check=True, capture_output=True, text=True).stdout.strip()
@@ -203,7 +208,7 @@ def test_a_finished_feature_is_left_alone(repo):
 def test_a_rerun_resumes_and_reviews_the_whole_feature(repo, monkeypatch):
     real = quality.run_quality
     monkeypatch.setattr(quality, "run_quality",
-                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+                        lambda r: _quality(not Path("src/t02.py").exists()))
     assert run() == 1                              # 02 never goes green
     assert subjects() == ["01: A", "03: C"]
     first = git("rev-parse", "--short", "HEAD~2")
@@ -220,7 +225,7 @@ def test_a_rerun_resumes_and_reviews_the_whole_feature(repo, monkeypatch):
 @pytest.mark.host_only
 def test_a_ticket_that_stays_red_stops_the_run_and_keeps_its_work(repo, monkeypatch, capsys):
     monkeypatch.setattr(quality, "run_quality",
-                        lambda r: QualityResult(passed=not Path("src/t03.py").exists(), failures=["red"]))
+                        lambda r: _quality(not Path("src/t03.py").exists()))
     assert run() == 1
     assert subjects() == ["01: A"]
     assert Path("src/t03.py").exists()             # uncommitted, not discarded
@@ -350,7 +355,7 @@ def test_the_reviewers_never_see_an_sssf_update(repo, monkeypatch):
     # feature's work: a reviewer that sees it calls it scope creep.
     real = quality.run_quality
     monkeypatch.setattr(quality, "run_quality",
-                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+                        lambda r: _quality(not Path("src/t02.py").exists()))
     run()
     Path("src/t02.py").unlink()
     for path in ("adws/adw_modules/new.py", ".claude/skills/sssf/SKILL.md"):
@@ -395,7 +400,7 @@ def test_feature_sssf_changes_lists_only_the_features_own_commits(repo):
 def test_the_reviewers_see_the_features_own_sssf_changes(repo, monkeypatch):
     real = quality.run_quality
     monkeypatch.setattr(quality, "run_quality",
-                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+                        lambda r: _quality(not Path("src/t02.py").exists()))
     run()
     Path("src/t02.py").unlink()
     Path(".claude/skills/sssf").mkdir(parents=True)
@@ -450,7 +455,7 @@ def test_a_stopped_worktree_run_rejoins_fresh_and_reuses_the_scouts_notes(from_m
     launch = Path.cwd()
     real = quality.run_quality
     monkeypatch.setattr(quality, "run_quality",
-                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+                        lambda r: _quality(not Path("src/t02.py").exists()))
     assert adw_tickets.main(FOLDER, adw_id="tk000002", use_worktree=True) == 1
     out = capsys.readouterr().out
     place = launch / "adws/adw_data/worktrees/tk000002"
@@ -477,7 +482,7 @@ def test_a_stopped_worktree_run_rejoins_fresh_and_reuses_the_scouts_notes(from_m
 def test_a_held_feature_refuses_every_other_run_before_any_worktree(from_main, monkeypatch):
     launch = Path.cwd()
     monkeypatch.setattr(quality, "run_quality",
-                        lambda r: QualityResult(passed=not Path("src/t02.py").exists(), failures=["red"]))
+                        lambda r: _quality(not Path("src/t02.py").exists()))
     assert adw_tickets.main(FOLDER, adw_id="tk000003", use_worktree=True) == 1
     calls = len(from_main.calls)
     for use_worktree in (True, False):
@@ -506,10 +511,31 @@ class VMTree(sandbox_mod.Local):
 
     def __init__(self):
         self.writes: list[str] = []
+        self.verifies = 0
+        self.calls: list[str] = []      # "verify" per round, "end" per end_verified
 
     def write_text(self, path, text):
         self.writes.append(str(path))
         super().write_text(path, text)
+
+    def open_verify(self):
+        """Each verify round gets its own box, as a real VM does; here it is the same tree."""
+        self.verifies += 1
+        self.calls.append("verify")
+        return _VerifyTree()
+
+    def end_verified(self):
+        self.calls.append("end")
+
+
+class _VerifyTree(sandbox_mod.Local):
+    name = "verify"
+
+    def close(self):
+        pass
+
+    def mark_green(self):
+        pass
 
 
 @pytest.fixture
@@ -536,6 +562,9 @@ def test_a_sandbox_run_builds_on_its_own_branch_and_marks_tickets_done_in_the_vm
     assert on_branch("sssf/tk000006") == ["01: A", "03: C", "02: B", "Document summaries"]
     assert sorted(Path(p).name for p in vm.tree.writes) == ["01-a.md", "02-b.md", "03-c.md"]
     assert "resolved" in git("show", f"sssf/tk000006:{FOLDER}/issues/01-a.md")
+    # the chain ended the verified binding once, after its last round, before the documenter
+    assert vm.tree.calls.count("end") == 1 and vm.tree.calls[-1] == "end"
+    assert "verify" in vm.tree.calls
 
 
 # host_only, downstream: under agentsh it fails with: AssertionError: assert 1 == 0

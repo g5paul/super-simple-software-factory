@@ -1,8 +1,9 @@
 """Where a run's tree lives: every process and file read SSSF does in it.
 
 A run's agents, quality checks, plan checks, gates, git, worktree setup, and
-adw_tickets' done marks go through `current()`. The only sandbox today is `Local`: the tree is a
-checkout on this machine, and each call is a subprocess here. A remote
+adw_tickets' done marks go through `current()`. The default is `Local`: the tree is a
+checkout on this machine, and each call is a subprocess here. Under a VM, `verifying`
+swaps in a fresh VM for one verify round. A remote
 sandbox (docs/designs/remote-sandboxes.md in the SSSF repo) keeps these calls
 and runs them in a VM, so nothing above this module changes when one exists.
 
@@ -16,6 +17,7 @@ subprocess.run does, and `start` returns a Process whose stdout yields lines.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 from pathlib import Path
@@ -214,6 +216,42 @@ def current() -> Sandbox:
 def use(sandbox: Sandbox) -> None:
     global _current
     _current = sandbox
+
+
+@contextlib.contextmanager
+def verifying(run):
+    """One verify round's sandbox. Under `Local` it yields None and changes
+    nothing. Under a VM, the box makes a fresh VM from the run's branch at the last
+    sync plus the builder's patch (`open_verify`), `current()` is that VM inside the
+    scope, and it is deleted on the way out, pass, fail or exception. A box that
+    can't make one raises SandboxFailed: no check runs in the build VM. The yielded
+    box is what `plan_checks.verify` marks green, so a box's `open_verify` must
+    return something with `mark_green`."""
+    box = current()
+    if box is LOCAL:
+        yield None
+        return
+    opener = getattr(box, "open_verify", None)
+    if opener is None:
+        raise SandboxFailed("the run's sandbox can't make a fresh VM for verify, "
+                            "and verify never runs in the VM the agents work in")
+    fresh = opener()
+    use(fresh)
+    try:
+        yield fresh
+    finally:
+        use(box)
+        fresh.close()
+
+
+def verify_done() -> None:
+    """A chain calls this once its verify is over and before a commit verify did not
+    check (the documenter's). Under a VM it brings back what is there, still held to
+    the verified tree, then ends the binding (`Remote.end_verified`). Under `Local`
+    it does nothing. Raises PermissionBreach."""
+    end = getattr(current(), "end_verified", None)
+    if end is not None:
+        end()
 
 
 # --- remote sandboxes -------------------------------------------------------

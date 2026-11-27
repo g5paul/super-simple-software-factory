@@ -9,6 +9,8 @@ Usage:
 
 Phases: engineer(request) -> planner -> builder -> [code(verify) -> code(test) -> builder(fix)] bounded -> git(commit)
 
+Under a VM the verified-tree binding is not ended, so `close()` refuses any commit that isn't the verified tree.
+
 Verify and test are CODE, not agents. Their commands are known, so running them
 needs no judgement — only repairing them does. A failing block does not fail its
 phase: the runner did its job, the code is what failed. The failure becomes an

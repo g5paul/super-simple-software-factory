@@ -447,9 +447,9 @@ def test_the_builder_slot_in_a_vm_says_the_checks_run_in_the_vm(tmp_path):
     finally:
         sandbox.use(sandbox.LOCAL)
     assert "outside" not in text
-    assert "SSSF runs each command below itself, in the run's VM, the one you work in. " in text
+    assert "SSSF runs each command below itself, in a fresh VM of the run's own, not the one you work in. " in text
     # Every other byte is the local slot's.
-    assert text == local.replace("outside your sandbox", "in the run's VM, the one you work in")
+    assert text == local.replace("outside your sandbox", "in a fresh VM of the run's own, not the one you work in")
     assert sandbox.current() is sandbox.LOCAL
 
 

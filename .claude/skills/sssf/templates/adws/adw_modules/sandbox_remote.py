@@ -25,11 +25,13 @@ both sides. Each command goes through `run` or `start` below:
 - Verify runs in a VM of its own (`open_verify`, used through `sandbox.verifying`): the
   work a commit would hold (the real index plus `git add -A`, in a copy of the index) is
   taken out as one patch, judged on the host (`permissions.judge_commits`), and applied
-  in a new VM that holds the branch at the last sync. `worktree_setup` runs there, then
+  to the index of a new VM that holds the branch at the last sync; the VM's tree id must
+  be the host's before any file is written, and every file is then checked out from that
+  index (a clean checkout of the verified tree). `worktree_setup` runs there, then
   every check, and the VM is deleted. It starts no agent, lands no commit, and the build
   VM is not changed. The chain's first round binds it: from then on every commit that
   comes back (a sync or `close()`) must hold the tree of the last green round, except
-  at `wrote`, or the bundle is refused; before the first green round nothing lands. A
+  at a `wrote` path with the blob the chain hashed, or the bundle is refused; before the first green round nothing lands. A
   red or failed round keeps the last green tree, a green one replaces it, and the
   chain's own commit (`commit`) moves the binding to its tree. Only `end_verified`
   (`sandbox.verify_done`) ends it. Nothing the build VM reports decides any of this.
@@ -649,6 +651,21 @@ class RemoteProcess:
                         "sh", ["-c", f'pkill -KILL -s "$(cat {self._sid_file})"'], capture_output=True)
 
 
+# Run once in the verify VM's fresh clone with the patch on stdin ($1 the last sync, $2 the
+# host's tree id). The patch goes into the index, the tree id is compared before any file
+# is written, then every file is checked out from that index under its own .gitattributes,
+# and the index goes back to HEAD (the last sync) so the patch reads as uncommitted work.
+_VERIFY_CHECKOUT = r"""set -e
+git rm -r -q -f --ignore-unmatch .
+git read-tree "$1"
+git apply --cached --binary --whitespace=nowarn -
+got=$(git write-tree)
+if [ "$got" != "$2" ]; then echo "the verify VM built tree $got, not $2" >&2; exit 3; fi
+git checkout-index -f -a
+git reset -q
+"""
+
+
 # Prints "alive" or "gone" for the session whose id is in the file $0 names.
 # /proc/<pid>/stat is "pid (comm) state ppid pgrp session ...", and comm can
 # hold spaces or parentheses, so the fields are read after its last ")".
@@ -1179,7 +1196,7 @@ class Remote:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    def commits_out(self, only=None, wrote=(), *, must_move: bool = False) -> None:
+    def commits_out(self, only=None, wrote=None, *, must_move: bool = False) -> None:
         """Fast-forward the host branch to the VM's, through a bundle of the new commits.
 
         With `must_move` (only `commit` sets it), a VM whose HEAD is still at the
@@ -1190,12 +1207,14 @@ class Remote:
         nothing: it is kept as sandbox-refused.bundle and PermissionBreach is raised.
 
         While bound (from the chain's first verify round on), every commit of
-        `synced..tip` must hold the tree of the last green round, except at the `wrote`
-        paths, or the whole bundle is refused. Before the first green round nothing
+        `synced..tip` must hold the tree of the last green round, except at a `wrote`
+        path (path -> blob id) that holds exactly that blob as a regular file, or the
+        whole bundle is refused. Before the first green round nothing
         lands. A red or failed round keeps the last green tree. A `must_move` call
         (`commit`) that lands moves the binding to its tree. Only `end_verified` ends
         it; a sync leaves it."""
         from . import permissions
+        wrote = permissions.wrote_map(wrote)
         head = self._must("git", ["rev-parse", "HEAD"], cwd=str(self.tree)).strip()
         if head == self.synced:
             if not must_move:
@@ -1225,7 +1244,7 @@ class Remote:
                 inside = ""
             refused = permissions.judge_commits(
                 self.tree, self.synced, tip, cfg, getattr(self.run_, "ran", []), only=only,
-                session=inside, wrote=list(wrote),
+                session=inside, wrote=wrote,
                 taken=list(getattr(self.run_, "taken", ())))
             if not refused and self._verified is not None:
                 # Every commit of synced..tip must hold the tree verify passed, except
@@ -1241,9 +1260,9 @@ class Remote:
                     got = _host_git("rev-parse", f"{commit}^{{tree}}", cwd=self.tree)
                     if got == self._verified:
                         continue
-                    names = _host_git("diff-tree", "-r", "--no-renames", "--name-only", "-z",
-                                      self._verified, got, cwd=self.tree)
-                    left = [n for n in names.split("\0") if n and n not in wrote]
+                    left = [p for p, status, mode, new in
+                            permissions._diff_paths(self.tree, self._verified, got)
+                            if not permissions.wrote_blob(wrote, p, status, mode, new)]
                     if left:
                         refused.append((commit, ["not the tree verify passed"]))
                         shown_paths = ", ".join(permissions._said_line(n) for n in left[:20])
@@ -1344,7 +1363,11 @@ class Remote:
 
     def open_verify(self) -> "VerifyBox":
         """A new VM for one verify round: the branch at the last sync plus this VM's
-        patch, `worktree_setup` run in it. Raises SandboxFailed or PermissionBreach.
+        patch, applied to the index there; its tree id must be the host's `tree` (else
+        the round fails before any file is written), and every file is then checked out
+        from that index, so the checks see a clean checkout of the judged tree under its
+        own `.gitattributes`. HEAD and the index stay at the last sync.
+        `worktree_setup` is run in it. Raises SandboxFailed or PermissionBreach.
         The build VM and the host branch are not changed. The caller closes the box.
         The first round of a chain binds it: from then on every commit that comes back
         must hold the tree of the last green round (see `commits_out`), and before the
@@ -1374,7 +1397,7 @@ class Remote:
                                     f"last sync {self.synced[:12]}")
             cloned = time.monotonic()
             if patch:
-                inner._must("git", ["apply", "--binary", "--whitespace=nowarn", "-"],
+                inner._must("sh", ["-c", _VERIFY_CHECKOUT, "sh", self.synced, tree],
                             cwd=str(self.tree), input=patch)
             from . import repo_settings, worktree
             settings = repo_settings.load(worktree.main_checkout())
@@ -1399,10 +1422,21 @@ class Remote:
             raise
         return box
 
-    def commit(self, argv, *, only=None, wrote=()) -> subprocess.CompletedProcess:
-        """Run a `git commit` in the VM and judge what comes back with `only` and `wrote`.
+    def commit(self, argv, *, only=None, wrote=None) -> subprocess.CompletedProcess:
+        """Run a `git commit` in the VM and judge what comes back with `only` and `wrote`
+        (path -> blob id: a `wrote` path passes only with that blob).
         A commit that exits 0 and doesn't move the VM's HEAD is refused."""
         return self._run(argv, sync=lambda: self.commits_out(only, wrote, must_move=True))
+
+    def verified_text(self, path) -> str | None:
+        """`path`'s text in the tree of the last green verify round, read from the host's
+        object store. None when no round has gone green or the binding has ended. The
+        build VM's disk is not read. Raises PermissionBreach (GitFailed) if the tree has
+        no such file."""
+        from . import permissions
+        if not self._verified:
+            return None
+        return permissions._host_read(self.tree, ["cat-file", "blob", f"{self._verified}:{path}"]).decode("utf-8")
 
     def end_verified(self) -> None:
         """The chain's verify is over (sandbox.verify_done). Bring back what the VM holds

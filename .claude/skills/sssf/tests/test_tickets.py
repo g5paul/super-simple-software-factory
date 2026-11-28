@@ -11,6 +11,7 @@ Run from the skill root:
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -161,3 +162,11 @@ def test_mark_done_adds_a_status_line_when_there_is_none(feature):
     path.write_text(path.read_text().replace("**Status:** ready-for-agent\n", ""))
     tickets.mark_done(load(feature).tickets[0])
     assert path.read_text().splitlines()[:3] == ["# 01: A", "", "**Status:** resolved"]
+
+
+def test_mark_done_returns_the_blob_it_wrote(feature):
+    path = feature("01-a", "A")
+    wrote = tickets.mark_done(load(feature).tickets[0])
+    blob = subprocess.run(["git", "hash-object", str(path)], capture_output=True, text=True,
+                          check=True).stdout.strip()
+    assert wrote == {load(feature).tickets[0].path: blob}

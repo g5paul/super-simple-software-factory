@@ -1746,8 +1746,20 @@ def test_commit_with_only_refuses_a_path_outside_it_and_wrote_lets_one_through(j
 def test_a_commit_the_chain_wrote_passes_through_wrote(jbox):
     (jbox.vm_tree / "justfile").write_text("mark:\n")
     jbox.run(["git", "add", "-A"])
-    assert jbox.commit(["git", "commit", "-qm", "mark"], wrote=["justfile"]).returncode == 0
+    from adw_modules import git_helper
+    assert jbox.commit(["git", "commit", "-qm", "mark"],
+                       wrote={"justfile": git_helper.blob_id("mark:\n")}).returncode == 0
     assert _host_head(jbox) == jbox.synced
+
+
+def test_a_wrote_path_with_other_content_is_refused(jbox):
+    from adw_modules import git_helper, permissions
+    (jbox.vm_tree / "justfile").write_text("evil:\n")
+    jbox.run(["git", "add", "-A"])
+    with pytest.raises(permissions.PermissionBreach, match="justfile"):
+        jbox.commit(["git", "commit", "-qm", "mark"],
+                    wrote={"justfile": git_helper.blob_id("mark:\n")})
+    assert (jbox.run_.session_dir / "sandbox-refused.bundle").exists()
 
 
 @pytest.mark.parametrize("header, why", [

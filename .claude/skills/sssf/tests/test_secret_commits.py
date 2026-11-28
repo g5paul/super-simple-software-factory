@@ -114,7 +114,7 @@ def test_a_repo_yaml_pattern_is_secret(repo, cfg):
 def test_no_grant_lifts_the_secret_rule(repo, cfg):
     base = git(repo, "rev-parse", "HEAD")
     tip = make_commit(repo, {"src/.env.local": "K=1\n"})
-    assert judge(repo, base, tip, cfg, only=["src/"], wrote={"src/.env.local"},
+    assert judge(repo, base, tip, cfg, only=["src/"], wrote={"src/.env.local": git(repo, "rev-parse", f"{tip}:src/.env.local")},
                  session="src/") != []
 
 

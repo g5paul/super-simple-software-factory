@@ -8,6 +8,7 @@ SSSF ships.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import types
@@ -263,13 +264,30 @@ def test_a_path_in_wrote_may_differ_from_the_verified_tree_but_a_second_one_may_
     assert _verify(rig, CHECK).passed
     before = _host_head(rig)
     (rig.vm_tree / "feat.txt").write_text("v2\n")
+    wrote = {"feat.txt": git_helper.blob_id("v2\n")}
     if not second:
-        git_helper.commit_all("build", run=rig.run_, wrote=["feat.txt"])
+        git_helper.commit_all("build", run=rig.run_, wrote=wrote)
         assert _git(rig.host_tree, "show", "HEAD:feat.txt") == "v2\n"
         return
     (rig.vm_tree / "other.txt").write_text("o2\n")
     with pytest.raises(permissions.PermissionBreach):
-        git_helper.commit_all("build", run=rig.run_, wrote=["feat.txt"])
+        git_helper.commit_all("build", run=rig.run_, wrote=wrote)
+    assert _host_head(rig) == before
+
+
+@pytest.mark.parametrize("what", ["v3", "deleted"])
+def test_a_wrote_path_with_another_blob_or_none_is_refused(rig, what):
+    from adw_modules import git_helper, permissions
+    _setup(rig)
+    _as_builder(rig, lambda: (rig.vm_tree / "b.txt").write_text("v1\n"))
+    assert _verify(rig, CHECK).passed
+    before = _host_head(rig)
+    if what == "v3":
+        (rig.vm_tree / "b.txt").write_text("v3\n")
+    else:
+        (rig.vm_tree / "b.txt").unlink()
+    with pytest.raises(permissions.PermissionBreach):
+        git_helper.commit_all("build", run=rig.run_, wrote={"b.txt": git_helper.blob_id("v2\n")})
     assert _host_head(rig) == before
 
 
@@ -342,7 +360,11 @@ def _binary(rig):
     (rig.vm_tree / "c.bin").write_bytes(b"\x00\xff\xfe\x00bin")
 
 
-@pytest.mark.parametrize("change", [_edit, _rename, _delete, _binary])
+def _attrs(rig):
+    (rig.vm_tree / ".gitattributes").write_text("*.txt text\n")      # changes no file's bytes
+
+
+@pytest.mark.parametrize("change", [_edit, _rename, _delete, _binary, _attrs])
 def test_a_real_run_still_verifies_and_lands_with_the_verified_tree(rig, change):
     from adw_modules import git_helper
     _setup(rig)
@@ -623,7 +645,7 @@ def _chain_tickets(rig, change, fix):
         mark = f"issues/{n}.md"
         (rig.vm_tree / "issues").mkdir(exist_ok=True)
         (rig.vm_tree / mark).write_text("resolved\n")
-        git_helper.commit_all(f"t{n}", run=rig.run_, wrote=[mark])
+        git_helper.commit_all(f"t{n}", run=rig.run_, wrote={mark: git_helper.blob_id("resolved\n")})
         count += 1
     if fix:
         _as_builder(rig, lambda: (rig.vm_tree / "rf.txt").write_text("rf\n"))
@@ -679,7 +701,11 @@ CHAINS = {
 }
 
 
-@pytest.mark.parametrize("change", [_edit, _rename, _delete, _binary])
+def _attrs(rig):
+    (rig.vm_tree / ".gitattributes").write_text("*.txt text\n")      # changes no file's bytes
+
+
+@pytest.mark.parametrize("change", [_edit, _rename, _delete, _binary, _attrs])
 @pytest.mark.parametrize("chain", list(CHAINS))
 def test_each_chains_ordinary_run_lands_every_commit(rig, chain, change):
     sync = _setup(rig)
@@ -703,3 +729,132 @@ def test_the_chains_end_the_binding_before_the_documenter():
     for path in sorted(chains.glob("*.py")):
         if path.name not in ("adw_simple_sdlc.py", "adw_tickets.py"):
             assert not re.search(r"^\s+sandbox\.verify_done\(\)", path.read_text(), re.M), path.name
+
+
+# --- the verify VM holds a checkout of the verified tree ------------------------
+
+def _clean_checkout(rig, tmp_path, tree: str) -> Path:
+    out = tmp_path / "clean"
+    out.mkdir()
+    env = {**os.environ, "GIT_INDEX_FILE": str(tmp_path / "clean-index")}
+    subprocess.run(["git", f"--git-dir={rig.host_tree}/.git", f"--work-tree={out}", "read-tree",
+                    "-u", "--reset", tree], check=True, env=env, capture_output=True)
+    return out
+
+
+def _plant_ident(rig):
+    (rig.vm_tree / ".gitattributes").write_text("app.py ident\n")
+    with (rig.vm_tree / "app.py").open("a") as f:
+        f.write("# $Id$\n")
+
+
+def _plant_crlf(rig):
+    (rig.vm_tree / "run.sh").write_text("echo hi\n")
+    (rig.vm_tree / ".gitattributes").write_text("*.sh eol=crlf\n")
+
+
+def _plant_crlf_untouched(rig):
+    (rig.vm_tree / ".gitattributes").write_text("*.sh eol=crlf\n")
+
+
+_IDENT_CHECK = "grep -qx '# \\$Id\\$' app.py"
+_CRLF_CHECK = 'test "$(wc -c < run.sh)" = 8'
+
+
+@pytest.mark.parametrize("plant, check", [(_plant_ident, _IDENT_CHECK), (_plant_crlf, _CRLF_CHECK),
+                                          (_plant_crlf_untouched, _CRLF_CHECK)])
+def test_verify_checks_a_checkout_under_the_patched_gitattributes(rig, tmp_path, plant, check):
+    if plant is _plant_crlf_untouched:
+        (rig.vm_tree / "run.sh").write_text("echo hi\n")      # committed with the sync
+    _setup(rig)
+    _as_builder(rig, lambda: plant(rig))
+    tree = rig._judge_patch(rig._patch_out())
+    clean = _clean_checkout(rig, tmp_path, tree)
+    assert subprocess.run(["bash", "-c", check], cwd=clean).returncode != 0
+    assert _verify(rig, check).passed is False
+    seen: list = []
+    assert _verify(rig, check, base=_block(check, seen)).passed is False
+
+
+def test_a_verify_vm_whose_tree_is_not_the_hosts_fails_the_round(rig, monkeypatch):
+    from adw_modules import sandbox
+    sync = _setup(rig)
+    _pending(rig)
+    monkeypatch.setattr(rig, "_judge_patch", lambda patch: _git(rig.host_tree, "rev-parse", "HEAD^{tree}").strip())
+    ran: list = []
+    with pytest.raises(sandbox.SandboxFailed):
+        _verify(rig, CHECK, base=_block("true", ran))
+    assert ran == [] and rig.made[-1].destroyed and _host_head(rig) == sync
+
+
+def test_a_last_sync_holding_a_crlf_blob_under_a_text_attribute_still_verifies(rig):
+    _setup(rig)
+    rig.run_.ran.append(next(a for a in rig.run_.cfg.agents if a.name == "builder"))
+    (rig.vm_tree / "w.py").write_bytes(b"a = 1\r\n")
+    (rig.vm_tree / ".gitattributes").write_text("*.py text\n")
+    blob = _git(rig.vm_tree, "hash-object", "-w", "--no-filters", "w.py").strip()
+    _git(rig.vm_tree, "update-index", "--add", "--cacheinfo", f"100644,{blob},w.py")
+    _git(rig.vm_tree, "add", ".gitattributes")
+    assert rig.run(["git", "commit", "-qm", "crlf"], cwd=rig.host_tree).returncode == 0   # syncs
+    assert _git(rig.host_tree, "rev-parse", "HEAD:w.py").strip() == blob
+    _pending(rig)
+    assert _verify(rig, CHECK).passed        # the fresh clone's `git rm` must not stop on w.py
+
+
+def test_the_verify_vm_keeps_head_and_index_at_the_last_sync(rig):
+    sync = _setup(rig)
+    _pending(rig)
+    seen: list = []
+    command = "git rev-parse HEAD; git status --porcelain"
+    assert _verify(rig, CHECK, base=_block(command, seen)).passed
+    head, status = seen[-1][1].split("\n", 1)
+    assert head == sync and status.strip() == "?? feat.txt"
+
+
+# --- the chain's own file is bound to its blob ------------------------------------
+
+_TICKET = "# 01: A\n\n**Status:** ready-for-agent\n\nAccept: the page loads\n"
+
+
+def _ticket_round(rig):
+    from adw_modules.data_types import Ticket
+    _setup(rig)
+    _as_builder(rig, lambda: ((rig.vm_tree / "issues").mkdir(),
+                              (rig.vm_tree / "issues" / "01-a.md").write_text(_TICKET)))
+    assert _verify(rig, CHECK).passed
+    return Ticket(number="01", slug="01-a", path="issues/01-a.md", title="A")
+
+
+def test_a_ticket_rewritten_before_the_mark_lands_as_the_green_tree_has_it(rig):
+    from adw_modules import git_helper, tickets
+    ticket = _ticket_round(rig)
+    (rig.vm_tree / ticket.path).write_text(_TICKET.replace("page loads", "anything passes"))
+    wrote = tickets.mark_done(ticket)
+    git_helper.commit_all("t01", run=rig.run_, wrote=wrote)
+    assert _git(rig.host_tree, "show", f"HEAD:{ticket.path}") == _TICKET.replace("ready-for-agent", "resolved")
+
+
+@pytest.mark.parametrize("how", ["text", "symlink"])
+def test_a_ticket_rewritten_after_the_mark_is_refused(rig, how):
+    from adw_modules import git_helper, permissions, tickets
+    ticket = _ticket_round(rig)
+    sync = _host_head(rig)
+    wrote = tickets.mark_done(ticket)
+    path = rig.vm_tree / ticket.path
+    if how == "text":
+        path.write_text(_TICKET.replace("page loads", "anything passes"))
+    else:
+        path.unlink()
+        path.symlink_to("../app.py")
+    with pytest.raises(permissions.PermissionBreach):
+        git_helper.commit_all("t01", run=rig.run_, wrote=wrote)
+    assert _host_head(rig) == sync and _refused_bundle(rig).exists()
+
+
+def test_wrote_as_a_list_is_a_type_error_and_stages_nothing(rig):
+    from adw_modules import git_helper
+    _setup(rig)
+    _pending(rig)
+    with pytest.raises(TypeError):
+        git_helper.commit_all("x", run=rig.run_, wrote=["feat.txt"])
+    assert _git(rig.vm_tree, "diff", "--cached", "--name-only").strip() == ""

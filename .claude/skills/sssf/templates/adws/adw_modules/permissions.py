@@ -54,7 +54,7 @@ The chain's own commits are judged too. `check_local_commit()` runs after
 what a VM run brings back before the host branch moves. Each commit is diffed
 against its parent by the host's own git (no replace ref, graft, hook or
 external diff), and a path passes when an agent that ran may write it, or it is
-under the session folder, or the chain wrote it (`wrote`), or it is exactly
+under the session folder, or the chain wrote it with the blob it hashed (`wrote`), or it is exactly
 what was already in the tree when the run began (`carried_tree`). A merge, a
 root, or a head that doesn't descend from the last sync is refused outright. An
 `only` commit that passes ends the grant of the agents that ran before it, inside
@@ -82,6 +82,7 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
+from collections.abc import Mapping
 from pathlib import Path
 
 from . import sandbox
@@ -998,6 +999,23 @@ def _inside(path: str, entries) -> bool:
     return any(path == e or (e.endswith("/") and path.startswith(e)) for e in entries)
 
 
+def wrote_blob(wrote, path: str, status: str, mode: str, sha: str) -> bool:
+    """True when the chain wrote `path` and the commit holds exactly that blob there,
+    as a regular file. `wrote` maps a path to the blob id the chain hashed."""
+    return status != "D" and mode in ("100644", "100755") and bool(sha) and wrote.get(path) == sha
+
+
+def wrote_map(wrote) -> dict[str, str]:
+    """`wrote` as a dict from path to blob id. None or empty is `{}`; a list of paths
+    binds nothing and is a TypeError."""
+    if not wrote:
+        return {}
+    if isinstance(wrote, Mapping):
+        return dict(wrote)
+    raise TypeError("wrote maps each path the chain wrote to its blob id; "
+                    "a list of paths binds nothing")
+
+
 def commit_passed(run, only) -> None:
     """Record that a commit passed. A full commit (`only` None) clears `run.ran`
     and `run.taken`. An `only` commit ends each agent's grant inside its entries:
@@ -1018,14 +1036,16 @@ def commit_passed(run, only) -> None:
 
 
 def judge_commits(repo, base: str, tip: str, cfg: SSSFConfig, agents, *, only=None,
-                  session: str = "", wrote=(), carried: str = "",
+                  session: str = "", wrote=None, carried: str = "",
                   taken=()) -> list[tuple[str, list[str]]]:
     """Judge every commit from `base` (exclusive) to `tip`, by host git alone.
+    A `wrote` path (path -> blob id) passes only when the commit holds that blob there.
 
     Returns `(commit, refused paths or one shape reason)` pairs, `[]` when all pass.
     A git failure raises GitFailed, which callers treat as a refusal. A shape
     refusal (a merge, a root, more than 256 commits, a tip that doesn't descend
     from `base`) comes before any diff is read."""
+    wrote = wrote_map(wrote)
     for sha in (base, tip):
         if not _SHA.match(sha or ""):
             return [(tip or "?", ["not a commit id"])]
@@ -1061,7 +1081,7 @@ def judge_commits(repo, base: str, tip: str, cfg: SSSFConfig, agents, *, only=No
                           for a in agents)
                       or bool(session and (path == session.rstrip("/")
                                            or path.startswith(session.rstrip("/") + "/")))
-                      or path in wrote
+                      or wrote_blob(wrote, path, status, mode, new)
                       or bool(carried and _in_carried(repo, carried, path, status, mode, new)))
             if not ok:
                 bad.append(path)
@@ -1082,13 +1102,15 @@ def refusal_text(refused: list[tuple[str, list[str]]]) -> str:
     return "\n".join(lines)
 
 
-def check_local_commit(run, before: str, *, only=None, wrote=()) -> None:
+def check_local_commit(run, before: str, *, only=None, wrote=None) -> None:
     """Judge the commit(s) the chain just made in the local tree, `before`..HEAD.
+    A `wrote` path (path -> blob id) passes only with that blob; a list is a TypeError.
 
     On a refusal the branch goes back to `before` with the tree kept, and a
     PermissionBreach says so. On a pass with `only` None, `run.ran` and `run.taken`
     are cleared; with `only`, each agent that ran has its grant inside those
     entries ended (`run.taken`) until the next full commit passes."""
+    wrote = wrote_map(wrote)
     tip = ""
     try:
         tip = _git(["rev-parse", "HEAD"], run.repo_root).strip()
@@ -1098,7 +1120,7 @@ def check_local_commit(run, before: str, *, only=None, wrote=()) -> None:
         except ValueError:
             pass
         refused = judge_commits(run.repo_root, before, tip, run.cfg, getattr(run, "ran", []),
-                                only=only, session=folder, wrote=list(wrote),
+                                only=only, session=folder, wrote=wrote,
                                 carried=getattr(run, "carried", ""),
                                 taken=list(getattr(run, "taken", ())))
         text = refusal_text(refused)

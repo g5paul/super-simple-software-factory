@@ -124,6 +124,7 @@ def test_a_started_process_streams_lines_and_stops_with_its_children(tmp_path):
 # What may still start a process with subprocess directly: work on the host,
 # never in the run's tree. A new in-tree call goes through sandbox.current().
 HOST_ONLY = {
+    "git_helper.py": ['subprocess.run(["git", "-c", "core.fsmonitor=", "hash-object"'],  # blob_id hashes on the host
     "agent_cc.py": ['[CLAUDE_PATH, "auth", "status"]'],   # the sign-in check
     "permissions.py": ["done = subprocess.run(argv, cwd=repo"],   # the commit check reads the host's repo
     "agent_pi.py": ["subprocess.run(", '[PI_PATH, "auth", "print-bearer-token"'],  # sign-in, VM token

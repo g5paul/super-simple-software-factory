@@ -513,6 +513,13 @@ class VMTree(sandbox_mod.Local):
         self.writes: list[str] = []
         self.verifies = 0
         self.calls: list[str] = []      # "verify" per round, "end" per end_verified
+        self.verified_asked: list[str] = []
+
+    def verified_text(self, path):
+        """The green tree's ticket, as the host's object store gives it (here HEAD)."""
+        self.verified_asked.append(str(path))
+        return subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True,
+                              check=True).stdout
 
     def write_text(self, path, text):
         self.writes.append(str(path))
@@ -562,6 +569,7 @@ def test_a_sandbox_run_builds_on_its_own_branch_and_marks_tickets_done_in_the_vm
     assert on_branch("sssf/tk000006") == ["01: A", "03: C", "02: B", "Document summaries"]
     assert sorted(Path(p).name for p in vm.tree.writes) == ["01-a.md", "02-b.md", "03-c.md"]
     assert "resolved" in git("show", f"sssf/tk000006:{FOLDER}/issues/01-a.md")
+    assert sorted(Path(p).name for p in vm.tree.verified_asked) == ["01-a.md", "02-b.md", "03-c.md"]
     # the chain ended the verified binding once, after its last round, before the documenter
     assert vm.tree.calls.count("end") == 1 and vm.tree.calls[-1] == "end"
     assert "verify" in vm.tree.calls

@@ -90,7 +90,34 @@ def test_the_session_folder_and_wrote_paths_pass(repo, cfg):
     commit(repo, ".scratch/t/1.md")
     who = ("reviewer",)
     assert judge(repo, base, cfg, who, session="data/sessions/abc")[0][1] == [".scratch/t/1.md"]
-    assert judge(repo, base, cfg, who, session="data/sessions/abc", wrote=[".scratch/t/1.md"]) == []
+    blob = git(repo, "rev-parse", "HEAD:.scratch/t/1.md")
+    assert judge(repo, base, cfg, who, session="data/sessions/abc", wrote={".scratch/t/1.md": blob}) == []
+
+
+def test_a_wrote_path_with_another_blob_is_judged_like_any_other_path(repo, cfg):
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, ".scratch/t/1.md")
+    other = git_helper.blob_id("not this\n")
+    assert judge(repo, base, cfg, ("reviewer",), wrote={".scratch/t/1.md": other}) == [
+        (sha, [".scratch/t/1.md"])]
+    with pytest.raises(TypeError):
+        judge(repo, base, cfg, ("reviewer",), wrote=[".scratch/t/1.md"])
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "app.py", "a = 2\n")           # the builder's writes cover it
+    assert judge(repo, base, cfg, ("builder",), wrote={"app.py": other}) == []
+
+
+def test_a_local_commit_with_a_wrote_path_passes_only_with_its_blob(repo, cfg):
+    before = git(repo, "rev-parse", "HEAD")
+    run = local_run(repo, cfg, [named(cfg, "reviewer")])
+    (repo / ".scratch" / "t").mkdir(parents=True)
+    (repo / ".scratch" / "t" / "1.md").write_text("one\n")
+    with pytest.raises(permissions.PermissionBreach, match="1.md"):
+        git_helper.commit_all("go", run=run, wrote={".scratch/t/1.md": git_helper.blob_id("two\n")})
+    assert git(repo, "rev-parse", "HEAD") == before
+    assert (repo / ".scratch" / "t" / "1.md").read_text() == "one\n"
+    git_helper.commit_all("go", run=run, wrote={".scratch/t/1.md": git_helper.blob_id("one\n")})
+    assert git(repo, "rev-parse", "HEAD") != before
 
 
 def test_a_merge_a_root_and_a_stranger_are_refused_before_any_diff(repo, cfg):

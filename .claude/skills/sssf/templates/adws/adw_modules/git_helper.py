@@ -51,7 +51,16 @@ def repo_root() -> Path:
     return Path.cwd().resolve()
 
 
-def commit_all(message: str, only: list[str] | None = None, *, run=None, wrote=()) -> str:
+def blob_id(text: str) -> str:
+    """The blob id git gives `text`, hashed on the host (never in the VM). Nothing is
+    written and no filter runs."""
+    import subprocess
+    return subprocess.run(["git", "-c", "core.fsmonitor=", "hash-object", "--stdin"],
+                          input=text.encode(), capture_output=True, check=True).stdout.decode().strip()
+
+
+def commit_all(message: str, only: list[str] | None = None, *, run=None,
+               wrote: dict[str, str] | None = None) -> str:
     """Stage the working tree, or just the `only` paths, and commit it. Returns
     the new short sha. With `only`, other changes stay in the tree for a later
     commit. With `only`, the commit holds those paths and nothing else that is
@@ -64,13 +73,16 @@ def commit_all(message: str, only: list[str] | None = None, *, run=None, wrote=(
     host branch moves. From the chain's first verify round until it calls
     `sandbox.verify_done()`, the commit must hold the last green round's tree,
     except the `wrote` paths, or it is refused (before a first green, always). Locally, with a `run`, a refused commit is undone (the tree
-    is kept) and PermissionBreach is raised. `wrote` names paths the chain itself
-    wrote into this commit. With `run=None` nothing is checked. A passing `only`
+    is kept) and PermissionBreach is raised. `wrote` maps each path the chain itself
+    wrote into this commit to the blob it wrote; the path passes only with that blob
+    (a list of paths is a TypeError). With `run=None` nothing is checked. A passing `only`
     commit ends the agents' grant inside its entries until the next full commit."""
     if not is_repo():
         raise RuntimeError(
             "not a git repository — a commit phase needs one. Run `git init` in the "
             "repo root (and make a first commit) before running an ADW that commits.")
+    from . import permissions
+    wrote = permissions.wrote_map(wrote)
     scope = ["--", *only] if only else []
     _git("add", "-A", *scope)
     # --no-renames: a rename is listed as both its halves, so a plan commit that

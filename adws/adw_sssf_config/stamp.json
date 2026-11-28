@@ -165,7 +165,7 @@
       "source": "adws/adw_modules/gates.py"
     },
     "adws/adw_modules/git_helper.py": {
-      "sha256": "cefa9201390f714f68a658909519425a4b4640393df5efc5596ce36f5ff6f482",
+      "sha256": "48e9b802390b973232c40ad53628cb1e367f962b2352a99c102b714e321ca27d",
       "source": "adws/adw_modules/git_helper.py"
     },
     "adws/adw_modules/kill.py": {
@@ -177,7 +177,7 @@
       "source": "adws/adw_modules/obs_relay.py"
     },
     "adws/adw_modules/permissions.py": {
-      "sha256": "59986b430d4901fac900e8371cc17954a2c95f32e30acce936586bb62a475160",
+      "sha256": "02aad42aa063a355ce7bbe3ba66eacb467eccdaaaecb5f3fbdca0cf2d8d09db5",
       "source": "adws/adw_modules/permissions.py"
     },
     "adws/adw_modules/plan_checks.py": {
@@ -225,7 +225,7 @@
       "source": "adws/adw_modules/sandbox_openshell.py"
     },
     "adws/adw_modules/sandbox_remote.py": {
-      "sha256": "7aaf92c063c2194353d16e02520f8b7ec1aa2a9f62da2e3127d6b82aa128a532",
+      "sha256": "f2d5de0b0d39585ad32f4b816ba473789633d24f1c3547aa2f231c90b44d0bc1",
       "source": "adws/adw_modules/sandbox_remote.py"
     },
     "adws/adw_modules/sandbox_usage.py": {
@@ -265,7 +265,7 @@
       "source": "adws/adw_modules/sssf_rules.ts"
     },
     "adws/adw_modules/tickets.py": {
-      "sha256": "efb832816b759a6c4af5999c9e86a9984f06b6b9e0abaa2e1d3593833425fa7c",
+      "sha256": "ad3857be2fb77baa90635812a7fd079cfe9d9348cf6a82452e3b64008b196218",
       "source": "adws/adw_modules/tickets.py"
     },
     "adws/adw_modules/tracer.py": {
@@ -329,7 +329,7 @@
       "source": "sssf.config.claude_code.yaml"
     },
     "adws/adw_tickets.py": {
-      "sha256": "9a35bcaaaed353a1f2c2ec51ff7e1abc4da75f50377aca1859353a1ae394d122",
+      "sha256": "28e647ddc165b7bd3751acd80d3ecaa88d67554da52a662c0773ba76a7b091d6",
       "source": "adws/adw_tickets.py"
     },
     "adws/adw_trial.py": {
@@ -345,5 +345,5 @@
       "source": "justfile"
     }
   },
-  "skill": "4a9eec4"
+  "skill": "4a83d02"
 }

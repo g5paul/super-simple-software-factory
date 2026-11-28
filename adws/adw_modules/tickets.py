@@ -11,7 +11,7 @@ adw_tickets: plain code that rejects a bad folder before any agent spends
 money, orders the tickets so blockers come first, and reports which are done.
 `mark_done` is the only write, and only code calls it, in the ticket's commit.
 It writes `resolved`, the word Matt Pocock's local tracker uses for a finished
-ticket. `done`, which adw_tickets wrote before, still reads as finished.
+ticket; it returns the blob it wrote, for the commit to be held to. `done`, which adw_tickets wrote before, still reads as finished.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-from . import sandbox
+from . import git_helper, sandbox
 from .data_types import Feature, Ticket
 
 TICKET_FILE = re.compile(r"^(\d{2,3})-.+\.md$")
@@ -58,12 +58,19 @@ def load(folder: str | Path) -> Feature:
     return Feature(slug=folder.name, folder=str(folder), spec=str(spec), tickets=_order(found))
 
 
-def mark_done(ticket: Ticket) -> None:
+def mark_done(ticket: Ticket) -> dict[str, str]:
     """Set the ticket's Status line to resolved, changing nothing else in the file.
     It goes through the run's sandbox, so in a VM run the mark lands in the
-    VM's tree and in the ticket's commit."""
+    VM's tree and in the ticket's commit. Under a VM the text starts from the
+    ticket in the last green tree, read on the host, so what the build VM's disk
+    holds is never read; under `sandbox: none` the local file is read, since no tree
+    is bound there. Returns `{path: blob id}` of the text written, which is what
+    `git_helper.commit_all` takes as `wrote`."""
     tree = sandbox.current()
-    text = tree.read_text(ticket.path)
+    verified = getattr(tree, "verified_text", None)
+    text = verified(ticket.path) if verified else None
+    if text is None:
+        text = tree.read_text(ticket.path)
     if STATUS.search(text):
         text = STATUS.sub(lambda m: m.group(1) + "resolved", text, count=1)
     else:
@@ -71,6 +78,7 @@ def mark_done(ticket: Ticket) -> None:
         lines[1:1] = ["\n", "**Status:** resolved\n"]
         text = "".join(lines)
     tree.write_text(ticket.path, text)
+    return {ticket.path: git_helper.blob_id(text)}
 
 
 def _require_seams(spec: Path) -> None:
